@@ -10,21 +10,17 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-var TinyJSON = []byte(`{
-	"bool": true,
-	"int": 42,
-	"int64": 9223372036854775807,
-	"float64": 3.14159265358979,
-	"string": "hello world benchmark"
-}`)
+//go:embed testdata/tiny.json
+var TinyJSON []byte
 
-var SmallJSON = []byte(`{"id":12125925,"ids":[-2147483648,2147483647],"title":"未来简史-从智人到智神","titles":["hello","world"],"price":40.8,"prices":[-0.1,0.1],"hot":true,"hots":[true,true,true],"author":{"name":"json","age":99,"male":true},"authors":[{"name":"json","age":99,"male":true},{"name":"json","age":99,"male":true},{"name":"json","age":99,"male":true}],"weights":[]}`)
+//go:embed testdata/small.json
+var SmallJSON []byte
 
 //go:embed testdata/escape_heavy.json
 var EscapeHeavyJSON []byte
 
-//go:embed testdata/pods.json
-var PodsJSON []byte
+//go:embed testdata/kubepods.json
+var KubePodsJSON []byte
 
 //go:embed testdata/twitter.json
 var TwitterJSON []byte
@@ -76,7 +72,7 @@ func LoadEscapeHeavyCompactJSON() []byte {
 }
 
 func LoadPodsCompactJSON() []byte {
-	podsCompactOnce.Do(func() { podsCompactData = compact(PodsJSON) })
+	podsCompactOnce.Do(func() { podsCompactData = compact(KubePodsJSON) })
 	return podsCompactData
 }
 
@@ -105,7 +101,6 @@ func mustDecompressZstd(src []byte) []byte {
 	}
 	return out
 }
-
 
 // buildSpikyNDJSON constructs an NDJSON stream with periodic large spikes.
 //

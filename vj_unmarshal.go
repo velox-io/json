@@ -51,6 +51,7 @@ func (p *parserPool) Put(sc *Parser) {
 	}
 
 	sc.useNumber = false
+	sc.copyString = false
 	p.pool.Put(sc)
 }
 
@@ -71,6 +72,12 @@ type UnmarshalOption func(*Parser)
 // representation and avoiding precision loss for large integers.
 func WithUseNumber() UnmarshalOption {
 	return func(sc *Parser) { sc.useNumber = true }
+}
+
+// WithCopyString causes all decoded strings to be heap-copied instead of
+// zero-copy referencing the input buffer. Per-field opt-in: `json:"name,copy"`.
+func WithCopyString() UnmarshalOption {
+	return func(sc *Parser) { sc.copyString = true }
 }
 
 // Unmarshal parses JSON data into v using the single-pass scanner.
@@ -125,6 +132,7 @@ type Parser struct {
 	arenaOff   int                                // next free offset in arenaData
 	ptrAllocs  map[unsafe.Pointer]*rtypeAllocator // per-type batch allocators for pointer fields
 	useNumber  bool                               // decode numbers in interface{} as json.Number
+	copyString bool                               // copy all strings instead of zero-copy
 }
 
 // arenaAlloc allocates size bytes from the arena.

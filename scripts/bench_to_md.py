@@ -3,27 +3,62 @@ import sys
 
 
 def parse_bench(raw_text):
-    # 正则匹配：Benchmark名称、迭代次数、耗时、吞吐量(可选)、内存占用、分配次数
+    # Regex match: Benchmark name, iteration count, time cost, throughput (optional), memory usage, allocation count
+    # Format: Benchmark_{Action}_{Dataset}_{Library}
+    # Example: Benchmark_Marshal_Twitter_Velox, Benchmark_ParallelMarshal_KubePods_Sonic
     pattern = re.compile(
         r"Benchmark_([^_]+)_([^_]+)_([^- ]+)-\d+\s+\d+\s+([\d.]+)\s+ns/op(?:\s+([\d.]+)\s+MB/s)?\s+(\d+)\s+B/op\s+(\d+)\s+allocs/op"
     )
 
-    results = {}
+    # Accumulate raw samples per (action, dataset, library)
+    samples = {}
+    group_order = []
     for line in raw_text.strip().split("\n"):
         match = pattern.search(line)
         if match:
             action, dataset, library, ns_op, mb_s, b_op, allocs = match.groups()
-            key = f"{action}_{dataset}"
-            if key not in results:
-                results[key] = []
+            group_key = f"{action}_{dataset}"
+            lib_key = (group_key, library)
+            if lib_key not in samples:
+                samples[lib_key] = {
+                    "ns_op": [],
+                    "mb_s": [],
+                    "b_op": [],
+                    "allocs": [],
+                }
+                if group_key not in [k for k, _ in group_order]:
+                    group_order.append((group_key, []))
+                # Append library to its group (preserving first-seen order)
+                for g, libs in group_order:
+                    if g == group_key:
+                        libs.append(library)
+                        break
+            samples[lib_key]["ns_op"].append(float(ns_op))
+            samples[lib_key]["mb_s"].append(float(mb_s) if mb_s else None)
+            samples[lib_key]["b_op"].append(int(b_op))
+            samples[lib_key]["allocs"].append(int(allocs))
 
-            results[key].append(
+    # Take median of samples
+    def median(lst):
+        s = sorted(lst)
+        n = len(s)
+        if n % 2 == 1:
+            return s[n // 2]
+        return (s[n // 2 - 1] + s[n // 2]) / 2
+
+    results = {}
+    for group_key, libs in group_order:
+        results[group_key] = []
+        for library in libs:
+            s = samples[(group_key, library)]
+            mb_s_vals = [v for v in s["mb_s"] if v is not None]
+            results[group_key].append(
                 {
                     "library": library,
-                    "ns_op": float(ns_op),
-                    "mb_s": mb_s if mb_s else "N/A",
-                    "b_op": int(b_op),
-                    "allocs": int(allocs),
+                    "ns_op": median(s["ns_op"]),
+                    "mb_s": f"{median(mb_s_vals):.2f}" if mb_s_vals else "N/A",
+                    "b_op": int(median(s["b_op"])),
+                    "allocs": int(median(s["allocs"])),
                 }
             )
     return results
@@ -40,7 +75,7 @@ def generate_markdown(results):
         )
         md += "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
 
-        # 以 StdJSON 或第一个非 Velox 库作为基准计算 Speedup
+        # Use StdJSON or the first non-Velox library as baseline to calculate Speedup
         baseline = next((b for b in benchmarks if "Std" in b["library"]), benchmarks[0])
         velox = next((b for b in benchmarks if "Velox" in b["library"]), None)
 
@@ -48,7 +83,7 @@ def generate_markdown(results):
             speedup = (
                 f"{(baseline['ns_op'] / b['ns_op']):.2f}x" if b["ns_op"] > 0 else "-"
             )
-            # 强调 Velox
+            # Emphasize Velox
             name = f"**{b['library']}**" if b["library"] == "Velox" else b["library"]
 
             md += f"| {name} | {b['ns_op']:,} | {speedup} | {b['b_op']:,} | {b['allocs']} | {b['mb_s']} |\n"
@@ -58,7 +93,7 @@ def generate_markdown(results):
 
 
 if __name__ == "__main__":
-    # 使用方式: python bench_to_md.py < output.txt
+    # Usage: python bench_to_md.py < output.txt
     if not sys.stdin.isatty():
         raw_input = sys.stdin.read()
         print(generate_markdown(parse_bench(raw_input)))

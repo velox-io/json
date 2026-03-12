@@ -569,3 +569,52 @@ func TestMarshal_LargeInt(t *testing.T) {
 		t.Fatalf("large int: got %s, want %s", got, want)
 	}
 }
+
+// TestAppendMarshal_BufferRetainedInPool verifies that AppendMarshal does not
+// let the pool retain (and later overwrite) the caller's buffer.
+//
+// Bug scenario:
+//  1. Caller passes dst with enough capacity → AppendMarshal sets m.buf = dst.
+//  2. putMarshaler keeps m.buf in the pool (cap ≤ marshalBufPoolLimit).
+//  3. Next getMarshaler reuses that backing array → m.buf = m.buf[:0].
+//  4. A subsequent Marshal/AppendMarshal writes into the same backing array,
+//     corrupting the data the caller is still holding.
+func TestAppendMarshal_BufferRetainedInPool(t *testing.T) {
+	type small struct {
+		X int `json:"x"`
+	}
+
+	// Pre-allocate dst with plenty of capacity so AppendMarshal won't
+	// reallocate — the returned slice shares dst's backing array.
+	prefix := []byte(`prefix:`)
+	dst := make([]byte, len(prefix), 512)
+	copy(dst, prefix)
+
+	v1 := small{X: 1}
+	result1, err := AppendMarshal(dst, &v1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot := string(result1) // pin the expected content
+	want1 := `prefix:{"x":1}`
+	if snapshot != want1 {
+		t.Fatalf("first AppendMarshal: got %q, want %q", snapshot, want1)
+	}
+
+	// Now do a second marshal. If the pool still holds our backing array,
+	// this call will scribble over result1's content.
+	v2 := small{X: 999}
+	_, err = Marshal(&v2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check that result1 is still intact.
+	if got := string(result1); got != snapshot {
+		t.Fatalf("AppendMarshal buffer was corrupted by subsequent Marshal!\n"+
+			"  before: %q\n"+
+			"  after:  %q\n"+
+			"The pool retained the caller's buffer.", snapshot, got)
+	}
+}

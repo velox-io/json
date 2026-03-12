@@ -198,9 +198,10 @@ func TestNumber_UseNumber_ArrayInterface(t *testing.T) {
 
 // --- UseNumber + Decoder ---
 
-func TestNumber_UseNumber_Decoder(t *testing.T) {
+func TestNumber_UseNumber_DecoderMethod_MultiValue(t *testing.T) {
 	input := `{"val":9007199254740993}` + "\n" + `{"val":42}`
-	dec := NewDecoder(strings.NewReader(input), DecoderUseNumber())
+	dec := NewDecoder(strings.NewReader(input))
+	dec.UseNumber()
 
 	var msg1 map[string]any
 	if err := dec.Decode(&msg1); err != nil {
@@ -224,6 +225,47 @@ func TestNumber_UseNumber_Decoder(t *testing.T) {
 	}
 	if string(n2) != "42" {
 		t.Fatalf("val = %q", n2)
+	}
+}
+
+func TestNumber_UseNumber_DecoderMethod(t *testing.T) {
+	input := `{"val":9007199254740993}`
+	dec := NewDecoder(strings.NewReader(input))
+	dec.UseNumber()
+
+	var msg map[string]any
+	if err := dec.Decode(&msg); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := msg["val"].(json.Number); !ok {
+		t.Fatalf("val is %T, want json.Number", msg["val"])
+	}
+}
+
+func TestNumber_UseNumber_DecoderMethod_AfterFirstDecode(t *testing.T) {
+	input := `{"val":1}` + "\n" + `{"val":9007199254740993}`
+	dec := NewDecoder(strings.NewReader(input))
+
+	var msg1 map[string]any
+	if err := dec.Decode(&msg1); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := msg1["val"].(float64); !ok {
+		t.Fatalf("first val is %T, want float64", msg1["val"])
+	}
+
+	dec.UseNumber()
+
+	var msg2 map[string]any
+	if err := dec.Decode(&msg2); err != nil {
+		t.Fatal(err)
+	}
+	n2, ok := msg2["val"].(json.Number)
+	if !ok {
+		t.Fatalf("second val is %T, want json.Number", msg2["val"])
+	}
+	if string(n2) != "9007199254740993" {
+		t.Fatalf("second val = %q", n2)
 	}
 }
 

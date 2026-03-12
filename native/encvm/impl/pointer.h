@@ -4,8 +4,6 @@
  * Out-of-line encoder for dereferenced pointer values (*bool, *int, etc.).
  * Marked noinline to keep the VM's code footprint small
  * and avoid icache pressure on the hot dispatch loop.
- *
- * Depends on: types.h, number.h, strfn.h, ryu.h.
  */
 
 #ifndef VJ_ENCVM_POINTER_H
@@ -27,9 +25,7 @@ typedef struct {
   int error;     /* 0 = ok, VJ_ERR_BUF_FULL, VJ_ERR_NAN_INF */
 } VjPtrEncResult;
 
-static __attribute__((noinline)) VjPtrEncResult
-vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend,
-                    const void *ptr, uint16_t etype, uint32_t flags) {
+static __attribute__((noinline)) VjPtrEncResult vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend, const void *ptr, uint16_t etype, uint32_t flags) {
   /* Caller already did CHECK(key_len+1+330) or similar for fixed-size
    * types.  For variable-length types (string, raw_message, number)
    * we do additional bounds checks below. */
@@ -72,7 +68,7 @@ vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend,
     if (__builtin_expect(__builtin_isnan(fval) || __builtin_isinf(fval), 0)) {
       return (VjPtrEncResult){NULL, VJ_ERR_NAN_INF};
     }
-    buf += us_write_float32(buf, fval);
+    buf += us_write_float32(buf, fval, (flags & VJ_ENC_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED);
     break;
   }
   case OP_FLOAT64: {
@@ -81,7 +77,7 @@ vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend,
     if (__builtin_expect(__builtin_isnan(dval) || __builtin_isinf(dval), 0)) {
       return (VjPtrEncResult){NULL, VJ_ERR_NAN_INF};
     }
-    buf += us_write_float64(buf, dval);
+    buf += us_write_float64(buf, dval, (flags & VJ_ENC_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED);
     break;
   }
   case OP_STRING: {

@@ -278,7 +278,7 @@ func TestNativeEncodeOmitemptyConsistency(t *testing.T) {
 }
 
 // ================================================================
-// Hot Resume (断点续传) tests
+// Hot Resume (breakpoint continuation) tests
 // ================================================================
 
 func TestHotResumeMapFieldMiddle(t *testing.T) {

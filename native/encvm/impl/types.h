@@ -12,10 +12,6 @@
 
 #include "memfn.h"
 
-/* ================================================================
- *  Constants
- * ================================================================ */
-
 #define VJ_MAX_DEPTH 16
 
 /* ================================================================
@@ -235,6 +231,7 @@ enum VjEncFlags {
   VJ_ENC_ESCAPE_HTML = 1 << 0,
   VJ_ENC_ESCAPE_LINE_TERMS = 1 << 1,
   VJ_ENC_ESCAPE_INVALID_UTF8 = 1 << 2,
+  VJ_ENC_FLOAT_EXP_AUTO = 1 << 3, /* scientific notation for |f|<1e-6 or |f|>=1e21 */
 
   /* Hot resume: skip opening '{' and resume mid-struct encoding.
    * Set by Go when re-entering C after handling a fallback field. */
@@ -247,7 +244,7 @@ enum VjEncFlags {
 };
 
 #define VJ_ENC_DEFAULT (VJ_ENC_ESCAPE_INVALID_UTF8 | VJ_ENC_ESCAPE_LINE_TERMS)
-#define VJ_ENC_STD_COMPAT (VJ_ENC_DEFAULT | VJ_ENC_ESCAPE_HTML)
+#define VJ_ENC_STD_COMPAT (VJ_ENC_DEFAULT | VJ_ENC_ESCAPE_HTML | VJ_ENC_FLOAT_EXP_AUTO)
 
 
 /* ================================================================

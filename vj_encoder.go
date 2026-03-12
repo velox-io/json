@@ -36,14 +36,27 @@ func EncoderSetEscapeLineTerms(on bool) EncoderOption {
 	}
 }
 
+// EncoderSetFloatExpAuto enables encoding/json-compatible scientific notation
+// for floats with |f| < 1e-6 or |f| >= 1e21.
+func EncoderSetFloatExpAuto(on bool) EncoderOption {
+	return func(enc *Encoder) {
+		if on {
+			enc.encFlags |= vjEncFloatExpAuto
+		} else {
+			enc.encFlags &^= vjEncFloatExpAuto
+		}
+	}
+}
+
 // Encoder writes JSON values to an output stream.
 // Each Encode call writes one JSON value followed by a newline.
 type Encoder struct {
-	w      io.Writer
-	err    error // sticky write error
-	prefix string
-	indent string
-	flags  escapeFlags
+	w        io.Writer
+	err      error // sticky write error
+	prefix   string
+	indent   string
+	flags    escapeFlags
+	encFlags uint32 // extra VjEncFlags bits (float format, etc.)
 }
 
 // NewEncoder creates an Encoder that writes to w.
@@ -128,21 +141,53 @@ func EncodeValue[T any](enc *Encoder, v *T) error {
 }
 
 // encodePtr is the shared encoding core for Encode and EncodeValue.
+//
+// In streaming mode the marshaler flushes chunks directly to enc.w as
+// the buffer fills, keeping memory usage bounded. The final residual
+// data (including the trailing newline) is written after encoding
+// completes.
 func (enc *Encoder) encodePtr(ti *TypeInfo, ptr unsafe.Pointer) error {
 	m := getMarshaler()
 	m.flags = enc.flags
+	m.encFlags = enc.encFlags
 	m.prefix = enc.prefix
 	m.indent = enc.indent
 
+	// Enable streaming flush: instead of growing the buffer to hold
+	// the entire output, flush completed chunks to the writer.
+	// Write errors are made sticky so subsequent Encode calls fail fast.
+	m.flushFn = func(p []byte) error {
+		_, err := enc.w.Write(p)
+		if err != nil {
+			enc.err = err
+		}
+		return err
+	}
+
 	if err := m.encodeValue(ti, ptr); err != nil {
 		putMarshaler(m)
-		return err
+		return enc.stickyErr(err)
 	}
 
 	m.buf = append(m.buf, '\n')
 
-	err := enc.write(m.buf)
+	// Flush any remaining data in the buffer.
+	if len(m.buf) > 0 {
+		if _, err := enc.w.Write(m.buf); err != nil {
+			putMarshaler(m)
+			return enc.stickyErr(err)
+		}
+	}
+
 	putMarshaler(m)
+	return nil
+}
+
+// stickyErr records err as the Encoder's sticky error and returns it.
+func (enc *Encoder) stickyErr(err error) error {
+	if enc.err == nil {
+		enc.err = err
+	}
 	return err
 }
 

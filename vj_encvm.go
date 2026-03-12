@@ -106,7 +106,8 @@ const (
 // Encoding flags (VjEncFlags bitmask).
 // ================================================================
 const (
-	vjEncEscapeHTML uint32 = 1 << 0
+	vjEncEscapeHTML   uint32 = 1 << 0
+	vjEncFloatExpAuto uint32 = 1 << 3 // scientific notation for |f|<1e-6 or |f|>=1e21
 
 	// Hot resume flags for re-entering C after Go handles a fallback field.
 	vjEncResume      uint32 = 1 << 7 // skip opening '{'; resume mid-struct

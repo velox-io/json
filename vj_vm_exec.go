@@ -61,7 +61,7 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	ctx.OpsPtr = unsafe.Pointer(&bp.Ops[0])
 	ctx.PC = 0
 	ctx.CurBase = base
-	ctx.EncFlags = uint32(m.flags)
+	ctx.EncFlags = uint32(m.flags) | m.encFlags
 	ctx.Depth = 0
 
 	// Select VM mode: fast mode when no string escape flags are active,
@@ -73,6 +73,16 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	}
 
 	for {
+		// In streaming mode, flush accumulated data from Go-side yield
+		// handlers before re-entering C. This keeps memory bounded and
+		// ensures Go-written data (fallback fields, maps, interfaces)
+		// reaches the writer promptly.
+		if m.flushFn != nil && len(m.buf) > 0 {
+			if err := m.flush(); err != nil {
+				return err
+			}
+		}
+
 		// Ensure sufficient buffer capacity
 		avail := cap(m.buf) - len(m.buf)
 		if avail < 64 {
@@ -99,14 +109,25 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 			return nil
 
 		case vjErrBufFull:
-			// Absorb partial output and grow buffer.
+			// Absorb partial output.
 			// C already saved PC/depth/stack and packed first into enc_flags.
 			// On re-entry, C reads VJ_ENC_RESUME from enc_flags to restore first.
 			m.buf = m.buf[:len(m.buf)+written]
-			newCap := max(cap(m.buf)*2, len(m.buf)+4096)
-			newBuf := make([]byte, len(m.buf), newCap)
-			copy(newBuf, m.buf)
-			m.buf = newBuf
+
+			if m.flushFn != nil {
+				// Streaming mode: flush buffered data to writer and reuse
+				// the buffer. Memory stays bounded at O(bufCap).
+				if err := m.flush(); err != nil {
+					return err
+				}
+			} else {
+				// Batch mode (Marshal/AppendMarshal): grow the buffer to
+				// accumulate the entire output.
+				newCap := max(cap(m.buf)*2, len(m.buf)+4096)
+				newBuf := make([]byte, len(m.buf), newCap)
+				copy(newBuf, m.buf)
+				m.buf = newBuf
+			}
 			// ctx.EncFlags already has VJ_ENC_RESUME set by C's SAVE_AND_RETURN
 
 		case vjErrYield:
@@ -181,13 +202,13 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 							// past SLICE_END = PC + body_len + 1.
 							bodyLen := bp.Ops[ctx.PC-1].OperandB
 							ctx.PC = ctx.PC + bodyLen + 1
-							ctx.EncFlags = uint32(m.flags) | vjEncResume
+							ctx.EncFlags = uint32(m.flags) | m.encFlags | vjEncResume
 							continue
 						}
 					}
 
 					ctx.PC++
-					ctx.EncFlags = uint32(m.flags) | vjEncResume
+					ctx.EncFlags = uint32(m.flags) | m.encFlags | vjEncResume
 				} else {
 					// Cold path: table-based fallback (custom marshalers, ,string, etc.)
 					if err := m.handleYieldFallback(ctx, bp); err != nil {
@@ -308,7 +329,7 @@ func (m *Marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 			// Skip: advance PC, preserve first flag as-is.
 			ctx.PC++
 			// Set resume flags: first stays the same.
-			ctx.EncFlags = uint32(m.flags) | vjEncResume
+			ctx.EncFlags = uint32(m.flags) | m.encFlags | vjEncResume
 			if isFirst {
 				ctx.EncFlags |= vjEncResumeFirst
 			}
@@ -341,7 +362,7 @@ func (m *Marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 	ctx.PC++
 
 	// Set resume flags: a field was written, so first=false.
-	ctx.EncFlags = uint32(m.flags) | vjEncResume
+	ctx.EncFlags = uint32(m.flags) | m.encFlags | vjEncResume
 
 	return nil
 }
@@ -403,7 +424,7 @@ func (m *Marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 	ctx.PC += op.OperandA + 1
 
 	// Set resume flags: a field was written, so first=false.
-	ctx.EncFlags = uint32(m.flags) | vjEncResume
+	ctx.EncFlags = uint32(m.flags) | m.encFlags | vjEncResume
 
 	return nil
 }

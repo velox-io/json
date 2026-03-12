@@ -10,14 +10,9 @@
 
 // clang-format off
 
-#include <stdint.h>
 #include "stdlib/memory.h"
+#include "util.h"
 
-#ifdef __aarch64__
-#include "sse2neon.h"
-#else
-#include <immintrin.h>
-#endif
 
 /* ================================================================
  *  Small copy helper
@@ -28,8 +23,7 @@
  *  emits optimal load/store pairs (never a _memcpy call).
  * ================================================================ */
 
-static __attribute__((always_inline)) inline void
-copy_small(uint8_t *dst, const uint8_t *src, int n) {
+ALWAYS_INLINE void copy_small(uint8_t *dst, const uint8_t *src, int n) {
   if (n >= 8) {
     __builtin_memcpy(dst, src, 8);
     dst += 8;
@@ -59,19 +53,18 @@ copy_small(uint8_t *dst, const uint8_t *src, int n) {
  * Typical key lengths: 4-32 bytes (JSON `"field_name":`).
  * Uses overlapping SIMD loads to avoid branching on exact size.
  * Always inlined — no function call overhead. */
-static __attribute__((always_inline)) inline void
-vj_copy_key(uint8_t *dst, const char *src, uint16_t n) {
-  if (__builtin_expect(n <= 8, 1)) {
+ALWAYS_INLINE void vj_copy_key(uint8_t *dst, const char *src, uint16_t n) {
+  if (n <= 8) {
     copy_small(dst, (const uint8_t *)src, (int)n);
     return;
   }
-  if (__builtin_expect(n <= 16, 1)) {
+  if (n <= 16) {
     /* Overlapping 8-byte copies: first 8 + last 8 */
     __builtin_memcpy(dst, src, 8);
     __builtin_memcpy(dst + n - 8, src + n - 8, 8);
     return;
   }
-  if (__builtin_expect(n <= 32, 1)) {
+  if (n <= 32) {
     /* Overlapping 16-byte SIMD copies */
     __m128i v0 = _mm_loadu_si128((const __m128i *)src);
     __m128i v1 = _mm_loadu_si128((const __m128i *)(src + n - 16));
@@ -94,26 +87,25 @@ vj_copy_key(uint8_t *dst, const char *src, uint16_t n) {
 /* vj_copy_var — general-purpose inline copy for variable-size data.
  * Used for OP_RAW_MESSAGE, OP_NUMBER, integer digit output, etc.
  * Handles up to 128 bytes inline; falls through to _memcpy for larger. */
-static __attribute__((always_inline)) inline void
-vj_copy_var(uint8_t *dst, const void *src, size_t n) {
+ALWAYS_INLINE void vj_copy_var(uint8_t *dst, const void *src, size_t n) {
   const uint8_t *s = (const uint8_t *)src;
-  if (__builtin_expect(n <= 8, 1)) {
+  if (n <= 8) {
     copy_small(dst, s, (int)n);
     return;
   }
-  if (__builtin_expect(n <= 16, 1)) {
+  if (n <= 16) {
     __builtin_memcpy(dst, s, 8);
     __builtin_memcpy(dst + n - 8, s + n - 8, 8);
     return;
   }
-  if (__builtin_expect(n <= 32, 1)) {
+  if (n <= 32) {
     __m128i v0 = _mm_loadu_si128((const __m128i *)s);
     __m128i v1 = _mm_loadu_si128((const __m128i *)(s + n - 16));
     _mm_storeu_si128((__m128i *)dst, v0);
     _mm_storeu_si128((__m128i *)(dst + n - 16), v1);
     return;
   }
-  if (__builtin_expect(n <= 64, 1)) {
+  if (n <= 64) {
     /* 2x overlapping 16-byte: first 32 + last 32 */
     __m128i a0 = _mm_loadu_si128((const __m128i *)s);
     __m128i a1 = _mm_loadu_si128((const __m128i *)(s + 16));
@@ -125,7 +117,7 @@ vj_copy_var(uint8_t *dst, const void *src, size_t n) {
     _mm_storeu_si128((__m128i *)(dst + n - 16), b1);
     return;
   }
-  if (__builtin_expect(n <= 128, 1)) {
+  if (n <= 128) {
     /* 4x overlapping 16-byte: first 64 + last 64 */
     __m128i a0 = _mm_loadu_si128((const __m128i *)s);
     __m128i a1 = _mm_loadu_si128((const __m128i *)(s + 16));
@@ -151,8 +143,7 @@ vj_copy_var(uint8_t *dst, const void *src, size_t n) {
 
 #else /* No SIMD — scalar fallback */
 
-static __attribute__((always_inline)) inline void
-vj_copy_key(uint8_t *dst, const char *src, uint16_t n) {
+ALWAYS_INLINE void vj_copy_key(uint8_t *dst, const char *src, uint16_t n) {
   const uint8_t *s = (const uint8_t *)src;
   if (n <= 15) {
     copy_small(dst, s, (int)n);
@@ -168,8 +159,7 @@ vj_copy_key(uint8_t *dst, const char *src, uint16_t n) {
   copy_small(dst, s, (int)n);
 }
 
-static __attribute__((always_inline)) inline void
-vj_copy_var(uint8_t *dst, const void *src, size_t n) {
+ALWAYS_INLINE void vj_copy_var(uint8_t *dst, const void *src, size_t n) {
   const uint8_t *s = (const uint8_t *)src;
   if (n <= 15) {
     copy_small(dst, s, (int)n);

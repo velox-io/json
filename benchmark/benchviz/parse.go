@@ -50,33 +50,49 @@ type BenchData struct {
 // knownLibraries lists the recognized library suffixes in display order.
 var knownLibraries = []string{"StdJSON", "Sonic", "GoJSON", "EasyJSON", "Velox"}
 
-// knownSectionPrefixes maps group name prefixes to section display names.
-// Order matters: longer prefixes must come first to match correctly.
-var knownSectionPrefixes = []struct {
-	prefix  string
-	section string
-}{
-	{"Parallel_Marshal_", "Parallel Marshal"},
-	{"Parallel_Unmarshal_", "Parallel Unmarshal"},
-	{"Marshal_", "Marshal"},
-	{"Unmarshal_", "Unmarshal"},
-	{"Decoder_", "Decoder"},
+// splitGroupToSection splits a group name following the pattern "{Action}_{Dataset}".
+// Examples:
+//   - "Marshal_Twitter" -> section="Marshal", dataset="Twitter"
+//   - "ParallelMarshal_KubePods" -> section="Parallel Marshal", dataset="KubePods"
+//   - "Decoder_Small" -> section="Decoder", dataset="Small"
+//
+// This matches the naming convention used in benchmark functions:
+//   Benchmark_{Action}_{Dataset}_{Library}
+func splitGroupToSection(group string) (section, dataset string) {
+	// Find the last underscore to identify dataset
+	idx := strings.LastIndex(group, "_")
+	if idx <= 0 {
+		// No underscore or underscore at start: treat whole string as section
+		return group, group
+	}
+	
+	action := group[:idx]
+	dataset = group[idx+1:]
+	
+	// Format action name for display: insert space before capital letters in camelCase
+	// e.g., "ParallelMarshal" -> "Parallel Marshal"
+	section = formatActionName(action)
+	
+	return section, dataset
 }
 
-// splitGroupToSection splits a group name like "Parallel_Marshal_Twitter" into
-// section="Parallel Marshal" and dataset="Twitter".
-func splitGroupToSection(group string) (section, dataset string) {
-	for _, kp := range knownSectionPrefixes {
-		if strings.HasPrefix(group, kp.prefix) {
-			return kp.section, group[len(kp.prefix):]
+// formatActionName converts camelCase action names to spaced display names.
+// Examples: "ParallelMarshal" -> "Parallel Marshal", "Marshal" -> "Marshal"
+func formatActionName(action string) string {
+	if action == "" {
+		return action
+	}
+	
+	var result strings.Builder
+	for i, r := range action {
+		// Insert space before uppercase letter (except at start)
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			result.WriteRune(' ')
 		}
+		result.WriteRune(r)
 	}
-	// Fallback: first segment is section, rest is dataset
-	idx := strings.Index(group, "_")
-	if idx > 0 {
-		return group[:idx], group[idx+1:]
-	}
-	return group, group
+	
+	return result.String()
 }
 
 // benchLineRe matches a standard Go benchmark output line.

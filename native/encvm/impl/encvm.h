@@ -1,24 +1,5 @@
 /*
  * encvm.h — Velox JSON C Encoding Engine
- *
- * Three-layer architecture:
- *   Go Pre-compiler  ->  Assembly Bridge  ->  C Engine (this file)
- *
- * This is the top-level header that assembles the encoder from
- * modular sub-headers.  The VM implementation is included below.
- *
- * Sub-headers (included in dependency order):
- *   memfn.h     — SIMD copy helpers (depends on stdlib/memory.h)
- *   types.h     — enums, structs, constants
- *   number.h    — integer-to-ASCII formatting
- *   strfn.h     — JSON string escaping (SIMD/SWAR)
- *   ryu.h       — float-to-ASCII (Ryu algorithm)
- *   pointer.h   — out-of-line pointer primitive encoder
- *   iface.h     — out-of-line Go interface value encoder
- *
- * Design constraints:
- *   - All memory referenced by the engine is pinned by Go (runtime.Pinner)
- *     before entry; the engine never allocates.
  */
 
 #ifndef VJ_ENCVM_H
@@ -26,7 +7,6 @@
 
 // clang-format off
 
-/* ---- Sub-headers (order matters: each may depend on predecessors) ---- */
 #include "types.h"
 #include "number.h"
 #include "strfn.h"
@@ -298,7 +278,7 @@ vj_op_float32: {
   }
   VM_CHECK(op->key_len + 1 + 60);
   VM_WRITE_KEY();
-  buf += us_write_float32(buf, fval);
+  buf += us_write_float32(buf, fval, (flags & VJ_ENC_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED);
   VM_NEXT();
 }
 
@@ -311,7 +291,7 @@ vj_op_float64: {
   }
   VM_CHECK(op->key_len + 1 + 330);
   VM_WRITE_KEY();
-  buf += us_write_float64(buf, dval);
+  buf += us_write_float64(buf, dval, (flags & VJ_ENC_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED);
   VM_NEXT();
 }
 

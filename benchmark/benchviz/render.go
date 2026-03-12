@@ -236,17 +236,11 @@ func renderGroup(b *strings.Builder, data *BenchData, group, displayName string,
 	bX := nsX + nsBarW + nsAnnotW + colGapW
 	aX := bX + bBarW + bAnnotW + colGapW
 
-	// Column headers
-	hdrY := gy + grpHdr + 10
-	fmt.Fprintf(b, `  <text x="%d" y="%d" class="col-hdr">ns/op</text>`+"\n", nsX, hdrY)
-	fmt.Fprintf(b, `  <text x="%d" y="%d" class="col-hdr-hint">lower is better ↓</text>`+"\n", nsX+34, hdrY)
-	fmt.Fprintf(b, `  <text x="%d" y="%d" class="col-hdr">B/op</text>`+"\n", bX, hdrY)
-	fmt.Fprintf(b, `  <text x="%d" y="%d" class="col-hdr">allocs/op</text>`+"\n", aX, hdrY)
-
-	// Compute min/max per metric
+	// Compute min/max per metric (min = fastest/best)
 	minNs, maxNs := math.MaxFloat64, 0.0
 	minB, maxB := math.MaxFloat64, 0.0
 	minA, maxA := math.MaxFloat64, 0.0
+	
 	for _, lib := range libs {
 		r, ok := gr[lib]
 		if !ok {
@@ -259,6 +253,13 @@ func renderGroup(b *strings.Builder, data *BenchData, group, displayName string,
 		minA = math.Min(minA, r.AllocsOp)
 		maxA = math.Max(maxA, r.AllocsOp)
 	}
+
+	// Column headers
+	hdrY := gy + grpHdr + 10
+	fmt.Fprintf(b, `  <text x="%d" y="%d" class="col-hdr">ns/op</text>`+"\n", nsX, hdrY)
+	fmt.Fprintf(b, `  <text x="%d" y="%d" class="col-hdr-hint">relative efficiency →</text>`+"\n", nsX+34, hdrY)
+	fmt.Fprintf(b, `  <text x="%d" y="%d" class="col-hdr">B/op</text>`+"\n", bX, hdrY)
+	fmt.Fprintf(b, `  <text x="%d" y="%d" class="col-hdr">allocs/op</text>`+"\n", aX, hdrY)
 
 	barsTopY := hdrY + 8
 	row := 0
@@ -276,7 +277,7 @@ func renderGroup(b *strings.Builder, data *BenchData, group, displayName string,
 		fmt.Fprintf(b, `  <text x="%d" y="%d" class="lib-label" fill="%s">%s</text>`+"\n",
 			x0, textY, color, esc(lib))
 
-		// ns/op bar + annotation
+		// ns/op bar + annotation (show efficiency relative to fastest)
 		renderMetricBar(b, nsX, rowY, nsBarW, r.NsOp, maxNs, minNs, color, FormatNsOp(r.NsOp), true)
 
 		// B/op bar + annotation
@@ -288,7 +289,7 @@ func renderGroup(b *strings.Builder, data *BenchData, group, displayName string,
 }
 
 // renderMetricBar draws a single horizontal bar with value annotation.
-// If showRatio is true, adds "x.xX" or "fastest" badge.
+// If showRatio is true, adds "x.xX" badge showing efficiency relative to fastest (minVal).
 func renderMetricBar(b *strings.Builder, x, y, maxW int, val, maxVal, minVal float64, color, label string, showRatio bool) {
 	// Bar width proportional to max
 	bw := 4
@@ -306,17 +307,21 @@ func renderMetricBar(b *strings.Builder, x, y, maxW int, val, maxVal, minVal flo
 	textY := y + barH/2 + 4
 	labelX := x + bw + 5
 
-	if showRatio && minVal > 0 {
-		isFastest := val <= minVal*1.03 // within 3% = essentially tied
-		if isFastest {
-			fmt.Fprintf(b, `  <text x="%d" y="%d" class="bar-val">%s</text>`+"\n", labelX, textY, esc(label))
-			fmt.Fprintf(b, `  <text x="%d" y="%d" class="badge-fast"> ★ fastest</text>`+"\n",
-				labelX+len(label)*7, textY)
+	if showRatio && minVal > 0 && val > 0 {
+		// Efficiency = fastest / current (1.0 = fastest, <1.0 = slower than fastest)
+		efficiency := minVal / val
+		
+		fmt.Fprintf(b, `  <text x="%d" y="%d" class="bar-val">%s </text>`+"\n", labelX, textY, esc(label))
+		
+		// Show efficiency badge with appropriate styling
+		if efficiency >= 0.98 {
+			// Within 2% of fastest - mark as fastest
+			fmt.Fprintf(b, `  <text x="%d" y="%d" class="badge-fast">★ 1.00x</text>`+"\n",
+				labelX+len(label)*7+3, textY)
 		} else {
-			ratio := val / minVal
-			fmt.Fprintf(b, `  <text x="%d" y="%d" class="bar-val">%s </text>`+"\n", labelX, textY, esc(label))
-			fmt.Fprintf(b, `  <text x="%d" y="%d" class="badge-ratio">%.1fx</text>`+"\n",
-				labelX+len(label)*7+3, textY, ratio)
+			// Slower than fastest - show relative efficiency
+			fmt.Fprintf(b, `  <text x="%d" y="%d" class="badge-ratio">%.2fx</text>`+"\n",
+				labelX+len(label)*7+3, textY, efficiency)
 		}
 		return
 	}

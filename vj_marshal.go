@@ -75,7 +75,17 @@ func WithoutUTF8Correction() MarshalOption {
 
 // WithStdCompat enables full encoding/json compatibility.
 func WithStdCompat() MarshalOption {
-	return func(m *Marshaler) { m.flags = escapeStdCompat }
+	return func(m *Marshaler) {
+		m.flags = escapeStdCompat
+		m.encFlags |= vjEncFloatExpAuto
+	}
+}
+
+// WithFloatExpAuto enables encoding/json-compatible scientific notation
+// for floats with |f| < 1e-6 or |f| >= 1e21 (e.g. 1e-7, 1e+21).
+// By default, floats are always formatted in fixed-point notation.
+func WithFloatExpAuto() MarshalOption {
+	return func(m *Marshaler) { m.encFlags |= vjEncFloatExpAuto }
 }
 
 // WithFastEscape disables all string-level escape features
@@ -88,13 +98,26 @@ func WithFastEscape() MarshalOption {
 
 // Marshaler is a pooled JSON encoder.
 type Marshaler struct {
-	buf    []byte
-	indent string
-	prefix string
-	depth  int
-	flags  escapeFlags
-	vmCtx  VjExecCtx // reusable C VM context (avoids per-call stack zeroing of 1248 bytes)
-	inVM   bool      // true while execVM is active; prevents re-entrant VM calls
+	buf      []byte
+	indent   string
+	prefix   string
+	depth    int
+	flags    escapeFlags
+	encFlags uint32    // extra VjEncFlags bits (float format, etc.) ORed with flags for VM
+	vmCtx    VjExecCtx // reusable C VM context (avoids per-call stack zeroing of 1248 bytes)
+	inVM     bool      // true while execVM is active; prevents re-entrant VM calls
+
+	// flushFn, when non-nil, enables streaming mode: instead of growing
+	// the buffer indefinitely, the marshaler flushes accumulated data
+	// through this callback whenever the buffer fills up. This is used
+	// by Encoder to write chunks directly to the underlying io.Writer,
+	// keeping memory usage bounded at O(bufCap) instead of O(output_size).
+	//
+	// Future optimization: if the io.Writer implements writev-style
+	// scatter-gather (e.g. net.Buffers / *net.TCPConn), the flush
+	// callback could batch multiple iovec entries for a single syscall
+	// instead of one Write per flush.
+	flushFn func([]byte) error
 }
 
 var marshalerPool = sync.Pool{
@@ -116,6 +139,8 @@ func getMarshaler() *Marshaler {
 	m.prefix = ""
 	m.depth = 0
 	m.flags = 0
+	m.encFlags = 0
+	m.flushFn = nil
 	initMarshalerVMCtx(m)
 	return m
 }
@@ -124,7 +149,19 @@ func putMarshaler(m *Marshaler) {
 	if cap(m.buf) > marshalBufPoolLimit {
 		m.buf = nil // discard oversized buffer, let GC reclaim
 	}
+	m.flushFn = nil      // clear closure reference before pooling
 	marshalerPool.Put(m) // always recycle the struct (vmCtx is 1248 bytes)
+}
+
+// flush writes all buffered data through flushFn and resets the buffer.
+// Returns nil if flushFn is not set or the buffer is empty.
+func (m *Marshaler) flush() error {
+	if m.flushFn == nil || len(m.buf) == 0 {
+		return nil
+	}
+	err := m.flushFn(m.buf)
+	m.buf = m.buf[:0]
+	return err
 }
 
 // ---------------------------------------------------------------------------
@@ -529,16 +566,20 @@ func AppendMarshal[T any](dst []byte, v *T, opts ...MarshalOption) ([]byte, erro
 	for _, o := range opts {
 		o(m)
 	}
-	defer putMarshaler(m)
 
 	m.buf = dst
 
 	ti := GetCodec(reflect.TypeFor[T]())
 	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
+		m.buf = nil // detach caller's buffer before pooling
+		putMarshaler(m)
 		return dst, err
 	}
 
-	return m.buf, nil
+	result := m.buf
+	m.buf = nil // detach caller's buffer before pooling
+	putMarshaler(m)
+	return result, nil
 }
 
 // finalize returns the encoded JSON as a standalone byte slice and recycles
@@ -711,7 +752,7 @@ func (m *Marshaler) encodeValueQuoted(ti *TypeInfo, ptr unsafe.Pointer) error {
 			return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
 		}
 		m.buf = append(m.buf, '"')
-		m.buf = strconv.AppendFloat(m.buf, f, 'f', -1, 32)
+		m.appendJSONFloat32(f)
 		m.buf = append(m.buf, '"')
 	case KindFloat64:
 		f := *(*float64)(ptr)
@@ -719,7 +760,7 @@ func (m *Marshaler) encodeValueQuoted(ti *TypeInfo, ptr unsafe.Pointer) error {
 			return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
 		}
 		m.buf = append(m.buf, '"')
-		m.buf = strconv.AppendFloat(m.buf, f, 'f', -1, 64)
+		m.appendJSONFloat64(f)
 		m.buf = append(m.buf, '"')
 	case KindString:
 		m.encodeQuotedString(*(*string)(ptr))
@@ -767,12 +808,50 @@ func (m *Marshaler) appendUint64(v uint64) error {
 	return nil
 }
 
+// appendJSONFloat64 appends a float64. When vjEncFloatExpAuto is set, uses
+// encoding/json format: scientific notation for |f| < 1e-6 or |f| >= 1e21.
+// Otherwise uses fixed-point notation.
+func (m *Marshaler) appendJSONFloat64(f float64) {
+	if m.encFlags&vjEncFloatExpAuto != 0 {
+		abs := math.Abs(f)
+		if abs != 0 && (abs < 1e-6 || abs >= 1e21) {
+			m.buf = strconv.AppendFloat(m.buf, f, 'e', -1, 64)
+			n := len(m.buf)
+			if n >= 4 && m.buf[n-4] == 'e' && m.buf[n-3] == '-' && m.buf[n-2] == '0' {
+				m.buf[n-2] = m.buf[n-1]
+				m.buf = m.buf[:n-1]
+			}
+			return
+		}
+	}
+	m.buf = strconv.AppendFloat(m.buf, f, 'f', -1, 64)
+}
+
+// appendJSONFloat32 appends a float32. When vjEncFloatExpAuto is set, uses
+// encoding/json format: scientific notation for |f| < 1e-6 or |f| >= 1e21.
+// Otherwise uses fixed-point notation.
+func (m *Marshaler) appendJSONFloat32(f float64) {
+	if m.encFlags&vjEncFloatExpAuto != 0 {
+		abs := float32(math.Abs(f))
+		if abs != 0 && (abs < 1e-6 || abs >= 1e21) {
+			m.buf = strconv.AppendFloat(m.buf, f, 'e', -1, 32)
+			n := len(m.buf)
+			if n >= 4 && m.buf[n-4] == 'e' && m.buf[n-3] == '-' && m.buf[n-2] == '0' {
+				m.buf[n-2] = m.buf[n-1]
+				m.buf = m.buf[:n-1]
+			}
+			return
+		}
+	}
+	m.buf = strconv.AppendFloat(m.buf, f, 'f', -1, 32)
+}
+
 func (m *Marshaler) encodeFloat32(ptr unsafe.Pointer) error {
 	f := float64(*(*float32)(ptr))
 	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
 	}
-	m.buf = strconv.AppendFloat(m.buf, f, 'f', -1, 32)
+	m.appendJSONFloat32(f)
 	return nil
 }
 
@@ -781,7 +860,7 @@ func (m *Marshaler) encodeFloat64(ptr unsafe.Pointer) error {
 	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
 	}
-	m.buf = strconv.AppendFloat(m.buf, f, 'f', -1, 64)
+	m.appendJSONFloat64(f)
 	return nil
 }
 
@@ -1098,9 +1177,9 @@ func (m *Marshaler) encodeAnyVal(v any) error {
 		m.encodeString(val)
 	case float64:
 		if math.IsNaN(val) || math.IsInf(val, 0) {
-			return &UnsupportedValueError{Str: strconv.FormatFloat(val, 'f', -1, 64)}
+			return &UnsupportedValueError{Str: strconv.FormatFloat(val, 'g', -1, 64)}
 		}
-		m.buf = strconv.AppendFloat(m.buf, val, 'f', -1, 64)
+		m.appendJSONFloat64(val)
 	case bool:
 		if val {
 			m.buf = append(m.buf, litTrue...)
@@ -1136,7 +1215,7 @@ func (m *Marshaler) encodeAnyVal(v any) error {
 		if math.IsNaN(f) || math.IsInf(f, 0) {
 			return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
 		}
-		m.buf = strconv.AppendFloat(m.buf, f, 'f', -1, 32)
+		m.appendJSONFloat32(f)
 	case []byte:
 		if val == nil {
 			m.buf = append(m.buf, litNull...)
@@ -1195,9 +1274,9 @@ func (m *Marshaler) encodeAnySlice(arr []any) error {
 			m.encodeString(val)
 		case float64:
 			if math.IsNaN(val) || math.IsInf(val, 0) {
-				return &UnsupportedValueError{Str: strconv.FormatFloat(val, 'f', -1, 64)}
+				return &UnsupportedValueError{Str: strconv.FormatFloat(val, 'g', -1, 64)}
 			}
-			m.buf = strconv.AppendFloat(m.buf, val, 'f', -1, 64)
+			m.appendJSONFloat64(val)
 		case bool:
 			if val {
 				m.buf = append(m.buf, litTrue...)
@@ -1277,9 +1356,9 @@ func (m *Marshaler) encodeAnyMap(mp map[string]any) error {
 			m.encodeString(val)
 		case float64:
 			if math.IsNaN(val) || math.IsInf(val, 0) {
-				return &UnsupportedValueError{Str: strconv.FormatFloat(val, 'f', -1, 64)}
+				return &UnsupportedValueError{Str: strconv.FormatFloat(val, 'g', -1, 64)}
 			}
-			m.buf = strconv.AppendFloat(m.buf, val, 'f', -1, 64)
+			m.appendJSONFloat64(val)
 		case bool:
 			if val {
 				m.buf = append(m.buf, litTrue...)

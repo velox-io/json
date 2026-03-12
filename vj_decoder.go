@@ -37,12 +37,10 @@ func WithSkipErrors(fn func(err error) bool) DecoderOption {
 	}
 }
 
-// DecoderUseNumber causes numbers in interface{} fields to be decoded as
-// [json.Number] instead of float64, preserving the original text
-// representation and avoiding precision loss for large integers.
-func DecoderUseNumber() DecoderOption {
+// DecoderCopyString causes all decoded strings to be heap-copied.
+func DecoderCopyString() DecoderOption {
 	return func(d *Decoder) {
-		d.useNumber = true
+		d.copyString = true
 	}
 }
 
@@ -77,6 +75,7 @@ type Decoder struct {
 
 	skipErrors func(err error) bool
 	useNumber  bool
+	copyString bool
 
 	sc       *Parser      // owned parser, lazily acquired from pool
 	lastType reflect.Type // type cache for consecutive same-type Decode calls
@@ -95,6 +94,25 @@ func NewDecoder(r io.Reader, opts ...DecoderOption) *Decoder {
 	return d
 }
 
+// UseNumber causes numbers in interface{} fields to decode as [json.Number]
+// instead of float64. It is safe to call before decoding starts or between
+// Decode calls; if a parser is already acquired, the setting is applied
+// immediately to the owned parser.
+func (d *Decoder) UseNumber() {
+	d.useNumber = true
+	if d.sc != nil {
+		d.sc.useNumber = true
+	}
+}
+
+// CopyString causes all decoded strings to be heap-copied.
+func (d *Decoder) CopyString() {
+	d.copyString = true
+	if d.sc != nil {
+		d.sc.copyString = true
+	}
+}
+
 // parser returns the owned Parser, acquiring one from the pool on first use.
 // Between Decode calls it performs inter-decode cleanup (same as parserPool.Put
 // but without the pool round-trip).
@@ -102,6 +120,7 @@ func (d *Decoder) parser() *Parser {
 	if d.sc == nil {
 		d.sc = defaultPool.Get()
 		d.sc.useNumber = d.useNumber
+		d.sc.copyString = d.copyString
 		return d.sc
 	}
 	sc := d.sc

@@ -138,7 +138,8 @@ func buildMetric(val, maxVal, minVal float64, formatted string, showRatio bool) 
 	isFastest := minVal > 0 && val <= minVal*1.03
 	ratio := ""
 	if showRatio && !isFastest && minVal > 0 {
-		ratio = fmt.Sprintf("%.1fx", val/minVal)
+		// Efficiency relative to fastest: minVal/val (1.0 = fastest, <1.0 = slower)
+		ratio = fmt.Sprintf("%.2fx", minVal/val)
 	}
 	// For non-ratio columns, mark lowest with star if there's meaningful difference.
 	if !showRatio && minVal >= 0 && val <= minVal*1.005 && maxVal > minVal*1.01 {
@@ -341,7 +342,7 @@ const htmlTemplate = `<!DOCTYPE html>
   <div class="group-title">{{.Name}}</div>
   <div class="metric-grid">
     <div class="col-hdr"></div>
-    <div class="col-hdr">ns/op <span class="col-hdr-hint">lower is better ↓</span></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
     <div class="col-hdr">B/op</div>
     <div class="col-hdr">allocs/op</div>
     {{range .Rows}}

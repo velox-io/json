@@ -12,7 +12,7 @@ import (
 // Parallel Marshal EscapeHeavy: real-world ~4KB JSON with ~40% escape density
 // =============================================================================
 
-func Benchmark_Parallel_Marshal_EscapeHeavy_StdJSON(b *testing.B) {
+func Benchmark_ParallelMarshal_EscapeHeavy_StdJSON(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -23,7 +23,7 @@ func Benchmark_Parallel_Marshal_EscapeHeavy_StdJSON(b *testing.B) {
 	})
 }
 
-func Benchmark_Parallel_Marshal_EscapeHeavy_Sonic(b *testing.B) {
+func Benchmark_ParallelMarshal_EscapeHeavy_Sonic(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -34,7 +34,7 @@ func Benchmark_Parallel_Marshal_EscapeHeavy_Sonic(b *testing.B) {
 	})
 }
 
-func Benchmark_Parallel_Marshal_EscapeHeavy_Velox(b *testing.B) {
+func Benchmark_ParallelMarshal_EscapeHeavy_Velox(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -49,7 +49,7 @@ func Benchmark_Parallel_Marshal_EscapeHeavy_Velox(b *testing.B) {
 // Parallel Marshal KubePods: Kubernetes Pod List (~25KB, deeply nested, 3 pods)
 // =============================================================================
 
-func Benchmark_Parallel_Marshal_KubePods_StdJSON(b *testing.B) {
+func Benchmark_ParallelMarshal_KubePods_StdJSON(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -60,7 +60,7 @@ func Benchmark_Parallel_Marshal_KubePods_StdJSON(b *testing.B) {
 	})
 }
 
-func Benchmark_Parallel_Marshal_KubePods_Sonic(b *testing.B) {
+func Benchmark_ParallelMarshal_KubePods_Sonic(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -71,7 +71,7 @@ func Benchmark_Parallel_Marshal_KubePods_Sonic(b *testing.B) {
 	})
 }
 
-func Benchmark_Parallel_Marshal_KubePods_Velox(b *testing.B) {
+func Benchmark_ParallelMarshal_KubePods_Velox(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -86,7 +86,7 @@ func Benchmark_Parallel_Marshal_KubePods_Velox(b *testing.B) {
 // Parallel Marshal Twitter: Twitter search API response (~617KB, deeply nested)
 // =============================================================================
 
-func Benchmark_Parallel_Marshal_Twitter_StdJSON(b *testing.B) {
+func Benchmark_ParallelMarshal_Twitter_StdJSON(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -97,7 +97,7 @@ func Benchmark_Parallel_Marshal_Twitter_StdJSON(b *testing.B) {
 	})
 }
 
-func Benchmark_Parallel_Marshal_Twitter_Sonic(b *testing.B) {
+func Benchmark_ParallelMarshal_Twitter_Sonic(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -108,7 +108,7 @@ func Benchmark_Parallel_Marshal_Twitter_Sonic(b *testing.B) {
 	})
 }
 
-func Benchmark_Parallel_Marshal_Twitter_Velox(b *testing.B) {
+func Benchmark_ParallelMarshal_Twitter_Velox(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {

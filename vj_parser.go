@@ -53,6 +53,16 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 
 // --- String Scanning ---
 
+func copyStringIfNeeded(raw []byte, copyStr bool) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	if copyStr {
+		return string(raw)
+	}
+	return unsafe.String(&raw[0], len(raw))
+}
+
 // scanStringValue scans a JSON string and assigns it to a typed field.
 // Fast path: no escapes → zero-copy via unsafe.String. Escapes → delegate to processEscapedString.
 func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
@@ -88,12 +98,9 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 		foundChar := src[foundPos]
 
 		if foundChar == '"' {
-			// Fast path: no escapes, zero-copy
 			raw := src[start:foundPos]
-			var s string
-			if len(raw) > 0 {
-				s = unsafe.String(&raw[0], len(raw))
-			}
+			needCopy := sc.copyString || (ti.Flags&tiFlagCopyString != 0)
+			s := copyStringIfNeeded(raw, needCopy)
 			switch ti.Kind {
 			case KindString:
 				*(*string)(ptr) = s
@@ -118,12 +125,9 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 	for pos < n {
 		c := src[pos]
 		if c == '"' {
-			// Fast path: no escapes
 			raw := src[start:pos]
-			var s string
-			if len(raw) > 0 {
-				s = unsafe.String(&raw[0], len(raw))
-			}
+			needCopy := sc.copyString || (ti.Flags&tiFlagCopyString != 0)
+			s := copyStringIfNeeded(raw, needCopy)
 			switch ti.Kind {
 			case KindString:
 				*(*string)(ptr) = s
@@ -193,10 +197,11 @@ func (sc *Parser) scanStringKey(src []byte, idx int) (int, []byte, error) {
 }
 
 // scanString scans a JSON string and returns it as a Go string.
-// Fast path: zero-copy via unsafe.String. Slow path: allocate + unescape.
+// When sc.copyString is true, the result is always a heap copy.
 func (sc *Parser) scanString(src []byte, idx int) (int, string, error) {
 	start := idx + 1
 	n := len(src)
+	needCopy := sc.copyString
 
 	// SWAR scan 8 bytes at a time for '"', '\\', or control chars (< 0x20)
 	pos := start
@@ -211,12 +216,15 @@ func (sc *Parser) scanString(src []byte, idx int) (int, string, error) {
 			foundIdx := pos + off
 			c := src[foundIdx]
 			if c == '"' {
-				return foundIdx + 1, UnsafeString(src[start:foundIdx]), nil
+				return foundIdx + 1, copyStringIfNeeded(src[start:foundIdx], needCopy), nil
 			}
 			if c == '\\' {
 				endIdx, result, err := sc.unescapeSinglePass(src, start, foundIdx)
 				if err != nil {
 					return endIdx, "", err
+				}
+				if needCopy {
+					return endIdx, string(result), nil
 				}
 				return endIdx, unsafe.String(unsafe.SliceData(result), len(result)), nil
 			}
@@ -228,12 +236,15 @@ func (sc *Parser) scanString(src []byte, idx int) (int, string, error) {
 	for pos < n {
 		c := src[pos]
 		if c == '"' {
-			return pos + 1, UnsafeString(src[start:pos]), nil
+			return pos + 1, copyStringIfNeeded(src[start:pos], needCopy), nil
 		}
 		if c == '\\' {
 			endIdx, result, err := sc.unescapeSinglePass(src, start, pos)
 			if err != nil {
 				return endIdx, "", err
+			}
+			if needCopy {
+				return endIdx, string(result), nil
 			}
 			return endIdx, unsafe.String(unsafe.SliceData(result), len(result)), nil
 		}

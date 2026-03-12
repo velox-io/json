@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 	"unsafe"
 )
 
@@ -143,9 +144,14 @@ func (sc *Parser) scanQuotedValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 			if scanErr != nil {
 				return newIdx, newSyntaxErrorWrap(fmt.Sprintf("vjson: cannot unmarshal quoted string: %v", scanErr), newIdx, scanErr)
 			}
+			if ti.Flags&tiFlagCopyString != 0 {
+				innerStr = strings.Clone(innerStr)
+			}
 			*(*string)(ptr) = innerStr
 		} else {
-			// encoding/json also accepts bare unquoted content for string,string fields.
+			if sc.copyString || (ti.Flags&tiFlagCopyString != 0) {
+				inner = strings.Clone(inner)
+			}
 			*(*string)(ptr) = inner
 		}
 

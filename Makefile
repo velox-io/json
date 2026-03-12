@@ -39,6 +39,7 @@ clean:
 	rm -f coverage.out coverage.html cpu.out mem.out
 
 FUZZ_TIME ?= 30s
+FUZZ_PARALLEL ?= 4
 
 fuzz:
 	go test -fuzz=FuzzMarshalString -fuzztime=$(FUZZ_TIME) .
@@ -48,6 +49,29 @@ fuzz:
 	go test -fuzz=FuzzUnmarshalStruct -fuzztime=$(FUZZ_TIME) .
 	go test -fuzz=FuzzUnmarshalNested -fuzztime=$(FUZZ_TIME) .
 	go test -fuzz=FuzzNoCrash -fuzztime=$(FUZZ_TIME) .
+
+# Run all fuzz tests with parallel workers
+fuzz-parallel:
+	go test -fuzz=FuzzMarshalString -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) .
+	go test -fuzz=FuzzMarshalStruct -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) .
+	go test -fuzz=FuzzMarshalNoCrash -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) .
+	go test -fuzz=FuzzUnmarshalAny -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) .
+	go test -fuzz=FuzzUnmarshalStruct -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) .
+	go test -fuzz=FuzzUnmarshalNested -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) .
+	go test -fuzz=FuzzNoCrash -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) .
+
+# Run multiple fuzz targets concurrently in background
+fuzz-concurrent:
+	@echo "Running 7 fuzz targets concurrently..."
+	@go test -fuzz=FuzzMarshalString -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) . & \
+	 go test -fuzz=FuzzMarshalStruct -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) . & \
+	 go test -fuzz=FuzzMarshalNoCrash -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) . & \
+	 go test -fuzz=FuzzUnmarshalAny -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) . & \
+	 go test -fuzz=FuzzUnmarshalStruct -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) . & \
+	 go test -fuzz=FuzzUnmarshalNested -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) . & \
+	 go test -fuzz=FuzzNoCrash -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) . & \
+	 wait
+	@echo "All fuzz tests completed"
 
 # Detect host platform
 _HOST_OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
@@ -68,7 +92,7 @@ gen:
 	@SOURCE_FILE="$(CURDIR)/native/encvm/impl/encvm.c" \
 	 TARGET_DIR="$(CURDIR)/native/encvm" \
 	 STDLIB_SOURCES="$(CURDIR)/native/stdlib/memory.c" \
-	 bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) "$(TARGET_OS)" "$(TARGET_ARCH)"
+	 bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) $(if $(ASM),--asm) "$(TARGET_OS)" "$(TARGET_ARCH)"
 
 # Generate benchmark visualization SVG
 # Usage: make benchviz
@@ -76,12 +100,12 @@ gen:
 BENCH_FILTER ?= .
 BENCH_TITLE ?= Benchmark Results
 BENCH_COUNT ?= 3
-BENCH_OUTPUT ?= local/benchmark.svg
+BENCH_OUTPUT ?= local/benchmark.txt
 
 benchviz:
-	@mkdir -p $(dir $(BENCH_OUTPUT))
-	cd benchmark && go test -run='^$$' -bench='$(BENCH_FILTER)' -benchmem -count=$(BENCH_COUNT) . \
-	  | go run ./benchviz/ -title '$(BENCH_TITLE)' > '../$(BENCH_OUTPUT)'
-	@echo "SVG saved to $(BENCH_OUTPUT)"
+	mkdir -p $(dir $(BENCH_OUTPUT));
+	(cd benchmark && go test -run='^$$' -bench='$(BENCH_FILTER)' -benchmem -count=$(BENCH_COUNT) . | tee '../$(BENCH_OUTPUT)');
+	(cd benchmark && go run ./benchviz/ -title '$(BENCH_TITLE)' -format html < '../$(BENCH_OUTPUT)' > '../$(basename $(BENCH_OUTPUT)).html');
+	(cd benchmark && go run ./benchviz/ -title '$(BENCH_TITLE)' -format svg < '../$(BENCH_OUTPUT)' > '../$(basename $(BENCH_OUTPUT)).svg');
 
 .PHONY: lint lint-ci fmt test test-coverage bench bench-baseline bench-check bench-check-threshold clean fuzz gen benchviz

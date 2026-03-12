@@ -3,10 +3,11 @@
 # gen-natives.sh - Expand macros, compile, and generate Go integration files
 #
 # Usage:
-#   ./gen-natives.sh [--zig] [target_os] [target_arch]
+#   ./gen-natives.sh [--zig] [--asm] [target_os] [target_arch]
 #
 # Options:
 #   --zig         - Force using zig cc even for native (non-cross) builds.
+#   --asm         - Generate assembly files for debugging.
 #
 # Arguments:
 #   target_os   - Target OS (linux, darwin, windows). Default: host OS.
@@ -15,7 +16,7 @@
 # Environment variables (required):
 #   SOURCE_FILE   - Source C file.
 #   TARGET_DIR    - Target directory for .syso/.s files.
-#   OUTPUT_DIR    - Output directory for .c/.o files. Default: build/native
+#   OUTPUT_DIR    - Output directory for .o files. Default: build/native
 #
 # Environment variables (optional):
 #   STDLIB_SOURCES - Space-separated list of stdlib .c files (e.g. memcpy/memset
@@ -24,10 +25,9 @@
 #                    and link.
 #
 # Output:
-#   - {OUTPUT_DIR}/{basename}[_{mode}]_{os}_{arch}_{isa}.c
 #   - {OUTPUT_DIR}/{basename}[_{mode}]_{os}_{arch}_{isa}.o
 #   - {TARGET_DIR}/{basename}_{os}_{arch}.syso  (all ISAs, all modes combined)
-#   - {TARGET_DIR}/asm/{basename}[_{mode}]_{os}_{arch}_{isa}.s
+#   - {TARGET_DIR}/asm/{basename}[_{mode}]_{os}_{arch}_{isa}.s (has disables)
 #
 # Cross-compilation terminology:
 #   HOST  - The machine running the compiler (current machine)
@@ -43,9 +43,11 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # ============================================================
 
 FORCE_ZIG=false
+GEN_ASM=false
 while [[ "${1:-}" == --* ]]; do
     case "$1" in
         --zig) FORCE_ZIG=true; shift ;;
+        --asm) GEN_ASM=true; shift ;;
         *)     echo "Error: Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -71,7 +73,7 @@ VJ_LIB_DIR="native/encvm/impl"
 # Derive base name from source file
 BASENAME=$(basename "$SOURCE_FILE" .c)
 
-mkdir -p "$OUTPUT_DIR" "$TARGET_DIR/asm"
+# mkdir -p "$OUTPUT_DIR" "$TARGET_DIR/asm"
 
 # ============================================================
 #  Host platform detection
@@ -330,63 +332,56 @@ for isa in $ISAS; do
         MODE_SUFFIX="_${mode}"
         MODE_FLAG=""
         if [ "$mode" = "default" ]; then
-            MODE_FLAG="-DMODE_default"
+            MODE_FLAG="-DMODE_DEFAULT"
         elif [ "$mode" = "fast" ]; then
-            MODE_FLAG="-DMODE_fast"
+            MODE_FLAG="-DMODE_FAST"
         fi
         # full: no MODE_FLAG needed, SJ_MODE defaults to SJ_MODE_FULL
 
         # File names
-        CFILE="${OUTPUT_DIR}/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.c"
         OFILE="${OUTPUT_DIR}/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.o"
-        SFILE="$TARGET_DIR/asm/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.s"
 
-        # Step 1: Expand macros (use target compiler for correct headers)
-        echo "  Expanding $(basename "$CFILE")"
-        # 使用 ISA_xxx 宏而非 ISA=xxx 避免预处理标识符比较问题
-        ISA_MACRO="-DISA_${isa}"
-        $CC -E -P \
-            -DOS=${TARGET_OS} \
-            -DARCH=${TARGET_ARCH} \
-            $ISA_MACRO \
-            $MODE_FLAG \
-            -I"$(dirname "$SOURCE_FILE")" \
-            -I"$REPO_ROOT/$VJ_LIB_DIR" \
-            -I"$REPO_ROOT/native/include" \
-            -I"$REPO_ROOT/native" \
-            "$SOURCE_FILE" \
-            -o "$CFILE"
+        # Use ISA_XXX macro instead of ISA=xxx to avoid preprocessor identifier comparison issues
+        ISA_UPPER=$(printf '%s' "$isa" | tr '[:lower:]' '[:upper:]')
+        ISA_MACRO="-DISA_${ISA_UPPER}"
+        COMMON_DEFS="$ISA_MACRO $MODE_FLAG -DOS=${TARGET_OS} -DARCH=${TARGET_ARCH}"
+        COMMON_INCLUDES="-I$(dirname "$SOURCE_FILE") -I$REPO_ROOT/$VJ_LIB_DIR -I$REPO_ROOT/native/include -I$REPO_ROOT/native"
 
-        # Step 2: Compile to object
+        # Step 1: Compile to object
         echo "  Compiling $(basename "$OFILE")"
         $CC -O3 -fPIC -g0 -fno-stack-protector $ARCH_FLAGS $ISA_FLAGS \
-            -I"$REPO_ROOT/native" -c "$CFILE" -o "$OFILE"
+            $COMMON_DEFS $COMMON_INCLUDES \
+            -c "$SOURCE_FILE" -o "$OFILE"
         ALL_OBJS="$ALL_OBJS $OFILE"
 
         # Capture flags for .clangd from the first ISA/mode combination
         if [ "$CLANGD_FLAGS_COLLECTED" = false ]; then
             CLANGD_FLAGS_COLLECTED=true
-            CLANGD_ADD_FLAGS="-DOS=${TARGET_OS} -DARCH=${TARGET_ARCH} $MODE_FLAG -I$REPO_ROOT/native/include"
+            CLANGD_ADD_FLAGS="-DOS=${TARGET_OS} -DARCH=${TARGET_ARCH} $MODE_FLAG -I$REPO_ROOT/native/include -I$REPO_ROOT/native"
         fi
 
-        # Step 3: Generate assembly for reference (strip debug info)
-        echo "  Generating $(basename "$SFILE")"
-        $CC -S -O3 -g0 -fno-stack-protector $ARCH_FLAGS -fno-asynchronous-unwind-tables $ISA_FLAGS \
-            -I"$REPO_ROOT/native" "$CFILE" -o "$SFILE"
+        # Step 2: Generate assembly for debugging (optional)
+        if [ "$GEN_ASM" = true ]; then
+            mkdir -p "$OUTPUT_DIR/asm"
+            SFILE="$OUTPUT_DIR/asm/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.s"
+            echo "  Generating $(basename "$SFILE")"
+            $CC -S -O3 -g0 -fno-stack-protector $ARCH_FLAGS -fno-asynchronous-unwind-tables $ISA_FLAGS \
+                $COMMON_DEFS $COMMON_INCLUDES \
+                "$SOURCE_FILE" -o "$SFILE"
 
-        # Remove debug directives
-        sed -i '/^[[:space:]]*\.file[[:space:]]/d' "$SFILE"
-        sed -i '/^[[:space:]]*\.loc[[:space:]]/d' "$SFILE"
-        sed -i '/^[[:space:]]*\.cfi_[[:alpha:]]/d' "$SFILE"
-        sed -i '/^[[:space:]]*#DEBUG_VALUE/d' "$SFILE"
-        sed -i '/^[[:space:]]*\.Lfunc_begin/d' "$SFILE"
-        sed -i '/^[[:space:]]*\.Lfunc_end/d' "$SFILE"
-        sed -i '/^[[:space:]]*\.Ltmp/d' "$SFILE"
-        # Remove .size directives that reference removed labels
-        sed -i '/\.size.*\.Lfunc_end/d' "$SFILE"
+            # Remove debug directives (use -i.bak for BSD/GNU sed compatibility)
+            sed -i.bak '/^[[:space:]]*\.file[[:space:]]/d' "$SFILE" && rm -f "${SFILE}.bak"
+            sed -i.bak '/^[[:space:]]*\.loc[[:space:]]/d' "$SFILE" && rm -f "${SFILE}.bak"
+            sed -i.bak '/^[[:space:]]*\.cfi_[[:alpha:]]/d' "$SFILE" && rm -f "${SFILE}.bak"
+            sed -i.bak '/^[[:space:]]*#DEBUG_VALUE/d' "$SFILE" && rm -f "${SFILE}.bak"
+            sed -i.bak '/^[[:space:]]*\.Lfunc_begin/d' "$SFILE" && rm -f "${SFILE}.bak"
+            sed -i.bak '/^[[:space:]]*\.Lfunc_end/d' "$SFILE" && rm -f "${SFILE}.bak"
+            sed -i.bak '/^[[:space:]]*\.Ltmp/d' "$SFILE" && rm -f "${SFILE}.bak"
+            # Remove .size directives that reference removed labels
+            sed -i.bak '/\.size.*\.Lfunc_end/d' "$SFILE" && rm -f "${SFILE}.bak"
 
-        TMP_ASM=$(mktemp)
-        cat > "$TMP_ASM" << HEADER
+            TMP_ASM=$(mktemp)
+            cat > "$TMP_ASM" << HEADER
 // ============================================================
 //
 //  Platform: $TARGET_OS/$TARGET_ARCH ($isa)
@@ -394,8 +389,10 @@ for isa in $ISAS; do
 // ============================================================
 
 HEADER
-        cat "$SFILE" >> "$TMP_ASM"
-        mv "$TMP_ASM" "$SFILE"
+            cat "$SFILE" >> "$TMP_ASM"
+            mv "$TMP_ASM" "$SFILE"
+        fi
+
     done
 done
 
@@ -474,11 +471,5 @@ echo "Generated $CLANGD_PATH"
 echo ""
 echo "Generated files:"
 echo "  $SYSO_PATH"
-for isa in $ISAS; do
-    for mode in $ALL_MODES; do
-        MODE_SUFFIX="_${mode}"
-        echo "  $TARGET_DIR/asm/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.s"
-    done
-done
 echo ""
 echo "Done!"

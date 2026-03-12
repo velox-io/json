@@ -41,7 +41,7 @@ const (
 )
 
 // tiFlag is a bitmask for hot-path checks in scanValue / encodeValue.
-type tiFlag uint8
+type tiFlag uint16
 
 const (
 	tiFlagHasUnmarshalFn     tiFlag = 1 << iota // Ext.UnmarshalFn != nil
@@ -52,6 +52,7 @@ const (
 	tiFlagOmitEmpty                             // omitempty
 	tiFlagRawMessage                            // json.RawMessage native handling
 	tiFlagNumber                                // json.Number native handling
+	tiFlagCopyString                            // `,copy` tag
 )
 
 // TypeInfo holds pre-computed metadata for a type.
@@ -440,6 +441,7 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 			jsonName := sf.Name
 			omitEmpty := false
 			quoted := false
+			copyStr := false
 			if tag := sf.Tag.Get("json"); tag != "" {
 				if tag == "-" {
 					continue
@@ -448,6 +450,7 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 					jsonName = before
 					omitEmpty = strings.Contains(opts, "omitempty")
 					quoted = strings.Contains(opts, "string")
+					copyStr = strings.Contains(opts, "copy")
 				} else {
 					jsonName = tag
 				}
@@ -501,6 +504,9 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 			}
 			if quoted {
 				fi.Flags |= tiFlagQuoted
+			}
+			if copyStr && fi.Kind == KindString {
+				fi.Flags |= tiFlagCopyString
 			}
 
 			addField(fi, depth, idxPath)

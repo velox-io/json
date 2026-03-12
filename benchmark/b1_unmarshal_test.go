@@ -10,6 +10,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	gojson "github.com/goccy/go-json"
+	segmentiojson "github.com/segmentio/encoding/json"
 	vjson "github.com/velox-io/json"
 )
 
@@ -32,6 +33,16 @@ func Benchmark_Unmarshal_Tiny_Sonic(b *testing.B) {
 	for b.Loop() {
 		var s Tiny
 		if err := sonic.Unmarshal(TinyJSON, &s); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Unmarshal_Tiny_Segmentio(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		var s Tiny
+		if err := segmentiojson.Unmarshal(TinyJSON, &s); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -87,6 +98,17 @@ func Benchmark_Unmarshal_TinyCompact_Sonic(b *testing.B) {
 	for b.Loop() {
 		var s Tiny
 		if err := sonic.Unmarshal(data, &s); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Unmarshal_TinyCompact_Segmentio(b *testing.B) {
+	data := LoadTinyCompactJSON()
+	b.ReportAllocs()
+	for b.Loop() {
+		var s Tiny
+		if err := segmentiojson.Unmarshal(data, &s); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -148,6 +170,16 @@ func Benchmark_Unmarshal_Small_Sonic(b *testing.B) {
 	}
 }
 
+func Benchmark_Unmarshal_Small_Segmentio(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		var s Book
+		if err := segmentiojson.Unmarshal(SmallJSON, &s); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func Benchmark_Unmarshal_Small_GoJSON(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
@@ -198,6 +230,17 @@ func Benchmark_Unmarshal_SmallCompact_Sonic(b *testing.B) {
 	for b.Loop() {
 		var s Book
 		if err := sonic.Unmarshal(data, &s); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Unmarshal_SmallCompact_Segmentio(b *testing.B) {
+	data := LoadSmallCompactJSON()
+	b.ReportAllocs()
+	for b.Loop() {
+		var s Book
+		if err := segmentiojson.Unmarshal(data, &s); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -256,6 +299,17 @@ func Benchmark_Unmarshal_EscapeHeavy_Sonic(b *testing.B) {
 	for b.Loop() {
 		var p EscapeHeavyPayload
 		if err := sonic.Unmarshal(EscapeHeavyJSON, &p); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Unmarshal_EscapeHeavy_Segmentio(b *testing.B) {
+	b.SetBytes(int64(len(EscapeHeavyJSON)))
+	b.ReportAllocs()
+	for b.Loop() {
+		var p EscapeHeavyPayload
+		if err := segmentiojson.Unmarshal(EscapeHeavyJSON, &p); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -321,6 +375,18 @@ func Benchmark_Unmarshal_EscapeHeavyCompact_Sonic(b *testing.B) {
 	}
 }
 
+func Benchmark_Unmarshal_EscapeHeavyCompact_Segmentio(b *testing.B) {
+	data := LoadEscapeHeavyCompactJSON()
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	for b.Loop() {
+		var p EscapeHeavyPayload
+		if err := segmentiojson.Unmarshal(data, &p); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func Benchmark_Unmarshal_EscapeHeavyCompact_GoJSON(b *testing.B) {
 	data := LoadEscapeHeavyCompactJSON()
 	b.SetBytes(int64(len(data)))
@@ -361,54 +427,65 @@ func Benchmark_Unmarshal_EscapeHeavyCompact_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_Unmarshal_KubePods_StdJSON(b *testing.B) {
-	b.SetBytes(int64(len(PodsJSON)))
+	b.SetBytes(int64(len(KubePodsJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var pl KubePodList
-		if err := stdjson.Unmarshal(PodsJSON, &pl); err != nil {
+		if err := stdjson.Unmarshal(KubePodsJSON, &pl); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
 func Benchmark_Unmarshal_KubePods_Sonic(b *testing.B) {
-	b.SetBytes(int64(len(PodsJSON)))
+	b.SetBytes(int64(len(KubePodsJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var pl KubePodList
-		if err := sonic.Unmarshal(PodsJSON, &pl); err != nil {
+		if err := sonic.Unmarshal(KubePodsJSON, &pl); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Unmarshal_KubePods_Segmentio(b *testing.B) {
+	b.SetBytes(int64(len(KubePodsJSON)))
+	b.ReportAllocs()
+	for b.Loop() {
+		var pl KubePodList
+		if err := segmentiojson.Unmarshal(KubePodsJSON, &pl); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
 func Benchmark_Unmarshal_KubePods_GoJSON(b *testing.B) {
-	b.SetBytes(int64(len(PodsJSON)))
+	b.SetBytes(int64(len(KubePodsJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var pl KubePodList
-		if err := gojson.Unmarshal(PodsJSON, &pl); err != nil {
+		if err := gojson.Unmarshal(KubePodsJSON, &pl); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
 func Benchmark_Unmarshal_KubePods_EasyJSON(b *testing.B) {
-	b.SetBytes(int64(len(PodsJSON)))
+	b.SetBytes(int64(len(KubePodsJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
-		if err := easyjson.UnmarshalKubePods(PodsJSON); err != nil {
+		if err := easyjson.UnmarshalKubePods(KubePodsJSON); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
 func Benchmark_Unmarshal_KubePods_Velox(b *testing.B) {
-	b.SetBytes(int64(len(PodsJSON)))
+	b.SetBytes(int64(len(KubePodsJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var pl KubePodList
-		if err := vjson.Unmarshal(PodsJSON, &pl); err != nil {
+		if err := vjson.Unmarshal(KubePodsJSON, &pl); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -437,6 +514,18 @@ func Benchmark_Unmarshal_KubePodsCompact_Sonic(b *testing.B) {
 	for b.Loop() {
 		var pl KubePodList
 		if err := sonic.Unmarshal(data, &pl); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Unmarshal_KubePodsCompact_Segmentio(b *testing.B) {
+	data := LoadPodsCompactJSON()
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	for b.Loop() {
+		var pl KubePodList
+		if err := segmentiojson.Unmarshal(data, &pl); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -503,6 +592,17 @@ func Benchmark_Unmarshal_Twitter_Sonic(b *testing.B) {
 	}
 }
 
+func Benchmark_Unmarshal_Twitter_Segmentio(b *testing.B) {
+	b.SetBytes(int64(len(TwitterJSON)))
+	b.ReportAllocs()
+	for b.Loop() {
+		var t twitter.TwitterStruct
+		if err := segmentiojson.Unmarshal(TwitterJSON, &t); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func Benchmark_Unmarshal_Twitter_GoJSON(b *testing.B) {
 	b.SetBytes(int64(len(TwitterJSON)))
 	b.ReportAllocs()
@@ -558,6 +658,18 @@ func Benchmark_Unmarshal_TwitterCompact_Sonic(b *testing.B) {
 	for b.Loop() {
 		var t twitter.TwitterStruct
 		if err := sonic.Unmarshal(data, &t); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Unmarshal_TwitterCompact_Segmentio(b *testing.B) {
+	data := LoadTwitterCompactJSON()
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	for b.Loop() {
+		var t twitter.TwitterStruct
+		if err := segmentiojson.Unmarshal(data, &t); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -621,6 +733,18 @@ func Benchmark_Unmarshal_TwitterTyped_Sonic(b *testing.B) {
 	for b.Loop() {
 		var t twitter_typed.TwitterStruct
 		if err := sonic.Unmarshal(data, &t); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Unmarshal_TwitterTyped_Segmentio(b *testing.B) {
+	data := LoadTwitterCompactJSON()
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	for b.Loop() {
+		var t twitter_typed.TwitterStruct
+		if err := segmentiojson.Unmarshal(data, &t); err != nil {
 			b.Fatal(err)
 		}
 	}

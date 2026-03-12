@@ -6,19 +6,14 @@
  * and avoid register spill from the cold interface logic
  * (binary search, primitive tag switch, Blueprint dispatch).
  *
- * Depends on: types.h, number.h, strfn.h,
- *             ryu.h, pointer.h.
  */
 
 #ifndef VJ_ENCVM_IFACE_H
 #define VJ_ENCVM_IFACE_H
 
-/* ================================================================
- *  Interface encode action codes
- *
- *  Returned to the VM caller so it can take the appropriate action
- *  (advance buf, yield to Go, push frame, or report error).
- * ================================================================ */
+// clang-format off
+
+#include "types.h"
 
 enum VjIfaceAction {
   VJ_IFACE_DONE       = 0,  /* primitive encoded into buf */
