@@ -11,14 +11,14 @@ import (
 // =============================================================================
 
 // lookupField is a test helper that wraps LookupFieldBytes for string input.
-func lookupField(dec *ReflectStructDecoder, key string) *TypeInfo {
+func lookupField(dec *StructCodec, key string) *TypeInfo {
 	return dec.LookupFieldBytes([]byte(key))
 }
 
-// makeTestStructDecoder builds a ReflectStructDecoder from a list of field names.
+// makeTestStructCodec builds a StructCodec from a list of field names.
 // This bypasses reflect to create controlled test scenarios.
-func makeTestStructDecoder(names []string) *ReflectStructDecoder {
-	dec := &ReflectStructDecoder{
+func makeTestStructCodec(names []string) *StructCodec {
+	dec := &StructCodec{
 		Fields: make([]TypeInfo, len(names)),
 	}
 	for i, name := range names {
@@ -85,7 +85,7 @@ func TestToLowerASCII_NonASCII(t *testing.T) {
 // =============================================================================
 
 func TestBuildLookup_Empty(t *testing.T) {
-	dec := makeTestStructDecoder(nil)
+	dec := makeTestStructCodec(nil)
 	if dec.LookupFn == nil {
 		t.Fatal("LookupFn should not be nil")
 	}
@@ -95,7 +95,7 @@ func TestBuildLookup_Empty(t *testing.T) {
 }
 
 func TestBuildLookup_SingleField(t *testing.T) {
-	dec := makeTestStructDecoder([]string{"id"})
+	dec := makeTestStructCodec([]string{"id"})
 	fi := lookupField(dec, "id")
 	if fi == nil {
 		t.Fatal("expected to find 'id'")
@@ -112,7 +112,7 @@ func TestBuildLookup_LinearRange(t *testing.T) {
 		for i := range n {
 			names[i] = fmt.Sprintf("field%d", i)
 		}
-		dec := makeTestStructDecoder(names)
+		dec := makeTestStructCodec(names)
 
 		for _, name := range names {
 			fi := lookupField(dec, name)
@@ -137,7 +137,7 @@ func TestBuildLookup_PerfectHashRange(t *testing.T) {
 		for i := range n {
 			names[i] = fmt.Sprintf("field_%d", i)
 		}
-		dec := makeTestStructDecoder(names)
+		dec := makeTestStructCodec(names)
 
 		if dec.HashTable == nil {
 			t.Errorf("n=%d: expected perfect hash table", n)
@@ -166,7 +166,7 @@ func TestBuildLookup_MapFallback(t *testing.T) {
 	for i := range n {
 		names[i] = fmt.Sprintf("field_%d", i)
 	}
-	dec := makeTestStructDecoder(names)
+	dec := makeTestStructCodec(names)
 
 	if dec.FieldMap == nil {
 		t.Fatal("expected FieldMap for 40 fields")
@@ -185,7 +185,7 @@ func TestBuildLookup_MapFallback(t *testing.T) {
 // =============================================================================
 
 func TestLookup_CaseInsensitive(t *testing.T) {
-	dec := makeTestStructDecoder([]string{"Name", "Age", "Email"})
+	dec := makeTestStructCodec([]string{"Name", "Age", "Email"})
 
 	tests := []struct {
 		key      string
@@ -215,7 +215,7 @@ func TestLookup_CaseInsensitive(t *testing.T) {
 
 func TestLookup_CaseInsensitive_PerfectHash(t *testing.T) {
 	names := []string{"id", "name", "email", "phone", "address", "city", "state", "zip"}
-	dec := makeTestStructDecoder(names)
+	dec := makeTestStructCodec(names)
 
 	// Lookup with various casings
 	for _, name := range names {
@@ -248,7 +248,7 @@ func TestLookup_CaseInsensitive_PerfectHash(t *testing.T) {
 // =============================================================================
 
 func TestLookup_UnknownKeys(t *testing.T) {
-	dec := makeTestStructDecoder([]string{"id", "name", "email", "phone", "address"})
+	dec := makeTestStructCodec([]string{"id", "name", "email", "phone", "address"})
 
 	unknowns := []string{"", "x", "unknown", "idd", "nam", "emaill", "PHONE2"}
 	for _, key := range unknowns {
@@ -260,7 +260,7 @@ func TestLookup_UnknownKeys(t *testing.T) {
 
 func TestLookup_SimilarNames(t *testing.T) {
 	// Names that differ only in one character — stress-test hash quality
-	dec := makeTestStructDecoder([]string{
+	dec := makeTestStructCodec([]string{
 		"created_at", "created_by",
 		"updated_at", "updated_by",
 		"deleted_at", "deleted_by",
@@ -278,7 +278,7 @@ func TestLookup_SimilarNames(t *testing.T) {
 
 func TestLookup_DuplicateLengthNames(t *testing.T) {
 	// All same length — simpleMixer must differentiate by character content
-	dec := makeTestStructDecoder([]string{"ab", "cd", "ef", "gh", "ij"})
+	dec := makeTestStructCodec([]string{"ab", "cd", "ef", "gh", "ij"})
 
 	for _, name := range []string{"ab", "cd", "ef", "gh", "ij"} {
 		fi := lookupField(dec, name)
@@ -291,7 +291,7 @@ func TestLookup_DuplicateLengthNames(t *testing.T) {
 }
 
 func TestLookup_SingleCharFields(t *testing.T) {
-	dec := makeTestStructDecoder([]string{"a", "b", "c", "d", "e", "f"})
+	dec := makeTestStructCodec([]string{"a", "b", "c", "d", "e", "f"})
 	for _, name := range []string{"a", "b", "c", "d", "e", "f"} {
 		fi := lookupField(dec, name)
 		if fi == nil || fi.JSONName != name {
@@ -301,7 +301,7 @@ func TestLookup_SingleCharFields(t *testing.T) {
 }
 
 func TestLookup_UnicodeFieldNames(t *testing.T) {
-	dec := makeTestStructDecoder([]string{"名前", "年齢", "メール", "住所", "電話"})
+	dec := makeTestStructCodec([]string{"名前", "年齢", "メール", "住所", "電話"})
 	for _, name := range []string{"名前", "年齢", "メール", "住所", "電話"} {
 		fi := lookupField(dec, name)
 		if fi == nil || fi.JSONName != name {
@@ -317,7 +317,7 @@ func TestLookup_RealisticStruct(t *testing.T) {
 		"address", "city", "state", "zip", "country",
 		"created_at", "updated_at", "is_active",
 	}
-	dec := makeTestStructDecoder(names)
+	dec := makeTestStructCodec(names)
 
 	for _, name := range names {
 		fi := lookupField(dec, name)
@@ -343,7 +343,7 @@ func TestLookup_ViaReflect(t *testing.T) {
 		Email string `json:"email"`
 	}
 
-	dec := GetDecoder(reflect.TypeOf(User{})).Decoder.(*ReflectStructDecoder)
+	dec := GetCodec(reflect.TypeOf(User{})).Decoder.(*StructCodec)
 
 	tests := []struct {
 		key  string
@@ -387,7 +387,7 @@ func TestLookup_ViaReflect_LargeStruct(t *testing.T) {
 		F16 string `json:"f16"`
 	}
 
-	dec := GetDecoder(reflect.TypeOf(BigStruct{})).Decoder.(*ReflectStructDecoder)
+	dec := GetCodec(reflect.TypeOf(BigStruct{})).Decoder.(*StructCodec)
 
 	if dec.HashTable == nil {
 		t.Fatal("expected perfect hash for 16-field struct")
@@ -409,7 +409,7 @@ func TestLookup_ViaReflect_LargeStruct(t *testing.T) {
 // =============================================================================
 
 func TestLookupFieldBytes(t *testing.T) {
-	dec := makeTestStructDecoder([]string{"id", "name", "email", "phone", "address"})
+	dec := makeTestStructCodec([]string{"id", "name", "email", "phone", "address"})
 
 	tests := []struct {
 		key  []byte
@@ -444,7 +444,7 @@ func TestLookupFieldBytes(t *testing.T) {
 
 // BenchmarkLookup compares linear, perfect hash, and map lookup across field counts.
 func BenchmarkLookup_Linear_4fields(b *testing.B) {
-	dec := makeTestStructDecoder([]string{"id", "name", "email", "age"})
+	dec := makeTestStructCodec([]string{"id", "name", "email", "age"})
 	key := []byte("email")
 	b.ResetTimer()
 	for range b.N {
@@ -453,7 +453,7 @@ func BenchmarkLookup_Linear_4fields(b *testing.B) {
 }
 
 func BenchmarkLookup_PerfectHash_8fields(b *testing.B) {
-	dec := makeTestStructDecoder([]string{"id", "name", "email", "phone", "address", "city", "state", "zip"})
+	dec := makeTestStructCodec([]string{"id", "name", "email", "phone", "address", "city", "state", "zip"})
 	key := []byte("address")
 	b.ResetTimer()
 	for range b.N {
@@ -466,7 +466,7 @@ func BenchmarkLookup_PerfectHash_16fields(b *testing.B) {
 	for i := range 16 {
 		names[i] = fmt.Sprintf("field_%d", i)
 	}
-	dec := makeTestStructDecoder(names)
+	dec := makeTestStructCodec(names)
 	key := []byte("field_12")
 	b.ResetTimer()
 	for range b.N {
@@ -479,7 +479,7 @@ func BenchmarkLookup_Map_40fields(b *testing.B) {
 	for i := range 40 {
 		names[i] = fmt.Sprintf("field_%d", i)
 	}
-	dec := makeTestStructDecoder(names)
+	dec := makeTestStructCodec(names)
 	key := []byte("field_30")
 	b.ResetTimer()
 	for range b.N {
@@ -488,7 +488,7 @@ func BenchmarkLookup_Map_40fields(b *testing.B) {
 }
 
 func BenchmarkLookup_Miss_PerfectHash(b *testing.B) {
-	dec := makeTestStructDecoder([]string{"id", "name", "email", "phone", "address", "city", "state", "zip"})
+	dec := makeTestStructCodec([]string{"id", "name", "email", "phone", "address", "city", "state", "zip"})
 	key := []byte("nonexistent")
 	b.ResetTimer()
 	for range b.N {

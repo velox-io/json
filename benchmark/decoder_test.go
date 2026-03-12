@@ -7,6 +7,7 @@ import (
 	"io"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"dev.local/benchmark/twitter"
@@ -29,23 +30,43 @@ func repeatNDJSON(jsonVal []byte, n int) []byte {
 	return buf.Bytes()
 }
 
-// NDJSON streams, initialized in init() because the compact JSON data
-// is itself produced in init() (data.go) and Go does not guarantee
-// execution order between package-level var initializers across files.
+// NDJSON streams, lazily built from compact JSON data.
 var (
-	smallNDJSON       []byte
-	escapeHeavyNDJSON []byte
-	kubePodsNDJSON    []byte
-	twitterNDJSON     []byte
-	tinyNDJSON        []byte
+	smallNDJSONOnce       sync.Once
+	smallNDJSONData       []byte
+	escapeHeavyNDJSONOnce sync.Once
+	escapeHeavyNDJSONData []byte
+	kubePodsNDJSONOnce    sync.Once
+	kubePodsNDJSONData    []byte
+	twitterNDJSONOnce     sync.Once
+	twitterNDJSONData     []byte
+	tinyNDJSONOnce        sync.Once
+	tinyNDJSONData        []byte
 )
 
-func init() {
-	smallNDJSON = repeatNDJSON(SmallCompactJSON, 100)
-	escapeHeavyNDJSON = repeatNDJSON(EscapeHeavyCompactJSON, 50)
-	kubePodsNDJSON = repeatNDJSON(PodsCompactJSON, 50)
-	twitterNDJSON = repeatNDJSON(TwitterCompactJSON, 10)
-	tinyNDJSON = []byte(strings.Repeat("{}\n", 1000))
+func loadSmallNDJSON() []byte {
+	smallNDJSONOnce.Do(func() { smallNDJSONData = repeatNDJSON(LoadSmallCompactJSON(), 100) })
+	return smallNDJSONData
+}
+
+func loadEscapeHeavyNDJSON() []byte {
+	escapeHeavyNDJSONOnce.Do(func() { escapeHeavyNDJSONData = repeatNDJSON(LoadEscapeHeavyCompactJSON(), 50) })
+	return escapeHeavyNDJSONData
+}
+
+func loadKubePodsNDJSON() []byte {
+	kubePodsNDJSONOnce.Do(func() { kubePodsNDJSONData = repeatNDJSON(LoadPodsCompactJSON(), 50) })
+	return kubePodsNDJSONData
+}
+
+func loadTwitterNDJSON() []byte {
+	twitterNDJSONOnce.Do(func() { twitterNDJSONData = repeatNDJSON(LoadTwitterCompactJSON(), 10) })
+	return twitterNDJSONData
+}
+
+func loadTinyNDJSON() []byte {
+	tinyNDJSONOnce.Do(func() { tinyNDJSONData = []byte(strings.Repeat("{}\n", 1000)) })
+	return tinyNDJSONData
 }
 
 // =============================================================================
@@ -53,10 +74,11 @@ func init() {
 // =============================================================================
 
 func Benchmark_Decoder_Small_Std(b *testing.B) {
-	b.SetBytes(int64(len(smallNDJSON)))
+	data := loadSmallNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := json.NewDecoder(bytes.NewReader(smallNDJSON))
+		dec := json.NewDecoder(bytes.NewReader(data))
 		for {
 			var s Small
 			if err := dec.Decode(&s); err != nil {
@@ -70,10 +92,11 @@ func Benchmark_Decoder_Small_Std(b *testing.B) {
 }
 
 func Benchmark_Decoder_Small_Sonic(b *testing.B) {
-	b.SetBytes(int64(len(smallNDJSON)))
+	data := loadSmallNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(smallNDJSON))
+		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(data))
 		for {
 			var s Small
 			if err := dec.Decode(&s); err != nil {
@@ -87,10 +110,11 @@ func Benchmark_Decoder_Small_Sonic(b *testing.B) {
 }
 
 func Benchmark_Decoder_Small_Velox(b *testing.B) {
-	b.SetBytes(int64(len(smallNDJSON)))
+	data := loadSmallNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := vjson.NewDecoder(bytes.NewReader(smallNDJSON))
+		dec := vjson.NewDecoder(bytes.NewReader(data))
 		for {
 			var s Small
 			if err := dec.Decode(&s); err != nil {
@@ -108,10 +132,11 @@ func Benchmark_Decoder_Small_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_Decoder_EscapeHeavy_Std(b *testing.B) {
-	b.SetBytes(int64(len(escapeHeavyNDJSON)))
+	data := loadEscapeHeavyNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := json.NewDecoder(bytes.NewReader(escapeHeavyNDJSON))
+		dec := json.NewDecoder(bytes.NewReader(data))
 		for {
 			var p EscapeHeavyPayload
 			if err := dec.Decode(&p); err != nil {
@@ -125,10 +150,11 @@ func Benchmark_Decoder_EscapeHeavy_Std(b *testing.B) {
 }
 
 func Benchmark_Decoder_EscapeHeavy_Sonic(b *testing.B) {
-	b.SetBytes(int64(len(escapeHeavyNDJSON)))
+	data := loadEscapeHeavyNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(escapeHeavyNDJSON))
+		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(data))
 		for {
 			var p EscapeHeavyPayload
 			if err := dec.Decode(&p); err != nil {
@@ -142,10 +168,11 @@ func Benchmark_Decoder_EscapeHeavy_Sonic(b *testing.B) {
 }
 
 func Benchmark_Decoder_EscapeHeavy_Velox(b *testing.B) {
-	b.SetBytes(int64(len(escapeHeavyNDJSON)))
+	data := loadEscapeHeavyNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := vjson.NewDecoder(bytes.NewReader(escapeHeavyNDJSON))
+		dec := vjson.NewDecoder(bytes.NewReader(data))
 		for {
 			var p EscapeHeavyPayload
 			if err := dec.Decode(&p); err != nil {
@@ -163,10 +190,11 @@ func Benchmark_Decoder_EscapeHeavy_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_Decoder_KubePods_Std(b *testing.B) {
-	b.SetBytes(int64(len(kubePodsNDJSON)))
+	data := loadKubePodsNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := json.NewDecoder(bytes.NewReader(kubePodsNDJSON))
+		dec := json.NewDecoder(bytes.NewReader(data))
 		for {
 			var pl KubePodList
 			if err := dec.Decode(&pl); err != nil {
@@ -180,10 +208,11 @@ func Benchmark_Decoder_KubePods_Std(b *testing.B) {
 }
 
 func Benchmark_Decoder_KubePods_Sonic(b *testing.B) {
-	b.SetBytes(int64(len(kubePodsNDJSON)))
+	data := loadKubePodsNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(kubePodsNDJSON))
+		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(data))
 		for {
 			var pl KubePodList
 			if err := dec.Decode(&pl); err != nil {
@@ -197,10 +226,11 @@ func Benchmark_Decoder_KubePods_Sonic(b *testing.B) {
 }
 
 func Benchmark_Decoder_KubePods_Velox(b *testing.B) {
-	b.SetBytes(int64(len(kubePodsNDJSON)))
+	data := loadKubePodsNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := vjson.NewDecoder(bytes.NewReader(kubePodsNDJSON))
+		dec := vjson.NewDecoder(bytes.NewReader(data))
 		for {
 			var pl KubePodList
 			if err := dec.Decode(&pl); err != nil {
@@ -218,10 +248,11 @@ func Benchmark_Decoder_KubePods_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_Decoder_Twitter_Std(b *testing.B) {
-	b.SetBytes(int64(len(twitterNDJSON)))
+	data := loadTwitterNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := json.NewDecoder(bytes.NewReader(twitterNDJSON))
+		dec := json.NewDecoder(bytes.NewReader(data))
 		for {
 			var t twitter.TwitterStruct
 			if err := dec.Decode(&t); err != nil {
@@ -235,10 +266,11 @@ func Benchmark_Decoder_Twitter_Std(b *testing.B) {
 }
 
 func Benchmark_Decoder_Twitter_Sonic(b *testing.B) {
-	b.SetBytes(int64(len(twitterNDJSON)))
+	data := loadTwitterNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(twitterNDJSON))
+		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(data))
 		for {
 			var t twitter.TwitterStruct
 			if err := dec.Decode(&t); err != nil {
@@ -252,10 +284,11 @@ func Benchmark_Decoder_Twitter_Sonic(b *testing.B) {
 }
 
 func Benchmark_Decoder_Twitter_Velox(b *testing.B) {
-	b.SetBytes(int64(len(twitterNDJSON)))
+	data := loadTwitterNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := vjson.NewDecoder(bytes.NewReader(twitterNDJSON))
+		dec := vjson.NewDecoder(bytes.NewReader(data))
 		for {
 			var t twitter.TwitterStruct
 			if err := dec.Decode(&t); err != nil {
@@ -273,10 +306,11 @@ func Benchmark_Decoder_Twitter_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_Decoder_SingleLarge_Std(b *testing.B) {
-	b.SetBytes(int64(len(TwitterCompactJSON)))
+	data := LoadTwitterCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := json.NewDecoder(bytes.NewReader(TwitterCompactJSON))
+		dec := json.NewDecoder(bytes.NewReader(data))
 		var t twitter.TwitterStruct
 		if err := dec.Decode(&t); err != nil {
 			b.Fatal(err)
@@ -285,10 +319,11 @@ func Benchmark_Decoder_SingleLarge_Std(b *testing.B) {
 }
 
 func Benchmark_Decoder_SingleLarge_Sonic(b *testing.B) {
-	b.SetBytes(int64(len(TwitterCompactJSON)))
+	data := LoadTwitterCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(TwitterCompactJSON))
+		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(data))
 		var t twitter.TwitterStruct
 		if err := dec.Decode(&t); err != nil {
 			b.Fatal(err)
@@ -297,10 +332,11 @@ func Benchmark_Decoder_SingleLarge_Sonic(b *testing.B) {
 }
 
 func Benchmark_Decoder_SingleLarge_Velox(b *testing.B) {
-	b.SetBytes(int64(len(TwitterCompactJSON)))
+	data := LoadTwitterCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := vjson.NewDecoder(bytes.NewReader(TwitterCompactJSON), vjson.WithBufferSize(1<<20))
+		dec := vjson.NewDecoder(bytes.NewReader(data), vjson.WithBufferSize(1<<20))
 		var t twitter.TwitterStruct
 		if err := dec.Decode(&t); err != nil {
 			b.Fatal(err)
@@ -313,10 +349,11 @@ func Benchmark_Decoder_SingleLarge_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_Decoder_TinyValues_Std(b *testing.B) {
-	b.SetBytes(int64(len(tinyNDJSON)))
+	data := loadTinyNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := json.NewDecoder(bytes.NewReader(tinyNDJSON))
+		dec := json.NewDecoder(bytes.NewReader(data))
 		for {
 			var m map[string]any
 			if err := dec.Decode(&m); err != nil {
@@ -330,10 +367,11 @@ func Benchmark_Decoder_TinyValues_Std(b *testing.B) {
 }
 
 func Benchmark_Decoder_TinyValues_Sonic(b *testing.B) {
-	b.SetBytes(int64(len(tinyNDJSON)))
+	data := loadTinyNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(tinyNDJSON))
+		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(data))
 		for {
 			var m map[string]any
 			if err := dec.Decode(&m); err != nil {
@@ -347,10 +385,11 @@ func Benchmark_Decoder_TinyValues_Sonic(b *testing.B) {
 }
 
 func Benchmark_Decoder_TinyValues_Velox(b *testing.B) {
-	b.SetBytes(int64(len(tinyNDJSON)))
+	data := loadTinyNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := vjson.NewDecoder(bytes.NewReader(tinyNDJSON))
+		dec := vjson.NewDecoder(bytes.NewReader(data))
 		for {
 			var m map[string]any
 			if err := dec.Decode(&m); err != nil {
@@ -371,10 +410,11 @@ func Benchmark_Decoder_TinyValues_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_Decoder_Spiky_Std(b *testing.B) {
-	b.SetBytes(int64(len(SpikyNDJSON)))
+	data := LoadSpikyNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := json.NewDecoder(bytes.NewReader(SpikyNDJSON))
+		dec := json.NewDecoder(bytes.NewReader(data))
 		for {
 			var p SpikyPayload
 			if err := dec.Decode(&p); err != nil {
@@ -388,10 +428,11 @@ func Benchmark_Decoder_Spiky_Std(b *testing.B) {
 }
 
 func Benchmark_Decoder_Spiky_Sonic(b *testing.B) {
-	b.SetBytes(int64(len(SpikyNDJSON)))
+	data := LoadSpikyNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(SpikyNDJSON))
+		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(data))
 		for {
 			var p SpikyPayload
 			if err := dec.Decode(&p); err != nil {
@@ -405,10 +446,11 @@ func Benchmark_Decoder_Spiky_Sonic(b *testing.B) {
 }
 
 func Benchmark_Decoder_Spiky_Velox(b *testing.B) {
-	b.SetBytes(int64(len(SpikyNDJSON)))
+	data := LoadSpikyNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := vjson.NewDecoder(bytes.NewReader(SpikyNDJSON))
+		dec := vjson.NewDecoder(bytes.NewReader(data))
 		for {
 			var p SpikyPayload
 			if err := dec.Decode(&p); err != nil {
@@ -427,10 +469,11 @@ func Benchmark_Decoder_Spiky_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_Decoder_HalfBuf_Std(b *testing.B) {
-	b.SetBytes(int64(len(HalfBufNDJSON)))
+	data := LoadHalfBufNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := json.NewDecoder(bytes.NewReader(HalfBufNDJSON))
+		dec := json.NewDecoder(bytes.NewReader(data))
 		for {
 			var p SpikyPayload
 			if err := dec.Decode(&p); err != nil {
@@ -444,10 +487,11 @@ func Benchmark_Decoder_HalfBuf_Std(b *testing.B) {
 }
 
 func Benchmark_Decoder_HalfBuf_Sonic(b *testing.B) {
-	b.SetBytes(int64(len(HalfBufNDJSON)))
+	data := LoadHalfBufNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(HalfBufNDJSON))
+		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(data))
 		for {
 			var p SpikyPayload
 			if err := dec.Decode(&p); err != nil {
@@ -461,10 +505,11 @@ func Benchmark_Decoder_HalfBuf_Sonic(b *testing.B) {
 }
 
 func Benchmark_Decoder_HalfBuf_Velox(b *testing.B) {
-	b.SetBytes(int64(len(HalfBufNDJSON)))
+	data := LoadHalfBufNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := vjson.NewDecoder(bytes.NewReader(HalfBufNDJSON))
+		dec := vjson.NewDecoder(bytes.NewReader(data))
 		for {
 			var p SpikyPayload
 			if err := dec.Decode(&p); err != nil {
@@ -484,10 +529,11 @@ func Benchmark_Decoder_HalfBuf_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_Decoder_ThirdBuf_Std(b *testing.B) {
-	b.SetBytes(int64(len(ThirdBufNDJSON)))
+	data := LoadThirdBufNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := json.NewDecoder(bytes.NewReader(ThirdBufNDJSON))
+		dec := json.NewDecoder(bytes.NewReader(data))
 		for {
 			var p SpikyPayload
 			if err := dec.Decode(&p); err != nil {
@@ -501,10 +547,11 @@ func Benchmark_Decoder_ThirdBuf_Std(b *testing.B) {
 }
 
 func Benchmark_Decoder_ThirdBuf_Sonic(b *testing.B) {
-	b.SetBytes(int64(len(ThirdBufNDJSON)))
+	data := LoadThirdBufNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(ThirdBufNDJSON))
+		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(data))
 		for {
 			var p SpikyPayload
 			if err := dec.Decode(&p); err != nil {
@@ -518,10 +565,11 @@ func Benchmark_Decoder_ThirdBuf_Sonic(b *testing.B) {
 }
 
 func Benchmark_Decoder_ThirdBuf_Velox(b *testing.B) {
-	b.SetBytes(int64(len(ThirdBufNDJSON)))
+	data := LoadThirdBufNDJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
-		dec := vjson.NewDecoder(bytes.NewReader(ThirdBufNDJSON))
+		dec := vjson.NewDecoder(bytes.NewReader(data))
 		for {
 			var p SpikyPayload
 			if err := dec.Decode(&p); err != nil {

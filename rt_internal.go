@@ -50,6 +50,6 @@ func init() {
 	s := make([]byte, 1, 2)
 	sh := (*SliceHeader)(unsafe.Pointer(&s))
 	if sh.Len != 1 || sh.Cap != 2 || sh.Data == nil {
-		panic("json: unexpected slice memory layout — sliceHeader assumption violated")
+		panic("vjson: unexpected slice memory layout — sliceHeader assumption violated")
 	}
 }

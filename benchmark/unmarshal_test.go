@@ -38,20 +38,22 @@ func Benchmark_Small_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_Small_Compact_Sonic(b *testing.B) {
+	data := LoadSmallCompactJSON()
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Small
-		if err := sonic.Unmarshal(SmallCompactJSON, &s); err != nil {
+		if err := sonic.Unmarshal(data, &s); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
 func Benchmark_Small_Compact_Velox(b *testing.B) {
+	data := LoadSmallCompactJSON()
 	b.ReportAllocs()
 	for b.Loop() {
 		var v Small
-		if err := vjson.Unmarshal(SmallCompactJSON, &v); err != nil {
+		if err := vjson.Unmarshal(data, &v); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -88,22 +90,24 @@ func Benchmark_EscapeHeavy_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_EscapeHeavy_Compact_Sonic(b *testing.B) {
-	b.SetBytes(int64(len(EscapeHeavyCompactJSON)))
+	data := LoadEscapeHeavyCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var p EscapeHeavyPayload
-		if err := sonic.Unmarshal(EscapeHeavyCompactJSON, &p); err != nil {
+		if err := sonic.Unmarshal(data, &p); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
 func Benchmark_EscapeHeavy_Compact_Velox(b *testing.B) {
-	b.SetBytes(int64(len(EscapeHeavyCompactJSON)))
+	data := LoadEscapeHeavyCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var p EscapeHeavyPayload
-		if err := vjson.Unmarshal(EscapeHeavyCompactJSON, &p); err != nil {
+		if err := vjson.Unmarshal(data, &p); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -140,22 +144,24 @@ func Benchmark_KubePods_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_KubePods_Compact_Sonic(b *testing.B) {
-	b.SetBytes(int64(len(PodsCompactJSON)))
+	data := LoadPodsCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var pl KubePodList
-		if err := sonic.Unmarshal(PodsCompactJSON, &pl); err != nil {
+		if err := sonic.Unmarshal(data, &pl); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
 func Benchmark_KubePods_Compact_Velox(b *testing.B) {
-	b.SetBytes(int64(len(PodsCompactJSON)))
+	data := LoadPodsCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var pl KubePodList
-		if err := vjson.Unmarshal(PodsCompactJSON, &pl); err != nil {
+		if err := vjson.Unmarshal(data, &pl); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -192,22 +198,24 @@ func Benchmark_Twitter_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_Twitter_Compact_Sonic(b *testing.B) {
-	b.SetBytes(int64(len(TwitterCompactJSON)))
+	data := LoadTwitterCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var t twitter.TwitterStruct
-		if err := sonic.Unmarshal(TwitterCompactJSON, &t); err != nil {
+		if err := sonic.Unmarshal(data, &t); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
 func Benchmark_Twitter_Compact_Velox(b *testing.B) {
-	b.SetBytes(int64(len(TwitterCompactJSON)))
+	data := LoadTwitterCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var t twitter.TwitterStruct
-		if err := vjson.Unmarshal(TwitterCompactJSON, &t); err != nil {
+		if err := vjson.Unmarshal(data, &t); err != nil {
 			b.Fatal(err)
 		}
 	}

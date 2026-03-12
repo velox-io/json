@@ -37,6 +37,15 @@ func WithSkipErrors(fn func(err error) bool) DecoderOption {
 	}
 }
 
+// DecoderUseNumber causes numbers in interface{} fields to be decoded as
+// [json.Number] instead of float64, preserving the original text
+// representation and avoiding precision loss for large integers.
+func DecoderUseNumber() DecoderOption {
+	return func(d *Decoder) {
+		d.useNumber = true
+	}
+}
+
 // Decoder reads and decodes JSON values from an input stream.
 //
 // Each call to [Decoder.Decode] parses the next complete value directly via
@@ -72,13 +81,14 @@ type Decoder struct {
 	minGoodBufSize int // sticky floor: smallest buf that held ≥ 2 values
 
 	skipErrors func(err error) bool // nil = sticky error (default)
+	useNumber  bool                 // decode numbers in interface{} as json.Number
 
 	// Owned parser — acquired lazily from the pool on first Decode,
 	// reused across calls to avoid per-value sync.Pool round-trips.
 	sc *Parser
 
 	// Type cache — when consecutive Decode calls use the same type
-	// (the common streaming case), skip the sync.Map lookup in GetDecoder.
+	// (the common streaming case), skip the sync.Map lookup in GetCodec.
 	lastType reflect.Type
 	lastTI   *TypeInfo
 }
@@ -102,6 +112,7 @@ func NewDecoder(r io.Reader, opts ...DecoderOption) *Decoder {
 func (d *Decoder) parser() *Parser {
 	if d.sc == nil {
 		d.sc = defaultPool.Get()
+		d.sc.useNumber = d.useNumber
 		return d.sc
 	}
 	// Inter-decode cleanup: same logic as parserPool.Put, but without
@@ -150,7 +161,7 @@ func (d *Decoder) Decode(v any) error {
 	if elemType == d.lastType {
 		ti = d.lastTI
 	} else {
-		ti = GetDecoder(elemType)
+		ti = GetCodec(elemType)
 		d.lastType = elemType
 		d.lastTI = ti
 	}

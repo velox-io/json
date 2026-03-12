@@ -10,6 +10,9 @@ import (
 	"unsafe"
 )
 
+var rawMessageType = reflect.TypeFor[json.RawMessage]()
+var numberType = reflect.TypeFor[json.Number]()
+
 type ElemTypeKind uint8
 
 const (
@@ -27,11 +30,13 @@ const (
 	KindFloat32
 	KindFloat64
 	KindString
-	KindStruct  // nested struct - Decoder field holds *ReflectStructDecoder
-	KindSlice   // slice - Decoder field holds *ReflectSliceDecoder
-	KindPointer // pointer to T - Decoder field holds *ReflectPointerDecoder
-	KindAny     // interface{} field
-	KindMap     // map type - Decoder field holds *ReflectMapDecoder
+	KindStruct     // nested struct - Decoder field holds *StructCodec
+	KindSlice      // slice - Decoder field holds *SliceCodec
+	KindPointer    // pointer to T - Decoder field holds *PointerCodec
+	KindAny        // interface{} field
+	KindMap        // map type - Decoder field holds *MapCodec
+	KindRawMessage // json.RawMessage — raw JSON bytes, skip parse
+	KindNumber     // json.Number — raw number string, skip float64 conversion
 )
 
 // tiFlag is a bitmask for hot-path checks in scanValue / encodeValue.
@@ -39,11 +44,13 @@ type tiFlag uint8
 
 const (
 	tiFlagHasUnmarshalFn     tiFlag = 1 << iota // Ext.UnmarshalFn != nil
-	tiFlagHasTextUnmarshalFn                     // Ext.TextUnmarshalFn != nil
-	tiFlagQuoted                                 // `,string` tag
-	tiFlagHasMarshalFn                           // Ext.MarshalFn != nil
-	tiFlagHasTextMarshalFn                       // Ext.TextMarshalFn != nil
-	tiFlagOmitEmpty                              // omitempty
+	tiFlagHasTextUnmarshalFn                    // Ext.TextUnmarshalFn != nil
+	tiFlagQuoted                                // `,string` tag
+	tiFlagHasMarshalFn                          // Ext.MarshalFn != nil
+	tiFlagHasTextMarshalFn                      // Ext.TextMarshalFn != nil
+	tiFlagOmitEmpty                             // omitempty
+	tiFlagRawMessage                            // json.RawMessage native handling
+	tiFlagNumber                                // json.Number native handling
 )
 
 // TypeInfo holds pre-computed metadata for a type.
@@ -86,13 +93,13 @@ func (ti *TypeInfo) getOrAllocExt() *TypeInfoExt {
 	return ti.Ext
 }
 
-// decoderCache maps reflect.Type → *TypeInfo (steady-state) or
-// *decoderEntry (transient, during construction).
+// codecCache maps reflect.Type → *TypeInfo (steady-state) or
+// *codecEntry (transient, during construction).
 // After construction completes the entry is promoted to *TypeInfo
 // so the hot path is a single atomic load with no synchronization.
-var decoderCache sync.Map
+var codecCache sync.Map
 
-type decoderEntry struct {
+type codecEntry struct {
 	ti   *TypeInfo
 	done chan struct{}
 }
@@ -159,46 +166,46 @@ func isQuotableKind(k ElemTypeKind) bool {
 	return false
 }
 
-// GetDecoder returns the cached *TypeInfo for the given type.
-// Thread-safe; blocks until the decoder is fully initialized.
-func GetDecoder(t reflect.Type) *TypeInfo {
-	if v, ok := decoderCache.Load(t); ok {
+// GetCodec returns the cached *TypeInfo for the given type.
+// Thread-safe; blocks until the codec is fully initialized.
+func GetCodec(t reflect.Type) *TypeInfo {
+	if v, ok := codecCache.Load(t); ok {
 		switch e := v.(type) {
 		case *TypeInfo:
 			return e // hot path: no synchronization
-		case *decoderEntry:
+		case *codecEntry:
 			<-e.done
 			return e.ti
 		}
 	}
-	return getDecoderSlow(t, true)
+	return getCodecSlow(t, true)
 }
 
-// getDecoderForCycle returns *TypeInfo without waiting, breaking recursive cycles.
-func getDecoderForCycle(t reflect.Type) *TypeInfo {
-	if v, ok := decoderCache.Load(t); ok {
+// getCodecForCycle returns *TypeInfo without waiting, breaking recursive cycles.
+func getCodecForCycle(t reflect.Type) *TypeInfo {
+	if v, ok := codecCache.Load(t); ok {
 		switch e := v.(type) {
 		case *TypeInfo:
 			return e
-		case *decoderEntry:
+		case *codecEntry:
 			return e.ti
 		}
 	}
-	return getDecoderSlow(t, false)
+	return getCodecSlow(t, false)
 }
 
-func getDecoderSlow(t reflect.Type, wait bool) *TypeInfo {
-	e := &decoderEntry{
+func getCodecSlow(t reflect.Type, wait bool) *TypeInfo {
+	e := &codecEntry{
 		ti:   &TypeInfo{Kind: KindForType(t), Size: t.Size(), Ext: &TypeInfoExt{Type: t}},
 		done: make(chan struct{}),
 	}
 
-	actual, loaded := decoderCache.LoadOrStore(t, e)
+	actual, loaded := codecCache.LoadOrStore(t, e)
 	if loaded {
 		switch existing := actual.(type) {
 		case *TypeInfo:
 			return existing
-		case *decoderEntry:
+		case *codecEntry:
 			if wait {
 				<-existing.done
 			}
@@ -206,16 +213,37 @@ func getDecoderSlow(t reflect.Type, wait bool) *TypeInfo {
 		}
 	}
 
-	// Won the race — build the decoder.
+	// Won the race — build the codec.
 	switch t.Kind() {
 	case reflect.Struct:
-		e.ti.Decoder = BuildStructDecoder(t)
+		e.ti.Decoder = BuildStructCodec(t)
 	case reflect.Slice:
-		e.ti.Decoder = BuildSliceDecoder(t)
+		e.ti.Decoder = BuildSliceCodec(t)
 	case reflect.Pointer:
-		e.ti.Decoder = BuildPointerDecoder(t)
+		e.ti.Decoder = BuildPointerCodec(t)
 	case reflect.Map:
-		e.ti.Decoder = BuildMapDecoder(t)
+		e.ti.Decoder = BuildMapCodec(t)
+	}
+
+	// json.RawMessage: override Kind to KindRawMessage and set the flag
+	// so that scanValueSpecial uses the native skip+copy path instead of
+	// going through the json.Unmarshaler interface.
+	if t == rawMessageType {
+		e.ti.Kind = KindRawMessage
+		e.ti.Flags |= tiFlagRawMessage
+		close(e.done)
+		codecCache.Store(t, e.ti)
+		return e.ti
+	}
+
+	// json.Number: override Kind to KindNumber so the parser stores the
+	// raw number text as a string instead of converting to float64.
+	if t == numberType {
+		e.ti.Kind = KindNumber
+		e.ti.Flags |= tiFlagNumber
+		close(e.done)
+		codecCache.Store(t, e.ti)
+		return e.ti
 	}
 
 	// Detect json.Marshaler / json.Unmarshaler interfaces.
@@ -282,9 +310,9 @@ func getDecoderSlow(t reflect.Type, wait bool) *TypeInfo {
 	}
 
 	close(e.done)
-	// Promote: replace the transient *decoderEntry with the final *TypeInfo
+	// Promote: replace the transient *codecEntry with the final *TypeInfo
 	// so subsequent loads hit the fast path (no channel recv).
-	decoderCache.Store(t, e.ti)
+	codecCache.Store(t, e.ti)
 	return e.ti
 }
 
@@ -335,14 +363,14 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 			}
 		}
 
-		cached := getDecoderForCycle(sf.Type)
+		cached := getCodecForCycle(sf.Type)
 
 		// `,string` is only meaningful for bool, int*, uint*, float*, string, and
 		// pointer-to-those kinds. encoding/json silently ignores it for other types.
 		if quoted {
 			switch cached.Kind {
 			case KindPointer:
-				pDec := cached.Decoder.(*ReflectPointerDecoder)
+				pDec := cached.Decoder.(*PointerCodec)
 				if !isQuotableKind(pDec.ElemTI.Kind) {
 					quoted = false
 				}
@@ -403,15 +431,15 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 	return fields
 }
 
-// --- Decoder Builders ---
+// --- Codec Builders ---
 
-// ReflectStructDecoder handles struct decoding.
-type ReflectStructDecoder struct {
+// StructCodec holds pre-computed metadata for struct encoding/decoding.
+type StructCodec struct {
 	Typ    reflect.Type
 	Fields []TypeInfo
 
 	// Tiered lookup — set by buildLookup at construction time.
-	LookupFn     func(dec *ReflectStructDecoder, key string) *TypeInfo
+	LookupFn     func(dec *StructCodec, key string) *TypeInfo
 	HashSeed     uint64
 	HashShift    uint8
 	HashTable    []uint8              // indices into Fields[]; 0xFF = empty
@@ -419,15 +447,15 @@ type ReflectStructDecoder struct {
 	HasMixedCase bool                 // true if any JSONName differs from JSONNameLower
 }
 
-func BuildStructDecoder(t reflect.Type) *ReflectStructDecoder {
-	dec := &ReflectStructDecoder{Typ: t}
+func BuildStructCodec(t reflect.Type) *StructCodec {
+	dec := &StructCodec{Typ: t}
 	dec.Fields = CollectStructFields(t, 0)
 	buildLookup(dec)
 	return dec
 }
 
-// ReflectSliceDecoder handles slice decoding.
-type ReflectSliceDecoder struct {
+// SliceCodec holds pre-computed metadata for slice encoding/decoding.
+type SliceCodec struct {
 	SliceType      reflect.Type
 	ElemType       reflect.Type
 	ElemSize       uintptr
@@ -443,17 +471,17 @@ type ReflectSliceDecoder struct {
 // The formula is: hint = (old*(alpha-1) + observed) / alpha.
 // Default alpha is 2 (equal-weight average). Higher values make the EMA
 // respond more slowly to length changes.
-func (d *ReflectSliceDecoder) SetEMAAlpha(alpha int32) {
+func (d *SliceCodec) SetEMAAlpha(alpha int32) {
 	if alpha < 2 {
 		alpha = 2
 	}
 	d.emaAlpha = alpha
 }
 
-func BuildSliceDecoder(t reflect.Type) *ReflectSliceDecoder {
-	elemTI := getDecoderForCycle(t.Elem())
+func BuildSliceCodec(t reflect.Type) *SliceCodec {
+	elemTI := getCodecForCycle(t.Elem())
 	emptySlice := reflect.MakeSlice(t, 0, 0)
-	return &ReflectSliceDecoder{
+	return &SliceCodec{
 		SliceType:      t,
 		ElemType:       t.Elem(),
 		ElemSize:       t.Elem().Size(),
@@ -491,8 +519,8 @@ func typeContainsPointer(t reflect.Type) bool {
 	}
 }
 
-// ReflectMapDecoder handles map[K]V decoding.
-type ReflectMapDecoder struct {
+// MapCodec holds pre-computed metadata for map[K]V encoding/decoding.
+type MapCodec struct {
 	MapType reflect.Type
 	KeyType reflect.Type
 	ValType reflect.Type
@@ -503,10 +531,10 @@ type ReflectMapDecoder struct {
 	ValIsString bool // true for map[string]string fast path
 }
 
-func BuildMapDecoder(t reflect.Type) *ReflectMapDecoder {
-	valTI := getDecoderForCycle(t.Elem())
-	keyTI := getDecoderForCycle(t.Key())
-	return &ReflectMapDecoder{
+func BuildMapCodec(t reflect.Type) *MapCodec {
+	valTI := getCodecForCycle(t.Elem())
+	keyTI := getCodecForCycle(t.Key())
+	return &MapCodec{
 		MapType:     t,
 		KeyType:     t.Key(),
 		ValType:     t.Elem(),
@@ -517,7 +545,7 @@ func BuildMapDecoder(t reflect.Type) *ReflectMapDecoder {
 	}
 }
 
-type ReflectPointerDecoder struct {
+type PointerCodec struct {
 	PtrType    reflect.Type
 	ElemType   reflect.Type
 	ElemTI     *TypeInfo
@@ -526,9 +554,9 @@ type ReflectPointerDecoder struct {
 	ElemRType  unsafe.Pointer
 }
 
-func BuildPointerDecoder(t reflect.Type) *ReflectPointerDecoder {
-	elemTI := getDecoderForCycle(t.Elem())
-	return &ReflectPointerDecoder{
+func BuildPointerCodec(t reflect.Type) *PointerCodec {
+	elemTI := getCodecForCycle(t.Elem())
+	return &PointerCodec{
 		PtrType:    t,
 		ElemType:   t.Elem(),
 		ElemTI:     elemTI,

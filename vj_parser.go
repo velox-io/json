@@ -1,6 +1,7 @@
 package vjson
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -343,7 +344,12 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 		}
 		*(*float64)(ptr) = v
 	case KindAny:
-		// encoding/json compatible: all numbers → float64 for interface{}
+		// UseNumber: preserve raw text as json.Number.
+		if sc.useNumber {
+			*(*any)(ptr) = json.Number(string(src[idx:end]))
+			return end, nil
+		}
+		// Default: all numbers → float64 for interface{}
 		v, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 64)
 		if err != nil {
 			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid number %q: %v", src[idx:end], err), end, err)
@@ -356,6 +362,7 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 }
 
 // scanNumberAny parses a number for interface{} context.
+// When useNumber is set, returns json.Number; otherwise returns float64.
 // Uses interned floats for small integers (0-255) to avoid allocation.
 func (sc *Parser) scanNumberAny(src []byte, idx int) (int, any, error) {
 	end, _, numErr := scanNumberSpan(src, idx)
@@ -363,6 +370,11 @@ func (sc *Parser) scanNumberAny(src []byte, idx int) (int, any, error) {
 		return end, nil, numErr
 	}
 	span := src[idx:end]
+
+	// json.Number path: preserve the raw text, no float conversion.
+	if sc.useNumber {
+		return end, json.Number(string(span)), nil
+	}
 
 	// Fast path: small non-negative integers 0-255 → interned float64
 	if len(span) >= 1 && len(span) <= 3 && span[0] >= '0' && span[0] <= '9' {
@@ -451,7 +463,7 @@ func (sc *Parser) scanNull(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer
 		*(*SliceHeader)(ptr) = SliceHeader{}
 	case KindMap:
 		// nil map
-		mapDec := ti.Decoder.(*ReflectMapDecoder)
+		mapDec := ti.Decoder.(*MapCodec)
 		reflect.NewAt(mapDec.MapType, ptr).Elem().Set(reflect.Zero(mapDec.MapType))
 	case KindStruct:
 		// no-op: struct is already at zero value
@@ -464,9 +476,9 @@ func (sc *Parser) scanNull(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer
 func (sc *Parser) scanObjectValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
 	switch ti.Kind {
 	case KindStruct:
-		return sc.scanStruct(src, idx, ti.Decoder.(*ReflectStructDecoder), ptr)
+		return sc.scanStruct(src, idx, ti.Decoder.(*StructCodec), ptr)
 	case KindMap:
-		return sc.scanMap(src, idx, ti.Decoder.(*ReflectMapDecoder), ptr)
+		return sc.scanMap(src, idx, ti.Decoder.(*MapCodec), ptr)
 	case KindAny:
 		newIdx, m, err := sc.scanMapAny(src, idx)
 		if err != nil {
@@ -479,7 +491,7 @@ func (sc *Parser) scanObjectValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 	}
 }
 
-func (sc *Parser) scanStruct(src []byte, idx int, dec *ReflectStructDecoder, base unsafe.Pointer) (int, error) {
+func (sc *Parser) scanStruct(src []byte, idx int, dec *StructCodec, base unsafe.Pointer) (int, error) {
 	idx++ // consume '{'
 	idx = skipWSLong(src, idx)
 	if idx >= len(src) {
@@ -550,7 +562,7 @@ func (sc *Parser) scanStruct(src []byte, idx int, dec *ReflectStructDecoder, bas
 	}
 }
 
-func (sc *Parser) scanMap(src []byte, idx int, mDec *ReflectMapDecoder, ptr unsafe.Pointer) (int, error) {
+func (sc *Parser) scanMap(src []byte, idx int, mDec *MapCodec, ptr unsafe.Pointer) (int, error) {
 	// Fast path for map[string]string - zero reflection
 	if mDec.ValIsString {
 		return sc.scanMapStringString(src, idx, ptr)
@@ -762,7 +774,7 @@ func (sc *Parser) scanMapAny(src []byte, idx int) (int, map[string]any, error) {
 func (sc *Parser) scanArrayValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
 	switch ti.Kind {
 	case KindSlice:
-		return sc.scanArray(src, idx, ti.Decoder.(*ReflectSliceDecoder), ptr)
+		return sc.scanArray(src, idx, ti.Decoder.(*SliceCodec), ptr)
 	case KindAny:
 		newIdx, arr, err := sc.scanArrayAny(src, idx)
 		if err != nil {
@@ -775,7 +787,7 @@ func (sc *Parser) scanArrayValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.P
 	}
 }
 
-func (sc *Parser) scanArray(src []byte, idx int, sDec *ReflectSliceDecoder, ptr unsafe.Pointer) (int, error) {
+func (sc *Parser) scanArray(src []byte, idx int, sDec *SliceCodec, ptr unsafe.Pointer) (int, error) {
 	idx++ // consume '['
 	idx = skipWSLong(src, idx)
 
@@ -908,7 +920,7 @@ func (sc *Parser) scanPointer(src []byte, idx int, ti *TypeInfo, ptr unsafe.Poin
 	if ti.Flags&tiFlagQuoted != 0 {
 		return sc.scanPointerQuoted(src, idx, ti, ptr)
 	}
-	pDec := ti.Decoder.(*ReflectPointerDecoder)
+	pDec := ti.Decoder.(*PointerCodec)
 
 	idx = skipWS(src, idx)
 	if idx >= len(src) {

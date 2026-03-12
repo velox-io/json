@@ -2,6 +2,7 @@ package vjson
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -108,18 +109,30 @@ func estimateDataSize(ti *TypeInfo, ptr unsafe.Pointer) int {
 		s := *(*string)(ptr)
 		return len(s) + 2 + len(s)/8 + 1
 	case KindStruct:
-		return estimateStructDataSize(ti.Decoder.(*ReflectStructDecoder), ptr)
+		return estimateStructDataSize(ti.Decoder.(*StructCodec), ptr)
 	case KindSlice:
-		return estimateSliceDataSize(ti.Decoder.(*ReflectSliceDecoder), ptr)
+		return estimateSliceDataSize(ti.Decoder.(*SliceCodec), ptr)
 	case KindPointer:
-		dec := ti.Decoder.(*ReflectPointerDecoder)
+		dec := ti.Decoder.(*PointerCodec)
 		elemPtr := *(*unsafe.Pointer)(ptr)
 		if elemPtr == nil {
 			return 4 // "null"
 		}
 		return estimateDataSize(dec.ElemTI, elemPtr)
 	case KindMap:
-		return estimateMapDataSize(ti.Decoder.(*ReflectMapDecoder), ptr)
+		return estimateMapDataSize(ti.Decoder.(*MapCodec), ptr)
+	case KindRawMessage:
+		raw := *(*[]byte)(ptr)
+		if len(raw) == 0 {
+			return 4 // "null"
+		}
+		return len(raw)
+	case KindNumber:
+		s := *(*string)(ptr)
+		if len(s) == 0 {
+			return 1 // "0"
+		}
+		return len(s)
 	case KindAny:
 		v := *(*any)(ptr)
 		if v == nil {
@@ -131,7 +144,7 @@ func estimateDataSize(ti *TypeInfo, ptr unsafe.Pointer) int {
 	}
 }
 
-func estimateStructDataSize(dec *ReflectStructDecoder, base unsafe.Pointer) int {
+func estimateStructDataSize(dec *StructCodec, base unsafe.Pointer) int {
 	n := 2 // { }
 	for i := range dec.Fields {
 		fi := &dec.Fields[i]
@@ -151,7 +164,7 @@ func estimateStructDataSize(dec *ReflectStructDecoder, base unsafe.Pointer) int 
 	return n
 }
 
-func estimateSliceDataSize(dec *ReflectSliceDecoder, ptr unsafe.Pointer) int {
+func estimateSliceDataSize(dec *SliceCodec, ptr unsafe.Pointer) int {
 	sh := (*SliceHeader)(ptr)
 	if sh.Data == nil || sh.Len == 0 {
 		return 2 // []
@@ -190,7 +203,7 @@ func estimateSliceDataSize(dec *ReflectSliceDecoder, ptr unsafe.Pointer) int {
 	return n
 }
 
-func estimateMapDataSize(dec *ReflectMapDecoder, ptr unsafe.Pointer) int {
+func estimateMapDataSize(dec *MapCodec, ptr unsafe.Pointer) int {
 	mapPtr := reflect.NewAt(dec.MapType, ptr)
 	mapVal := mapPtr.Elem()
 	if mapVal.IsNil() {
@@ -210,7 +223,7 @@ func Marshal[T any](v *T, opts ...MarshalOption) ([]byte, error) {
 		o(m)
 	}
 
-	ti := GetDecoder(reflect.TypeFor[T]())
+	ti := GetCodec(reflect.TypeFor[T]())
 
 	hint := estimateDataSize(ti, unsafe.Pointer(v))
 	if hint > cap(m.buf) {
@@ -235,7 +248,7 @@ func MarshalIndent[T any](v *T, prefix, indent string, opts ...MarshalOption) ([
 	m.prefix = prefix
 	m.indent = indent
 
-	ti := GetDecoder(reflect.TypeFor[T]())
+	ti := GetCodec(reflect.TypeFor[T]())
 	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
 		putMarshaler(m)
 		return nil, err
@@ -254,7 +267,7 @@ func AppendMarshal[T any](dst []byte, v *T, opts ...MarshalOption) ([]byte, erro
 
 	m.buf = dst
 
-	ti := GetDecoder(reflect.TypeFor[T]())
+	ti := GetCodec(reflect.TypeFor[T]())
 	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
 		return dst, err
 	}
@@ -344,13 +357,29 @@ func (m *Marshaler) encodeValue(ti *TypeInfo, ptr unsafe.Pointer) error {
 		return nil
 
 	case KindStruct:
-		return m.encodeStruct(ti.Decoder.(*ReflectStructDecoder), ptr)
+		return m.encodeStruct(ti.Decoder.(*StructCodec), ptr)
 	case KindSlice:
-		return m.encodeSlice(ti.Decoder.(*ReflectSliceDecoder), ptr)
+		return m.encodeSlice(ti.Decoder.(*SliceCodec), ptr)
 	case KindPointer:
-		return m.encodePointer(ti.Decoder.(*ReflectPointerDecoder), ptr)
+		return m.encodePointer(ti.Decoder.(*PointerCodec), ptr)
 	case KindMap:
-		return m.encodeMap(ti.Decoder.(*ReflectMapDecoder), ptr)
+		return m.encodeMap(ti.Decoder.(*MapCodec), ptr)
+	case KindRawMessage:
+		raw := *(*[]byte)(ptr)
+		if len(raw) == 0 {
+			m.buf = append(m.buf, litNull...)
+		} else {
+			m.buf = append(m.buf, raw...)
+		}
+		return nil
+	case KindNumber:
+		s := *(*string)(ptr)
+		if s == "" {
+			m.buf = append(m.buf, '0')
+		} else {
+			m.buf = append(m.buf, s...)
+		}
+		return nil
 	case KindAny:
 		return m.encodeAny(ptr)
 
@@ -417,7 +446,7 @@ func (m *Marshaler) encodeValueQuoted(ti *TypeInfo, ptr unsafe.Pointer) error {
 	case KindString:
 		m.encodeQuotedString(*(*string)(ptr))
 	case KindPointer:
-		dec := ti.Decoder.(*ReflectPointerDecoder)
+		dec := ti.Decoder.(*PointerCodec)
 		elemPtr := *(*unsafe.Pointer)(ptr)
 		if elemPtr == nil {
 			m.buf = append(m.buf, litNull...)
@@ -478,7 +507,7 @@ func (m *Marshaler) encodeFloat64(ptr unsafe.Pointer) error {
 	return nil
 }
 
-func (m *Marshaler) encodeStruct(dec *ReflectStructDecoder, base unsafe.Pointer) error {
+func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
 	m.buf = append(m.buf, '{')
 	first := true
 
@@ -526,7 +555,7 @@ func (m *Marshaler) encodeStruct(dec *ReflectStructDecoder, base unsafe.Pointer)
 	return nil
 }
 
-func (m *Marshaler) encodeSlice(dec *ReflectSliceDecoder, ptr unsafe.Pointer) error {
+func (m *Marshaler) encodeSlice(dec *SliceCodec, ptr unsafe.Pointer) error {
 	sh := (*SliceHeader)(ptr)
 
 	if sh.Data == nil || sh.Len == 0 {
@@ -580,7 +609,7 @@ func (m *Marshaler) encodeByteSlice(sh *SliceHeader) error {
 	return nil
 }
 
-func (m *Marshaler) encodePointer(dec *ReflectPointerDecoder, ptr unsafe.Pointer) error {
+func (m *Marshaler) encodePointer(dec *PointerCodec, ptr unsafe.Pointer) error {
 	elemPtr := *(*unsafe.Pointer)(ptr)
 	if elemPtr == nil {
 		m.buf = append(m.buf, litNull...)
@@ -589,7 +618,7 @@ func (m *Marshaler) encodePointer(dec *ReflectPointerDecoder, ptr unsafe.Pointer
 	return m.encodeValue(dec.ElemTI, elemPtr)
 }
 
-func (m *Marshaler) encodeMap(dec *ReflectMapDecoder, ptr unsafe.Pointer) error {
+func (m *Marshaler) encodeMap(dec *MapCodec, ptr unsafe.Pointer) error {
 	if dec.ValIsString {
 		return m.encodeMapStringString(ptr)
 	}
@@ -665,7 +694,7 @@ func resolveMapKey(k reflect.Value, keyTI *TypeInfo) (string, error) {
 	return "", &UnsupportedTypeError{Type: k.Type()}
 }
 
-func (m *Marshaler) encodeMapGeneric(dec *ReflectMapDecoder, ptr unsafe.Pointer) error {
+func (m *Marshaler) encodeMapGeneric(dec *MapCodec, ptr unsafe.Pointer) error {
 	mapPtr := reflect.NewAt(dec.MapType, ptr)
 	mapVal := mapPtr.Elem()
 	if mapVal.IsNil() {
@@ -781,6 +810,13 @@ func (m *Marshaler) encodeAny(ptr unsafe.Pointer) error {
 		return m.encodeAnySlice(val)
 	case map[string]any:
 		return m.encodeAnyMap(val)
+	case json.Number:
+		s := string(val)
+		if s == "" {
+			m.buf = append(m.buf, '0')
+		} else {
+			m.buf = append(m.buf, s...)
+		}
 	default:
 		return m.encodeAnyReflect(v)
 	}
@@ -891,7 +927,7 @@ func (m *Marshaler) encodeAnyReflect(v any) error {
 		rv = rv.Elem()
 	}
 
-	ti := GetDecoder(rv.Type())
+	ti := GetCodec(rv.Type())
 
 	tmp := reflect.New(rv.Type())
 	tmp.Elem().Set(rv)

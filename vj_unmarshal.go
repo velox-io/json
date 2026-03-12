@@ -46,6 +46,7 @@ func (p *parserPool) Put(sc *Parser) {
 	for _, a := range sc.ptrAllocs {
 		a.reset()
 	}
+	sc.useNumber = false
 	p.pool.Put(sc)
 }
 
@@ -58,15 +59,28 @@ func newParser() *Parser {
 	}
 }
 
+// UnmarshalOption configures Unmarshal behavior.
+type UnmarshalOption func(*Parser)
+
+// WithUseNumber causes numbers in interface{} fields to be decoded as
+// [json.Number] instead of float64, preserving the original text
+// representation and avoiding precision loss for large integers.
+func WithUseNumber() UnmarshalOption {
+	return func(sc *Parser) { sc.useNumber = true }
+}
+
 // Unmarshal parses JSON data into v using the single-pass scanner.
 // v must be a non-nil pointer. Strings in v may reference the data buffer
 // directly (zero-copy); the caller must not modify data after calling Unmarshal.
 //
 // Array capacities are determined by adaptive heuristics (EMA of past
 // observations) — no pre-scanning is needed.
-func Unmarshal[T any](data []byte, v *T) error {
+func Unmarshal[T any](data []byte, v *T, opts ...UnmarshalOption) error {
 	sc := defaultPool.Get()
 	defer defaultPool.Put(sc)
+	for _, o := range opts {
+		o(sc)
+	}
 	return unmarshalInto(sc, data, v)
 }
 
@@ -80,7 +94,7 @@ func unmarshalInto(sc *Parser, data []byte, v any) error {
 	}
 
 	elemType := rv.Elem().Type()
-	ti := GetDecoder(elemType)
+	ti := GetCodec(elemType)
 	ptr := rv.UnsafePointer()
 
 	idx := skipWS(data, 0)
@@ -107,6 +121,7 @@ type Parser struct {
 	arenaData  []byte                             // current arena block
 	arenaOff   int                                // next free offset in arenaData
 	ptrAllocs  map[unsafe.Pointer]*rtypeAllocator // per-type batch allocators for pointer fields
+	useNumber  bool                               // decode numbers in interface{} as json.Number
 }
 
 // arenaAlloc allocates size bytes from the arena.

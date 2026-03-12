@@ -17,6 +17,21 @@ import (
 // scanValueSpecial handles fields with non-zero Flags (Quoted, UnmarshalFn,
 // TextUnmarshalFn). Called only when ti.Flags != 0, keeping scanValue lean.
 func (sc *Parser) scanValueSpecial(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
+	// Native json.RawMessage: skipValue + copy — no interface dispatch.
+	if ti.Flags&tiFlagRawMessage != 0 {
+		endIdx, err := skipValue(src, idx)
+		if err != nil {
+			return endIdx, err
+		}
+		raw := make([]byte, endIdx-idx)
+		copy(raw, src[idx:endIdx])
+		*(*[]byte)(ptr) = raw
+		return endIdx, nil
+	}
+	// Native json.Number field: capture the raw number text as a string.
+	if ti.Flags&tiFlagNumber != 0 {
+		return sc.scanNumberToString(src, idx, ptr)
+	}
 	if ti.Flags&tiFlagHasUnmarshalFn != 0 {
 		endIdx, err := skipValue(src, idx)
 		if err != nil {
@@ -134,7 +149,7 @@ func (sc *Parser) scanQuotedValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 
 // scanPointerQuoted handles pointer fields with the `,string` tag.
 func (sc *Parser) scanPointerQuoted(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
-	pDec := ti.Decoder.(*ReflectPointerDecoder)
+	pDec := ti.Decoder.(*PointerCodec)
 
 	idx = skipWS(src, idx)
 	if idx >= len(src) {
@@ -196,4 +211,40 @@ func resolveMapKeyValue(keyStr string, keyType reflect.Type, keyTI *TypeInfo) (r
 		return reflect.ValueOf(n).Convert(keyType), nil
 	}
 	return reflect.Value{}, newSyntaxError(fmt.Sprintf("vjson: unsupported map key type: %v", keyType), 0)
+}
+
+// scanNumberToString handles a json.Number field: stores the raw number text
+// as a string. Also accepts quoted strings ("123") and null.
+func (sc *Parser) scanNumberToString(src []byte, idx int, ptr unsafe.Pointer) (int, error) {
+	if idx >= len(src) {
+		return idx, errUnexpectedEOF
+	}
+	switch {
+	case src[idx] == '"':
+		// Quoted number: "123" → json.Number("123")
+		newIdx, s, err := sc.scanString(src, idx)
+		if err != nil {
+			return newIdx, err
+		}
+		*(*string)(ptr) = s
+		return newIdx, nil
+	case src[idx] == 'n':
+		// null → empty json.Number (zero value)
+		if idx+4 > len(src) {
+			return idx, errUnexpectedEOF
+		}
+		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null {
+			return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
+		}
+		*(*string)(ptr) = ""
+		return idx + 4, nil
+	default:
+		// Bare number
+		end, _, numErr := scanNumberSpan(src, idx)
+		if numErr != nil {
+			return end, numErr
+		}
+		*(*string)(ptr) = string(src[idx:end])
+		return end, nil
+	}
 }

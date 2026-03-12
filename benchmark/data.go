@@ -40,13 +40,40 @@ func LoadLogNDJSON() []byte {
 	return logJSONData
 }
 
-// Compact (whitespace-stripped) versions of all JSON test data.
+// Compact (whitespace-stripped) versions of all JSON test data, lazily initialized.
 var (
-	SmallCompactJSON       []byte
-	EscapeHeavyCompactJSON []byte
-	PodsCompactJSON        []byte
-	TwitterCompactJSON     []byte
+	smallCompactOnce sync.Once
+	smallCompactData []byte
+
+	escapeHeavyCompactOnce sync.Once
+	escapeHeavyCompactData []byte
+
+	podsCompactOnce sync.Once
+	podsCompactData []byte
+
+	twitterCompactOnce sync.Once
+	twitterCompactData []byte
 )
+
+func LoadSmallCompactJSON() []byte {
+	smallCompactOnce.Do(func() { smallCompactData = compact(SmallJSON) })
+	return smallCompactData
+}
+
+func LoadEscapeHeavyCompactJSON() []byte {
+	escapeHeavyCompactOnce.Do(func() { escapeHeavyCompactData = compact(EscapeHeavyJSON) })
+	return escapeHeavyCompactData
+}
+
+func LoadPodsCompactJSON() []byte {
+	podsCompactOnce.Do(func() { podsCompactData = compact(PodsJSON) })
+	return podsCompactData
+}
+
+func LoadTwitterCompactJSON() []byte {
+	twitterCompactOnce.Do(func() { twitterCompactData = compact(TwitterJSON) })
+	return twitterCompactData
+}
 
 func compact(src []byte) []byte {
 	var buf bytes.Buffer
@@ -69,16 +96,6 @@ func mustDecompressZstd(src []byte) []byte {
 	return out
 }
 
-func init() {
-	SmallCompactJSON = compact(SmallJSON)
-	EscapeHeavyCompactJSON = compact(EscapeHeavyJSON)
-	PodsCompactJSON = compact(PodsJSON)
-	TwitterCompactJSON = compact(TwitterJSON)
-
-	SpikyNDJSON = buildSpikyNDJSON()
-	HalfBufNDJSON = buildHalfBufNDJSON()
-	ThirdBufNDJSON = buildThirdBufNDJSON()
-}
 
 // buildSpikyNDJSON constructs an NDJSON stream with periodic large spikes.
 //
@@ -101,7 +118,15 @@ const (
 	spikyCycles          = 5
 )
 
-var SpikyNDJSON []byte
+var (
+	spikyNDJSONOnce sync.Once
+	spikyNDJSONData []byte
+)
+
+func LoadSpikyNDJSON() []byte {
+	spikyNDJSONOnce.Do(func() { spikyNDJSONData = buildSpikyNDJSON() })
+	return spikyNDJSONData
+}
 
 func makeSpikyPayload(kind string, seq, nItems, payloadLen int) SpikyPayload {
 	filler := strings.Repeat("x", payloadLen)
@@ -143,7 +168,15 @@ const (
 	halfBufCount      = 50
 )
 
-var HalfBufNDJSON []byte
+var (
+	halfBufNDJSONOnce sync.Once
+	halfBufNDJSONData []byte
+)
+
+func LoadHalfBufNDJSON() []byte {
+	halfBufNDJSONOnce.Do(func() { halfBufNDJSONData = buildHalfBufNDJSON() })
+	return halfBufNDJSONData
+}
 
 func buildHalfBufNDJSON() []byte {
 	var buf bytes.Buffer
@@ -166,7 +199,15 @@ const (
 	thirdBufCount      = 50
 )
 
-var ThirdBufNDJSON []byte
+var (
+	thirdBufNDJSONOnce sync.Once
+	thirdBufNDJSONData []byte
+)
+
+func LoadThirdBufNDJSON() []byte {
+	thirdBufNDJSONOnce.Do(func() { thirdBufNDJSONData = buildThirdBufNDJSON() })
+	return thirdBufNDJSONData
+}
 
 func buildThirdBufNDJSON() []byte {
 	var buf bytes.Buffer

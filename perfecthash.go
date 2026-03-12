@@ -8,7 +8,7 @@ import (
 // LookupFieldBytes looks up a struct field by JSON key.
 // It tries an exact match first (fast path), then falls back to
 // case-insensitive matching (strings.EqualFold) per encoding/json semantics.
-func (dec *ReflectStructDecoder) LookupFieldBytes(key []byte) *TypeInfo {
+func (dec *StructCodec) LookupFieldBytes(key []byte) *TypeInfo {
 	k := unsafe.String(unsafe.SliceData(key), len(key))
 
 	// Fast path: exact match against original tag names.
@@ -33,8 +33,8 @@ func (dec *ReflectStructDecoder) LookupFieldBytes(key []byte) *TypeInfo {
 // --- Build phase (called once per struct type at initialization) ---
 
 // buildLookup selects and constructs the optimal lookup strategy for a
-// ReflectStructDecoder based on its field count. Called once at construction.
-func buildLookup(dec *ReflectStructDecoder) {
+// StructCodec based on its field count. Called once at construction.
+func buildLookup(dec *StructCodec) {
 	for i := range dec.Fields {
 		if dec.Fields[i].JSONName != dec.Fields[i].JSONNameLower {
 			dec.HasMixedCase = true
@@ -73,7 +73,7 @@ const maxSeedAttempts = 1 << 16 // 64K seeds, each tested against all shifts
 // Strategy: for each seed, compute all hashes once, then sweep shifts to find a
 // zero-collision mapping. The search is bounded by maxSeedAttempts; callers
 // fall back to a map when no perfect hash is found.
-func tryBuildPerfectHash(dec *ReflectStructDecoder, mixer hashMixer) bool {
+func tryBuildPerfectHash(dec *StructCodec, mixer hashMixer) bool {
 	n := len(dec.Fields)
 	tableSize := nextPowerOf2(n * 2) // load factor ~50%
 	mask := uint64(tableSize - 1)
@@ -134,7 +134,7 @@ func tryBuildPerfectHash(dec *ReflectStructDecoder, mixer hashMixer) bool {
 }
 
 // buildMapFallback initializes the traditional map[string]*TypeInfo for large structs.
-func buildMapFallback(dec *ReflectStructDecoder) {
+func buildMapFallback(dec *StructCodec) {
 	dec.FieldMap = make(map[string]*TypeInfo, len(dec.Fields))
 	for i := range dec.Fields {
 		dec.FieldMap[dec.Fields[i].JSONName] = &dec.Fields[i]
@@ -145,12 +145,12 @@ func buildMapFallback(dec *ReflectStructDecoder) {
 // --- Lookup strategies (one is selected per struct by buildLookup) ---
 
 // lookupEmpty always returns nil (zero-field struct).
-func lookupEmpty(_ *ReflectStructDecoder, _ string) *TypeInfo {
+func lookupEmpty(_ *StructCodec, _ string) *TypeInfo {
 	return nil
 }
 
 // lookupLinear performs a linear scan over 1-4 fields.
-func lookupLinear(dec *ReflectStructDecoder, key string) *TypeInfo {
+func lookupLinear(dec *StructCodec, key string) *TypeInfo {
 	fields := dec.Fields
 	for i := range fields {
 		if fields[i].JSONName == key {
@@ -161,8 +161,8 @@ func lookupLinear(dec *ReflectStructDecoder, key string) *TypeInfo {
 }
 
 // makePerfectHashLookup returns a lookup function bound to a specific mixer.
-func makePerfectHashLookup(mixer hashMixer) func(*ReflectStructDecoder, string) *TypeInfo {
-	return func(dec *ReflectStructDecoder, key string) *TypeInfo {
+func makePerfectHashLookup(mixer hashMixer) func(*StructCodec, string) *TypeInfo {
+	return func(dec *StructCodec, key string) *TypeInfo {
 		h := mixer(key, dec.HashSeed)
 		slot := int(h>>dec.HashShift) & (len(dec.HashTable) - 1)
 
@@ -180,7 +180,7 @@ func makePerfectHashLookup(mixer hashMixer) func(*ReflectStructDecoder, string) 
 }
 
 // lookupMap uses the fallback map for large structs.
-func lookupMap(dec *ReflectStructDecoder, key string) *TypeInfo {
+func lookupMap(dec *StructCodec, key string) *TypeInfo {
 	return dec.FieldMap[key]
 }
 
