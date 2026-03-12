@@ -43,10 +43,18 @@ type TypeInfo struct {
 	Decoder       any          // nested decoder (*ReflectStructDecoder, *ReflectSliceDecoder, etc.)
 }
 
-// decoderCache maps reflect.Type → *TypeInfo.
+// decoderCache maps reflect.Type → *decoderEntry.
 // Every type goes through GetDecoder exactly once; the returned *TypeInfo is
 // stable and may be referenced by pointer from other decoders.
-var decoderCache sync.Map // map[reflect.Type]*TypeInfo
+var decoderCache sync.Map // map[reflect.Type]*decoderEntry
+
+// decoderEntry wraps a *TypeInfo with a channel that is closed once the
+// decoder (TypeInfo.Decoder) is fully initialized. Concurrent readers
+// wait on the channel before using the TypeInfo.
+type decoderEntry struct {
+	ti   *TypeInfo
+	done chan struct{} // closed when ti.Decoder is set
+}
 
 // KindForType maps reflect.Kind to the internal ElemTypeKind.
 // Panics on unsupported types (programming error, not runtime input error).
@@ -101,40 +109,64 @@ func KindForType(t reflect.Type) ElemTypeKind {
 // GetDecoder returns the cached *TypeInfo for the given type, building it on
 // first access. The returned pointer is stable and safe to store by reference.
 //
-// For recursive types (e.g. type Node struct { Children []*Node }), a
-// partially-initialized *TypeInfo is stored in the cache before construction
-// begins. Composite decoders that reference it via pointer will see the
-// fully-populated value once construction completes.
+// Thread-safe: concurrent first-time access to the same type will block
+// until the decoder is fully initialized. For recursive types (e.g.
+// type Node struct { Children []*Node }), internal builder calls use
+// getDecoderForCycle which returns the pointer without waiting.
 func GetDecoder(t reflect.Type) *TypeInfo {
-	if cached, ok := decoderCache.Load(t); ok {
-		return cached.(*TypeInfo)
+	if v, ok := decoderCache.Load(t); ok {
+		e := v.(*decoderEntry)
+		<-e.done
+		return e.ti
+	}
+	return getDecoderSlow(t, true)
+}
+
+// getDecoderForCycle is used by composite decoder builders to resolve
+// element types. It returns the *TypeInfo pointer immediately without
+// waiting for the decoder to be built, which breaks recursive cycles.
+// The pointer is stable and the Decoder field will be populated by the
+// time any parsing occurs.
+func getDecoderForCycle(t reflect.Type) *TypeInfo {
+	if v, ok := decoderCache.Load(t); ok {
+		e := v.(*decoderEntry)
+		// Don't wait — may be called during initialization of this very type.
+		return e.ti
+	}
+	return getDecoderSlow(t, false)
+}
+
+func getDecoderSlow(t reflect.Type, wait bool) *TypeInfo {
+	e := &decoderEntry{
+		ti:   &TypeInfo{Kind: KindForType(t), Size: t.Size()},
+		done: make(chan struct{}),
 	}
 
-	ti := &TypeInfo{
-		Kind: KindForType(t),
-		Size: t.Size(),
-	}
-
-	// Occupy the cache slot before building the decoder to break cycles.
-	actual, loaded := decoderCache.LoadOrStore(t, ti)
+	actual, loaded := decoderCache.LoadOrStore(t, e)
 	if loaded {
-		return actual.(*TypeInfo)
+		existing := actual.(*decoderEntry)
+		if wait {
+			<-existing.done
+		}
+		return existing.ti
 	}
 
-	// Build decoder for composite types. ti is already in the cache,
-	// so recursive GetDecoder calls will hit the cache and return ti's pointer.
+	// We won the race — build the decoder.
+	// e.ti is already in the cache, so recursive getDecoderForCycle calls
+	// will return e.ti's pointer (without waiting).
 	switch t.Kind() {
 	case reflect.Struct:
-		ti.Decoder = BuildStructDecoder(t)
+		e.ti.Decoder = BuildStructDecoder(t)
 	case reflect.Slice:
-		ti.Decoder = BuildSliceDecoder(t)
+		e.ti.Decoder = BuildSliceDecoder(t)
 	case reflect.Pointer:
-		ti.Decoder = BuildPointerDecoder(t)
+		e.ti.Decoder = BuildPointerDecoder(t)
 	case reflect.Map:
-		ti.Decoder = BuildMapDecoder(t)
+		e.ti.Decoder = BuildMapDecoder(t)
 	}
 
-	return ti
+	close(e.done)
+	return e.ti
 }
 
 // CollectStructFields recursively collects fields from a struct type, promoting
@@ -181,7 +213,7 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 			}
 		}
 
-		cached := GetDecoder(sf.Type)
+		cached := getDecoderForCycle(sf.Type)
 		fi := TypeInfo{
 			Kind:          cached.Kind,
 			Size:          cached.Size,
@@ -245,7 +277,7 @@ type ReflectSliceDecoder struct {
 }
 
 func BuildSliceDecoder(t reflect.Type) *ReflectSliceDecoder {
-	elemTI := GetDecoder(t.Elem())
+	elemTI := getDecoderForCycle(t.Elem())
 	emptySlice := reflect.MakeSlice(t, 0, 0)
 	return &ReflectSliceDecoder{
 		SliceType:      t,
@@ -300,7 +332,7 @@ type ReflectMapDecoder struct {
 }
 
 func BuildMapDecoder(t reflect.Type) *ReflectMapDecoder {
-	valTI := GetDecoder(t.Elem())
+	valTI := getDecoderForCycle(t.Elem())
 	return &ReflectMapDecoder{
 		MapType:     t,
 		KeyType:     t.Key(),
@@ -321,7 +353,7 @@ type ReflectPointerDecoder struct {
 }
 
 func BuildPointerDecoder(t reflect.Type) *ReflectPointerDecoder {
-	elemTI := GetDecoder(t.Elem())
+	elemTI := getDecoderForCycle(t.Elem())
 	return &ReflectPointerDecoder{
 		PtrType:    t,
 		ElemType:   t.Elem(),

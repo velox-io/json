@@ -28,7 +28,11 @@ func TestSurrogatePair(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _ := testUnescape(tt.input)
+			got, _, err := testUnescape(tt.input)
+			if err != nil {
+				t.Errorf("unescape(%q) unexpected error: %v", tt.input, err)
+				return
+			}
 
 			if got != tt.expected {
 				t.Errorf("unescape(%q) = %q (bytes: %x), want %q (bytes: %x)",

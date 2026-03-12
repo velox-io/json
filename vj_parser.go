@@ -67,14 +67,16 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 		mq := hasZeroByte(w ^ (lo64 * 0x22))
 		// Check for backslash (0x5C)
 		mb := hasZeroByte(w ^ (lo64 * 0x5C))
+		// Check for control chars (< 0x20)
+		mc := (w - lo64*0x20) & ^w & hi64
 
-		if (mq | mb) == 0 {
+		if (mq | mb | mc) == 0 {
 			pos += 8
 			continue
 		}
 
 		// Found something - determine which came first
-		combined := mq | mb
+		combined := mq | mb | mc
 		off := firstMarkedByteIndex(combined)
 		foundPos := pos + off
 		foundChar := src[foundPos]
@@ -245,30 +247,84 @@ func (sc *Parser) scanStringAny(src []byte, idx int) (int, string, error) {
 
 // --- Number Scanning ---
 
-// scanNumberSpan finds the end of a number starting at idx.
-// Returns (endIdx, isFloat).
-func scanNumberSpan(src []byte, idx int) (int, bool) {
-	isFloat := false
+// scanNumberSpan finds the end of a JSON number starting at idx,
+// validating the format per RFC 8259 §6:
+//
+//	number = [ "-" ] int [ frac ] [ exp ]
+//	int    = "0" / ( digit1-9 *DIGIT )
+//	frac   = "." 1*DIGIT
+//	exp    = ( "e" / "E" ) [ "+" / "-" ] 1*DIGIT
+//
+// Returns (endIdx, isFloat, error).
+func scanNumberSpan(src []byte, idx int) (int, bool, error) {
 	i := idx
-	if i < len(src) && src[i] == '-' {
+	n := len(src)
+
+	// Optional leading '-'
+	if i < n && src[i] == '-' {
 		i++
 	}
-	for i < len(src) {
-		c := src[i]
-		if c >= '0' && c <= '9' {
+
+	// Integer part (required)
+	if i >= n || src[i] < '0' || src[i] > '9' {
+		return i, false, fmt.Errorf("vjson: invalid number at offset %d", idx)
+	}
+	if src[i] == '0' {
+		i++
+		// Leading zeros forbidden: "0" must not be followed by another digit
+		if i < n && src[i] >= '0' && src[i] <= '9' {
+			return i, false, fmt.Errorf("vjson: leading zeros in number at offset %d", idx)
+		}
+	} else {
+		// 1-9 followed by any digits
+		i++
+		for i < n && src[i] >= '0' && src[i] <= '9' {
 			i++
-		} else if c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-' {
-			isFloat = true
-			i++
-		} else {
-			break
 		}
 	}
-	return i, isFloat
+
+	isFloat := false
+
+	// Optional fraction
+	if i < n && src[i] == '.' {
+		isFloat = true
+		i++
+		// Must have at least one digit after '.'
+		if i >= n || src[i] < '0' || src[i] > '9' {
+			return i, true, fmt.Errorf("vjson: invalid fraction in number at offset %d", idx)
+		}
+		i++
+		for i < n && src[i] >= '0' && src[i] <= '9' {
+			i++
+		}
+	}
+
+	// Optional exponent
+	if i < n && (src[i] == 'e' || src[i] == 'E') {
+		isFloat = true
+		i++
+		// Optional sign
+		if i < n && (src[i] == '+' || src[i] == '-') {
+			i++
+		}
+		// Must have at least one digit after exponent marker
+		if i >= n || src[i] < '0' || src[i] > '9' {
+			return i, true, fmt.Errorf("vjson: invalid exponent in number at offset %d", idx)
+		}
+		i++
+		for i < n && src[i] >= '0' && src[i] <= '9' {
+			i++
+		}
+	}
+
+	return i, isFloat, nil
 }
 
 func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
-	end, isFloat := scanNumberSpan(src, idx)
+	end, isFloat, numErr := scanNumberSpan(src, idx)
+	if numErr != nil {
+		return end, numErr
+	}
 
 	switch ti.Kind {
 	case KindInt, KindInt8, KindInt16, KindInt32, KindInt64:
@@ -319,7 +375,10 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 // scanNumberAny parses a number for interface{} context.
 // Uses interned floats for small integers (0-255) to avoid allocation.
 func (sc *Parser) scanNumberAny(src []byte, idx int) (int, any, error) {
-	end, _ := scanNumberSpan(src, idx)
+	end, _, numErr := scanNumberSpan(src, idx)
+	if numErr != nil {
+		return end, nil, numErr
+	}
 	span := src[idx:end]
 
 	// Fast path: small non-negative integers 0-255 → interned float64
@@ -526,6 +585,9 @@ func (sc *Parser) scanObjectToMap(src []byte, idx int, mDec *ReflectMapDecoder, 
 
 	for {
 		// Key
+		if idx >= len(src) || src[idx] != '"' {
+			return idx, errSyntax
+		}
 		var key string
 		var err error
 		idx, key, err = sc.scanStringAny(src, idx)
@@ -588,6 +650,9 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 
 	for {
 		// Key
+		if idx >= len(src) || src[idx] != '"' {
+			return idx, errSyntax
+		}
 		var key string
 		var err error
 		idx, key, err = sc.scanStringAny(src, idx)
@@ -642,6 +707,9 @@ func (sc *Parser) scanObjectAny(src []byte, idx int) (int, map[string]any, error
 	}
 
 	for {
+		if idx >= len(src) || src[idx] != '"' {
+			return idx, nil, errSyntax
+		}
 		var key string
 		var err error
 		idx, key, err = sc.scanStringAny(src, idx)
@@ -961,7 +1029,10 @@ func skipValue(src []byte, idx int) (int, error) {
 		return skipContainer(src, idx)
 	default:
 		if (src[idx] >= '0' && src[idx] <= '9') || src[idx] == '-' {
-			end, _ := scanNumberSpan(src, idx)
+			end, _, numErr := scanNumberSpan(src, idx)
+			if numErr != nil {
+				return end, numErr
+			}
 			return end, nil
 		}
 		return idx, fmt.Errorf("vjson: unexpected character %q", src[idx])
@@ -994,12 +1065,32 @@ func skipString(src []byte, idx int) (int, error) {
 				return i + off + 1, nil
 			}
 			if c == '\\' {
-				i += off + 2 // skip escape sequence
+				// Validate escape sequence
+				escIdx := i + off
+				if escIdx+1 >= n {
+					return escIdx, errUnexpectedEOF
+				}
+				next := src[escIdx+1]
+				if next == 'u' {
+					// \uXXXX — need 4 hex digits
+					if escIdx+5 >= n {
+						return escIdx, fmt.Errorf("vjson: invalid unicode escape in string at offset %d", escIdx)
+					}
+					for k := escIdx + 2; k < escIdx+6; k++ {
+						if !isHexChar(src[k]) {
+							return escIdx, fmt.Errorf("vjson: invalid unicode escape in string at offset %d", escIdx)
+						}
+					}
+					i = escIdx + 6
+				} else if escapeTable[next] != 0 {
+					i = escIdx + 2
+				} else {
+					return escIdx, fmt.Errorf("vjson: invalid escape '\\%c' in string at offset %d", next, escIdx)
+				}
 				continue
 			}
-			// control character — skip it for skip purposes
-			i += off + 1
-			continue
+			// control character
+			return i + off, fmt.Errorf("vjson: control character in string at offset %d", i+off)
 		}
 
 		// Tail: byte-at-a-time
@@ -1008,8 +1099,29 @@ func skipString(src []byte, idx int) (int, error) {
 			return i + 1, nil
 		}
 		if c == '\\' {
-			i += 2
+			if i+1 >= n {
+				return i, errUnexpectedEOF
+			}
+			next := src[i+1]
+			if next == 'u' {
+				if i+5 >= n {
+					return i, fmt.Errorf("vjson: invalid unicode escape in string at offset %d", i)
+				}
+				for k := i + 2; k < i+6; k++ {
+					if !isHexChar(src[k]) {
+						return i, fmt.Errorf("vjson: invalid unicode escape in string at offset %d", i)
+					}
+				}
+				i += 6
+			} else if escapeTable[next] != 0 {
+				i += 2
+			} else {
+				return i, fmt.Errorf("vjson: invalid escape '\\%c' in string at offset %d", next, i)
+			}
 			continue
+		}
+		if c < 0x20 {
+			return i, fmt.Errorf("vjson: control character in string at offset %d", i)
 		}
 		i++
 	}

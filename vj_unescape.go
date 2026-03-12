@@ -7,7 +7,7 @@ import (
 )
 
 // Escape translation table: maps escape character to its unescaped value.
-// Invalid escapes map to 0 (will be preserved as-is).
+// Invalid escapes map to 0 (rejected per RFC 8259).
 var escapeTable = [256]byte{
 	'"':  '"',
 	'\\': '\\',
@@ -41,14 +41,12 @@ func decodeSurrogatePair(high, low rune) rune {
 }
 
 // unescapeSequence processes a single escape sequence starting at data[i] (which is '\').
-// Returns (new read position, new write position).
+// Returns (new read position, new write position, error).
 // dst must have enough space for the output.
-func unescapeSequence(data []byte, n int, i int, dst []byte, pos int) (int, int) {
+func unescapeSequence(data []byte, n int, i int, dst []byte, pos int) (int, int, error) {
 	// Found backslash
 	if i+1 >= n {
-		// Trailing backslash - preserve it
-		dst[pos] = '\\'
-		return i + 1, pos + 1
+		return i, pos, fmt.Errorf("vjson: trailing backslash in string at offset %d", i)
 	}
 
 	next := data[i+1]
@@ -72,7 +70,7 @@ func unescapeSequence(data []byte, n int, i int, dst []byte, pos int) (int, int)
 								// Valid surrogate pair - decode to single rune
 								combined := decodeSurrogatePair(r, low)
 								pos += utf8.EncodeRune(dst[pos:], combined)
-								return i + 12, pos
+								return i + 12, pos, nil
 							}
 						}
 					}
@@ -80,7 +78,7 @@ func unescapeSequence(data []byte, n int, i int, dst []byte, pos int) (int, int)
 					dst[pos] = 0xEF
 					dst[pos+1] = 0xBF
 					dst[pos+2] = 0xBD
-					return i + 6, pos + 3
+					return i + 6, pos + 3, nil
 				}
 
 				if isLowSurrogate(r) {
@@ -88,30 +86,26 @@ func unescapeSequence(data []byte, n int, i int, dst []byte, pos int) (int, int)
 					dst[pos] = 0xEF
 					dst[pos+1] = 0xBF
 					dst[pos+2] = 0xBD
-					return i + 6, pos + 3
+					return i + 6, pos + 3, nil
 				}
 
 				// Normal Unicode character
 				pos += utf8.EncodeRune(dst[pos:], r)
-				return i + 6, pos
+				return i + 6, pos, nil
 			}
 		}
-		// Invalid or incomplete unicode escape - preserve as-is
-		dst[pos] = '\\'
-		dst[pos+1] = 'u'
-		return i + 2, pos + 2
+		// Invalid or incomplete unicode escape
+		return i, pos, fmt.Errorf("vjson: invalid unicode escape in string at offset %d", i)
 	}
 
 	// Lookup table for common escapes
 	if unescaped := escapeTable[next]; unescaped != 0 {
 		dst[pos] = unescaped
-		return i + 2, pos + 1
+		return i + 2, pos + 1, nil
 	}
 
-	// Unknown escape - preserve backslash and character
-	dst[pos] = '\\'
-	dst[pos+1] = next
-	return i + 2, pos + 2
+	// Unknown escape — RFC 8259 only allows " \\ / b f n r t uXXXX
+	return i, pos, fmt.Errorf("vjson: invalid escape '\\%c' in string at offset %d", next, i)
 }
 
 // unescapeSinglePass performs single-pass scanning and unescaping of a JSON string.
@@ -183,20 +177,21 @@ func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, [
 
 		w := *(*uint64)(unsafe.Pointer(&src[i]))
 
-		// SWAR: check for '"' (0x22) or '\\' (0x5C)
+		// SWAR: check for '"' (0x22), '\\' (0x5C), or control chars (< 0x20)
 		mq := hasZeroByte(w ^ (lo64 * 0x22))
 		mb := hasZeroByte(w ^ (lo64 * 0x5C))
-		combined := mq | mb
+		mc := (w - lo64*0x20) & ^w & hi64 // < 0x20
+		combined := mq | mb | mc
 
 		if combined == 0 {
-			// No quote or backslash — copy 8 bytes directly
+			// No quote, backslash, or control char — copy 8 bytes directly
 			*(*uint64)(unsafe.Pointer(&buf[pos])) = w
 			pos += 8
 			i += 8
 			continue
 		}
 
-		// Found quote or backslash — determine which and where
+		// Found quote, backslash, or control char — determine which and where
 		off := firstMarkedByteIndex(combined)
 		c := src[i+off]
 
@@ -219,6 +214,10 @@ func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, [
 			goto done
 		}
 
+		if c < 0x20 {
+			return i, nil, fmt.Errorf("vjson: control character in string at offset %d", i)
+		}
+
 		// c == '\\': process escape inline
 		if i+1 < n {
 			next := src[i+1]
@@ -229,21 +228,18 @@ func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, [
 					i += 2
 					continue
 				}
-				// Unknown escape — preserve as-is
-				grow(2)
-				buf[pos] = '\\'
-				buf[pos+1] = next
-				pos += 2
-				i += 2
-				continue
+				// Unknown escape — RFC 8259 only allows " \\ / b f n r t uXXXX
+				return i, nil, fmt.Errorf("vjson: invalid escape '\\%c' in string at offset %d", next, i)
 			}
 			// \uXXXX path — may write up to 4 bytes
 			grow(4)
-			i, pos = unescapeSequence(src, n, i, buf, pos)
+			var unescErr error
+			i, pos, unescErr = unescapeSequence(src, n, i, buf, pos)
+			if unescErr != nil {
+				return i, nil, unescErr
+			}
 		} else {
-			buf[pos] = '\\'
-			pos++
-			i++
+			return i, nil, fmt.Errorf("vjson: trailing backslash in string at offset %d", i)
 		}
 	}
 
@@ -264,19 +260,17 @@ func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, [
 						i += 2
 						continue
 					}
-					buf[pos] = '\\'
-					buf[pos+1] = next
-					pos += 2
-					i += 2
-					continue
+					// Unknown escape — RFC 8259 only allows " \\ / b f n r t uXXXX
+					return i, nil, fmt.Errorf("vjson: invalid escape '\\%c' in string at offset %d", next, i)
 				}
 				grow(4)
-				i, pos = unescapeSequence(src, n, i, buf, pos)
+				var unescErr error
+				i, pos, unescErr = unescapeSequence(src, n, i, buf, pos)
+				if unescErr != nil {
+					return i, nil, unescErr
+				}
 			} else {
-				grow(1)
-				buf[pos] = '\\'
-				pos++
-				i++
+				return i, nil, fmt.Errorf("vjson: trailing backslash in string at offset %d", i)
 			}
 			continue
 		}

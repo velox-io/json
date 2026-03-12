@@ -6,8 +6,8 @@ import (
 
 // testUnescape is a test helper that wraps unescapeSinglePass.
 // It appends a closing '"' to the input and calls unescapeSinglePass,
-// returning the decoded string.
-func testUnescape(input string) (string, int) {
+// returning the decoded string and any error.
+func testUnescape(input string) (string, int, error) {
 	// Wrap with closing quote so unescapeSinglePass can find it
 	src := []byte(input + `"`)
 	sc := &Parser{}
@@ -21,9 +21,9 @@ func testUnescape(input string) (string, int) {
 	}
 	_, result, err := sc.unescapeSinglePass(src, 0, firstEsc)
 	if err != nil {
-		return "", 0
+		return "", 0, err
 	}
-	return string(result), len(result)
+	return string(result), len(result), nil
 }
 
 // testUnescapeRange is a test helper for range-based unescape tests.
@@ -82,12 +82,6 @@ func TestUnescape(t *testing.T) {
 
 		// Edge cases
 		{"double backslash at end", `hello\\`, `hello\`, 6},
-		{"incomplete unicode", `\u041`, `\u041`, 5},    // not enough hex digits
-		{"invalid unicode hex", `\uXXXX`, `\uXXXX`, 6}, // non-hex chars preserved
-
-		// Unknown escapes (should preserve)
-		{"unknown escape", `hello\Xworld`, `hello\Xworld`, 12},
-		{"unknown escape x", `\x41`, `\x41`, 4},
 
 		// Long strings
 		{"long no escapes", makeLongString(100), makeLongString(100), 100},
@@ -96,7 +90,11 @@ func TestUnescape(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, gotLen := testUnescape(tt.input)
+			got, gotLen, err := testUnescape(tt.input)
+			if err != nil {
+				t.Errorf("unescape(%q) unexpected error: %v", tt.input, err)
+				return
+			}
 
 			if got != tt.want {
 				t.Errorf("unescape(%q) = %q (len=%d), want %q (len=%d)",
@@ -105,6 +103,26 @@ func TestUnescape(t *testing.T) {
 			if gotLen != len(tt.want) {
 				t.Errorf("unescape(%q) returned length %d, want %d",
 					tt.input, gotLen, len(tt.want))
+			}
+		})
+	}
+
+	// Test that invalid escapes are rejected per RFC 8259
+	errorTests := []struct {
+		name  string
+		input string
+	}{
+		{"unknown escape", `hello\Xworld`},
+		{"unknown escape x", `\x41`},
+		{"incomplete unicode", `\u041`},
+		{"invalid unicode hex", `\uXXXX`},
+	}
+
+	for _, tt := range errorTests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := testUnescape(tt.input)
+			if err == nil {
+				t.Errorf("unescape(%q) expected error, got nil", tt.input)
 			}
 		})
 	}
