@@ -1,3 +1,3 @@
-module github.com/penglei/pjson
+module github.com/velox-io/json
 
-go 1.26rc3
+go 1.25

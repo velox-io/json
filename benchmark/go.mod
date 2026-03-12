@@ -1,12 +1,11 @@
 module dev.local/benchmark
 
-go 1.26rc3
+go 1.25
 
 require (
 	github.com/bytedance/sonic v1.15.0
-	github.com/go-json-experiment/json v0.0.0-20251027170946-4849db3c2f7e
-	github.com/penglei/pjson v0.0.0
 	github.com/urfave/cli/v3 v3.6.2
+	github.com/velox-io/json v0.0.0
 )
 
 require (
@@ -19,4 +18,4 @@ require (
 	golang.org/x/sys v0.22.0 // indirect
 )
 
-replace github.com/penglei/pjson => ..
+replace github.com/velox-io/json => ..

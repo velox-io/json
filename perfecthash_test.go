@@ -1,4 +1,4 @@
-package pjson
+package vjson
 
 import (
 	"fmt"

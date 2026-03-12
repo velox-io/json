@@ -1,4 +1,4 @@
-package pjson
+package vjson
 
 import (
 	"reflect"
@@ -6,10 +6,6 @@ import (
 	"sync"
 	"unsafe"
 )
-
-// =============================================================================
-// Field Metadata Types
-// =============================================================================
 
 type ElemTypeKind uint8
 
@@ -51,10 +47,6 @@ type TypeInfo struct {
 // Every type goes through GetDecoder exactly once; the returned *TypeInfo is
 // stable and may be referenced by pointer from other decoders.
 var decoderCache sync.Map // map[reflect.Type]*TypeInfo
-
-// =============================================================================
-// Unified Entry Point
-// =============================================================================
 
 // KindForType maps reflect.Kind to the internal ElemTypeKind.
 // Panics on unsupported types (programming error, not runtime input error).
@@ -98,11 +90,11 @@ func KindForType(t reflect.Type) ElemTypeKind {
 		if t.NumMethod() == 0 {
 			return KindAny
 		}
-		panic("pjson: non-empty interface types not supported: " + t.String())
+		panic("vjson: non-empty interface types not supported: " + t.String())
 	case reflect.Map:
 		return KindMap
 	default:
-		panic("pjson: unsupported type: " + t.String())
+		panic("vjson: unsupported type: " + t.String())
 	}
 }
 
@@ -144,10 +136,6 @@ func GetDecoder(t reflect.Type) *TypeInfo {
 
 	return ti
 }
-
-// =============================================================================
-// Struct Field Collection
-// =============================================================================
 
 // CollectStructFields recursively collects fields from a struct type, promoting
 // fields from anonymous (embedded) structs. baseOffset is added to each
@@ -223,9 +211,7 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 	return fields
 }
 
-// =============================================================================
-// Decoder Builders (no caching — that's GetDecoder's job)
-// =============================================================================
+// --- Decoder Builders ---
 
 // ReflectStructDecoder handles struct decoding using reflect.
 type ReflectStructDecoder struct {
@@ -249,11 +235,11 @@ func BuildStructDecoder(t reflect.Type) *ReflectStructDecoder {
 
 // ReflectSliceDecoder handles slice decoding for any element type
 type ReflectSliceDecoder struct {
-	SliceType      reflect.Type    // the slice type itself, e.g., []int64
+	SliceType      reflect.Type // the slice type itself, e.g., []int64
 	ElemType       reflect.Type
-	ElemSize       uintptr         // size of one element (for unsafe pointer arithmetic)
-	ElemTI         *TypeInfo       // cached TypeInfo for element (pointer for cycle safety)
-	EmptySliceData unsafe.Pointer  // pre-created empty slice backing, avoids reflect.MakeSlice per empty []
+	ElemSize       uintptr        // size of one element (for unsafe pointer arithmetic)
+	ElemTI         *TypeInfo      // cached TypeInfo for element (pointer for cycle safety)
+	EmptySliceData unsafe.Pointer // pre-created empty slice backing, avoids reflect.MakeSlice per empty []
 }
 
 func BuildSliceDecoder(t reflect.Type) *ReflectSliceDecoder {
@@ -284,11 +270,11 @@ type ReflectMapDecoder struct {
 func BuildMapDecoder(t reflect.Type) *ReflectMapDecoder {
 	valTI := GetDecoder(t.Elem())
 	return &ReflectMapDecoder{
-		MapType:    t,
-		KeyType:    t.Key(),
-		ValType:    t.Elem(),
-		ValSize:    t.Elem().Size(),
-		ValTI:      valTI,
+		MapType:     t,
+		KeyType:     t.Key(),
+		ValType:     t.Elem(),
+		ValSize:     t.Elem().Size(),
+		ValTI:       valTI,
 		ValIsString: valTI.Kind == KindString,
 	}
 }
@@ -297,7 +283,7 @@ type ReflectPointerDecoder struct {
 	PtrType  reflect.Type // the pointer type itself, e.g., *Foo
 	ElemType reflect.Type
 	ElemTI   *TypeInfo // cached TypeInfo for the pointed-to element (pointer for cycle safety)
-	ElemSize uintptr    // size of the element type for allocation
+	ElemSize uintptr   // size of the element type for allocation
 }
 
 func BuildPointerDecoder(t reflect.Type) *ReflectPointerDecoder {

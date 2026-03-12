@@ -10,8 +10,7 @@ import (
 
 	"dev.local/benchmark"
 
-	"github.com/penglei/pjson"
-	json "github.com/penglei/pjson"
+	vjson "github.com/velox-io/json"
 	"github.com/urfave/cli/v3"
 )
 
@@ -30,7 +29,7 @@ func cpuprof() {
 
 	// Warm up decoder cache
 	var warmup EscapeHeavyPayload
-	_ = json.Unmarshal(escapeHeavyJSON, &warmup)
+	_ = vjson.Unmarshal(escapeHeavyJSON, &warmup)
 
 	// CPU profile
 	f, err := os.Create(profPath("cpu.prof"))
@@ -45,7 +44,7 @@ func cpuprof() {
 	// Hot loop
 	for range N {
 		var s EscapeHeavyPayload
-		if err := pjson.Unmarshal(escapeHeavyJSON, &s); err != nil {
+		if err := vjson.Unmarshal(escapeHeavyJSON, &s); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -59,7 +58,7 @@ func memprof() {
 
 	// Warm up decoder cache
 	var warmup EscapeHeavyPayload
-	_ = pjson.Unmarshal(escapeHeavyJSON, &warmup)
+	_ = vjson.Unmarshal(escapeHeavyJSON, &warmup)
 
 	// Force GC to get a clean baseline
 	runtime.GC()
@@ -70,7 +69,7 @@ func memprof() {
 	// Hot loop
 	for range N {
 		var s EscapeHeavyPayload
-		if err := pjson.Unmarshal(escapeHeavyJSON, &s); err != nil {
+		if err := vjson.Unmarshal(escapeHeavyJSON, &s); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

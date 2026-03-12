@@ -6,8 +6,8 @@ import (
 	"dev.local/benchmark/twitter"
 
 	"github.com/bytedance/sonic"
-	"github.com/penglei/pjson"
-	"github.com/penglei/pjson/s2s"
+	"github.com/velox-io/json"
+	"github.com/velox-io/json/prescan"
 )
 
 // =============================================================================
@@ -24,21 +24,21 @@ func Benchmark_Small_Sonic(b *testing.B) {
 	}
 }
 
-func Benchmark_Small_S2S(b *testing.B) {
+func Benchmark_Small_Velox(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		var v Small
-		if err := s2s.Unmarshal(SmallJSON, &v); err != nil {
+		if err := vjson.Unmarshal(SmallJSON, &v); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func Benchmark_Small_Pjson(b *testing.B) {
+func Benchmark_Small_Prescan(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Small
-		if err := pjson.Unmarshal(SmallJSON, &s); err != nil {
+		if err := prescan.Unmarshal(SmallJSON, &s); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -58,21 +58,21 @@ func Benchmark_Nested_Sonic(b *testing.B) {
 	}
 }
 
-func Benchmark_Nested_S2S(b *testing.B) {
+func Benchmark_Nested_Velox(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		var u User
-		if err := s2s.Unmarshal(NestedJSON, &u); err != nil {
+		if err := vjson.Unmarshal(NestedJSON, &u); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func Benchmark_Nested_Pjson(b *testing.B) {
+func Benchmark_Nested_Prescan(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		var u User
-		if err := pjson.Unmarshal(NestedJSON, &u); err != nil {
+		if err := prescan.Unmarshal(NestedJSON, &u); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -92,21 +92,21 @@ func Benchmark_SliceOfStructs_Sonic(b *testing.B) {
 	}
 }
 
-func Benchmark_SliceOfStructs_S2S(b *testing.B) {
+func Benchmark_SliceOfStructs_Velox(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		var ul UserList
-		if err := s2s.Unmarshal(SliceJSON, &ul); err != nil {
+		if err := vjson.Unmarshal(SliceJSON, &ul); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func Benchmark_SliceOfStructs_Pjson(b *testing.B) {
+func Benchmark_SliceOfStructs_Prescan(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		var ul UserList
-		if err := pjson.Unmarshal(SliceJSON, &ul); err != nil {
+		if err := prescan.Unmarshal(SliceJSON, &ul); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -127,23 +127,23 @@ func Benchmark_EscapeHeavy_Sonic(b *testing.B) {
 	}
 }
 
-func Benchmark_EscapeHeavy_S2S(b *testing.B) {
+func Benchmark_EscapeHeavy_Velox(b *testing.B) {
 	b.SetBytes(int64(len(EscapeHeavyJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var p EscapeHeavyPayload
-		if err := s2s.Unmarshal(EscapeHeavyJSON, &p); err != nil {
+		if err := vjson.Unmarshal(EscapeHeavyJSON, &p); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func Benchmark_EscapeHeavy_Pjson(b *testing.B) {
+func Benchmark_EscapeHeavy_Prescan(b *testing.B) {
 	b.SetBytes(int64(len(EscapeHeavyJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var p EscapeHeavyPayload
-		if err := pjson.Unmarshal(EscapeHeavyJSON, &p); err != nil {
+		if err := prescan.Unmarshal(EscapeHeavyJSON, &p); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -164,23 +164,23 @@ func Benchmark_KubePods_Sonic(b *testing.B) {
 	}
 }
 
-func Benchmark_KubePods_S2S(b *testing.B) {
+func Benchmark_KubePods_Velox(b *testing.B) {
 	b.SetBytes(int64(len(PodsJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var pl KubePodList
-		if err := s2s.Unmarshal(PodsJSON, &pl); err != nil {
+		if err := vjson.Unmarshal(PodsJSON, &pl); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func Benchmark_KubePods_Pjson(b *testing.B) {
+func Benchmark_KubePods_Prescan(b *testing.B) {
 	b.SetBytes(int64(len(PodsJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var pl KubePodList
-		if err := pjson.Unmarshal(PodsJSON, &pl); err != nil {
+		if err := prescan.Unmarshal(PodsJSON, &pl); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -201,23 +201,23 @@ func Benchmark_Twitter_Sonic(b *testing.B) {
 	}
 }
 
-func Benchmark_Twitter_S2S(b *testing.B) {
+func Benchmark_Twitter_Velox(b *testing.B) {
 	b.SetBytes(int64(len(TwitterJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var t twitter.TwitterStruct
-		if err := s2s.Unmarshal(TwitterJSON, &t); err != nil {
+		if err := vjson.Unmarshal(TwitterJSON, &t); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func Benchmark_Twitter_Pjson(b *testing.B) {
+func Benchmark_Twitter_Prescan(b *testing.B) {
 	b.SetBytes(int64(len(TwitterJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var t twitter.TwitterStruct
-		if err := pjson.Unmarshal(TwitterJSON, &t); err != nil {
+		if err := prescan.Unmarshal(TwitterJSON, &t); err != nil {
 			b.Fatal(err)
 		}
 	}

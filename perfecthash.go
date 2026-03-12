@@ -1,10 +1,6 @@
-package pjson
+package vjson
 
 import "unsafe"
-
-// =============================================================================
-// Hash Functions
-// =============================================================================
 
 // hashMixer is a hash function type used for perfect hash construction.
 type hashMixer func(s string, seed uint64) uint64
@@ -69,9 +65,7 @@ func fnv1aMixer(s string, seed uint64) uint64 {
 	return h
 }
 
-// =============================================================================
-// ASCII Case Conversion
-// =============================================================================
+// --- ASCII Case Conversion ---
 
 // toLowerASCII returns a lowercased version of s for ASCII letters.
 // If s contains no uppercase ASCII, returns s directly (zero allocation).
@@ -116,9 +110,7 @@ func toLowerASCIIBytes(buf []byte) string {
 	return unsafe.String(&buf[0], len(buf))
 }
 
-// =============================================================================
-// Build Phase
-// =============================================================================
+// --- Build Phase ---
 
 // buildLookup selects and constructs the optimal lookup strategy for a
 // ReflectStructDecoder based on its field count. Called once at construction.
@@ -233,9 +225,7 @@ func buildMapFallback(dec *ReflectStructDecoder) {
 	dec.LookupFn = lookupMap
 }
 
-// =============================================================================
-// Lookup Functions
-// =============================================================================
+// --- Lookup Functions ---
 
 // lookupEmpty always returns nil (zero-field struct).
 func lookupEmpty(_ *ReflectStructDecoder, _ string) *TypeInfo {
