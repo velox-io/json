@@ -259,54 +259,166 @@ VJ_ESCAPE_MASK_FUNC(vj_escape_mask_16_html, 1)
  * The top-level escape_string_content() dispatches once based on flags.
  */
 
-/* ---- UTF-8-only escape handler ----
+/* ---- Batch UTF-8 run handler ----
  *
- * Handles non-ASCII bytes (>= 0x80) that were flagged by SIMD/SWAR.
- * Only called when UTF-8 validation or line-terminator escaping is needed.
- * Returns number of source bytes consumed (1-4).
+ * Processes an entire contiguous run of non-ASCII bytes (>= 0x80) starting
+ * at src[i].  Uses lazy-flush: scans ahead through all non-ASCII bytes,
+ * only flushing + escaping on invalid UTF-8 or line terminators (U+2028/29).
+ * Valid UTF-8 bytes are bulk-copied in one memcpy at the end of the run.
+ *
+ * This replaces the old per-rune vj_escape_one_utf8 which was called once
+ * per non-ASCII byte, causing N function calls + N memcpy calls for a run
+ * of N runes.  Now it's 1 call + typically 1 memcpy.
+ *
+ * Returns number of source bytes consumed (the entire non-ASCII run).
  * Writes escaped output to *out_ptr and advances it. */
-static inline int vj_escape_one_utf8(uint8_t **out_ptr, const uint8_t *src,
-                                     int64_t i, int64_t src_len,
-                                     uint32_t flags) {
+static __attribute__((always_inline)) inline int64_t
+vj_escape_utf8_run(uint8_t **out_ptr, const uint8_t *src,
+                   int64_t i, int64_t src_len, uint32_t flags) {
   uint8_t *out = *out_ptr;
   const int check_utf8 = (flags & VJ_ENC_ESCAPE_INVALID_UTF8) != 0;
   const int check_line_terms = (flags & VJ_ENC_ESCAPE_LINE_TERMS) != 0;
+  const int64_t run_start = i;
 
-  /* Fast path: no validation needed — copy the byte as-is. */
+  /* Fast path: no validation needed — scan to end of non-ASCII run,
+   * bulk copy the entire segment. */
   if (!check_utf8 && !check_line_terms) {
-    *out++ = src[i];
+    while (i < src_len && src[i] >= 0x80)
+      i++;
+    int64_t run_len = i - run_start;
+    vj_memcpy(out, &src[run_start], run_len);
+    out += run_len;
     *out_ptr = out;
-    return 1;
+    return run_len;
   }
 
-  int consumed = 0;
-  uint32_t cp = decode_utf8(&src[i], src_len - i, &consumed);
+  /* Validation path: scan rune-by-rune but defer memcpy (lazy flush).
+   * `flush_start` marks the beginning of the current un-flushed segment. */
+  int64_t flush_start = i;
 
-  if (cp == 0xFFFD && consumed <= 1 && check_utf8) {
+  while (i < src_len && src[i] >= 0x80) {
+    /* --- Line terminator fast check (byte-level) ---
+     * U+2028 = E2 80 A8,  U+2029 = E2 80 A9.
+     * Only need full decode if first byte is 0xE2. */
+    if (check_line_terms && src[i] == 0xE2 &&
+        i + 2 < src_len && src[i + 1] == 0x80 &&
+        (src[i + 2] == 0xA8 || src[i + 2] == 0xA9)) {
+      /* Flush preceding valid bytes */
+      if (i > flush_start) {
+        int64_t n = i - flush_start;
+        vj_memcpy(out, &src[flush_start], n);
+        out += n;
+      }
+      uint32_t cp = (src[i + 2] == 0xA8) ? 0x2028 : 0x2029;
+      out += write_unicode_escape(out, cp);
+      i += 3;
+      flush_start = i;
+      continue;
+    }
+
+    /* --- UTF-8 validation with length-from-leading-byte --- */
+    uint8_t b0 = src[i];
+
+    if ((b0 & 0xE0) == 0xC0) {
+      /* 2-byte: 110xxxxx 10xxxxxx */
+      if (i + 2 <= src_len && (src[i + 1] & 0xC0) == 0x80) {
+        uint32_t cp = ((uint32_t)(b0 & 0x1F) << 6) | (src[i + 1] & 0x3F);
+        if (cp >= 0x80) {
+          i += 2;
+          continue; /* valid — stay in run, no copy yet */
+        }
+      }
+      /* Invalid: overlong or truncated */
+      goto invalid_byte;
+    } else if ((b0 & 0xF0) == 0xE0) {
+      /* 3-byte: 1110xxxx 10xxxxxx 10xxxxxx */
+      if (i + 3 <= src_len &&
+          (src[i + 1] & 0xC0) == 0x80 && (src[i + 2] & 0xC0) == 0x80) {
+        uint32_t cp = ((uint32_t)(b0 & 0x0F) << 12) |
+                      ((uint32_t)(src[i + 1] & 0x3F) << 6) |
+                      (src[i + 2] & 0x3F);
+        if (cp >= 0x800) {
+          if (check_utf8 && cp >= 0xD800 && cp <= 0xDFFF) {
+            /* Surrogate codepoint — replace with \ufffd */
+            goto replace_ufffd_3;
+          }
+          /* Note: line terminators (0xE2 prefix) already handled above */
+          i += 3;
+          continue; /* valid */
+        }
+      }
+      /* Invalid: overlong or truncated */
+      goto invalid_byte;
+    } else if ((b0 & 0xF8) == 0xF0) {
+      /* 4-byte: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx */
+      if (i + 4 <= src_len &&
+          (src[i + 1] & 0xC0) == 0x80 && (src[i + 2] & 0xC0) == 0x80 &&
+          (src[i + 3] & 0xC0) == 0x80) {
+        uint32_t cp = ((uint32_t)(b0 & 0x07) << 18) |
+                      ((uint32_t)(src[i + 1] & 0x3F) << 12) |
+                      ((uint32_t)(src[i + 2] & 0x3F) << 6) |
+                      (src[i + 3] & 0x3F);
+        if (cp >= 0x10000 && cp <= 0x10FFFF) {
+          i += 4;
+          continue; /* valid */
+        }
+      }
+      /* Invalid: overlong, out-of-range, or truncated */
+      goto invalid_byte;
+    } else {
+      /* Continuation byte (10xxxxxx) or invalid leading byte (11111xxx) */
+      goto invalid_byte;
+    }
+
+    /* --- Surrogate replacement (3-byte sequence) --- */
+  replace_ufffd_3:
+    if (i > flush_start) {
+      int64_t n = i - flush_start;
+      vj_memcpy(out, &src[flush_start], n);
+      out += n;
+    }
     vj_memcpy(out, "\\ufffd", 6);
     out += 6;
-    *out_ptr = out;
-    return consumed ? consumed : 1;
+    i += 3;
+    flush_start = i;
+    continue;
+
+    /* --- Invalid byte handler --- */
+  invalid_byte:
+    if (check_utf8) {
+      if (i > flush_start) {
+        int64_t n = i - flush_start;
+        vj_memcpy(out, &src[flush_start], n);
+        out += n;
+      }
+      vj_memcpy(out, "\\ufffd", 6);
+      out += 6;
+      i += 1;
+      flush_start = i;
+    } else {
+      /* No UTF-8 validation — copy invalid byte as-is */
+      i += 1;
+    }
+    continue;
   }
 
-  if (check_line_terms && (cp == 0x2028 || cp == 0x2029)) {
-    out += write_unicode_escape(out, cp);
-    *out_ptr = out;
-    return consumed;
+  /* Flush remaining valid bytes from this run */
+  if (i > flush_start) {
+    int64_t n = i - flush_start;
+    vj_memcpy(out, &src[flush_start], n);
+    out += n;
   }
 
-  /* Valid UTF-8: copy as-is. */
-  vj_memcpy(out, &src[i], consumed);
-  out += consumed;
   *out_ptr = out;
-  return consumed;
+  return i - run_start;
 }
 
 /* ---- Inline ASCII escape macro ----
  *
  * Handles a single byte at src[i] that was flagged by SIMD/SWAR.
  * For ASCII (< 0x80): inlines the escape directly (no function call).
- * For non-ASCII (>= 0x80): delegates to vj_escape_one_utf8.
+ * For non-ASCII (>= 0x80): delegates to vj_escape_utf8_run which
+ * batch-processes the entire contiguous non-ASCII segment.
  *
  * Uses the escape_lut lookup table for branchless escape selection.
  * The `html` parameter must be a compile-time constant. */
@@ -323,7 +435,7 @@ static inline int vj_escape_one_utf8(uint8_t **out_ptr, const uint8_t *src,
       }                                                                        \
       i++;                                                                     \
     } else {                                                                   \
-      i += vj_escape_one_utf8(&out, src, i, src_len, flags);                   \
+      i += vj_escape_utf8_run(&out, src, i, src_len, flags);                   \
     }                                                                          \
   } while (0)
 

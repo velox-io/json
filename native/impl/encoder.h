@@ -116,6 +116,8 @@ void vj_vm_exec(VjExecCtx *ctx) {
       [OP_SLICE_END]    = DT_ENTRY(vj_op_slice_end),
       [OP_MAP_BEGIN]    = DT_ENTRY(vj_op_map_begin),
       [OP_MAP_END]      = DT_ENTRY(vj_op_map_end),
+      [OP_OBJ_OPEN]     = DT_ENTRY(vj_op_obj_open),
+      [OP_OBJ_CLOSE]    = DT_ENTRY(vj_op_obj_close),
 
       /* Go-only fallback (0x3F) */
       [OP_FALLBACK]    = DT_ENTRY(vj_op_yield),
@@ -502,6 +504,26 @@ vj_op_slice_end: {
 }
 
 
+vj_op_obj_open: {
+  /* Lightweight nested struct open: write key + '{', flip first flag.
+   * No stack frame push, no base switch — child field offsets are
+   * pre-computed (absolute from top-level struct base). */
+  VM_CHECK(op->key_len + 1 + 1);
+  VM_WRITE_KEY();
+  *buf++ = '{';
+  first = 1;
+  VM_NEXT();
+}
+
+vj_op_obj_close: {
+  /* Lightweight nested struct close: write '}', set first=0.
+   * No stack frame pop — mirrors vj_op_obj_open. */
+  VM_CHECK(1);
+  *buf++ = '}';
+  first = 0;
+  VM_NEXT();
+}
+
 vj_op_map_begin: {
   /* Map iteration is Go-driven. Yield to Go, which will:
    * - Initialize map iterator
@@ -578,8 +600,9 @@ vj_op_interface: {
     }
     ops = iface_r.cached_ops;
     op = &ops[0];
-    /* TODO: base needs eface.data_ptr — original code has the same issue */
-    goto vj_op_yield; /* preserve existing behavior for now */
+    base = iface_r.data_ptr;  /* set base to struct data inside interface */
+    first = 1;                /* interface value context: no leading comma */
+    VM_DISPATCH();            /* execute cached Blueprint ops */
   case VJ_IFACE_BUF_FULL:
     VM_SAVE_AND_RETURN(VJ_ERR_BUF_FULL);
   case VJ_IFACE_NAN_INF:

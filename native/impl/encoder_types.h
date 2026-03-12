@@ -313,6 +313,8 @@ enum OpType {
   OP_SLICE_END    = 38, /* slice loop end / back-edge */
   OP_MAP_BEGIN    = 39, /* map iteration start (yield-driven) */
   OP_MAP_END      = 40, /* map iteration end */
+  OP_OBJ_OPEN     = 41, /* write key + '{', set first=1 (no frame) */
+  OP_OBJ_CLOSE    = 42, /* write '}', set first=0 (no frame) */
 
   /* --- Go-only fallback --- */
   OP_FALLBACK    = 0x3F, /* custom marshalers, ,string, complex structs */
@@ -574,7 +576,7 @@ enum VjYieldReason {
 typedef struct VjIfaceCacheEntry {
   const void      *type_ptr;  /*  0: Go *abi.Type address */
   const VjOpStep  *ops;       /*  8: Blueprint.Ops[0], or NULL */
-  uint8_t          tag;       /* 16: primitive tag (OP_BOOL..OP_STRING) or 0 */
+  uint8_t          tag;       /* 16: (opcode+1) for primitives, 0 = none */
   uint8_t          _pad[7];   /* 17: alignment */
 } VjIfaceCacheEntry;
 

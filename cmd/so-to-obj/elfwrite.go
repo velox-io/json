@@ -6,12 +6,17 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"sort"
 )
 
 // writeRelocatableELF generates an ELF ET_REL object with:
 //   - A single .text section containing the provided code+data blob
-//   - Global function symbols at their correct offsets
+//   - Local and global function symbols at their correct offsets
 //   - Zero relocation entries
+//
+// Symbols are sorted: local symbols first, then global symbols.
+// This ordering is required by ELF: the .symtab section header's Info
+// field records the index of the first global symbol.
 //
 // The layout is:
 //
@@ -20,9 +25,25 @@ import (
 //	.symtab section data
 //	.strtab section data
 //	.shstrtab section data
-//	Section header table (5 entries: null, .text, .symtab, .strtab, .shstrtab)
+//	Section header table (6 entries: null, .text, .note.GNU-stack, .symtab, .strtab, .shstrtab)
 func writeRelocatableELF(path string, textData []byte, syms []symInfo) error {
 	var buf bytes.Buffer
+
+	// ── Sort symbols: locals first, then globals ────────────────────
+	sort.SliceStable(syms, func(i, j int) bool {
+		if syms[i].Local != syms[j].Local {
+			return syms[i].Local // locals before globals
+		}
+		return syms[i].Offset < syms[j].Offset
+	})
+
+	// Count local symbols to determine first-global index
+	numLocal := 0
+	for _, s := range syms {
+		if s.Local {
+			numLocal++
+		}
+	}
 
 	// ── Build string tables first so we know offsets ──────────────────
 
@@ -32,6 +53,7 @@ func writeRelocatableELF(path string, textData []byte, syms []symInfo) error {
 	shText := shstrtab.add(".text")
 	shSymtab := shstrtab.add(".symtab")
 	shStrtab := shstrtab.add(".strtab")
+	shNoteStack := shstrtab.add(".note.GNU-stack")
 	shShstrtab := shstrtab.add(".shstrtab")
 	_ = shNull
 
@@ -46,8 +68,9 @@ func writeRelocatableELF(path string, textData []byte, syms []symInfo) error {
 	// ── Build .symtab ────────────────────────────────────────────────
 	//
 	// Entry 0: null symbol (required)
-	// Entry 1..N: global function symbols
-	// The Info field in section header: Link=strtab index, Info=first global
+	// Entry 1..numLocal: local function symbols
+	// Entry numLocal+1..N: global function symbols
+	// The Info field in section header: index of first global symbol
 
 	const symSize = 24 // sizeof(Elf64_Sym)
 	symtabData := make([]byte, symSize*(1+len(syms)))
@@ -56,13 +79,21 @@ func writeRelocatableELF(path string, textData []byte, syms []symInfo) error {
 
 	for i, s := range syms {
 		off := symSize * (1 + i)
-		binary.LittleEndian.PutUint32(symtabData[off:], symNameIdx[i])   // st_name
-		symtabData[off+4] = byte(elf.STB_GLOBAL)<<4 | byte(elf.STT_FUNC) // st_info
-		symtabData[off+5] = byte(elf.STV_DEFAULT)                        // st_other
-		binary.LittleEndian.PutUint16(symtabData[off+6:], 1)             // st_shndx = 1 (.text)
-		binary.LittleEndian.PutUint64(symtabData[off+8:], s.Offset)      // st_value
-		binary.LittleEndian.PutUint64(symtabData[off+16:], 0)            // st_size (unknown)
+		binary.LittleEndian.PutUint32(symtabData[off:], symNameIdx[i]) // st_name
+
+		bind := elf.STB_GLOBAL
+		if s.Local {
+			bind = elf.STB_LOCAL
+		}
+		symtabData[off+4] = byte(bind)<<4 | byte(elf.STT_FUNC)        // st_info
+		symtabData[off+5] = byte(elf.STV_DEFAULT)                      // st_other
+		binary.LittleEndian.PutUint16(symtabData[off+6:], 1)           // st_shndx = 1 (.text)
+		binary.LittleEndian.PutUint64(symtabData[off+8:], s.Offset)    // st_value
+		binary.LittleEndian.PutUint64(symtabData[off+16:], s.Size)     // st_size
 	}
+
+	// First global symbol index: null(0) + numLocal locals → index numLocal+1
+	firstGlobal := uint32(1 + numLocal)
 
 	// ── Compute layout offsets ───────────────────────────────────────
 
@@ -88,7 +119,7 @@ func writeRelocatableELF(path string, textData []byte, syms []symInfo) error {
 	// Section header table follows .shstrtab, aligned to 8
 	shdrOff := align(shstrtabEnd, 8)
 
-	const numSections = 5 // null, .text, .symtab, .strtab, .shstrtab
+	const numSections = 6 // null, .text, .note.GNU-stack, .symtab, .strtab, .shstrtab
 	totalSize := shdrOff + uint64(numSections*shdrSize)
 
 	// ── Write ELF header ─────────────────────────────────────────────
@@ -120,8 +151,8 @@ func writeRelocatableELF(path string, textData []byte, syms []symInfo) error {
 	binary.LittleEndian.PutUint16(ehdr[58:], uint16(shdrSize))
 	// e_shnum
 	binary.LittleEndian.PutUint16(ehdr[60:], numSections)
-	// e_shstrndx = 4 (.shstrtab is section index 4)
-	binary.LittleEndian.PutUint16(ehdr[62:], 4)
+	// e_shstrndx = 5 (.shstrtab is section index 5)
+	binary.LittleEndian.PutUint16(ehdr[62:], 5)
 
 	buf.Write(ehdr[:])
 
@@ -159,19 +190,27 @@ func writeRelocatableELF(path string, textData []byte, syms []symInfo) error {
 		Addralign: 64,
 	})
 
-	// Section 2: .symtab
+	// Section 2: .note.GNU-stack (empty, marks stack as non-executable)
+	writeShdr(&buf, elf.Section64{
+		Name: shNoteStack,
+		Type: uint32(elf.SHT_PROGBITS),
+		// No SHF_EXECINSTR → non-executable stack
+		Addralign: 1,
+	})
+
+	// Section 3: .symtab
 	writeShdr(&buf, elf.Section64{
 		Name:      shSymtab,
 		Type:      uint32(elf.SHT_SYMTAB),
 		Off:       symtabOff,
 		Size:      uint64(len(symtabData)),
-		Link:      3, // .strtab section index
-		Info:      1, // index of first global symbol
+		Link:      4,           // .strtab section index
+		Info:      firstGlobal, // index of first global symbol
 		Addralign: 8,
 		Entsize:   symSize,
 	})
 
-	// Section 3: .strtab
+	// Section 4: .strtab
 	writeShdr(&buf, elf.Section64{
 		Name:      shStrtab,
 		Type:      uint32(elf.SHT_STRTAB),
@@ -180,7 +219,7 @@ func writeRelocatableELF(path string, textData []byte, syms []symInfo) error {
 		Addralign: 1,
 	})
 
-	// Section 4: .shstrtab
+	// Section 5: .shstrtab
 	writeShdr(&buf, elf.Section64{
 		Name:      shShstrtab,
 		Type:      uint32(elf.SHT_STRTAB),

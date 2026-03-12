@@ -67,6 +67,45 @@ type benchL1 struct {
 	L2 benchL2 `json:"l2"`
 }
 
+// benchDeep5 — five-level nesting, stresses stack frame overhead.
+type benchD5 struct {
+	V int64 `json:"v"`
+}
+
+type benchD4 struct {
+	D5 benchD5 `json:"d5"`
+	X  int64   `json:"x"`
+}
+
+type benchD3 struct {
+	D4 benchD4 `json:"d4"`
+	Y  string  `json:"y"`
+}
+
+type benchD2 struct {
+	D3 benchD3 `json:"d3"`
+	Z  bool    `json:"z"`
+}
+
+type benchD1 struct {
+	ID int64   `json:"id"`
+	D2 benchD2 `json:"d2"`
+}
+
+// benchMultiNest — struct with multiple nested struct siblings.
+type benchMNInner struct {
+	A int64  `json:"a"`
+	B string `json:"b"`
+}
+
+type benchMultiNest struct {
+	ID int64        `json:"id"`
+	N1 benchMNInner `json:"n1"`
+	N2 benchMNInner `json:"n2"`
+	N3 benchMNInner `json:"n3"`
+	OK bool         `json:"ok"`
+}
+
 // benchWide — 15 fields, all basic types.
 type benchWide struct {
 	F1  string `json:"f1"`
@@ -110,6 +149,26 @@ var (
 			L3:   benchL3{Val: 999, Tag: "deep-value", Flag: false},
 			Seq:  77,
 		},
+	}
+	deep5Val = benchD1{
+		ID: 1,
+		D2: benchD2{
+			D3: benchD3{
+				D4: benchD4{
+					D5: benchD5{V: 42},
+					X:  100,
+				},
+				Y: "deep-five",
+			},
+			Z: true,
+		},
+	}
+	multiNestVal = benchMultiNest{
+		ID: 1,
+		N1: benchMNInner{A: 10, B: "alpha"},
+		N2: benchMNInner{A: 20, B: "bravo"},
+		N3: benchMNInner{A: 30, B: "charlie"},
+		OK: true,
 	}
 	wideVal = benchWide{
 		F1: "alpha", F2: 123456789, F3: "bravo charlie", F4: true, F5: 9876543210,
@@ -224,6 +283,50 @@ func BenchmarkMarshal_Deep_GoOnly(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := marshalGoOnly(&deepVal); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// ================================================================
+// Deep5 (5-level nesting) benchmarks
+// ================================================================
+
+func BenchmarkMarshal_Deep5_Native(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := Marshal(&deep5Val); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkMarshal_Deep5_GoOnly(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := marshalGoOnly(&deep5Val); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// ================================================================
+// MultiNest (3 nested struct siblings) benchmarks
+// ================================================================
+
+func BenchmarkMarshal_MultiNest_Native(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := Marshal(&multiNestVal); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkMarshal_MultiNest_GoOnly(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := marshalGoOnly(&multiNestVal); err != nil {
 			b.Fatal(err)
 		}
 	}

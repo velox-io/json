@@ -47,6 +47,16 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 		return fmt.Errorf("vjson: native encoder not available")
 	}
 
+	// Guard against re-entrant VM calls. This can happen when a cycle-
+	// detected struct falls back to Go encoding which then calls
+	// encodeStruct → encodeStructNative → execVM. Since m.vmCtx is
+	// a single shared context, re-entrant calls would corrupt state.
+	if m.inVM {
+		panic("vjson: re-entrant execVM call (likely circular type fallback bug)")
+	}
+	m.inVM = true
+	defer func() { m.inVM = false }()
+
 	ctx := &m.vmCtx
 	ctx.OpsPtr = unsafe.Pointer(&bp.Ops[0])
 	ctx.PC = 0
@@ -115,10 +125,75 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 				// ctx.EncFlags already has VJ_ENC_RESUME; PC unchanged for retry
 
 			case yieldFallback:
-				if err := m.handleYieldFallback(ctx, bp); err != nil {
-					return err
+				// Hot path: OP_INTERFACE yield (vast majority of fallbacks).
+				// Inline the interface handling to avoid map lookup + function
+				// call overhead in handleYieldFallback.
+				op := bp.Ops[ctx.PC]
+				if op.OpType&opTypeMask == opInterface {
+					isFirst := (uint32(ctx.YieldFieldIdx) & escOpFirstBit) != 0
+					ifacePtr := unsafe.Add(ctx.CurBase, uintptr(op.FieldOff))
+
+					if !isFirst {
+						m.buf = append(m.buf, ',')
+					}
+					if op.KeyLen > 0 {
+						keyBytes := unsafe.Slice((*byte)(op.KeyPtr), op.KeyLen)
+						m.buf = append(m.buf, keyBytes...)
+					}
+
+				// Encode the current interface{} element.
+				if err := m.encodeAnyIface(ifacePtr); err != nil {
+						return err
+					}
+
+					// Batch slice takeover: if this OP_INTERFACE is inside a
+					// []interface{} slice loop, encode the remaining elements
+					// in Go instead of returning to C for each one. This saves
+					// N-1 C↔Go round-trips per slice.
+					//
+					// Guard: only activate when we can verify the parent frame
+					// is a SLICE in the same ops stream (bp.Ops). When the VM
+					// is inside an IFACE-switched ops stream, ctx.PC is relative
+					// to a different Blueprint, so bp.Ops[ctx.PC-1] would be wrong.
+					// The SLICE_BEGIN check catches this safely.
+					const frameSlice = int32(1) // VJ_FRAME_SLICE
+					if ctx.Depth > 0 && ctx.PC > 0 {
+						frame := &ctx.Stack[ctx.Depth-1]
+						if frame.FrameType == frameSlice &&
+							int(ctx.PC-1) < len(bp.Ops) &&
+							bp.Ops[ctx.PC-1].OpType&opTypeMask == opSliceBegin {
+							// Encode remaining slice elements in Go.
+							elemSize := uintptr(frame.ElemSize)
+							count := frame.IterCount
+							for idx := frame.IterIdx + 1; idx < count; idx++ {
+								m.buf = append(m.buf, ',')
+								elemPtr := unsafe.Add(frame.IterData, uintptr(idx)*elemSize)
+								if err := m.encodeAnyIface(elemPtr); err != nil {
+									return err
+								}
+							}
+							// Close the array, pop the slice frame.
+							m.buf = append(m.buf, ']')
+							ctx.Depth--
+							ctx.CurBase = frame.RetBase
+							// PC past SLICE_END: SLICE_BEGIN is at PC-1, body_len
+							// is in its OperandB. SLICE_END = PC + body_len,
+							// past SLICE_END = PC + body_len + 1.
+							bodyLen := bp.Ops[ctx.PC-1].OperandB
+							ctx.PC = ctx.PC + bodyLen + 1
+							ctx.EncFlags = uint32(m.flags) | vjEncResume
+							continue
+						}
+					}
+
+					ctx.PC++
+					ctx.EncFlags = uint32(m.flags) | vjEncResume
+				} else {
+					// Cold path: table-based fallback (custom marshalers, ,string, etc.)
+					if err := m.handleYieldFallback(ctx, bp); err != nil {
+						return err
+					}
 				}
-				// handleYieldFallback advances PC and sets EncFlags
 
 			case yieldMapNext:
 				if err := m.handleMapIteration(ctx, bp); err != nil {
@@ -156,45 +231,46 @@ func (m *Marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 	ti := GetCodec(rtype)
 
 	// Determine tag for primitives or compile Blueprint for complex types.
+	// Tag stored as (opcode + 1) so that tag=0 is unambiguous for "no tag"
+	// (needed because OP_BOOL == 0).
 	var tag uint8
 	var bp *Blueprint
 
 	switch ti.Kind {
 	case KindBool:
-		tag = uint8(opBool)
+		tag = uint8(opBool) + 1
 	case KindInt:
-		tag = uint8(opInt)
+		tag = uint8(opInt) + 1
 	case KindInt8:
-		tag = uint8(opInt8)
+		tag = uint8(opInt8) + 1
 	case KindInt16:
-		tag = uint8(opInt16)
+		tag = uint8(opInt16) + 1
 	case KindInt32:
-		tag = uint8(opInt32)
+		tag = uint8(opInt32) + 1
 	case KindInt64:
-		tag = uint8(opInt64)
+		tag = uint8(opInt64) + 1
 	case KindUint:
-		tag = uint8(opUint)
+		tag = uint8(opUint) + 1
 	case KindUint8:
-		tag = uint8(opUint8)
+		tag = uint8(opUint8) + 1
 	case KindUint16:
-		tag = uint8(opUint16)
+		tag = uint8(opUint16) + 1
 	case KindUint32:
-		tag = uint8(opUint32)
+		tag = uint8(opUint32) + 1
 	case KindUint64:
-		tag = uint8(opUint64)
+		tag = uint8(opUint64) + 1
 	case KindFloat32:
-		tag = uint8(opFloat32)
+		tag = uint8(opFloat32) + 1
 	case KindFloat64:
-		tag = uint8(opFloat64)
+		tag = uint8(opFloat64) + 1
 	case KindString:
-		tag = uint8(opString)
+		tag = uint8(opString) + 1
 	case KindStruct:
 		dec := ti.Codec.(*StructCodec)
 		bp = dec.getBlueprint()
 	case KindSlice:
-		// For slices, compile a standalone Blueprint for the element loop.
-		// TODO: implement per-type standalone Blueprint compilation.
-		// For now, insert with nil ops — C will yield again and Go fallback.
+		sliceDec := ti.Codec.(*SliceCodec)
+		bp = compileStandaloneSliceBlueprint(sliceDec)
 	case KindMap:
 		// Maps are Go-driven — insert with nil ops.
 	default:
@@ -203,6 +279,23 @@ func (m *Marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 
 	insertIfaceCache(typePtr, bp, tag)
 	return nil
+}
+
+// encodeAnyIface encodes an interface{} value from a pointer to the eface.
+// Uses inline fast-path dispatch for the most common JSON types.
+func (m *Marshaler) encodeAnyIface(ifacePtr unsafe.Pointer) error {
+	v := *(*any)(ifacePtr)
+	switch val := v.(type) {
+	case map[string]any:
+		return m.encodeAnyMap(val)
+	case []any:
+		return m.encodeAnySlice(val)
+	case nil:
+		m.buf = append(m.buf, litNull...)
+		return nil
+	default:
+		return m.encodeAny(ifacePtr)
+	}
 }
 
 // handleYieldFallback handles a yield due to custom marshaler, ,string, or
@@ -214,10 +307,7 @@ func (m *Marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 	// Look up fallback info by PC.
 	fb, ok := bp.Fallbacks[int(ctx.PC)]
 	if !ok {
-		// No explicit fallback entry — this happens for OP_INTERFACE and
-		// other instructions that yield to Go without being registered in
-		// the fallback table. Handle by reading the instruction directly.
-		return m.handleInlineFallback(ctx, bp, isFirst)
+		return fmt.Errorf("vjson: native VM yield at PC=%d with no fallback info", ctx.PC)
 	}
 
 	// Compute field pointer from current base + offset.
@@ -267,54 +357,13 @@ func (m *Marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 	return nil
 }
 
-// handleInlineFallback handles yield for instructions not in the fallback table.
-// This covers OP_INTERFACE and other opcodes that yield to Go for encoding.
-func (m *Marshaler) handleInlineFallback(ctx *VjExecCtx, bp *Blueprint, isFirst bool) error {
-	op := bp.Ops[ctx.PC]
-	opCode := op.OpType & opTypeMask
-
-	switch opCode {
-	case opInterface:
-		return m.handleInterfaceYield(ctx, bp, &op, isFirst)
-	default:
-		return fmt.Errorf("vjson: native VM yield at PC=%d (op=%d) with no fallback info", ctx.PC, opCode)
-	}
-}
-
-// handleInterfaceYield handles an interface{} field that C couldn't encode.
-// Go reads the eface from memory, encodes the value, and advances PC.
-func (m *Marshaler) handleInterfaceYield(ctx *VjExecCtx, bp *Blueprint, op *VjOpStep, isFirst bool) error {
-	// Pointer to the interface{} value in memory.
-	ifacePtr := unsafe.Add(ctx.CurBase, uintptr(op.FieldOff))
-
-	// Write comma if not the first field.
-	if !isFirst {
-		m.buf = append(m.buf, ',')
-	}
-
-	// Write key from the instruction's key data.
-	if op.KeyLen > 0 {
-		keyBytes := unsafe.Slice((*byte)(op.KeyPtr), op.KeyLen)
-		m.buf = append(m.buf, keyBytes...)
-	}
-
-	// Encode the interface value using the general-purpose encoder.
-	if err := m.encodeAny(ifacePtr); err != nil {
-		return err
-	}
-
-	// Advance PC past the OP_INTERFACE instruction.
-	ctx.PC++
-
-	// Set resume flags: a field was written, so first=false.
-	ctx.EncFlags = uint32(m.flags) | vjEncResume
-
-	return nil
-}
-
 // handleMapIteration handles the Go-driven map iteration protocol.
 // When C yields at OP_MAP_BEGIN, Go takes over the entire map encoding,
 // then advances PC past OP_MAP_END.
+//
+// For map[string]any, we use encodeAnyMap which has inline fast-paths for
+// common JSON value types (string, float64, bool, nil, []any, map[string]any),
+// avoiding the reflect-based encodeMapGeneric path.
 func (m *Marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 	op := bp.Ops[ctx.PC]
 	opCode := op.OpType & opTypeMask
@@ -345,10 +394,20 @@ func (m *Marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 		return fmt.Errorf("vjson: native VM map at PC=%d (op=%d) with no fallback info", ctx.PC, opCode)
 	}
 
-	// Encode the map using Go's generic encoder.
 	mapDec := fb.TI.Codec.(*MapCodec)
-	if err := m.encodeMap(mapDec, mapPtr); err != nil {
-		return err
+
+	// Fast path for map[string]any: use encodeAnyMap which has inline type
+	// dispatch for common JSON value types, avoiding reflect overhead.
+	if mapDec.ValTI.Kind == KindAny && mapDec.KeyType.Kind() == reflect.String {
+		mp := *(*map[string]any)(mapPtr)
+		if err := m.encodeAnyMap(mp); err != nil {
+			return err
+		}
+	} else {
+		// Generic path for other map types (e.g. map[string]int, map[string]string).
+		if err := m.encodeMap(mapDec, mapPtr); err != nil {
+			return err
+		}
 	}
 
 	// Advance PC past MAP_END: skip MAP_BEGIN + operand_a (distance to MAP_END) + 1 (past MAP_END)

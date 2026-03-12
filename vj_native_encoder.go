@@ -43,7 +43,7 @@ const (
 	opNumber     uint16 = 18 // json.Number — direct string copy
 	opByteSlice  uint16 = 19 // []byte — base64, yield to Go
 
-	// Structural control-flow instructions (32-40).
+	// Structural control-flow instructions (32-42).
 	opSkipIfZero  uint16 = 32 // conditional forward jump (omitempty)
 	opStructBegin uint16 = 33 // push frame, write '{'
 	opStructEnd   uint16 = 34 // write '}', pop frame
@@ -53,6 +53,8 @@ const (
 	opSliceEnd    uint16 = 38 // slice loop end / back-edge
 	opMapBegin    uint16 = 39 // map iteration start (yield-driven)
 	opMapEnd      uint16 = 40 // map iteration end (yield)
+	opObjOpen     uint16 = 41 // write key + '{', set first=1 (no frame push)
+	opObjClose    uint16 = 42 // write '}', set first=0 (no frame pop)
 
 	// Go-only fallback (0x3F).
 	opFallback uint16 = 0x3F // custom marshalers, ,string, complex structs
@@ -271,12 +273,16 @@ var _ [1248]byte = [unsafe.Sizeof(VjExecCtx{})]byte{}
 //
 //	offset  0: TypePtr  pointer (8) — Go *abi.Type address
 //	offset  8: OpsPtr   pointer (8) — &Blueprint.Ops[0], or nil
-//	offset 16: Tag      uint8   (1) — quick tag: opBool..opString, or 0
+//	offset 16: Tag      uint8   (1) — (opcode+1) for primitives, 0 = none
 //	offset 17: _pad     [7]byte (7)
+//
+// Tag encoding: stored as (opcode + 1) so that tag=0 is an unambiguous
+// sentinel for "no primitive tag". OP_BOOL (opcode 0) → tag=1, etc.
+// C subtracts 1 before dispatching to vj_encode_ptr_value.
 type VjIfaceCacheEntry struct {
 	TypePtr unsafe.Pointer // *abi.Type (address-comparable)
 	OpsPtr  unsafe.Pointer // &Blueprint.Ops[0], nil if not compilable by C
-	Tag     uint8          // opBool..opString for primitives, 0 for complex
+	Tag     uint8          // (opcode+1) for primitives, 0 for complex/yield
 	_pad    [7]byte
 }
 
@@ -374,20 +380,21 @@ func initPrimitiveIfaceCache() {
 		t   reflect.Type
 		tag uint8
 	}{
-		{reflect.TypeOf(false), uint8(opBool)},
-		{reflect.TypeOf(int(0)), uint8(opInt)},
-		{reflect.TypeOf(int8(0)), uint8(opInt8)},
-		{reflect.TypeOf(int16(0)), uint8(opInt16)},
-		{reflect.TypeOf(int32(0)), uint8(opInt32)},
-		{reflect.TypeOf(int64(0)), uint8(opInt64)},
-		{reflect.TypeOf(uint(0)), uint8(opUint)},
-		{reflect.TypeOf(uint8(0)), uint8(opUint8)},
-		{reflect.TypeOf(uint16(0)), uint8(opUint16)},
-		{reflect.TypeOf(uint32(0)), uint8(opUint32)},
-		{reflect.TypeOf(uint64(0)), uint8(opUint64)},
-		{reflect.TypeOf(float32(0)), uint8(opFloat32)},
-		{reflect.TypeOf(float64(0)), uint8(opFloat64)},
-		{reflect.TypeOf(""), uint8(opString)},
+		// Tag stored as (opcode + 1) so tag=0 means "no tag".
+		{reflect.TypeOf(false), uint8(opBool) + 1},
+		{reflect.TypeOf(int(0)), uint8(opInt) + 1},
+		{reflect.TypeOf(int8(0)), uint8(opInt8) + 1},
+		{reflect.TypeOf(int16(0)), uint8(opInt16) + 1},
+		{reflect.TypeOf(int32(0)), uint8(opInt32) + 1},
+		{reflect.TypeOf(int64(0)), uint8(opInt64) + 1},
+		{reflect.TypeOf(uint(0)), uint8(opUint) + 1},
+		{reflect.TypeOf(uint8(0)), uint8(opUint8) + 1},
+		{reflect.TypeOf(uint16(0)), uint8(opUint16) + 1},
+		{reflect.TypeOf(uint32(0)), uint8(opUint32) + 1},
+		{reflect.TypeOf(uint64(0)), uint8(opUint64) + 1},
+		{reflect.TypeOf(float32(0)), uint8(opFloat32) + 1},
+		{reflect.TypeOf(float64(0)), uint8(opFloat64) + 1},
+		{reflect.TypeOf(""), uint8(opString) + 1},
 	}
 	table := make([]VjIfaceCacheEntry, len(entries))
 	for i, e := range entries {

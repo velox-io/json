@@ -61,6 +61,7 @@ type Marshaler struct {
 	depth  int
 	flags  escapeFlags
 	vmCtx  VjExecCtx // reusable C VM context (avoids per-call stack zeroing of 1248 bytes)
+	inVM   bool      // true while execVM is active; prevents re-entrant VM calls
 }
 
 var marshalerPool = sync.Pool{
@@ -254,12 +255,24 @@ func bindEncodeFn(ti *TypeInfo) {
 	case KindAny:
 		ti.EncodeFn = encodeAnyValue
 	case KindStruct:
+		if ti.Codec == nil {
+			return // cycle: Codec not yet built; EncodeFn will be bound later
+		}
 		ti.EncodeFn = makeEncodeStruct(ti.Codec.(*StructCodec))
 	case KindSlice:
+		if ti.Codec == nil {
+			return
+		}
 		ti.EncodeFn = makeEncodeSlice(ti.Codec.(*SliceCodec))
 	case KindPointer:
+		if ti.Codec == nil {
+			return
+		}
 		ti.EncodeFn = makeEncodePointer(ti.Codec.(*PointerCodec))
 	case KindMap:
+		if ti.Codec == nil {
+			return
+		}
 		ti.EncodeFn = makeEncodeMap(ti.Codec.(*MapCodec))
 	}
 }
@@ -359,6 +372,12 @@ func computeHintBytes(ti *TypeInfo, depth int) int {
 		return 32 // prevent unbounded recursion for deeply nested/recursive types
 	}
 	if ti.Flags&tiFlagHasMarshalFn != 0 || ti.Flags&tiFlagHasTextMarshalFn != 0 {
+		return 64
+	}
+	// During codec construction, Codec may be nil for types involved in
+	// pointer cycles (getCodecForCycle returns a partially-initialized TypeInfo).
+	// Return a conservative estimate in that case.
+	if ti.Codec == nil {
 		return 64
 	}
 	switch ti.Kind {
@@ -709,6 +728,13 @@ func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
 	// Indent mode: use Go implementation
 	if m.indent != "" {
 		return m.encodeStructIndent(dec, base)
+	}
+
+	// If we're inside a VM yield handler (e.g. cycle-detected struct fallback),
+	// use the Go path to avoid re-entrant execVM calls that would corrupt the
+	// single shared VjExecCtx.
+	if m.inVM {
+		return m.encodeStructGo(dec, base)
 	}
 
 	// Native VM path: flat linear instruction stream with yield protocol.
@@ -1128,9 +1154,37 @@ func (m *Marshaler) encodeAnyMap(mp map[string]any) error {
 			m.buf = append(m.buf, ':')
 		}
 
-		vv := v
-		if err := m.encodeAny(unsafe.Pointer(&vv)); err != nil {
-			return err
+		// Inline fast-path for the most common JSON value types.
+		// Avoids the encodeAny dispatch + unsafe.Pointer indirection.
+		switch val := v.(type) {
+		case string:
+			m.encodeString(val)
+		case float64:
+			if math.IsNaN(val) || math.IsInf(val, 0) {
+				return &UnsupportedValueError{Str: strconv.FormatFloat(val, 'f', -1, 64)}
+			}
+			m.buf = strconv.AppendFloat(m.buf, val, 'f', -1, 64)
+		case bool:
+			if val {
+				m.buf = append(m.buf, litTrue...)
+			} else {
+				m.buf = append(m.buf, litFalse...)
+			}
+		case nil:
+			m.buf = append(m.buf, litNull...)
+		case []any:
+			if err := m.encodeAnySlice(val); err != nil {
+				return err
+			}
+		case map[string]any:
+			if err := m.encodeAnyMap(val); err != nil {
+				return err
+			}
+		default:
+			vv := v
+			if err := m.encodeAny(unsafe.Pointer(&vv)); err != nil {
+				return err
+			}
 		}
 	}
 

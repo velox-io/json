@@ -1,6 +1,7 @@
 package vjson
 
 import (
+	"reflect"
 	"unsafe"
 )
 
@@ -23,6 +24,14 @@ type blueprintBuilder struct {
 	ops       []VjOpStep
 	keyPool   []byte
 	fallbacks map[int]*fbInfo // PC index → fallback info
+
+	// visiting tracks struct types currently being compiled along the
+	// recursive call chain (through pointers). This prevents infinite
+	// recursion when two struct types form a cycle via pointer fields
+	// (e.g. type A struct { B *B }; type B struct { A *A }).
+	// When a cycle is detected, an OP_FALLBACK is emitted instead of
+	// inlining the struct body, deferring to the Go encoder.
+	visiting map[reflect.Type]bool
 }
 
 // emit appends an instruction and returns its index.
@@ -61,7 +70,11 @@ type keyFixup struct {
 func compileBlueprint(dec *StructCodec) *Blueprint {
 	var b blueprintBuilder
 	b.fallbacks = make(map[int]*fbInfo)
+	b.visiting = make(map[reflect.Type]bool)
 	var fixups []keyFixup
+
+	// Mark top-level struct as visiting to detect cycles.
+	b.visiting[dec.Typ] = true
 
 	// Emit top-level struct as STRUCT_BEGIN + body + STRUCT_END.
 	beginIdx := b.emit(VjOpStep{
@@ -81,13 +94,39 @@ func compileBlueprint(dec *StructCodec) *Blueprint {
 	b.emit(VjOpStep{OpType: opEnd})
 
 	// Fix up key pointers
+	applyKeyFixups(&b, fixups)
+
+	return &Blueprint{
+		Ops:       b.ops,
+		KeyPool:   b.keyPool,
+		Fallbacks: b.fallbacks,
+	}
+}
+
+// applyKeyFixups resolves key pool offsets into real pointers.
+func applyKeyFixups(b *blueprintBuilder, fixups []keyFixup) {
 	if len(b.keyPool) > 0 {
 		poolBase := unsafe.Pointer(&b.keyPool[0])
 		for _, f := range fixups {
 			b.ops[f.opIdx].KeyPtr = unsafe.Add(poolBase, f.poolOffset)
 		}
 	}
+}
 
+// compileStandaloneSliceBlueprint builds a Blueprint for encoding a slice
+// whose type was discovered at runtime (e.g. inside an interface{}).
+// The ops encode: SLICE_BEGIN + element body + SLICE_END + END.
+// The VM's base register must point to the GoSlice header on entry.
+func compileStandaloneSliceBlueprint(dec *SliceCodec) *Blueprint {
+	var b blueprintBuilder
+	b.fallbacks = make(map[int]*fbInfo)
+	b.visiting = make(map[reflect.Type]bool)
+	var fixups []keyFixup
+
+	emitSliceInner(&b, &fixups, 0, dec)
+	b.emit(VjOpStep{OpType: opEnd})
+
+	applyKeyFixups(&b, fixups)
 	return &Blueprint{
 		Ops:       b.ops,
 		KeyPool:   b.keyPool,
@@ -210,30 +249,44 @@ func emitPrimitive(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fieldO
 	}
 }
 
-// emitNestedStruct emits STRUCT_BEGIN + body + STRUCT_END for a nested struct.
+// emitNestedStruct emits OBJ_OPEN + body + OBJ_CLOSE for a nested struct.
+// Uses frameless flat encoding: child field offsets are computed at compile
+// time (baseOff = parent field offset), so the VM doesn't need to push a
+// stack frame or switch the base register.
 func emitNestedStruct(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fieldOff uintptr, subDec *StructCodec) {
 	poolOff, keyLen := b.addKey(fi.Ext.KeyBytes)
 
-	// STRUCT_BEGIN: operand_a will be patched to the distance to STRUCT_END
-	beginIdx := b.emit(VjOpStep{
-		OpType:   opStructBegin,
-		KeyLen:   keyLen,
-		FieldOff: uint32(fieldOff),
+	// OBJ_OPEN: lightweight '{' with key, no frame push
+	openIdx := b.emit(VjOpStep{
+		OpType: opObjOpen,
+		KeyLen: keyLen,
+		// FieldOff unused by OBJ_OPEN (no base switch)
 	})
 	if keyLen > 0 {
-		*fixups = append(*fixups, keyFixup{opIdx: beginIdx, poolOffset: poolOff})
+		*fixups = append(*fixups, keyFixup{opIdx: openIdx, poolOffset: poolOff})
 	}
 
-	// Emit child fields (with offset 0 — base will be switched by STRUCT_BEGIN)
-	emitStructBody(b, fixups, subDec, 0)
+	// Mark this struct type as visiting to detect cycles through pointers.
+	// For example: type A struct { B B }; type B struct { Back *B }
+	// Without this mark, *B → B → *B → B → ... would recurse forever.
+	wasVisiting := b.visiting[subDec.Typ]
+	b.visiting[subDec.Typ] = true
 
-	// STRUCT_END
+	// Emit child fields with accumulated offset (baseOff = fieldOff).
+	// Since OBJ_OPEN doesn't switch base, child field offsets must be
+	// absolute from the top-level struct.
+	emitStructBody(b, fixups, subDec, fieldOff)
+
+	// Restore previous visiting state (don't unconditionally delete —
+	// the type might have been visiting from an outer scope).
+	if !wasVisiting {
+		delete(b.visiting, subDec.Typ)
+	}
+
+	// OBJ_CLOSE: lightweight '}'
 	b.emit(VjOpStep{
-		OpType: opStructEnd,
+		OpType: opObjClose,
 	})
-
-	// Patch STRUCT_BEGIN's operand_a: distance from STRUCT_BEGIN to STRUCT_END (inclusive)
-	b.ops[beginIdx].OperandA = int32(b.pc() - beginIdx - 1)
 }
 
 // emitPointer emits PTR_DEREF + the dereferenced type's instructions.
@@ -294,6 +347,20 @@ func emitDerefBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) {
 
 	case KindStruct:
 		subDec := elemTI.Codec.(*StructCodec)
+		// Cycle detection: if this struct type is already being compiled
+		// along the current call chain, emit a fallback to avoid infinite
+		// recursion. The Go encoder will handle the recursive type at runtime.
+		if b.visiting[subDec.Typ] {
+			idx := b.emit(VjOpStep{
+				OpType: opFallback,
+			})
+			b.fallbacks[idx] = &fbInfo{
+				TI:     elemTI,
+				Offset: 0,
+			}
+			return
+		}
+		b.visiting[subDec.Typ] = true
 		// Inline the struct with STRUCT_BEGIN/END (keyless, off=0)
 		beginIdx := b.emit(VjOpStep{
 			OpType:   opStructBegin,
@@ -304,6 +371,7 @@ func emitDerefBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) {
 			OpType: opStructEnd,
 		})
 		b.ops[beginIdx].OperandA = int32(b.pc() - beginIdx - 1)
+		delete(b.visiting, subDec.Typ)
 
 	case KindSlice:
 		sliceDec := elemTI.Codec.(*SliceCodec)
@@ -415,6 +483,16 @@ func emitElementBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) 
 
 	case KindStruct:
 		subDec := elemTI.Codec.(*StructCodec)
+		// Cycle detection (same as emitDerefBody).
+		if b.visiting[subDec.Typ] {
+			idx := b.emit(VjOpStep{OpType: opFallback})
+			b.fallbacks[idx] = &fbInfo{
+				TI:     elemTI,
+				Offset: 0,
+			}
+			return
+		}
+		b.visiting[subDec.Typ] = true
 		beginIdx := b.emit(VjOpStep{
 			OpType:   opStructBegin,
 			FieldOff: 0,
@@ -422,6 +500,7 @@ func emitElementBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) 
 		emitStructBody(b, fixups, subDec, 0)
 		b.emit(VjOpStep{OpType: opStructEnd})
 		b.ops[beginIdx].OperandA = int32(b.pc() - beginIdx - 1)
+		delete(b.visiting, subDec.Typ)
 
 	case KindPointer:
 		pDec := elemTI.Codec.(*PointerCodec)

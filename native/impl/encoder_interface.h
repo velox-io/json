@@ -29,11 +29,12 @@ enum VjIfaceAction {
   VJ_IFACE_NAN_INF    = 5,  /* float NaN/Inf encountered */
 };
 
-/* Result struct — returned by value (fits in 2-3 registers on arm64/x86_64). */
+/* Result struct — returned by value (fits in 3-4 registers on arm64/x86_64). */
 typedef struct {
   uint8_t         *buf;        /* advanced buffer pointer (valid when action=DONE) */
   const VjOpStep  *cached_ops; /* Blueprint ops (valid when action=SWITCH_OPS) */
   const void      *type_ptr;   /* eface.type_ptr (valid when action=CACHE_MISS) */
+  const uint8_t   *data_ptr;   /* eface.data_ptr (valid when action=SWITCH_OPS) */
   int32_t          action;     /* VjIfaceAction */
 } VjIfaceResult;
 
@@ -95,27 +96,30 @@ vj_encode_interface_value(
 
   /* Not in cache → yield to Go for compilation */
   if (__builtin_expect(!found, 0)) {
-    return (VjIfaceResult){buf, NULL, type_ptr, VJ_IFACE_CACHE_MISS};
+    return (VjIfaceResult){buf, NULL, type_ptr, NULL, VJ_IFACE_CACHE_MISS};
   }
 
-  /* Found but not compilable by C (tag=0, ops=NULL) → yield fallback */
+  /* Found but not compilable by C (tag=0, ops=NULL) → yield fallback.
+   * Tag is stored as (opcode + 1) so that tag=0 is unambiguous for
+   * "no primitive tag" (needed because OP_BOOL == 0). */
   if (tag == 0 && cached_ops == NULL) {
-    return (VjIfaceResult){buf, NULL, NULL, VJ_IFACE_YIELD};
+    return (VjIfaceResult){buf, NULL, NULL, NULL, VJ_IFACE_YIELD};
   }
 
   /* ---- Primitive type (tag != 0) → encode inline ---- */
   if (tag != 0) {
-    VjPtrEncResult r = vj_encode_ptr_value(buf, bend, data_ptr, tag, flags);
+    /* Subtract 1 to recover the actual opcode (tag was stored as opcode+1). */
+    VjPtrEncResult r = vj_encode_ptr_value(buf, bend, data_ptr, tag - 1, flags);
     if (__builtin_expect(r.buf == NULL, 0)) {
       if (r.error == VJ_ERR_NAN_INF)
-        return (VjIfaceResult){NULL, NULL, NULL, VJ_IFACE_NAN_INF};
-      return (VjIfaceResult){NULL, NULL, NULL, VJ_IFACE_BUF_FULL};
+        return (VjIfaceResult){NULL, NULL, NULL, NULL, VJ_IFACE_NAN_INF};
+      return (VjIfaceResult){NULL, NULL, NULL, NULL, VJ_IFACE_BUF_FULL};
     }
-    return (VjIfaceResult){r.buf, NULL, NULL, VJ_IFACE_DONE};
+    return (VjIfaceResult){r.buf, NULL, NULL, NULL, VJ_IFACE_DONE};
   }
 
   /* ---- Cached Blueprint (ops != NULL) → caller pushes frame ---- */
-  return (VjIfaceResult){buf, cached_ops, type_ptr, VJ_IFACE_SWITCH_OPS};
+  return (VjIfaceResult){buf, cached_ops, type_ptr, data_ptr, VJ_IFACE_SWITCH_OPS};
 }
 
 #endif /* VJ_ENCODER_INTERFACE_H */

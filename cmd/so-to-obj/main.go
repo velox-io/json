@@ -141,6 +141,18 @@ func main() {
 		fatalf("empty .text section in input")
 	}
 	if len(syms) == 0 {
+		fatalf("no function symbols found in .text section")
+	}
+
+	// Verify at least one global symbol exists
+	hasGlobal := false
+	for _, s := range syms {
+		if !s.Local {
+			hasGlobal = true
+			break
+		}
+	}
+	if !hasGlobal {
 		fatalf("no global function symbols found in .text section")
 	}
 
@@ -162,15 +174,21 @@ func main() {
 	}
 }
 
-// symInfo holds a global function symbol's name and offset within .text.
+// symInfo holds a function symbol's name, offset, size, and binding within .text.
 type symInfo struct {
 	Name   string
 	Offset uint64
+	Size   uint64
+	Local  bool // true for STB_LOCAL, false for STB_GLOBAL
 }
 
 // extractFromSO reads the shared object and returns the .text section
-// bytes and the list of global function symbols with their section-relative
-// offsets.
+// bytes and the list of function symbols (both local and global) with their
+// section-relative offsets.
+//
+// Local function symbols are included because Go's internal linker requires
+// all code regions in .text to be covered by function symbols (otherwise it
+// reports "hole in findfunctab").
 func extractFromSO(path string) ([]byte, []symInfo, error) {
 	f, err := elf.Open(path)
 	if err != nil {
@@ -199,11 +217,14 @@ func extractFromSO(path string) ([]byte, []symInfo, error) {
 
 	var syms []symInfo
 	for _, s := range symbols {
-		// Filter: global function symbols in .text section
-		if elf.ST_BIND(s.Info) != elf.STB_GLOBAL {
+		bind := elf.ST_BIND(s.Info)
+		if bind != elf.STB_GLOBAL && bind != elf.STB_LOCAL {
 			continue
 		}
 		if elf.ST_TYPE(s.Info) != elf.STT_FUNC {
+			continue
+		}
+		if s.Size == 0 {
 			continue
 		}
 		// Verify the symbol belongs to .text section
@@ -219,7 +240,12 @@ func extractFromSO(path string) ([]byte, []symInfo, error) {
 		}
 
 		offset := s.Value - textAddr
-		syms = append(syms, symInfo{Name: s.Name, Offset: offset})
+		syms = append(syms, symInfo{
+			Name:   s.Name,
+			Offset: offset,
+			Size:   s.Size,
+			Local:  bind == elf.STB_LOCAL,
+		})
 	}
 
 	return textData, syms, nil
