@@ -1,5 +1,12 @@
 package vjson
 
+// pow10f64 contains exact powers of 10 representable as float64 (10^0 through 10^22).
+var pow10f64 = [...]float64{
+	1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9,
+	1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19,
+	1e20, 1e21, 1e22,
+}
+
 // Eisel-Lemire power-of-10 table for float64 parsing.
 // 128-bit mantissas scaled so the high bit is always set.
 // Ported from Go's internal/strconv/pow10tab.go.

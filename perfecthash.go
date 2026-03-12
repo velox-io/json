@@ -26,14 +26,6 @@ type bitmapLookup8 struct {
 	lenMask   []uint8 // lenMask[len] = bitmask of fields with this length; size = maxKeyLen+1
 }
 
-// sliceGet performs an unchecked index into a slice.
-// The caller must guarantee i is in bounds.
-//
-//go:nosplit
-func sliceGet[T any](s []T, i int) T {
-	return *(*T)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(s)), uintptr(i)*unsafe.Sizeof(s[0])))
-}
-
 func (b *bitmapLookup8) lookup(dec *StructCodec, key string) *TypeInfo {
 	klen := len(key)
 	if klen == 0 || klen > int(b.maxKeyLen) {
@@ -42,13 +34,13 @@ func (b *bitmapLookup8) lookup(dec *StructCodec, key string) *TypeInfo {
 	bitmap := b.bitmap
 	lenMask := b.lenMask
 	cur := uint8(0xFF)
-	for i := 0; i < klen; i++ {
-		cur &= sliceGet(bitmap, i*256+int(key[i]))
+	for i := range klen {
+		cur &= sliceAt(bitmap, i*256+int(key[i]))
 		if cur == 0 {
 			return nil
 		}
 	}
-	cur &= sliceGet(lenMask, klen)
+	cur &= sliceAt(lenMask, klen)
 	if cur == 0 {
 		return nil
 	}
@@ -72,7 +64,7 @@ func buildBitmapLookup8(dec *StructCodec) *bitmapLookup8 {
 		lenMask:   make([]uint8, maxLen+1),
 	}
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		name := dec.Fields[i].JSONName
 		bit := uint8(1) << i
 		for j := 0; j < len(name); j++ {
@@ -97,6 +89,7 @@ func (b *perfectHashBase) lookupByHash(dec *StructCodec, key string, h uint64) *
 	if idx == 0xFF {
 		return nil
 	}
+	// fi := &dec.Fields[idx]
 	fi := &dec.Fields[idx]
 	if fi.JSONName == key {
 		return fi

@@ -8,6 +8,7 @@ package vjson
 // pressure on the hot unmarshal path. See docs/perf-regression-analysis.md.
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -65,7 +66,7 @@ func (sc *Parser) scanValueSpecial(src []byte, idx int, ti *TypeInfo, ptr unsafe
 	if idx >= len(src) {
 		return idx, errUnexpectedEOF
 	}
-	switch src[idx] {
+	switch sliceAt(src, idx) {
 	case '"':
 		if ti.Flags&tiFlagHasTextUnmarshalFn != 0 {
 			newIdx, s, err := sc.scanString(src, idx)
@@ -169,10 +170,11 @@ func (sc *Parser) scanValueSpecial(src []byte, idx int, ti *TypeInfo, ptr unsafe
 			// null leaves the existing value unchanged, matching encoding/json.
 		}
 		return idx + 4, nil
+	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-':
+		// if (src[idx] >= '0' && src[idx] <= '9') || src[idx] == '-' {
+		return sc.scanNumber(src, idx, ti, ptr)
+		// }
 	default:
-		if (src[idx] >= '0' && src[idx] <= '9') || src[idx] == '-' {
-			return sc.scanNumber(src, idx, ti, ptr)
-		}
 		return idx, newSyntaxError(fmt.Sprintf("vjson: unexpected character %q at offset %d", src[idx], idx), idx)
 	}
 }
@@ -231,7 +233,8 @@ func (sc *Parser) scanQuotedValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 		*(*float32)(ptr) = float32(v)
 
 	case KindFloat64:
-		v, parseErr := strconv.ParseFloat(inner, 64)
+		innerBytes := unsafe.Slice(unsafe.StringData(inner), len(inner))
+		_, v, parseErr := scanFloat64(innerBytes, 0)
 		if parseErr != nil {
 			return newIdx, newSyntaxErrorWrap(fmt.Sprintf("vjson: cannot unmarshal string %q into float64: %v", inner, parseErr), newIdx, parseErr)
 		}
@@ -289,13 +292,15 @@ func (sc *Parser) scanPointerQuoted(src []byte, idx int, ti *TypeInfo, ptr unsaf
 			elemPtr = sc.ptrAlloc(pDec.ElemRType, pDec.ElemSize)
 		} else {
 			backing := make([]byte, pDec.ElemSize)
-			elemPtr = unsafe.Pointer(&backing[0])
+			// elemPtr = unsafe.Pointer(&backing[0])
+			elemPtr = slicePtr(backing)
 		}
 	}
 
 	// Shallow copy to propagate Quoted flag to the element.
 	elemTI := *pDec.ElemTI
 	elemTI.Flags |= tiFlagQuoted
+	elemTI.UFlags |= tiFlagQuoted
 	newIdx, err := sc.scanValue(src, idx, &elemTI, elemPtr)
 	if err != nil {
 		return newIdx, err
@@ -305,33 +310,51 @@ func (sc *Parser) scanPointerQuoted(src []byte, idx int, ti *TypeInfo, ptr unsaf
 	return newIdx, nil
 }
 
-// resolveMapKeyValue converts a JSON string key to a reflect.Value of the given key type.
-func resolveMapKeyValue(keyStr string, keyType reflect.Type, keyTI *TypeInfo) (reflect.Value, error) {
-	if keyType.Kind() == reflect.String {
-		return reflect.ValueOf(keyStr).Convert(keyType), nil
-	}
+// resolveMapKey parses a JSON string key and writes the typed key value into keyPtr.
+// keyPtr must point to zeroed memory of at least keyType.Size() bytes.
+// Used by scanMap to avoid reflect.Value allocation for non-string-key maps.
+func resolveMapKey(keyStr string, keyType reflect.Type, keyTI *TypeInfo, keyPtr unsafe.Pointer) error {
 	if keyTI.Flags&tiFlagHasTextUnmarshalFn != 0 {
-		kv := reflect.New(keyType)
-		if err := keyTI.Ext.TextUnmarshalFn(kv.UnsafePointer(), []byte(keyStr)); err != nil {
-			return reflect.Value{}, err
-		}
-		return kv.Elem(), nil
+		return keyTI.Ext.TextUnmarshalFn(keyPtr, []byte(keyStr))
 	}
 	switch keyType.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		n, err := strconv.ParseInt(keyStr, 10, int(keyType.Size()*8))
 		if err != nil {
-			return reflect.Value{}, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid map key %q: %v", keyStr, err), 0, err)
+			return newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid map key %q: %v", keyStr, err), 0, err)
 		}
-		return reflect.ValueOf(n).Convert(keyType), nil
+		switch keyType.Size() {
+		case 1:
+			*(*int8)(keyPtr) = int8(n)
+		case 2:
+			*(*int16)(keyPtr) = int16(n)
+		case 4:
+			*(*int32)(keyPtr) = int32(n)
+		case 8:
+			*(*int64)(keyPtr) = n
+		}
+		return nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		n, err := strconv.ParseUint(keyStr, 10, int(keyType.Size()*8))
 		if err != nil {
-			return reflect.Value{}, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid map key %q: %v", keyStr, err), 0, err)
+			return newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid map key %q: %v", keyStr, err), 0, err)
 		}
-		return reflect.ValueOf(n).Convert(keyType), nil
+		switch keyType.Size() {
+		case 1:
+			*(*uint8)(keyPtr) = uint8(n)
+		case 2:
+			*(*uint16)(keyPtr) = uint16(n)
+		case 4:
+			*(*uint32)(keyPtr) = uint32(n)
+		case 8:
+			*(*uint64)(keyPtr) = n
+		}
+		return nil
+	case reflect.String:
+		*(*string)(keyPtr) = keyStr
+		return nil
 	}
-	return reflect.Value{}, newSyntaxError(fmt.Sprintf("vjson: unsupported map key type: %v", keyType), 0)
+	return newSyntaxError(fmt.Sprintf("vjson: unsupported map key type: %v", keyType), 0)
 }
 
 // scanNumberToString handles a json.Number field: stores the raw number text
@@ -367,5 +390,130 @@ func (sc *Parser) scanNumberToString(src []byte, idx int, ptr unsafe.Pointer) (i
 		}
 		*(*string)(ptr) = string(src[idx:end])
 		return end, nil
+	}
+}
+
+// scanStruct is the cold-path struct decoder, used only when scanValueSpecial
+// dispatches to it (e.g. a struct type that also implements TextUnmarshaler
+// but receives a JSON object instead of a string). The hot-path struct
+// decoding is inlined directly in scanValue (vj_parser.go).
+func (sc *Parser) scanStruct(src []byte, idx int, dec *StructCodec, base unsafe.Pointer) (int, error) {
+	idx++
+	idx = skipWSLong(src, idx)
+	if idx >= len(src) {
+		return idx, errUnexpectedEOF
+	}
+	if sliceAt(src, idx) == '}' {
+		return idx + 1, nil
+	}
+
+	var firstErr error
+
+	for {
+		if idx >= len(src) {
+			return idx, errUnexpectedEOF
+		}
+		if sliceAt(src, idx) != '"' {
+			return idx, newSyntaxError("vjson: syntax error", idx)
+		}
+		var keyBytes []byte
+		var err error
+		idx, keyBytes, err = sc.scanStringKey(src, idx)
+		if err != nil {
+			return idx, err
+		}
+
+		idx = skipWS(src, idx)
+		if idx >= len(src) {
+			return idx, errUnexpectedEOF
+		}
+		if sliceAt(src, idx) != ':' {
+			return idx, newSyntaxError("vjson: syntax error", idx)
+		}
+		idx++
+		idx = skipWS(src, idx)
+
+		fi := dec.LookupFieldBytes(keyBytes)
+		if fi == nil {
+			// Unknown field — skip value
+			idx, err = skipValue(src, idx)
+			if err != nil {
+				return idx, err
+			}
+		} else {
+			savedIdx := idx
+			fieldPtr := unsafe.Add(base, fi.Offset)
+			idx, err = sc.scanValue(src, idx, fi, fieldPtr)
+			if err != nil {
+				var ute *UnmarshalTypeError
+				if !errors.As(err, &ute) {
+					return idx, err // syntax error → abort
+				}
+				// Type mismatch: skip the value and continue.
+				if idx == savedIdx {
+					// Object/array mismatch: scanValue didn't consume the value.
+					idx, err = skipValue(src, idx)
+					if err != nil {
+						return idx, err
+					}
+				}
+				if firstErr == nil {
+					firstErr = ute
+				}
+			}
+		}
+
+		if idx >= len(src) {
+			return idx, errUnexpectedEOF
+		}
+		c := sliceAt(src, idx)
+		if c == ',' {
+			idx++
+			if idx >= len(src) {
+				return idx, errUnexpectedEOF
+			}
+			if sliceAt(src, idx) == '"' {
+				continue
+			}
+			idx = skipWSLong(src, idx)
+			if idx >= len(src) {
+				return idx, errUnexpectedEOF
+			}
+			if sliceAt(src, idx) != '"' {
+				return idx, newSyntaxError("vjson: syntax error", idx)
+			}
+			continue
+		}
+		if c == '}' {
+			return idx + 1, firstErr
+		}
+		if wsLUT[c] != 0 {
+			idx = skipWSLong(src, idx)
+			if idx >= len(src) {
+				return idx, errUnexpectedEOF
+			}
+			c = sliceAt(src, idx)
+			if c == ',' {
+				idx++
+				if idx >= len(src) {
+					return idx, errUnexpectedEOF
+				}
+				if sliceAt(src, idx) == '"' {
+					continue
+				}
+				idx = skipWSLong(src, idx)
+				if idx >= len(src) {
+					return idx, errUnexpectedEOF
+				}
+				if sliceAt(src, idx) != '"' {
+					return idx, newSyntaxError("vjson: syntax error", idx)
+				}
+				continue
+			}
+			if c == '}' {
+				return idx + 1, firstErr
+			}
+		}
+		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in object, got %q", src[idx]), idx)
 	}
 }

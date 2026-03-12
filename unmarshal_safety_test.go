@@ -26,10 +26,6 @@ type SafetyInner struct {
 	Label string `json:"label"`
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 // safetyInput returns a JSON byte slice and expected SafetyItem for index i.
 // Escaped strings force the arena path; plain strings exercise zero-copy.
 func safetyInput(i int) ([]byte, SafetyItem) {
@@ -49,41 +45,6 @@ func safetyInput(i int) ([]byte, SafetyItem) {
 	return []byte(json), want
 }
 
-//nolint:unused
-func verifySafetyItem(t *testing.T, prefix string, got, want SafetyItem) {
-	t.Helper()
-	if got.Name != want.Name {
-		t.Errorf("%s Name = %q, want %q", prefix, got.Name, want.Name)
-	}
-	if got.Value != want.Value {
-		t.Errorf("%s Value = %v, want %v", prefix, got.Value, want.Value)
-	}
-	if len(got.Tags) != len(want.Tags) {
-		t.Errorf("%s Tags len = %d, want %d", prefix, len(got.Tags), len(want.Tags))
-	} else {
-		for j := range want.Tags {
-			if got.Tags[j] != want.Tags[j] {
-				t.Errorf("%s Tags[%d] = %q, want %q", prefix, j, got.Tags[j], want.Tags[j])
-			}
-		}
-	}
-	if got.Inner == nil {
-		t.Errorf("%s Inner is nil", prefix)
-	} else {
-		if got.Inner.ID != want.Inner.ID {
-			t.Errorf("%s Inner.ID = %d, want %d", prefix, got.Inner.ID, want.Inner.ID)
-		}
-		if got.Inner.Label != want.Inner.Label {
-			t.Errorf("%s Inner.Label = %q, want %q", prefix, got.Inner.Label, want.Inner.Label)
-		}
-	}
-	for k, wv := range want.Meta {
-		if gv, ok := got.Meta[k]; !ok || gv != wv {
-			t.Errorf("%s Meta[%q] = %q, want %q", prefix, k, gv, wv)
-		}
-	}
-}
-
 // ---------------------------------------------------------------------------
 // 1. TestConcurrentUnmarshal — pool data race detection
 // ---------------------------------------------------------------------------
@@ -96,11 +57,11 @@ func TestConcurrentUnmarshal(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, numG)
 
-	for g := 0; g < numG; g++ {
+	for g := range numG {
 		wg.Add(1)
 		go func(gid int) {
 			defer wg.Done()
-			for i := 0; i < itersPerG; i++ {
+			for i := range itersPerG {
 				idx := gid*itersPerG + i
 				data, want := safetyInput(idx)
 				var got SafetyItem
@@ -152,11 +113,11 @@ func TestConcurrentUnmarshal_GCStress(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, numG)
 
-	for g := 0; g < numG; g++ {
+	for g := range numG {
 		wg.Add(1)
 		go func(gid int) {
 			defer wg.Done()
-			for i := 0; i < itersPerG; i++ {
+			for i := range itersPerG {
 				idx := gid*itersPerG + i
 				data, want := safetyInput(idx)
 				var got SafetyItem
@@ -214,7 +175,7 @@ func TestArenaStringsSurviveGC(t *testing.T) {
 	}
 
 	// Hammer GC — if arena memory is incorrectly collected, strings will corrupt.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		runtime.GC()
 	}
 
@@ -244,7 +205,7 @@ func TestZeroCopyStringsSurviveGC(t *testing.T) {
 	}
 
 	// Keep input alive (don't zero it) — verify string survives GC.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		runtime.GC()
 	}
 
@@ -266,8 +227,8 @@ func TestPointerFieldAllocation_GCStress(t *testing.T) {
 	}
 
 	results := make([]Item, N)
-	for i := 0; i < N; i++ {
-		data := []byte(fmt.Sprintf(`{"inner":{"id":%d,"label":"L%d"}}`, i, i))
+	for i := range N {
+		data := fmt.Appendf(nil, `{"inner":{"id":%d,"label":"L%d"}}`, i, i)
 		if err := Unmarshal(data, &results[i]); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
 		}
@@ -281,7 +242,7 @@ func TestPointerFieldAllocation_GCStress(t *testing.T) {
 	runtime.GC()
 	runtime.GC()
 
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if results[i].Inner == nil {
 			t.Fatalf("iter %d: Inner is nil after GC", i)
 		}
@@ -306,10 +267,8 @@ func TestConcurrentUnmarshal_DiverseTypes(t *testing.T) {
 	errs := make(chan error, 5)
 
 	// Goroutine 1: struct target
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < iters; i++ {
+	wg.Go(func() {
+		for i := range iters {
 			data, want := safetyInput(i)
 			var got SafetyItem
 			if err := Unmarshal(data, &got); err != nil {
@@ -321,14 +280,12 @@ func TestConcurrentUnmarshal_DiverseTypes(t *testing.T) {
 				return
 			}
 		}
-	}()
+	})
 
 	// Goroutine 2: any target
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < iters; i++ {
-			data := []byte(fmt.Sprintf(`{"key":"val-%d\nesc"}`, i))
+	wg.Go(func() {
+		for i := range iters {
+			data := fmt.Appendf(nil, `{"key":"val-%d\nesc"}`, i)
 			var got any
 			if err := Unmarshal(data, &got); err != nil {
 				errs <- fmt.Errorf("any: %w", err)
@@ -345,14 +302,12 @@ func TestConcurrentUnmarshal_DiverseTypes(t *testing.T) {
 				return
 			}
 		}
-	}()
+	})
 
 	// Goroutine 3: map[string]string target
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < iters; i++ {
-			data := []byte(fmt.Sprintf(`{"a":"x%d","b":"y%d\ttab"}`, i, i))
+	wg.Go(func() {
+		for i := range iters {
+			data := fmt.Appendf(nil, `{"a":"x%d","b":"y%d\ttab"}`, i, i)
 			var got map[string]string
 			if err := Unmarshal(data, &got); err != nil {
 				errs <- fmt.Errorf("map: %w", err)
@@ -365,14 +320,12 @@ func TestConcurrentUnmarshal_DiverseTypes(t *testing.T) {
 				return
 			}
 		}
-	}()
+	})
 
 	// Goroutine 4: []any target
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < iters; i++ {
-			data := []byte(fmt.Sprintf(`[%d,"s%d\n",true]`, i, i))
+	wg.Go(func() {
+		for i := range iters {
+			data := fmt.Appendf(nil, `[%d,"s%d\n",true]`, i, i)
 			var got []any
 			if err := Unmarshal(data, &got); err != nil {
 				errs <- fmt.Errorf("slice: %w", err)
@@ -383,17 +336,15 @@ func TestConcurrentUnmarshal_DiverseTypes(t *testing.T) {
 				return
 			}
 		}
-	}()
+	})
 
 	// Goroutine 5: nested slice of structs
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		type List struct {
 			Items []SafetyInner `json:"items"`
 		}
-		for i := 0; i < iters; i++ {
-			data := []byte(fmt.Sprintf(`{"items":[{"id":%d,"label":"L%d"},{"id":%d,"label":"M%d"}]}`, i, i, i+1, i+1))
+		for i := range iters {
+			data := fmt.Appendf(nil, `{"items":[{"id":%d,"label":"L%d"},{"id":%d,"label":"M%d"}]}`, i, i, i+1, i+1)
 			var got List
 			if err := Unmarshal(data, &got); err != nil {
 				errs <- fmt.Errorf("nested: %w", err)
@@ -404,7 +355,7 @@ func TestConcurrentUnmarshal_DiverseTypes(t *testing.T) {
 				return
 			}
 		}
-	}()
+	})
 
 	wg.Wait()
 	close(errs)
@@ -426,11 +377,11 @@ func TestPoolReuse_ArenaIntegrity(t *testing.T) {
 	const N = 100
 	results := make([]S, N)
 
-	for i := 0; i < N; i++ {
+	for i := range N {
 		// Escaped strings force arena allocation.
-		data := []byte(fmt.Sprintf(
+		data := fmt.Appendf(nil,
 			`{"a":"alpha-%d\nnewline","b":"beta-%d\ttab"}`, i, i,
-		))
+		)
 		if err := Unmarshal(data, &results[i]); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
 		}
@@ -438,7 +389,7 @@ func TestPoolReuse_ArenaIntegrity(t *testing.T) {
 
 	// After all parses, all previous results must still be intact.
 	// The pool has been returning and re-issuing parsers throughout.
-	for i := 0; i < N; i++ {
+	for i := range N {
 		wantA := fmt.Sprintf("alpha-%d\nnewline", i)
 		wantB := fmt.Sprintf("beta-%d\ttab", i)
 		if results[i].A != wantA {
@@ -560,13 +511,13 @@ func TestPointer_PreExistingValue_GCStress(t *testing.T) {
 	results := make([]Outer, N)
 
 	// Pre-allocate all Inner structs
-	for i := 0; i < N; i++ {
+	for i := range N {
 		results[i].Data = &Inner{ID: int64(i + 10000), Label: fmt.Sprintf("pre-%d", i)}
 	}
 
 	// Unmarshal new data, replacing all pre-existing allocations
-	for i := 0; i < N; i++ {
-		data := []byte(fmt.Sprintf(`{"data":{"id":%d,"label":"new-%d"}}`, i, i))
+	for i := range N {
+		data := fmt.Appendf(nil, `{"data":{"id":%d,"label":"new-%d"}}`, i, i)
 		if err := Unmarshal(data, &results[i]); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
 		}
@@ -581,7 +532,7 @@ func TestPointer_PreExistingValue_GCStress(t *testing.T) {
 	runtime.GC()
 
 	// Verify all new values are intact
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if results[i].Data == nil {
 			t.Fatalf("iter %d: Data is nil after GC", i)
 		}
@@ -773,8 +724,8 @@ func TestPointer_NestedPointers_GCStress(t *testing.T) {
 	const N = 500
 	results := make([]Root, N)
 
-	for i := 0; i < N; i++ {
-		data := []byte(fmt.Sprintf(`{"l1":{"l2":{"l3":{"id":%d,"label":"L%d"}}}}`, i, i))
+	for i := range N {
+		data := fmt.Appendf(nil, `{"l1":{"l2":{"l3":{"id":%d,"label":"L%d"}}}}`, i, i)
 		if err := Unmarshal(data, &results[i]); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
 		}
@@ -787,7 +738,7 @@ func TestPointer_NestedPointers_GCStress(t *testing.T) {
 	runtime.GC()
 	runtime.GC()
 
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if results[i].L1 == nil || results[i].L1.L2 == nil || results[i].L1.L2.L3 == nil {
 			t.Fatalf("iter %d: nested pointers are nil after GC", i)
 		}
@@ -824,12 +775,12 @@ func TestPointer_PointerFreeElem_GCStress(t *testing.T) {
 	const N = 2000
 	results := make([]S, N)
 
-	for i := 0; i < N; i++ {
+	for i := range N {
 		bval := "true"
 		if i%2 == 0 {
 			bval = "false"
 		}
-		data := []byte(fmt.Sprintf(`{"a":%d,"b":%d.5,"c":%s,"d":%d}`, i, i, bval, i*10))
+		data := fmt.Appendf(nil, `{"a":%d,"b":%d.5,"c":%s,"d":%d}`, i, i, bval, i*10)
 		if err := Unmarshal(data, &results[i]); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
 		}
@@ -841,11 +792,11 @@ func TestPointer_PointerFreeElem_GCStress(t *testing.T) {
 	}
 
 	// Multiple final GC passes to shake out any latent issues
-	for gc := 0; gc < 5; gc++ {
+	for range 5 {
 		runtime.GC()
 	}
 
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if results[i].A == nil || *results[i].A != i {
 			t.Errorf("iter %d: A = %v, want %d", i, results[i].A, i)
 		}
@@ -883,12 +834,12 @@ func TestPointer_PreExistingStackLikeValue(t *testing.T) {
 	// Simulate the pattern: caller sets up a pointer field from a "local" variable.
 	// In Go, &localVar escapes to heap when stored in S which escapes via Unmarshal.
 	// The test verifies Unmarshal fills in-place correctly.
-	for iter := 0; iter < 500; iter++ {
+	for iter := range 500 {
 		localVar := 12345 + iter
 		s := S{V: &localVar} // &localVar escapes to heap here
 		origPtr := s.V
 
-		data := []byte(fmt.Sprintf(`{"v":%d}`, iter))
+		data := fmt.Appendf(nil, `{"v":%d}`, iter)
 		if err := Unmarshal(data, &s); err != nil {
 			t.Fatalf("iter %d: %v", iter, err)
 		}

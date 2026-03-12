@@ -26,6 +26,18 @@ func unsafe_NewArray(typ unsafe.Pointer, n int) unsafe.Pointer //nolint:revive
 //go:nosplit
 func typedslicecopy(typ unsafe.Pointer, dstPtr unsafe.Pointer, dstLen int, srcPtr unsafe.Pointer, srcLen int) int
 
+//go:linkname makemap runtime.makemap
+func makemap(t unsafe.Pointer, hint int, m unsafe.Pointer) unsafe.Pointer
+
+//go:linkname mapassign runtime.mapassign
+func mapassign(t unsafe.Pointer, m unsafe.Pointer, key unsafe.Pointer) unsafe.Pointer
+
+//go:linkname mapassign_faststr runtime.mapassign_faststr
+func mapassign_faststr(t unsafe.Pointer, m unsafe.Pointer, key string) unsafe.Pointer //nolint:revive
+
+//go:linkname typedmemmove runtime.typedmemmove
+func typedmemmove(typ unsafe.Pointer, dst unsafe.Pointer, src unsafe.Pointer)
+
 // goIface matches the runtime iface layout: {itab, data}.
 // Used to construct interface values with a cached itab, avoiding
 // the mallocgc boxing that reflect.Value.Interface() triggers for

@@ -19,7 +19,7 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 	if idx >= len(src) {
 		return idx, errUnexpectedEOF
 	}
-	if src[idx] == '}' {
+	if sliceAt(src, idx) == '}' {
 		return idx + 1, nil
 	}
 
@@ -27,7 +27,7 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] != '"' {
+		if sliceAt(src, idx) != '"' {
 			return idx, newSyntaxError("vjson: syntax error", idx)
 		}
 		var key string
@@ -41,7 +41,7 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] != ':' {
+		if sliceAt(src, idx) != ':' {
 			return idx, newSyntaxError("vjson: syntax error", idx)
 		}
 		idx++
@@ -57,20 +57,20 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		c := src[idx]
+		c := sliceAt(src, idx)
 		if c == ',' {
 			idx++
 			if idx >= len(src) {
 				return idx, errUnexpectedEOF
 			}
-			if src[idx] == '"' {
+			if sliceAt(src, idx) == '"' {
 				continue
 			}
 			idx = skipWSLong(src, idx)
 			if idx >= len(src) {
 				return idx, errUnexpectedEOF
 			}
-			if src[idx] != '"' {
+			if sliceAt(src, idx) != '"' {
 				return idx, newSyntaxError("vjson: syntax error", idx)
 			}
 			continue
@@ -83,20 +83,20 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 			if idx >= len(src) {
 				return idx, errUnexpectedEOF
 			}
-			c = src[idx]
+			c = sliceAt(src, idx)
 			if c == ',' {
 				idx++
 				if idx >= len(src) {
 					return idx, errUnexpectedEOF
 				}
-				if src[idx] == '"' {
+				if sliceAt(src, idx) == '"' {
 					continue
 				}
 				idx = skipWSLong(src, idx)
 				if idx >= len(src) {
 					return idx, errUnexpectedEOF
 				}
-				if src[idx] != '"' {
+				if sliceAt(src, idx) != '"' {
 					return idx, newSyntaxError("vjson: syntax error", idx)
 				}
 				continue
@@ -123,7 +123,7 @@ func (sc *Parser) scanMapStringInt(src []byte, idx int, ptr unsafe.Pointer) (int
 	if idx >= len(src) {
 		return idx, errUnexpectedEOF
 	}
-	if src[idx] == '}' {
+	if sliceAt(src, idx) == '}' {
 		return idx + 1, nil
 	}
 
@@ -131,7 +131,7 @@ func (sc *Parser) scanMapStringInt(src []byte, idx int, ptr unsafe.Pointer) (int
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] != '"' {
+		if sliceAt(src, idx) != '"' {
 			return idx, newSyntaxError("vjson: syntax error", idx)
 		}
 		var key string
@@ -145,7 +145,7 @@ func (sc *Parser) scanMapStringInt(src []byte, idx int, ptr unsafe.Pointer) (int
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] != ':' {
+		if sliceAt(src, idx) != ':' {
 			return idx, newSyntaxError("vjson: syntax error", idx)
 		}
 		idx++
@@ -154,7 +154,7 @@ func (sc *Parser) scanMapStringInt(src []byte, idx int, ptr unsafe.Pointer) (int
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] == 'n' {
+		if sliceAt(src, idx) == 'n' {
 			if idx+4 > len(src) {
 				return idx, errUnexpectedEOF
 			}
@@ -164,7 +164,7 @@ func (sc *Parser) scanMapStringInt(src []byte, idx int, ptr unsafe.Pointer) (int
 			m[key] = 0
 			idx += 4
 		} else {
-			end, v, isFloat, ok := scanInt64SinglePass(src, idx)
+			end, v, isFloat, ok := scanInt64(src, idx)
 			if isFloat {
 				numEnd, _, numErr := scanNumberSpan(src, idx)
 				if numErr != nil {
@@ -185,20 +185,20 @@ func (sc *Parser) scanMapStringInt(src []byte, idx int, ptr unsafe.Pointer) (int
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		c := src[idx]
+		c := sliceAt(src, idx)
 		if c == ',' {
 			idx++
 			if idx >= len(src) {
 				return idx, errUnexpectedEOF
 			}
-			if src[idx] == '"' {
+			if sliceAt(src, idx) == '"' {
 				continue
 			}
 			idx = skipWSLong(src, idx)
 			if idx >= len(src) {
 				return idx, errUnexpectedEOF
 			}
-			if src[idx] != '"' {
+			if sliceAt(src, idx) != '"' {
 				return idx, newSyntaxError("vjson: syntax error", idx)
 			}
 			continue
@@ -211,20 +211,20 @@ func (sc *Parser) scanMapStringInt(src []byte, idx int, ptr unsafe.Pointer) (int
 			if idx >= len(src) {
 				return idx, errUnexpectedEOF
 			}
-			c = src[idx]
+			c = sliceAt(src, idx)
 			if c == ',' {
 				idx++
 				if idx >= len(src) {
 					return idx, errUnexpectedEOF
 				}
-				if src[idx] == '"' {
+				if sliceAt(src, idx) == '"' {
 					continue
 				}
 				idx = skipWSLong(src, idx)
 				if idx >= len(src) {
 					return idx, errUnexpectedEOF
 				}
-				if src[idx] != '"' {
+				if sliceAt(src, idx) != '"' {
 					return idx, newSyntaxError("vjson: syntax error", idx)
 				}
 				continue
@@ -251,7 +251,7 @@ func (sc *Parser) scanMapStringInt64(src []byte, idx int, ptr unsafe.Pointer) (i
 	if idx >= len(src) {
 		return idx, errUnexpectedEOF
 	}
-	if src[idx] == '}' {
+	if sliceAt(src, idx) == '}' {
 		return idx + 1, nil
 	}
 
@@ -259,7 +259,7 @@ func (sc *Parser) scanMapStringInt64(src []byte, idx int, ptr unsafe.Pointer) (i
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] != '"' {
+		if sliceAt(src, idx) != '"' {
 			return idx, newSyntaxError("vjson: syntax error", idx)
 		}
 		var key string
@@ -273,7 +273,7 @@ func (sc *Parser) scanMapStringInt64(src []byte, idx int, ptr unsafe.Pointer) (i
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] != ':' {
+		if sliceAt(src, idx) != ':' {
 			return idx, newSyntaxError("vjson: syntax error", idx)
 		}
 		idx++
@@ -282,7 +282,7 @@ func (sc *Parser) scanMapStringInt64(src []byte, idx int, ptr unsafe.Pointer) (i
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] == 'n' {
+		if sliceAt(src, idx) == 'n' {
 			if idx+4 > len(src) {
 				return idx, errUnexpectedEOF
 			}
@@ -292,7 +292,7 @@ func (sc *Parser) scanMapStringInt64(src []byte, idx int, ptr unsafe.Pointer) (i
 			m[key] = 0
 			idx += 4
 		} else {
-			end, v, isFloat, ok := scanInt64SinglePass(src, idx)
+			end, v, isFloat, ok := scanInt64(src, idx)
 			if isFloat {
 				numEnd, _, numErr := scanNumberSpan(src, idx)
 				if numErr != nil {
@@ -301,7 +301,7 @@ func (sc *Parser) scanMapStringInt64(src []byte, idx int, ptr unsafe.Pointer) (i
 				return numEnd, newUnmarshalTypeError("number", int64Type, numEnd)
 			}
 			if !ok {
-				if end == idx || (end == idx+1 && src[idx] == '-') {
+				if end == idx || (end == idx+1 && sliceAt(src, idx) == '-') {
 					return end, newSyntaxError(fmt.Sprintf("vjson: invalid number at offset %d", idx), idx)
 				}
 				return end, newUnmarshalTypeError("number "+string(src[idx:end]), int64Type, end)
@@ -313,20 +313,20 @@ func (sc *Parser) scanMapStringInt64(src []byte, idx int, ptr unsafe.Pointer) (i
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		c := src[idx]
+		c := sliceAt(src, idx)
 		if c == ',' {
 			idx++
 			if idx >= len(src) {
 				return idx, errUnexpectedEOF
 			}
-			if src[idx] == '"' {
+			if sliceAt(src, idx) == '"' {
 				continue
 			}
 			idx = skipWSLong(src, idx)
 			if idx >= len(src) {
 				return idx, errUnexpectedEOF
 			}
-			if src[idx] != '"' {
+			if sliceAt(src, idx) != '"' {
 				return idx, newSyntaxError("vjson: syntax error", idx)
 			}
 			continue
@@ -339,20 +339,20 @@ func (sc *Parser) scanMapStringInt64(src []byte, idx int, ptr unsafe.Pointer) (i
 			if idx >= len(src) {
 				return idx, errUnexpectedEOF
 			}
-			c = src[idx]
+			c = sliceAt(src, idx)
 			if c == ',' {
 				idx++
 				if idx >= len(src) {
 					return idx, errUnexpectedEOF
 				}
-				if src[idx] == '"' {
+				if sliceAt(src, idx) == '"' {
 					continue
 				}
 				idx = skipWSLong(src, idx)
 				if idx >= len(src) {
 					return idx, errUnexpectedEOF
 				}
-				if src[idx] != '"' {
+				if sliceAt(src, idx) != '"' {
 					return idx, newSyntaxError("vjson: syntax error", idx)
 				}
 				continue

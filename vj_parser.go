@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
-	"reflect"
 	"strconv"
 	"unsafe"
 )
@@ -27,21 +26,23 @@ func unmarshalBoolTypeError(ti *TypeInfo, offset int) error {
 }
 
 func nullifyMap(ti *TypeInfo, ptr unsafe.Pointer) {
-	mapDec := ti.resolveCodec().(*MapCodec)
-	reflect.NewAt(mapDec.MapType, ptr).Elem().Set(reflect.Zero(mapDec.MapType))
+	// Use typedmemmove to ensure GC write barrier shades the old map pointer.
+	mDec := ti.resolveCodec().(*MapCodec)
+	var zero unsafe.Pointer
+	typedmemmove(mDec.mapRType, ptr, unsafe.Pointer(&zero))
 }
 
 func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
 	if ti.Kind == KindPointer {
 		return sc.scanPointer(src, idx, ti, ptr)
 	}
-	if ti.Flags != 0 {
+	if ti.UFlags != 0 {
 		return sc.scanValueSpecial(src, idx, ti, ptr)
 	}
 	if idx >= len(src) {
 		return idx, errUnexpectedEOF
 	}
-	switch sliceByteAt(src, idx) {
+	switch sliceAt(src, idx) {
 	case '"':
 		if ti.Kind == KindSlice {
 			return sc.scanStringToSlice(src, idx, ti, ptr)
@@ -59,7 +60,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 				if idx >= len(src) {
 					return idx, errUnexpectedEOF
 				}
-				if sliceByteAt(src, idx) == '}' {
+				if sliceAt(src, idx) == '}' {
 					return idx + 1, nil
 				}
 
@@ -72,7 +73,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 					if idx >= len(src) {
 						return idx, errUnexpectedEOF
 					}
-					if sliceByteAt(src, idx) != '"' {
+					if sliceAt(src, idx) != '"' {
 						return idx, newSyntaxError("vjson: syntax error", idx)
 					}
 
@@ -93,11 +94,11 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 						charIdx := 0
 
 						for pos < n {
-							c := sliceByteAt(src, pos)
+							c := sliceAt(src, pos)
 							if c == '"' {
 								// Key ended — finalize bitmap match
 								if cur != 0 && charIdx <= bmMaxKeyLen {
-									cur &= sliceGet(bmLenMask, charIdx)
+									cur &= sliceAt(bmLenMask, charIdx)
 									if cur != 0 {
 										fi = &dec.Fields[bits.TrailingZeros8(cur)]
 									}
@@ -106,21 +107,24 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 								goto bmDone
 							}
 							if c == '\\' {
-								// Escaped key — fall back to full scan + standard lookup
+								// Escaped key — fall back to full scan + standard lookup.
+								// LookupFieldBytes already does case-insensitive fallback,
+								// so skip the bmDone fallback to avoid a redundant scan
+								// with wrong (raw/escaped) key bytes.
 								var keyBytes []byte
 								idx, keyBytes, err = sc.unescapeSinglePass(src, start, pos)
 								if err != nil {
 									return idx, err
 								}
 								fi = dec.LookupFieldBytes(keyBytes)
-								goto bmDone
+								goto bmFieldResolved
 							}
 							if c < 0x20 {
 								return pos, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", pos), pos)
 							}
 							// Bitmap AND — only while charIdx is in range
 							if charIdx < bmMaxKeyLen && cur != 0 {
-								cur &= sliceGet(bmBitmap, charIdx*256+int(c))
+								cur &= sliceAt(bmBitmap, charIdx*256+int(c))
 							} else {
 								cur = 0
 							}
@@ -129,17 +133,23 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 						}
 						return pos, errUnexpectedEOF
 					bmDone:
-						// Case-insensitive fallback when bitmap exact match misses
-						if fi == nil && dec.HasMixedCase {
-							k := unsafe.String(unsafe.SliceData(src[start:]), idx-1-start)
-							fields := dec.Fields
-							for i := range fields {
-								if equalFoldASCII(fields[i].JSONName, k) {
-									fi = &fields[i]
-									break
+						// Case-insensitive fallback when bitmap exact match misses.
+						// Mirror LookupFieldBytes: fall back when either the struct
+						// has mixed-case tags OR the incoming key contains uppercase.
+						if fi == nil {
+							keySlice := sliceRangeT(src, start, idx-1)
+							if dec.HasMixedCase || hasUpperASCII(keySlice) {
+								k := unsafe.String(unsafe.SliceData(keySlice), len(keySlice))
+								fields := dec.Fields
+								for i := range fields {
+									if equalFoldASCII(fields[i].JSONName, k) {
+										fi = &fields[i]
+										break
+									}
 								}
 							}
 						}
+					bmFieldResolved:
 					} else {
 						// Non-bitmap path: SWAR key scan then polymorphic lookup
 						var keyBytes []byte
@@ -160,7 +170,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 								if combined != 0 {
 									off := firstMarkedByteIndex(combined)
 									foundIdx := pos + off
-									c := sliceByteAt(src, foundIdx)
+									c := sliceAt(src, foundIdx)
 									if c == '"' {
 										idx, keyBytes, err = foundIdx+1, unsafe.Slice((*byte)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(src)), start)), foundIdx-start), nil
 										goto out
@@ -176,7 +186,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 							}
 
 							for pos < n {
-								c := sliceByteAt(src, pos)
+								c := sliceAt(src, pos)
 								if c == '"' {
 									idx, keyBytes, err = pos+1, unsafe.Slice((*byte)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(src)), start)), pos-start), nil
 									goto out
@@ -205,7 +215,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 					if idx >= len(src) {
 						return idx, errUnexpectedEOF
 					}
-					if sliceByteAt(src, idx) != ':' {
+					if sliceAt(src, idx) != ':' {
 						return idx, newSyntaxError("vjson: syntax error", idx)
 					}
 					idx++
@@ -220,14 +230,33 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 						savedIdx := idx
 						fieldPtr := unsafe.Add(base, fi.Offset)
 
-						if idx < len(src) && sliceByteAt(src, idx) == '"' && fi.Flags == 0 && fi.Kind != KindPointer {
-							//fast path
-							if fi.Kind == KindSlice {
-								idx, err = sc.scanStringToSlice(src, idx, fi, fieldPtr)
-							} else {
-								idx, err = sc.scanStringValue(src, idx, fi, fieldPtr)
+						if fi.UFlags == 0 && fi.Kind != KindPointer {
+							// Hot-path for common scalar field kinds to avoid an extra scanValue dispatch.
+							b := sliceAt(src, idx)
+
+							switch {
+							// String fields: keep existing fast path.
+							case b == '"':
+								if fi.Kind == KindSlice {
+									idx, err = sc.scanStringToSlice(src, idx, fi, fieldPtr)
+								} else {
+									idx, err = sc.scanStringValue(src, idx, fi, fieldPtr)
+								}
+							// Numeric fields: directly call scanNumber instead of scanValue → scanNumber.
+							case (b >= '0' && b <= '9') || b == '-':
+								switch fi.Kind {
+								case KindInt, KindInt8, KindInt16, KindInt32, KindInt64,
+									KindUint, KindUint8, KindUint16, KindUint32, KindUint64,
+									KindFloat32, KindFloat64:
+									idx, err = sc.scanNumber(src, idx, fi, fieldPtr)
+								default:
+									idx, err = sc.scanValue(src, idx, fi, fieldPtr)
+								}
+							default:
+								idx, err = sc.scanValue(src, idx, fi, fieldPtr)
 							}
 						} else {
+							// Flags != 0 or pointer fields: keep original slow path semantics.
 							idx, err = sc.scanValue(src, idx, fi, fieldPtr)
 						}
 
@@ -253,20 +282,20 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 					if idx >= len(src) {
 						return idx, errUnexpectedEOF
 					}
-					c := sliceByteAt(src, idx)
+					c := sliceAt(src, idx)
 					if c == ',' {
 						idx++
 						if idx >= len(src) {
 							return idx, errUnexpectedEOF
 						}
-						if sliceByteAt(src, idx) == '"' {
+						if sliceAt(src, idx) == '"' {
 							continue
 						}
 						idx = skipWSLong(src, idx)
 						if idx >= len(src) {
 							return idx, errUnexpectedEOF
 						}
-						if sliceByteAt(src, idx) != '"' {
+						if sliceAt(src, idx) != '"' {
 							return idx, newSyntaxError("vjson: syntax error", idx)
 						}
 						continue
@@ -279,20 +308,20 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 						if idx >= len(src) {
 							return idx, errUnexpectedEOF
 						}
-						c = sliceByteAt(src, idx)
+						c = sliceAt(src, idx)
 						if c == ',' {
 							idx++
 							if idx >= len(src) {
 								return idx, errUnexpectedEOF
 							}
-							if sliceByteAt(src, idx) == '"' {
+							if sliceAt(src, idx) == '"' {
 								continue
 							}
 							idx = skipWSLong(src, idx)
 							if idx >= len(src) {
 								return idx, errUnexpectedEOF
 							}
-							if sliceByteAt(src, idx) != '"' {
+							if sliceAt(src, idx) != '"' {
 								return idx, newSyntaxError("vjson: syntax error", idx)
 							}
 							continue
@@ -301,7 +330,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 							return idx + 1, firstErr
 						}
 					}
-					return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in object, got %q", sliceByteAt(src, idx)), idx)
+					return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in object, got %q", sliceAt(src, idx)), idx)
 				}
 			} //inline scanStruct end
 		case KindMap:
@@ -390,7 +419,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 		return sc.scanNumber(src, idx, ti, ptr)
 		// }
 	default:
-		return idx, newSyntaxError(fmt.Sprintf("vjson: unexpected character %q at offset %d", sliceByteAt(src, idx), idx), idx)
+		return idx, newSyntaxError(fmt.Sprintf("vjson: unexpected character %q at offset %d", sliceAt(src, idx), idx), idx)
 	}
 }
 
@@ -403,7 +432,7 @@ func copyStringIfNeeded(raw []byte, copyStr bool) string {
 	if copyStr {
 		return string(raw)
 	}
-	return unsafe.String(&raw[0], len(raw))
+	return unsafe.String(slicePtrT(raw), len(raw))
 }
 
 // scanStringValue scans a JSON string and assigns it to a typed field.
@@ -419,7 +448,7 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 
 	// Process 8 bytes at a time looking for '"' or '\\'
 	pos := start
-	base := unsafe.Pointer(&src[0])
+	base := slicePtr(src)
 	for pos+8 <= n {
 		w := *(*uint64)(unsafe.Add(base, pos))
 
@@ -439,10 +468,11 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 		combined := mq | mb | mc
 		off := firstMarkedByteIndex(combined)
 		foundPos := pos + off
-		foundChar := sliceByteAt(src, foundPos)
+		foundChar := sliceAt(src, foundPos)
 
 		if foundChar == '"' {
-			raw := src[start:foundPos]
+			// raw := src[start:foundPos]
+			raw := sliceRangeT(src, start, foundPos)
 			needCopy := sc.copyString || (ti.Flags&tiFlagCopyString != 0)
 			s := copyStringIfNeeded(raw, needCopy)
 			switch ti.Kind {
@@ -467,9 +497,10 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 
 	// Handle remaining bytes (tail)
 	for pos < n {
-		c := sliceByteAt(src, pos)
+		c := sliceAt(src, pos)
 		if c == '"' {
-			raw := src[start:pos]
+			// raw := src[start:pos]
+			raw := sliceRangeT(src, start, pos)
 			needCopy := sc.copyString || (ti.Flags&tiFlagCopyString != 0)
 			s := copyStringIfNeeded(raw, needCopy)
 			switch ti.Kind {
@@ -503,7 +534,7 @@ func (sc *Parser) scanStringKey(src []byte, idx int) (int, []byte, error) {
 
 	// SWAR scan 8 bytes at a time for '"', '\\', or control chars (< 0x20)
 	pos := start
-	base := unsafe.Pointer(&src[0])
+	base := slicePtr(src)
 	for pos+8 <= n {
 		w := *(*uint64)(unsafe.Add(base, pos))
 		mq := hasZeroByte(w ^ (lo64 * 0x22)) // '"'
@@ -513,9 +544,10 @@ func (sc *Parser) scanStringKey(src []byte, idx int) (int, []byte, error) {
 		if combined != 0 {
 			off := firstMarkedByteIndex(combined)
 			foundIdx := pos + off
-			c := sliceByteAt(src, foundIdx)
+			c := sliceAt(src, foundIdx)
 			if c == '"' {
-				return foundIdx + 1, src[start:foundIdx], nil
+				// return foundIdx + 1, src[start:foundIdx], nil
+				return foundIdx + 1, sliceRangeT(src, start, foundIdx), nil
 			}
 			if c == '\\' {
 				return sc.unescapeSinglePass(src, start, foundIdx)
@@ -526,9 +558,10 @@ func (sc *Parser) scanStringKey(src []byte, idx int) (int, []byte, error) {
 	}
 
 	for pos < n {
-		c := sliceByteAt(src, pos)
+		c := sliceAt(src, pos)
 		if c == '"' {
-			return pos + 1, src[start:pos], nil
+			// return pos + 1, src[start:pos], nil
+			return pos + 1, sliceRangeT(src, start, pos), nil
 		}
 		if c == '\\' {
 			return sc.unescapeSinglePass(src, start, pos)
@@ -551,6 +584,7 @@ func (sc *Parser) scanString(src []byte, idx int) (int, string, error) {
 	// SWAR scan 8 bytes at a time for '"', '\\', or control chars (< 0x20)
 	pos := start
 	for pos+8 <= n {
+		// w := *(*uint64)(unsafe.Pointer(&src[pos]))
 		w := *(*uint64)(unsafe.Pointer(&src[pos]))
 		mq := hasZeroByte(w ^ (lo64 * 0x22)) // '"'
 		mb := hasZeroByte(w ^ (lo64 * 0x5C)) // '\\'
@@ -559,9 +593,10 @@ func (sc *Parser) scanString(src []byte, idx int) (int, string, error) {
 		if combined != 0 {
 			off := firstMarkedByteIndex(combined)
 			foundIdx := pos + off
-			c := src[foundIdx]
+			c := sliceAt(src, foundIdx)
 			if c == '"' {
-				return foundIdx + 1, copyStringIfNeeded(src[start:foundIdx], needCopy), nil
+				// return foundIdx + 1, copyStringIfNeeded(src[start:foundIdx], needCopy), nil
+				return foundIdx + 1, copyStringIfNeeded(sliceRangeT(src, start, foundIdx), needCopy), nil
 			}
 			if c == '\\' {
 				endIdx, result, err := sc.unescapeSinglePass(src, start, foundIdx)
@@ -579,9 +614,10 @@ func (sc *Parser) scanString(src []byte, idx int) (int, string, error) {
 	}
 
 	for pos < n {
-		c := src[pos]
+		c := sliceAt(src, pos)
 		if c == '"' {
-			return pos + 1, copyStringIfNeeded(src[start:pos], needCopy), nil
+			// return pos + 1, copyStringIfNeeded(src[start:pos], needCopy), nil
+			return pos + 1, copyStringIfNeeded(sliceRangeT(src, start, pos), needCopy), nil
 		}
 		if c == '\\' {
 			endIdx, result, err := sc.unescapeSinglePass(src, start, pos)
@@ -610,24 +646,24 @@ func scanNumberSpan(src []byte, idx int) (int, bool, error) {
 	n := len(src)
 
 	// Optional leading '-'
-	if i < n && sliceByteAt(src, i) == '-' {
+	if i < n && sliceAt(src, i) == '-' {
 		i++
 	}
 
 	// Integer part (required)
-	if i >= n || sliceByteAt(src, i) < '0' || sliceByteAt(src, i) > '9' {
+	if i >= n || sliceAt(src, i) < '0' || sliceAt(src, i) > '9' {
 		return i, false, newSyntaxError(fmt.Sprintf("vjson: invalid number at offset %d", idx), idx)
 	}
-	if sliceByteAt(src, i) == '0' {
+	if sliceAt(src, i) == '0' {
 		i++
 		// Leading zeros forbidden: "0" must not be followed by another digit
-		if i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
+		if i < n && sliceAt(src, i) >= '0' && sliceAt(src, i) <= '9' {
 			return i, false, newSyntaxError(fmt.Sprintf("vjson: leading zeros in number at offset %d", idx), idx)
 		}
 	} else {
 		// 1-9 followed by any digits
 		i++
-		for i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
+		for i < n && sliceAt(src, i) >= '0' && sliceAt(src, i) <= '9' {
 			i++
 		}
 	}
@@ -635,33 +671,33 @@ func scanNumberSpan(src []byte, idx int) (int, bool, error) {
 	isFloat := false
 
 	// Optional fraction
-	if i < n && sliceByteAt(src, i) == '.' {
+	if i < n && sliceAt(src, i) == '.' {
 		isFloat = true
 		i++
 		// Must have at least one digit after '.'
-		if i >= n || sliceByteAt(src, i) < '0' || sliceByteAt(src, i) > '9' {
+		if i >= n || sliceAt(src, i) < '0' || sliceAt(src, i) > '9' {
 			return i, true, newSyntaxError(fmt.Sprintf("vjson: invalid fraction in number at offset %d", idx), idx)
 		}
 		i++
-		for i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
+		for i < n && sliceAt(src, i) >= '0' && sliceAt(src, i) <= '9' {
 			i++
 		}
 	}
 
 	// Optional exponent
-	if i < n && (sliceByteAt(src, i) == 'e' || sliceByteAt(src, i) == 'E') {
+	if i < n && (sliceAt(src, i) == 'e' || sliceAt(src, i) == 'E') {
 		isFloat = true
 		i++
 		// Optional sign
-		if i < n && (sliceByteAt(src, i) == '+' || sliceByteAt(src, i) == '-') {
+		if i < n && (sliceAt(src, i) == '+' || sliceAt(src, i) == '-') {
 			i++
 		}
 		// Must have at least one digit after exponent marker
-		if i >= n || sliceByteAt(src, i) < '0' || sliceByteAt(src, i) > '9' {
+		if i >= n || sliceAt(src, i) < '0' || sliceAt(src, i) > '9' {
 			return i, true, newSyntaxError(fmt.Sprintf("vjson: invalid exponent in number at offset %d", idx), idx)
 		}
 		i++
-		for i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
+		for i < n && sliceAt(src, i) >= '0' && sliceAt(src, i) <= '9' {
 			i++
 		}
 	}
@@ -673,20 +709,11 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 	switch ti.Kind {
 
 	case KindFloat64:
-		end, v, usedFast, scanErr := scanFloat64Fast(src, idx)
+		end, v, scanErr := scanFloat64(src, idx)
 		if scanErr != nil {
 			return end, scanErr
 		}
-		if usedFast {
-			*(*float64)(ptr) = v
-			return end, nil
-		}
-		// Fall back to strconv for complex numbers
-		fv, err := strconv.ParseFloat(unsafeString(src[idx:end]), 64)
-		if err != nil {
-			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
-		}
-		*(*float64)(ptr) = fv
+		*(*float64)(ptr) = v
 		return end, nil
 
 	case KindFloat32:
@@ -694,7 +721,8 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 		if numErr != nil {
 			return end, numErr
 		}
-		v, err := strconv.ParseFloat(unsafeString(src[idx:end]), 32)
+		// v, err := strconv.ParseFloat(unsafeString(src[idx:end]), 32)
+		v, err := strconv.ParseFloat(unsafeString(sliceRangeT(src, idx, end)), 32)
 		if err != nil {
 			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
 		}
@@ -702,7 +730,7 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 		return end, nil
 
 	case KindInt, KindInt8, KindInt16, KindInt32, KindInt64:
-		end, v, isFloat, ok := scanInt64SinglePass(src, idx)
+		end, v, isFloat, ok := scanInt64(src, idx)
 		if isFloat {
 			// scanInt64SinglePass stopped at '.' or 'e/E'; need to scan
 			// through the full float to report correct end position.
@@ -715,7 +743,7 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 		if !ok {
 			// Syntax error or overflow — distinguish by checking if we
 			// actually scanned any digits.
-			if end == idx || (end == idx+1 && src[idx] == '-') {
+			if end == idx || (end == idx+1 && sliceAt(src, idx) == '-') {
 				return end, newSyntaxError(fmt.Sprintf("vjson: invalid number at offset %d", idx), idx)
 			}
 			return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
@@ -727,7 +755,7 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 		return end, nil
 
 	case KindUint, KindUint8, KindUint16, KindUint32, KindUint64:
-		end, v, isFloat, ok := scanUint64SinglePass(src, idx)
+		end, v, isFloat, ok := scanUint64(src, idx)
 		if isFloat {
 			numEnd, _, numErr := scanNumberSpan(src, idx)
 			if numErr != nil {
@@ -748,19 +776,19 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 		return end, nil
 
 	case KindAny:
-		end, _, numErr := scanNumberSpan(src, idx)
-		if numErr != nil {
-			return end, numErr
-		}
 		// UseNumber: preserve raw text as json.Number.
 		if sc.useNumber {
+			end, _, numErr := scanNumberSpan(src, idx)
+			if numErr != nil {
+				return end, numErr
+			}
 			*(*any)(ptr) = json.Number(string(src[idx:end]))
 			return end, nil
 		}
 		// Default: all numbers → float64 for interface{}
-		v, err := strconv.ParseFloat(unsafeString(src[idx:end]), 64)
+		end, v, err := scanFloat64(src, idx)
 		if err != nil {
-			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid number %q: %v", src[idx:end], err), end, err)
+			return end, err
 		}
 		*(*any)(ptr) = v
 		return end, nil
@@ -778,7 +806,8 @@ func (sc *Parser) scanNumberAny(src []byte, idx int) (int, any, error) {
 	if numErr != nil {
 		return end, nil, numErr
 	}
-	span := src[idx:end]
+	// span := src[idx:end]
+	span := sliceRangeT(src, idx, end)
 
 	// json.Number path: preserve the raw text, no float conversion.
 	if sc.useNumber {
@@ -801,133 +830,13 @@ func (sc *Parser) scanNumberAny(src []byte, idx int) (int, any, error) {
 		}
 	}
 
-	v, err := strconv.ParseFloat(unsafeString(span), 64)
+	_, v, err := scanFloat64(src, idx)
 	if err != nil {
-		return end, nil, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid number %q: %v", span, err), end, err)
+		return end, nil, err
 	}
 	return end, v, nil
 }
 
-func (sc *Parser) scanStruct(src []byte, idx int, dec *StructCodec, base unsafe.Pointer) (int, error) {
-	idx++
-	idx = skipWSLong(src, idx)
-	if idx >= len(src) {
-		return idx, errUnexpectedEOF
-	}
-	if src[idx] == '}' {
-		return idx + 1, nil
-	}
-
-	var firstErr error
-
-	for {
-		if idx >= len(src) {
-			return idx, errUnexpectedEOF
-		}
-		if src[idx] != '"' {
-			return idx, newSyntaxError("vjson: syntax error", idx)
-		}
-		var keyBytes []byte
-		var err error
-		idx, keyBytes, err = sc.scanStringKey(src, idx)
-		if err != nil {
-			return idx, err
-		}
-
-		idx = skipWS(src, idx)
-		if idx >= len(src) {
-			return idx, errUnexpectedEOF
-		}
-		if src[idx] != ':' {
-			return idx, newSyntaxError("vjson: syntax error", idx)
-		}
-		idx++
-		idx = skipWS(src, idx)
-
-		fi := dec.LookupFieldBytes(keyBytes)
-		if fi == nil {
-			// Unknown field — skip value
-			idx, err = skipValue(src, idx)
-			if err != nil {
-				return idx, err
-			}
-		} else {
-			savedIdx := idx
-			fieldPtr := unsafe.Add(base, fi.Offset)
-			idx, err = sc.scanValue(src, idx, fi, fieldPtr)
-			if err != nil {
-				var ute *UnmarshalTypeError
-				if !errors.As(err, &ute) {
-					return idx, err // syntax error → abort
-				}
-				// Type mismatch: skip the value and continue.
-				if idx == savedIdx {
-					// Object/array mismatch: scanValue didn't consume the value.
-					idx, err = skipValue(src, idx)
-					if err != nil {
-						return idx, err
-					}
-				}
-				if firstErr == nil {
-					firstErr = ute
-				}
-			}
-		}
-
-		if idx >= len(src) {
-			return idx, errUnexpectedEOF
-		}
-		c := src[idx]
-		if c == ',' {
-			idx++
-			if idx >= len(src) {
-				return idx, errUnexpectedEOF
-			}
-			if src[idx] == '"' {
-				continue
-			}
-			idx = skipWSLong(src, idx)
-			if idx >= len(src) {
-				return idx, errUnexpectedEOF
-			}
-			if src[idx] != '"' {
-				return idx, newSyntaxError("vjson: syntax error", idx)
-			}
-			continue
-		}
-		if c == '}' {
-			return idx + 1, firstErr
-		}
-		if wsLUT[c] != 0 {
-			idx = skipWSLong(src, idx)
-			if idx >= len(src) {
-				return idx, errUnexpectedEOF
-			}
-			c = src[idx]
-			if c == ',' {
-				idx++
-				if idx >= len(src) {
-					return idx, errUnexpectedEOF
-				}
-				if src[idx] == '"' {
-					continue
-				}
-				idx = skipWSLong(src, idx)
-				if idx >= len(src) {
-					return idx, errUnexpectedEOF
-				}
-				if src[idx] != '"' {
-					return idx, newSyntaxError("vjson: syntax error", idx)
-				}
-				continue
-			}
-			if c == '}' {
-				return idx + 1, firstErr
-			}
-		}
-		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in object, got %q", src[idx]), idx)
-	}
-}
 
 func (sc *Parser) scanMap(src []byte, idx int, mDec *MapCodec, ptr unsafe.Pointer) (int, error) {
 	// Fast path for map[string]V with known V — zero reflection
@@ -938,16 +847,17 @@ func (sc *Parser) scanMap(src []byte, idx int, mDec *MapCodec, ptr unsafe.Pointe
 	idx++
 	idx = skipWSLong(src, idx)
 
-	mapPtr := reflect.NewAt(mDec.MapType, ptr)
-	mapVal := mapPtr.Elem()
-	if mapVal.IsNil() {
-		mapVal.Set(reflect.MakeMap(mDec.MapType))
+	mp := *(*unsafe.Pointer)(ptr)
+	if mp == nil {
+		mp = makemap(mDec.mapRType, 0, nil)
+		// Use typedmemmove to store the new map pointer with a GC write barrier.
+		typedmemmove(mDec.mapRType, ptr, unsafe.Pointer(&mp))
 	}
 
 	if idx >= len(src) {
 		return idx, errUnexpectedEOF
 	}
-	if src[idx] == '}' {
+	if sliceAt(src, idx) == '}' {
 		return idx + 1, nil
 	}
 
@@ -955,7 +865,7 @@ func (sc *Parser) scanMap(src []byte, idx int, mDec *MapCodec, ptr unsafe.Pointe
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] != '"' {
+		if sliceAt(src, idx) != '"' {
 			return idx, newSyntaxError("vjson: syntax error", idx)
 		}
 		var key string
@@ -969,42 +879,67 @@ func (sc *Parser) scanMap(src []byte, idx int, mDec *MapCodec, ptr unsafe.Pointe
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] != ':' {
+		if sliceAt(src, idx) != ':' {
 			return idx, newSyntaxError("vjson: syntax error", idx)
 		}
 		idx++
 		idx = skipWS(src, idx)
 
-		valRV := reflect.New(mDec.ValType)
-		valPtr := valRV.UnsafePointer()
-		idx, err = sc.scanValue(src, idx, mDec.ValTI, valPtr)
+		if mDec.isStringKey {
+			if mDec.valHasPtr {
+				// Value contains GC-traced pointers: write to a temp alloc, then
+				// typedmemmove into the map slot to ensure write barriers fire.
+				valBuf := unsafe_New(mDec.valRType)
+				idx, err = sc.scanValue(src, idx, mDec.ValTI, valBuf)
+				if err != nil {
+					return idx, err
+				}
+				valSlot := mapassign_faststr(mDec.mapRType, mp, key)
+				typedmemmove(mDec.valRType, valSlot, valBuf)
+			} else {
+				// Scalar value (no pointers): safe to write directly into the slot.
+				valSlot := mapassign_faststr(mDec.mapRType, mp, key)
+				idx, err = sc.scanValue(src, idx, mDec.ValTI, valSlot)
+			}
+		} else {
+			keyBuf := unsafe_New(mDec.keyRType)
+			if err = resolveMapKey(key, mDec.KeyType, mDec.KeyTI, keyBuf); err != nil {
+				return idx, err
+			}
+			if mDec.valHasPtr {
+				valBuf := unsafe_New(mDec.valRType)
+				idx, err = sc.scanValue(src, idx, mDec.ValTI, valBuf)
+				if err != nil {
+					return idx, err
+				}
+				valSlot := mapassign(mDec.mapRType, mp, keyBuf)
+				typedmemmove(mDec.valRType, valSlot, valBuf)
+			} else {
+				valSlot := mapassign(mDec.mapRType, mp, keyBuf)
+				idx, err = sc.scanValue(src, idx, mDec.ValTI, valSlot)
+			}
+		}
 		if err != nil {
 			return idx, err
 		}
-
-		keyRV, err := resolveMapKeyValue(key, mDec.KeyType, mDec.KeyTI)
-		if err != nil {
-			return idx, err
-		}
-		mapVal.SetMapIndex(keyRV, valRV.Elem())
 
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		c := src[idx]
+		c := sliceAt(src, idx)
 		if c == ',' {
 			idx++
 			if idx >= len(src) {
 				return idx, errUnexpectedEOF
 			}
-			if src[idx] == '"' {
+			if sliceAt(src, idx) == '"' {
 				continue
 			}
 			idx = skipWSLong(src, idx)
 			if idx >= len(src) {
 				return idx, errUnexpectedEOF
 			}
-			if src[idx] != '"' {
+			if sliceAt(src, idx) != '"' {
 				return idx, newSyntaxError("vjson: syntax error", idx)
 			}
 			continue
@@ -1017,20 +952,20 @@ func (sc *Parser) scanMap(src []byte, idx int, mDec *MapCodec, ptr unsafe.Pointe
 			if idx >= len(src) {
 				return idx, errUnexpectedEOF
 			}
-			c = src[idx]
+			c = sliceAt(src, idx)
 			if c == ',' {
 				idx++
 				if idx >= len(src) {
 					return idx, errUnexpectedEOF
 				}
-				if src[idx] == '"' {
+				if sliceAt(src, idx) == '"' {
 					continue
 				}
 				idx = skipWSLong(src, idx)
 				if idx >= len(src) {
 					return idx, errUnexpectedEOF
 				}
-				if src[idx] != '"' {
+				if sliceAt(src, idx) != '"' {
 					return idx, newSyntaxError("vjson: syntax error", idx)
 				}
 				continue
@@ -1052,7 +987,7 @@ func (sc *Parser) scanMapAny(src []byte, idx int) (int, map[string]any, error) {
 	if idx >= len(src) {
 		return idx, nil, errUnexpectedEOF
 	}
-	if src[idx] == '}' {
+	if sliceAt(src, idx) == '}' {
 		return idx + 1, m, nil
 	}
 
@@ -1060,7 +995,7 @@ func (sc *Parser) scanMapAny(src []byte, idx int) (int, map[string]any, error) {
 		if idx >= len(src) {
 			return idx, nil, errUnexpectedEOF
 		}
-		if src[idx] != '"' {
+		if sliceAt(src, idx) != '"' {
 			return idx, nil, newSyntaxError("vjson: syntax error", idx)
 		}
 		var key string
@@ -1074,7 +1009,7 @@ func (sc *Parser) scanMapAny(src []byte, idx int) (int, map[string]any, error) {
 		if idx >= len(src) {
 			return idx, nil, errUnexpectedEOF
 		}
-		if src[idx] != ':' {
+		if sliceAt(src, idx) != ':' {
 			return idx, nil, newSyntaxError("vjson: syntax error", idx)
 		}
 		idx++
@@ -1090,20 +1025,20 @@ func (sc *Parser) scanMapAny(src []byte, idx int) (int, map[string]any, error) {
 		if idx >= len(src) {
 			return idx, nil, errUnexpectedEOF
 		}
-		c := src[idx]
+		c := sliceAt(src, idx)
 		if c == ',' {
 			idx++
 			if idx >= len(src) {
 				return idx, nil, errUnexpectedEOF
 			}
-			if src[idx] == '"' {
+			if sliceAt(src, idx) == '"' {
 				continue
 			}
 			idx = skipWSLong(src, idx)
 			if idx >= len(src) {
 				return idx, nil, errUnexpectedEOF
 			}
-			if src[idx] != '"' {
+			if sliceAt(src, idx) != '"' {
 				return idx, nil, newSyntaxError("vjson: syntax error", idx)
 			}
 			continue
@@ -1116,20 +1051,20 @@ func (sc *Parser) scanMapAny(src []byte, idx int) (int, map[string]any, error) {
 			if idx >= len(src) {
 				return idx, nil, errUnexpectedEOF
 			}
-			c = src[idx]
+			c = sliceAt(src, idx)
 			if c == ',' {
 				idx++
 				if idx >= len(src) {
 					return idx, nil, errUnexpectedEOF
 				}
-				if src[idx] == '"' {
+				if sliceAt(src, idx) == '"' {
 					continue
 				}
 				idx = skipWSLong(src, idx)
 				if idx >= len(src) {
 					return idx, nil, errUnexpectedEOF
 				}
-				if src[idx] != '"' {
+				if sliceAt(src, idx) != '"' {
 					return idx, nil, newSyntaxError("vjson: syntax error", idx)
 				}
 				continue
@@ -1157,7 +1092,7 @@ func (sc *Parser) scanSlice(src []byte, idx int, sDec *SliceCodec, ptr unsafe.Po
 	if idx >= len(src) {
 		return idx, errUnexpectedEOF
 	}
-	if src[idx] == ']' {
+	if sliceAt(src, idx) == ']' {
 		sh := (*SliceHeader)(ptr)
 		sh.Data = sDec.EmptySliceData
 		sh.Len = 0
@@ -1182,7 +1117,8 @@ func (sc *Parser) scanSlice(src []byte, idx int, sDec *SliceCodec, ptr unsafe.Po
 		base = unsafe_NewArray(sDec.ElemRType, sliceCap)
 	} else {
 		backingBytes = make([]byte, sliceCap*int(elemSize))
-		base = unsafe.Pointer(&backingBytes[0])
+		// base = unsafe.Pointer(&backingBytes[0])
+		base = slicePtr(backingBytes)
 	}
 
 	for {
@@ -1197,7 +1133,7 @@ func (sc *Parser) scanSlice(src []byte, idx int, sDec *SliceCodec, ptr unsafe.Po
 				newBacking := make([]byte, newCap*int(elemSize))
 				copy(newBacking, backingBytes)
 				backingBytes = newBacking
-				base = unsafe.Pointer(&backingBytes[0])
+				base = slicePtr(backingBytes)
 			}
 			sliceCap = newCap
 		}
@@ -1215,12 +1151,12 @@ func (sc *Parser) scanSlice(src []byte, idx int, sDec *SliceCodec, ptr unsafe.Po
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] == ',' {
+		if sliceAt(src, idx) == ',' {
 			idx++
 			idx = skipWSLong(src, idx)
 			continue
 		}
-		if src[idx] == ']' {
+		if sliceAt(src, idx) == ']' {
 			// Update adaptive capacity hint using EMA.
 			// Relaxed store is fine — a stale read just means one sub-optimal alloc.
 			old := int(sDec.capHint.Load())
@@ -1247,7 +1183,7 @@ func (sc *Parser) scanSliceAny(src []byte, idx int) (int, []any, error) {
 	if idx >= len(src) {
 		return idx, nil, errUnexpectedEOF
 	}
-	if src[idx] == ']' {
+	if sliceAt(src, idx) == ']' {
 		return idx + 1, []any{}, nil
 	}
 
@@ -1266,12 +1202,12 @@ func (sc *Parser) scanSliceAny(src []byte, idx int) (int, []any, error) {
 		if idx >= len(src) {
 			return idx, nil, errUnexpectedEOF
 		}
-		if src[idx] == ',' {
+		if sliceAt(src, idx) == ',' {
 			idx++
 			idx = skipWSLong(src, idx)
 			continue
 		}
-		if src[idx] == ']' {
+		if sliceAt(src, idx) == ']' {
 			return idx + 1, arr, nil
 		}
 		return idx, nil, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in any array, got %q", src[idx]), idx)
@@ -1290,7 +1226,7 @@ func (sc *Parser) scanArray(src []byte, idx int, aDec *ArrayCodec, ptr unsafe.Po
 	if idx >= len(src) {
 		return idx, errUnexpectedEOF
 	}
-	if src[idx] == ']' {
+	if sliceAt(src, idx) == ']' {
 		zeroArrayElements(ptr, aDec.ElemSize, 0, aDec.ArrayLen)
 		return idx + 1, nil
 	}
@@ -1320,12 +1256,12 @@ func (sc *Parser) scanArray(src []byte, idx int, aDec *ArrayCodec, ptr unsafe.Po
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] == ',' {
+		if sliceAt(src, idx) == ',' {
 			idx++
 			idx = skipWSLong(src, idx)
 			continue
 		}
-		if src[idx] == ']' {
+		if sliceAt(src, idx) == ']' {
 			if count < arrayLen {
 				zeroArrayElements(ptr, elemSize, count, arrayLen)
 			}
@@ -1347,10 +1283,11 @@ func (sc *Parser) scanPointer(src []byte, idx int, ti *TypeInfo, ptr unsafe.Poin
 	}
 
 	// null → set pointer to nil.
-	if src[idx] == 'n' {
+	if sliceAt(src, idx) == 'n' {
 		if idx+4 > len(src) {
 			return idx, errUnexpectedEOF
 		}
+		// if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null
 		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null {
 			return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 		}
@@ -1367,7 +1304,8 @@ func (sc *Parser) scanPointer(src []byte, idx int, ti *TypeInfo, ptr unsafe.Poin
 			elemPtr = sc.ptrAlloc(pDec.ElemRType, pDec.ElemSize)
 		} else {
 			backing := make([]byte, pDec.ElemSize)
-			elemPtr = unsafe.Pointer(&backing[0])
+			// elemPtr = unsafe.Pointer(&backing[0])
+			elemPtr = slicePtr(backing)
 		}
 	}
 
@@ -1401,7 +1339,7 @@ func (sc *Parser) scanValueAny(src []byte, idx int) (int, any, error) {
 	if idx >= len(src) {
 		return idx, nil, errUnexpectedEOF
 	}
-	switch src[idx] {
+	switch sliceAt(src, idx) {
 	case '"':
 		newIdx, s, err := sc.scanString(src, idx)
 		return newIdx, s, err
@@ -1435,10 +1373,11 @@ func (sc *Parser) scanValueAny(src []byte, idx int) (int, any, error) {
 			return idx, nil, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 		}
 		return idx + 4, nil, nil
+	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-':
+		// if (src[idx] >= '0' && src[idx] <= '9') || src[idx] == '-' {
+		return sc.scanNumberAny(src, idx)
+		// }
 	default:
-		if (src[idx] >= '0' && src[idx] <= '9') || src[idx] == '-' {
-			return sc.scanNumberAny(src, idx)
-		}
 		return idx, nil, newSyntaxError(fmt.Sprintf("vjson: unexpected character %q in any value", src[idx]), idx)
 	}
 }
@@ -1449,7 +1388,7 @@ func skipValue(src []byte, idx int) (int, error) {
 	if idx >= len(src) {
 		return idx, errUnexpectedEOF
 	}
-	switch src[idx] {
+	switch sliceAt(src, idx) {
 	case '"':
 		return skipString(src, idx)
 	case 't':
@@ -1478,14 +1417,15 @@ func skipValue(src []byte, idx int) (int, error) {
 		return idx + 4, nil
 	case '{', '[':
 		return skipContainer(src, idx)
-	default:
-		if (src[idx] >= '0' && src[idx] <= '9') || src[idx] == '-' {
-			end, _, numErr := scanNumberSpan(src, idx)
-			if numErr != nil {
-				return end, numErr
-			}
-			return end, nil
+	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-':
+		// if (src[idx] >= '0' && src[idx] <= '9') || src[idx] == '-' {
+		end, _, numErr := scanNumberSpan(src, idx)
+		if numErr != nil {
+			return end, numErr
 		}
+		return end, nil
+		// }
+	default:
 		return idx, newSyntaxError(fmt.Sprintf("vjson: unexpected character %q", src[idx]), idx)
 	}
 }
@@ -1497,13 +1437,15 @@ func skipStringEscape(src []byte, escIdx, n int) (int, error) {
 		return escIdx, errUnexpectedEOF
 	}
 
-	next := src[escIdx+1]
+	// next := src[escIdx+1]
+	next := sliceAt(src, escIdx+1)
 	if next == 'u' {
 		// \uXXXX — exactly 4 hex digits.
 		if escIdx+5 >= n {
 			return escIdx, errUnexpectedEOF
 		}
-		if !isHexChar(src[escIdx+2]) || !isHexChar(src[escIdx+3]) || !isHexChar(src[escIdx+4]) || !isHexChar(src[escIdx+5]) {
+		// if !isHexChar(src[escIdx+2]) || !isHexChar(src[escIdx+3]) || !isHexChar(src[escIdx+4]) || !isHexChar(src[escIdx+5])
+		if !isHexChar(sliceAt(src, escIdx+2)) || !isHexChar(sliceAt(src, escIdx+3)) || !isHexChar(sliceAt(src, escIdx+4)) || !isHexChar(sliceAt(src, escIdx+5)) {
 			return escIdx, newSyntaxError(fmt.Sprintf("vjson: invalid unicode escape in string at offset %d", escIdx), escIdx)
 		}
 		return escIdx + 6, nil
@@ -1522,7 +1464,8 @@ func skipString(src []byte, idx int) (int, error) {
 	limit := n - 8
 
 	// SWAR scan 8 bytes at a time for '"', '\\', or control chars (< 0x20).
-	base := unsafe.Pointer(&src[0])
+	// base := unsafe.Pointer(&src[0])
+	base := slicePtr(src)
 	for i <= limit {
 		w := *(*uint64)(unsafe.Add(base, i))
 		mq := hasZeroByte(w ^ (lo64 * 0x22)) // '"'
@@ -1536,7 +1479,7 @@ func skipString(src []byte, idx int) (int, error) {
 
 		off := firstMarkedByteIndex(combined)
 		pos := i + off
-		c := sliceByteAt(src, pos)
+		c := sliceAt(src, pos)
 		if c == '"' {
 			return pos + 1, nil
 		}
@@ -1554,7 +1497,7 @@ func skipString(src []byte, idx int) (int, error) {
 
 	// Tail: byte-at-a-time
 	for i < n {
-		c := sliceByteAt(src, i)
+		c := sliceAt(src, i)
 		if c == '"' {
 			return i + 1, nil
 		}
@@ -1585,7 +1528,8 @@ outer:
 	for i < n && depth > 0 {
 		// Fast path: SWAR scan 8 bytes at a time for { } [ ] "
 		if i+8 <= n {
-			base := unsafe.Pointer(&src[0])
+			// base := unsafe.Pointer(&src[0])
+			base := slicePtr(src)
 			w := *(*uint64)(unsafe.Add(base, i))
 
 			// Fold bit 0x20 so '{' and '[' share 0x5B, '}' and ']' share 0x5D.
@@ -1602,7 +1546,7 @@ outer:
 			// Process ALL structural chars in this 8-byte word.
 			for m != 0 {
 				off := firstMarkedByteIndex(m)
-				c := sliceByteAt(src, i+off)
+				c := sliceAt(src, i+off)
 
 				switch c {
 				case '{', '[':
@@ -1626,7 +1570,7 @@ outer:
 								continue
 							}
 							soff := firstMarkedByteIndex(sc)
-							if sliceByteAt(src, j+soff) == '"' {
+							if sliceAt(src, j+soff) == '"' {
 								j += soff + 1
 								break
 							}
@@ -1638,11 +1582,11 @@ outer:
 						if j >= n {
 							return j, errUnexpectedEOF
 						}
-						if sliceByteAt(src, j) == '"' {
+						if sliceAt(src, j) == '"' {
 							j++
 							break
 						}
-						if sliceByteAt(src, j) == '\\' {
+						if sliceAt(src, j) == '\\' {
 							j += 2
 							continue
 						}
@@ -1660,7 +1604,7 @@ outer:
 		}
 
 		// Slow path: byte-by-byte for remaining < 8 bytes
-		c := sliceByteAt(src, i)
+		c := sliceAt(src, i)
 		switch c {
 		case '{', '[':
 			depth++
@@ -1672,11 +1616,11 @@ outer:
 			// Inline string skip for tail bytes
 			i++
 			for i < n {
-				if sliceByteAt(src, i) == '"' {
+				if sliceAt(src, i) == '"' {
 					i++
 					continue outer
 				}
-				if sliceByteAt(src, i) == '\\' {
+				if sliceAt(src, i) == '\\' {
 					i += 2
 					continue
 				}

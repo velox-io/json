@@ -20,7 +20,7 @@ func TestParseEightDigitsSWAR(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.input[:8], func(t *testing.T) {
-			got := parseEightDigitsSWAR([]byte(tt.input), 0)
+			got := parseEightDigits([]byte(tt.input), 0)
 			if got != tt.want {
 				t.Errorf("parseEightDigitsSWAR(%q) = %d, want %d", tt.input[:8], got, tt.want)
 			}
@@ -28,45 +28,7 @@ func TestParseEightDigitsSWAR(t *testing.T) {
 	}
 }
 
-func TestParseUint64(t *testing.T) {
-	tests := []struct {
-		input string
-		want  uint64
-	}{
-		// Short: pure Horner path
-		{"0", 0},
-		{"1", 1},
-		{"42", 42},
-		{"255", 255},
-		{"65535", 65535},
-		{"1234567", 1234567},
-		// Exactly 8 digits: single SWAR
-		{"12345678", 12345678},
-		{"00000000", 0},
-		{"99999999", 99999999},
-		// 9-15 digits: SWAR + Horner tail
-		{"123456789", 123456789},
-		{"1234567890", 1234567890},
-		{"4294967295", 4294967295},
-		{"999999999999999", 999999999999999},
-		// 16 digits: two SWAR calls
-		{"1234567812345678", 1234567812345678},
-		// 16+ digits: two SWAR + Horner tail
-		{"12345678123456789", 12345678123456789},
-		{"18446744073709551615", 18446744073709551615},
-	}
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			b := []byte(tt.input)
-			got := parseUint64(b, 0, len(b))
-			if got != tt.want {
-				t.Errorf("parseUint64(%q) = %d, want %d", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestParseInt64(t *testing.T) {
+func TestScanInt64(t *testing.T) {
 	tests := []struct {
 		input string
 		want  int64
@@ -89,20 +51,153 @@ func TestParseInt64(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			b := []byte(tt.input)
-			got := parseInt64(b, 0, len(b))
+			end, got, isFloat, ok := scanInt64(b, 0)
+			if !ok {
+				t.Fatalf("scanInt64(%q) ok=false", tt.input)
+			}
+			if isFloat {
+				t.Fatalf("scanInt64(%q) isFloat=true", tt.input)
+			}
+			if end != len(b) {
+				t.Errorf("scanInt64(%q) end=%d, want %d", tt.input, end, len(b))
+			}
 			if got != tt.want {
-				t.Errorf("parseInt64(%q) = %d, want %d", tt.input, got, tt.want)
+				t.Errorf("scanInt64(%q) = %d, want %d", tt.input, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestParseInt64_Empty(t *testing.T) {
-	if got := parseInt64(nil, 0, 0); got != 0 {
-		t.Errorf("parseInt64(nil) = %d, want 0", got)
+func TestScanInt64_Empty(t *testing.T) {
+	_, _, _, ok := scanInt64(nil, 0)
+	if ok {
+		t.Errorf("scanInt64(nil) ok=true, want false")
 	}
-	if got := parseInt64([]byte{}, 0, 0); got != 0 {
-		t.Errorf("parseInt64([]) = %d, want 0", got)
+	_, _, _, ok = scanInt64([]byte{}, 0)
+	if ok {
+		t.Errorf("scanInt64([]) ok=true, want false")
+	}
+}
+
+func TestScanUint64(t *testing.T) {
+	tests := []struct {
+		input string
+		want  uint64
+	}{
+		// Short
+		{"0", 0},
+		{"1", 1},
+		{"42", 42},
+		{"255", 255},
+		{"65535", 65535},
+		{"1234567", 1234567},
+		// Exactly 8 digits
+		{"12345678", 12345678},
+		// 9-15 digits
+		{"123456789", 123456789},
+		{"1234567890", 1234567890},
+		{"4294967295", 4294967295},
+		{"999999999999999", 999999999999999},
+		// 16 digits
+		{"1234567812345678", 1234567812345678},
+		// 16+ digits
+		{"12345678123456789", 12345678123456789},
+		{"18446744073709551615", 18446744073709551615},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			b := []byte(tt.input)
+			end, got, isFloat, ok := scanUint64(b, 0)
+			if !ok {
+				t.Fatalf("scanUint64(%q) ok=false", tt.input)
+			}
+			if isFloat {
+				t.Fatalf("scanUint64(%q) isFloat=true", tt.input)
+			}
+			if end != len(b) {
+				t.Errorf("scanUint64(%q) end=%d, want %d", tt.input, end, len(b))
+			}
+			if got != tt.want {
+				t.Errorf("scanUint64(%q) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestScanFloat64(t *testing.T) {
+	tests := []struct {
+		input string
+		want  float64
+	}{
+		{"0", 0},
+		{"-0", 0},
+		{"1", 1},
+		{"-1", -1},
+		{"42", 42},
+		{"123456789", 123456789},
+		{"0.0", 0},
+		{"1.5", 1.5},
+		{"-0.5", -0.5},
+		{"3.14", 3.14},
+		{"1e10", 1e10},
+		{"1E10", 1e10},
+		{"1e+10", 1e10},
+		{"1e-10", 1e-10},
+		{"1.5e2", 150},
+		{"-1.5e-2", -0.015},
+		{"0e0", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			b := []byte(tt.input)
+			end, got, err := scanFloat64(b, 0)
+			if err != nil {
+				t.Fatalf("scanFloat64(%q) error: %v", tt.input, err)
+			}
+			if end != len(b) {
+				t.Errorf("scanFloat64(%q) end=%d, want %d", tt.input, end, len(b))
+			}
+			if got != tt.want {
+				t.Errorf("scanFloat64(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+var sinkUint64 uint64
+
+func BenchmarkScanUint64_4digits(b *testing.B) {
+	src := []byte("1234")
+	for b.Loop() {
+		_, sinkUint64, _, _ = scanUint64(src, 0)
+	}
+}
+
+func BenchmarkScanUint64_8digits(b *testing.B) {
+	src := []byte("12345678")
+	for b.Loop() {
+		_, sinkUint64, _, _ = scanUint64(src, 0)
+	}
+}
+
+func BenchmarkScanUint64_10digits(b *testing.B) {
+	src := []byte("1234567890")
+	for b.Loop() {
+		_, sinkUint64, _, _ = scanUint64(src, 0)
+	}
+}
+
+func BenchmarkScanUint64_16digits(b *testing.B) {
+	src := []byte("1234567812345678")
+	for b.Loop() {
+		_, sinkUint64, _, _ = scanUint64(src, 0)
+	}
+}
+
+func BenchmarkScanUint64_19digits(b *testing.B) {
+	src := []byte("9223372036854775807")
+	for b.Loop() {
+		_, sinkUint64, _, _ = scanUint64(src, 0)
 	}
 }
 
@@ -168,46 +263,6 @@ func TestScanNumber_FloatToInt(t *testing.T) {
 			t.Errorf("got %d, want 12345", s.A)
 		}
 	})
-}
-
-var sinkUint64 uint64
-
-//nolint:unused
-var sinkInt64 int64
-
-func BenchmarkParseUint64_4digits(b *testing.B) {
-	src := []byte("1234")
-	for b.Loop() {
-		sinkUint64 = parseUint64(src, 0, 4)
-	}
-}
-
-func BenchmarkParseUint64_8digits(b *testing.B) {
-	src := []byte("12345678")
-	for b.Loop() {
-		sinkUint64 = parseUint64(src, 0, 8)
-	}
-}
-
-func BenchmarkParseUint64_10digits(b *testing.B) {
-	src := []byte("1234567890")
-	for b.Loop() {
-		sinkUint64 = parseUint64(src, 0, 10)
-	}
-}
-
-func BenchmarkParseUint64_16digits(b *testing.B) {
-	src := []byte("1234567812345678")
-	for b.Loop() {
-		sinkUint64 = parseUint64(src, 0, 16)
-	}
-}
-
-func BenchmarkParseUint64_19digits(b *testing.B) {
-	src := []byte("9223372036854775807")
-	for b.Loop() {
-		sinkUint64 = parseUint64(src, 0, 19)
-	}
 }
 
 // --- scanNumberSpan RFC 8259 validation tests ---

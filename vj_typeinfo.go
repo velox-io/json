@@ -67,11 +67,18 @@ const (
 	tiFlagRawMessage                            // json.RawMessage native handling
 	tiFlagNumber                                // json.Number native handling
 	tiFlagCopyString                            // `,copy` tag
+
+	// tiFlagUnmarshalMask groups flags that affect the unmarshal code path.
+	// Marshal-only flags (MarshalFn, TextMarshalFn, OmitEmpty) do not
+	// require the scanValueSpecial slow path during decoding.
+	tiFlagUnmarshalMask = tiFlagHasUnmarshalFn | tiFlagHasTextUnmarshalFn |
+		tiFlagQuoted | tiFlagRawMessage | tiFlagNumber | tiFlagCopyString
 )
 
 type TypeInfo struct {
 	Kind          ElemTypeKind
-	Flags         tiFlag
+	Flags         tiFlag // all flags (used by marshal)
+	UFlags        tiFlag // unmarshal-only flags subset (used by parser fast-path check)
 	Size          uintptr
 	Offset        uintptr
 	JSONName      string
@@ -280,6 +287,7 @@ func getCodecSlow(t reflect.Type, wait bool) *TypeInfo {
 	if t == rawMessageType {
 		e.ti.Kind = KindRawMessage
 		e.ti.Flags |= tiFlagRawMessage
+		e.ti.UFlags = e.ti.Flags & tiFlagUnmarshalMask
 		bindEncodeFn(e.ti)
 		e.ti.HintBytes = 64
 		close(e.done)
@@ -292,6 +300,7 @@ func getCodecSlow(t reflect.Type, wait bool) *TypeInfo {
 	if t == numberType {
 		e.ti.Kind = KindNumber
 		e.ti.Flags |= tiFlagNumber
+		e.ti.UFlags = e.ti.Flags & tiFlagUnmarshalMask
 		bindEncodeFn(e.ti)
 		e.ti.HintBytes = 12
 		close(e.done)
@@ -411,6 +420,7 @@ func getCodecSlow(t reflect.Type, wait bool) *TypeInfo {
 	bindEncodeFn(e.ti)
 	bindStructFieldEncodeFns(e.ti)
 	e.ti.HintBytes = computeHintBytes(e.ti, 0)
+	e.ti.UFlags = e.ti.Flags & tiFlagUnmarshalMask
 
 	close(e.done)
 	// Promote: replace the transient *codecEntry with the final *TypeInfo
@@ -580,6 +590,7 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 			if copyStr && fi.Kind == KindString {
 				fi.Flags |= tiFlagCopyString
 			}
+			fi.UFlags = fi.Flags & tiFlagUnmarshalMask
 
 			addField(fi, depth, idxPath)
 		}
@@ -784,7 +795,11 @@ type MapCodec struct {
 
 	MapKind     MapVariant     // specialized map type for fast path
 	mapRType    unsafe.Pointer // cached *abi.MapType for mapsIterInit
+	keyRType    unsafe.Pointer // cached *abi.Type for key (used by unsafe_New)
+	valRType    unsafe.Pointer // cached *abi.Type for value (used by unsafe_New/typedmemmove)
 	isStringKey bool           // KeyType.Kind() == reflect.String
+	valHasPtr   bool           // value type contains GC-traced pointers
+	KeySize     uintptr
 	ScanMapFn   func(sc *Parser, src []byte, idx int, ptr unsafe.Pointer) (int, error)
 }
 
@@ -801,7 +816,11 @@ func BuildMapCodec(t reflect.Type) *MapCodec {
 		KeyTI:       keyTI,
 		MapKind:     MapVariantGeneric,
 		mapRType:    rtypePtr(t),
+		keyRType:    rtypePtr(t.Key()),
+		valRType:    rtypePtr(t.Elem()),
 		isStringKey: isStringKey,
+		valHasPtr:   typeContainsPointer(t.Elem()),
+		KeySize:     t.Key().Size(),
 	}
 	if isStringKey {
 		switch valTI.Kind {
