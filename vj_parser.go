@@ -461,11 +461,11 @@ func (sc *Parser) scanNull(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer
 func (sc *Parser) scanObjectValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
 	switch ti.Kind {
 	case KindStruct:
-		return sc.scanObject(src, idx, ti.Decoder.(*ReflectStructDecoder), ptr)
+		return sc.scanStruct(src, idx, ti.Decoder.(*ReflectStructDecoder), ptr)
 	case KindMap:
-		return sc.scanObjectToMap(src, idx, ti.Decoder.(*ReflectMapDecoder), ptr)
+		return sc.scanMap(src, idx, ti.Decoder.(*ReflectMapDecoder), ptr)
 	case KindAny:
-		newIdx, m, err := sc.scanObjectAny(src, idx)
+		newIdx, m, err := sc.scanMapAny(src, idx)
 		if err != nil {
 			return newIdx, err
 		}
@@ -476,7 +476,7 @@ func (sc *Parser) scanObjectValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 	}
 }
 
-func (sc *Parser) scanObject(src []byte, idx int, dec *ReflectStructDecoder, base unsafe.Pointer) (int, error) {
+func (sc *Parser) scanStruct(src []byte, idx int, dec *ReflectStructDecoder, base unsafe.Pointer) (int, error) {
 	idx++ // consume '{'
 	idx = skipWSLong(src, idx)
 	if idx >= len(src) {
@@ -541,7 +541,7 @@ func (sc *Parser) scanObject(src []byte, idx int, dec *ReflectStructDecoder, bas
 	}
 }
 
-func (sc *Parser) scanObjectToMap(src []byte, idx int, mDec *ReflectMapDecoder, ptr unsafe.Pointer) (int, error) {
+func (sc *Parser) scanMap(src []byte, idx int, mDec *ReflectMapDecoder, ptr unsafe.Pointer) (int, error) {
 	// Fast path for map[string]string - zero reflection
 	if mDec.ValIsString {
 		return sc.scanMapStringString(src, idx, ptr)
@@ -673,7 +673,7 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 	}
 }
 
-func (sc *Parser) scanObjectAny(src []byte, idx int) (int, map[string]any, error) {
+func (sc *Parser) scanMapAny(src []byte, idx int) (int, map[string]any, error) {
 	idx++ // consume '{'
 	idx = skipWSLong(src, idx)
 
@@ -705,7 +705,7 @@ func (sc *Parser) scanObjectAny(src []byte, idx int) (int, map[string]any, error
 		idx = skipWS(src, idx)
 
 		var val any
-		idx, val, err = sc.scanAnyValue(src, idx)
+		idx, val, err = sc.scanValueAny(src, idx)
 		if err != nil {
 			return idx, nil, err
 		}
@@ -815,13 +815,14 @@ func (sc *Parser) scanArray(src []byte, idx int, sDec *ReflectSliceDecoder, ptr 
 			continue
 		}
 		if src[idx] == ']' {
-			// Update adaptive capacity hint: EMA = (old + observed) / 2.
+			// Update adaptive capacity hint using EMA.
 			// Relaxed store is fine — a stale read just means one sub-optimal alloc.
 			old := int(sDec.capHint.Load())
 			if old == 0 {
 				sDec.capHint.Store(int32(sliceLen))
 			} else {
-				sDec.capHint.Store(int32((old + sliceLen) / 2))
+				alpha := int(sDec.emaAlpha)
+				sDec.capHint.Store(int32((old*(alpha-1) + sliceLen) / alpha))
 			}
 			sh := (*SliceHeader)(ptr)
 			sh.Data = base
@@ -849,7 +850,7 @@ func (sc *Parser) scanArrayAny(src []byte, idx int) (int, []any, error) {
 	for {
 		var val any
 		var err error
-		idx, val, err = sc.scanAnyValue(src, idx)
+		idx, val, err = sc.scanValueAny(src, idx)
 		if err != nil {
 			return idx, nil, err
 		}
@@ -929,7 +930,7 @@ func (sc *Parser) ptrAlloc(rtype unsafe.Pointer, elemSize uintptr) unsafe.Pointe
 	return a.alloc()
 }
 
-func (sc *Parser) scanAnyValue(src []byte, idx int) (int, any, error) {
+func (sc *Parser) scanValueAny(src []byte, idx int) (int, any, error) {
 	if idx >= len(src) {
 		return idx, nil, errUnexpectedEOF
 	}
@@ -938,7 +939,7 @@ func (sc *Parser) scanAnyValue(src []byte, idx int) (int, any, error) {
 		newIdx, s, err := sc.scanString(src, idx)
 		return newIdx, s, err
 	case '{':
-		newIdx, m, err := sc.scanObjectAny(src, idx)
+		newIdx, m, err := sc.scanMapAny(src, idx)
 		return newIdx, m, err
 	case '[':
 		newIdx, arr, err := sc.scanArrayAny(src, idx)

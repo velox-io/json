@@ -286,6 +286,18 @@ type ReflectSliceDecoder struct {
 	ElemHasPtr     bool
 	ElemRType      unsafe.Pointer
 	capHint        atomic.Int32 // adaptive: EMA of observed array lengths
+	emaAlpha       int32        // EMA smoothing denominator; 0 means default (2)
+}
+
+// SetEMAAlpha sets the EMA smoothing denominator for adaptive array capacity.
+// The formula is: hint = (old*(alpha-1) + observed) / alpha.
+// Default alpha is 2 (equal-weight average). Higher values make the EMA
+// respond more slowly to length changes.
+func (d *ReflectSliceDecoder) SetEMAAlpha(alpha int32) {
+	if alpha < 2 {
+		alpha = 2
+	}
+	d.emaAlpha = alpha
 }
 
 func BuildSliceDecoder(t reflect.Type) *ReflectSliceDecoder {
@@ -299,6 +311,7 @@ func BuildSliceDecoder(t reflect.Type) *ReflectSliceDecoder {
 		EmptySliceData: unsafe.Pointer(emptySlice.Pointer()),
 		ElemHasPtr:     typeContainsPointer(t.Elem()),
 		ElemRType:      rtypePtr(t.Elem()),
+		emaAlpha:       2,
 	}
 }
 

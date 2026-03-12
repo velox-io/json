@@ -9,7 +9,7 @@ import (
 const (
 	arenaBlockSize = 8192 // 8KB arena blocks
 	arenaInlineMax = 1024 // small decoded strings kept in arena to reduce allocs
-	scratchBufSize = 2048 // reusable scratch buffer size for single-pass decoding
+	scratchBufSize = 4096 // reusable scratch buffer size for single-pass decoding
 )
 
 var defaultPool = parserPool{
