@@ -234,7 +234,9 @@ func (d *Decoder) Decode(v any) error {
 	// the remaining capacity is unlikely to hold the next value.
 	if !d.eof {
 		if len(d.buf)-d.scanAt < d.predictedValueSize() {
-			d.growBuffer()
+			if err := d.growBufferAndFill(); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -301,7 +303,9 @@ func (d *Decoder) retryDecode(sc *Parser, valueStart int, ti *TypeInfo, ptr unsa
 		d.valuesInBuf++
 		if !d.eof {
 			if len(d.buf)-d.scanAt < d.predictedValueSize() {
-				d.growBuffer()
+				if err := d.growBufferAndFill(); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -358,16 +362,34 @@ func (d *Decoder) ensureBuffer() error {
 	unscanned := d.bufLen - d.scanAt
 	newSize := d.nextBufSize()
 	if unscanned > 0 {
-		for newSize < unscanned+minReadSize {
+		minNeeded := unscanned + minReadSize
+		predicted := d.predictedValueSize()
+		// Modification 2: prediction-aware sizing — include predicted value
+		// size so retry-path buffers grow fast enough to hold the next value.
+		if predicted > minReadSize {
+			needed := unscanned + predicted + minReadSize
+			if needed > minNeeded {
+				minNeeded = needed
+			}
+		}
+		// Modification 3: cold-start heuristic — when unscanned exceeds the
+		// prediction, the value is provably >= unscanned bytes. Use 2x as
+		// target to converge in fewer retries.
+		if unscanned > predicted {
+			coldNeeded := unscanned*2 + minReadSize
+			if coldNeeded > minNeeded {
+				minNeeded = coldNeeded
+			}
+		}
+		for newSize < minNeeded {
 			newSize *= 2
 		}
 		// Value-align when predicted is driven by recent average (not spike decay).
-		predicted := d.predictedValueSize()
 		avg := d.recentAvgValueSize()
 		if predicted > minReadSize && predicted == avg {
 			nFit := (newSize - minReadSize) / predicted
 			aligned := nFit*predicted + minReadSize
-			if aligned >= unscanned+minReadSize {
+			if aligned >= minNeeded {
 				newSize = aligned
 			}
 		}
@@ -466,6 +488,21 @@ func (d *Decoder) predictedValueSize() int {
 		return d.maxSeenSize
 	}
 	return avg
+}
+
+// growBufferAndFill allocates a new prediction-sized buffer (via growBuffer)
+// and immediately fills it with data from the reader. This ensures the next
+// Decode call finds a buffer that is both correctly sized and full, preventing
+// ensureData from skipping the read (because scanAt < bufLen) and thus
+// eliminating the retry that would otherwise occur on insufficient data.
+func (d *Decoder) growBufferAndFill() error {
+	d.growBuffer()
+	for len(d.buf)-d.bufLen >= minReadSize && !d.eof {
+		if err := d.readMore(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // growBuffer allocates a new buffer when the remaining capacity is

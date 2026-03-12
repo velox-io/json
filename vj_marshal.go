@@ -166,11 +166,19 @@ func estimateStructDataSize(dec *StructCodec, base unsafe.Pointer) int {
 
 func estimateSliceDataSize(dec *SliceCodec, ptr unsafe.Pointer) int {
 	sh := (*SliceHeader)(ptr)
-	if sh.Data == nil || sh.Len == 0 {
+	if sh.Data == nil {
+		return 4 // null
+	}
+
+	isByteSlice := dec.ElemTI.Kind == KindUint8 && dec.ElemSize == 1
+	if sh.Len == 0 {
+		if isByteSlice {
+			return 2 // ""
+		}
 		return 2 // []
 	}
 
-	if dec.ElemTI.Kind == KindUint8 && dec.ElemSize == 1 {
+	if isByteSlice {
 		return int(sh.Len)*4/3 + 4 + 2
 	}
 
@@ -558,14 +566,19 @@ func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
 func (m *Marshaler) encodeSlice(dec *SliceCodec, ptr unsafe.Pointer) error {
 	sh := (*SliceHeader)(ptr)
 
-	if sh.Data == nil || sh.Len == 0 {
-		m.buf = append(m.buf, litArr...)
+	if sh.Data == nil {
+		m.buf = append(m.buf, litNull...) // nil slice → null
 		return nil
 	}
 
-	// []byte → base64
+	// []byte → base64 (handles empty []byte{} → "")
 	if dec.ElemTI.Kind == KindUint8 && dec.ElemSize == 1 {
 		return m.encodeByteSlice(sh)
+	}
+
+	if sh.Len == 0 {
+		m.buf = append(m.buf, litArr...)
+		return nil
 	}
 
 	m.buf = append(m.buf, '[')
@@ -800,12 +813,16 @@ func (m *Marshaler) encodeAny(ptr unsafe.Pointer) error {
 	case string:
 		m.encodeString(val)
 	case []byte:
-		m.buf = append(m.buf, '"')
-		encodedLen := base64.StdEncoding.EncodedLen(len(val))
-		start := len(m.buf)
-		m.buf = append(m.buf, make([]byte, encodedLen)...)
-		base64.StdEncoding.Encode(m.buf[start:], val)
-		m.buf = append(m.buf, '"')
+		if val == nil {
+			m.buf = append(m.buf, litNull...)
+		} else {
+			m.buf = append(m.buf, '"')
+			encodedLen := base64.StdEncoding.EncodedLen(len(val))
+			start := len(m.buf)
+			m.buf = append(m.buf, make([]byte, encodedLen)...)
+			base64.StdEncoding.Encode(m.buf[start:], val)
+			m.buf = append(m.buf, '"')
+		}
 	case []any:
 		return m.encodeAnySlice(val)
 	case map[string]any:

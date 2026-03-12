@@ -1,6 +1,9 @@
 package vjson
 
-import "unsafe"
+import (
+	"math"
+	"unsafe"
+)
 
 // UnsafeString converts a byte slice to a string without copying.
 // The caller must ensure the byte slice is not modified during the
@@ -130,6 +133,97 @@ func parseUint64(src []byte, start, end int) uint64 {
 		n = n*10 + uint64(src[i]-'0')
 	}
 	return n
+}
+
+// parseUint64Checked parses an unsigned integer with overflow detection.
+// Returns (value, true) on success, (0, false) on overflow.
+func parseUint64Checked(src []byte, start, end int) (uint64, bool) {
+	nDigits := end - start
+	// uint64 max = 18446744073709551615 (20 digits).
+	// ≤ 19 digits: cannot overflow.
+	if nDigits <= 19 {
+		return parseUint64(src, start, end), true
+	}
+	if nDigits > 20 {
+		return 0, false
+	}
+	// Exactly 20 digits: parse and check for wrap-around.
+	v := parseUint64(src, start, end)
+	// If the result is smaller than 10^19, the multiplication wrapped.
+	if v < 10_000_000_000_000_000_000 {
+		return 0, false
+	}
+	return v, true
+}
+
+// parseInt64Checked parses a signed integer with overflow detection.
+// Returns (value, true) on success, (0, false) on overflow.
+func parseInt64Checked(src []byte, start, end int) (int64, bool) {
+	if start >= end {
+		return 0, true
+	}
+	neg := src[start] == '-'
+	digitStart := start
+	if neg {
+		digitStart++
+	}
+	u, ok := parseUint64Checked(src, digitStart, end)
+	if !ok {
+		// Special case: -9223372036854775808 (int64 min) has uint64 value
+		// 9223372036854775808 which overflows int64 but is valid as negative.
+		if neg && u == 0 {
+			// parseUint64Checked returned false, but check if digits match exactly.
+			nDigits := end - digitStart
+			if nDigits == 19 {
+				v := parseUint64(src, digitStart, end)
+				if v == uint64(math.MaxInt64)+1 {
+					return math.MinInt64, true
+				}
+			}
+		}
+		return 0, false
+	}
+	if neg {
+		if u > uint64(math.MaxInt64)+1 {
+			return 0, false
+		}
+		if u == uint64(math.MaxInt64)+1 {
+			return math.MinInt64, true
+		}
+		return -int64(u), true
+	}
+	if u > uint64(math.MaxInt64) {
+		return 0, false
+	}
+	return int64(u), true
+}
+
+// intFitsKind checks whether v fits in the target signed integer kind.
+func intFitsKind(v int64, kind ElemTypeKind) bool {
+	switch kind {
+	case KindInt8:
+		return v >= math.MinInt8 && v <= math.MaxInt8
+	case KindInt16:
+		return v >= math.MinInt16 && v <= math.MaxInt16
+	case KindInt32:
+		return v >= math.MinInt32 && v <= math.MaxInt32
+	default: // KindInt, KindInt64
+		return true
+	}
+}
+
+// uintFitsKind checks whether v fits in the target unsigned integer kind.
+func uintFitsKind(v uint64, kind ElemTypeKind) bool {
+	switch kind {
+	case KindUint8:
+		return v <= math.MaxUint8
+	case KindUint16:
+		return v <= math.MaxUint16
+	case KindUint32:
+		return v <= math.MaxUint32
+	default: // KindUint, KindUint64
+		return true
+	}
 }
 
 var internedFloats = func() [256]any {

@@ -84,6 +84,101 @@ func TestMarshal_OmitEmpty(t *testing.T) {
 	}
 }
 
+func TestMarshal_OmitEmpty_EmptySlice(t *testing.T) {
+	type S struct {
+		NilSlice   []int `json:"nil_slice,omitempty"`
+		EmptySlice []int `json:"empty_slice,omitempty"`
+		HasData    []int `json:"has_data,omitempty"`
+	}
+	v := S{NilSlice: nil, EmptySlice: []int{}, HasData: []int{1}}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdGot, _ := json.Marshal(v)
+	if string(got) != string(stdGot) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, stdGot)
+	}
+	// Both nil and empty should be omitted, only has_data remains
+	want := `{"has_data":[1]}`
+	if string(got) != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestMarshal_OmitEmpty_EmptyByteSlice(t *testing.T) {
+	type S struct {
+		Nil   []byte `json:"nil,omitempty"`
+		Empty []byte `json:"empty,omitempty"`
+		Data  []byte `json:"data,omitempty"`
+	}
+	v := S{Nil: nil, Empty: []byte{}, Data: []byte("hi")}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdGot, _ := json.Marshal(v)
+	if string(got) != string(stdGot) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, stdGot)
+	}
+}
+
+func TestMarshal_OmitEmpty_EmptyMap(t *testing.T) {
+	type S struct {
+		NilMap   map[string]int `json:"nil_map,omitempty"`
+		EmptyMap map[string]int `json:"empty_map,omitempty"`
+		HasData  map[string]int `json:"has_data,omitempty"`
+	}
+	v := S{NilMap: nil, EmptyMap: map[string]int{}, HasData: map[string]int{"k": 1}}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdGot, _ := json.Marshal(v)
+	if string(got) != string(stdGot) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, stdGot)
+	}
+	// Both nil and empty should be omitted
+	want := `{"has_data":{"k":1}}`
+	if string(got) != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestMarshal_OmitEmpty_StdlibCompat(t *testing.T) {
+	type S struct {
+		Str   string         `json:"str,omitempty"`
+		Int   int            `json:"int,omitempty"`
+		Bool  bool           `json:"bool,omitempty"`
+		F64   float64        `json:"f64,omitempty"`
+		Ptr   *int           `json:"ptr,omitempty"`
+		Slice []int          `json:"slice,omitempty"`
+		Map   map[string]int `json:"map,omitempty"`
+		Bytes []byte         `json:"bytes,omitempty"`
+	}
+	// All zero/empty/nil
+	v := S{}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdGot, _ := json.Marshal(v)
+	if string(got) != string(stdGot) {
+		t.Errorf("all zero:\n  vjson:  %s\n  stdlib: %s", got, stdGot)
+	}
+
+	// Empty non-nil containers
+	v2 := S{Slice: []int{}, Map: map[string]int{}, Bytes: []byte{}}
+	got2, err := Marshal(&v2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdGot2, _ := json.Marshal(v2)
+	if string(got2) != string(stdGot2) {
+		t.Errorf("empty containers:\n  vjson:  %s\n  stdlib: %s", got2, stdGot2)
+	}
+}
+
 // --- json:"-" ---
 
 func TestMarshal_SkipField(t *testing.T) {
@@ -322,6 +417,95 @@ func TestMarshal_ByteSlice(t *testing.T) {
 	}
 	if string(check.Data) != "hello world" {
 		t.Fatalf("byte slice mismatch: got %q", check.Data)
+	}
+}
+
+func TestMarshal_ByteSlice_Nil(t *testing.T) {
+	type S struct {
+		Data []byte `json:"data"`
+	}
+	v := S{Data: nil}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdGot, _ := json.Marshal(v)
+	if string(got) != string(stdGot) {
+		t.Errorf("nil []byte: vjson=%s stdlib=%s", got, stdGot)
+	}
+	// Should be null
+	if string(got) != `{"data":null}` {
+		t.Errorf("nil []byte: got %s, want {\"data\":null}", got)
+	}
+}
+
+func TestMarshal_ByteSlice_Empty(t *testing.T) {
+	type S struct {
+		Data []byte `json:"data"`
+	}
+	v := S{Data: []byte{}}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdGot, _ := json.Marshal(v)
+	if string(got) != string(stdGot) {
+		t.Errorf("empty []byte: vjson=%s stdlib=%s", got, stdGot)
+	}
+	// Should be ""
+	if string(got) != `{"data":""}` {
+		t.Errorf("empty []byte: got %s, want {\"data\":\"\"}", got)
+	}
+}
+
+func TestMarshal_ByteSlice_NilVsEmpty_StdlibCompat(t *testing.T) {
+	type S struct {
+		Nil   []byte `json:"nil_field"`
+		Empty []byte `json:"empty_field"`
+		Data  []byte `json:"data_field"`
+	}
+	v := S{Nil: nil, Empty: []byte{}, Data: []byte("abc")}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdGot, _ := json.Marshal(v)
+	if string(got) != string(stdGot) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, stdGot)
+	}
+}
+
+func TestMarshal_NonByteSlice_Nil(t *testing.T) {
+	// All nil slices → null (matches stdlib)
+	type S struct {
+		Ints []int    `json:"ints"`
+		Strs []string `json:"strs"`
+	}
+	v := S{Ints: nil, Strs: nil}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdGot, _ := json.Marshal(v)
+	if string(got) != string(stdGot) {
+		t.Errorf("nil slices: vjson=%s stdlib=%s", got, stdGot)
+	}
+}
+
+func TestMarshal_NonByteSlice_Empty(t *testing.T) {
+	// Non-nil empty slices → [] (matches stdlib)
+	type S struct {
+		Ints []int    `json:"ints"`
+		Strs []string `json:"strs"`
+	}
+	v := S{Ints: []int{}, Strs: []string{}}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdGot, _ := json.Marshal(v)
+	if string(got) != string(stdGot) {
+		t.Errorf("empty slices: vjson=%s stdlib=%s", got, stdGot)
 	}
 }
 

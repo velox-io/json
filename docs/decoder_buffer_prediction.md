@@ -17,31 +17,47 @@ The prediction algorithm minimizes:
      │
      ├─ scanValue(buf, idx) ──► OK ──► recordValueSize(size)
      │                                        │
-     │                                   maybeNewBuffer()
+     │                                   remaining < predicted?
      │                                        │
      │                               ┌────────┴────────┐
-     │                               │  remaining +    │
-     │                               │  unscanned >=   │──► YES: keep buffer
+     │                               │  len(buf) -     │
+     │                               │  scanAt >=      │──► YES: keep buffer
      │                               │  predicted?     │
      │                               └────────┬────────┘
      │                                        │ NO
      │                                        ▼
-     │                               ┌─────────────────┐
-     │                               │ Compute newSize  │
-     │                               │ (see algorithm)  │
-     │                               └────────┬────────┘
-     │                                        │
-     │                                   alloc new buf
-     │                                   copy unscanned
-     │                                   reset counters
+     │                               ┌───────────────────┐
+     │                               │ growBufferAndFill │
+     │                               │ 1. growBuffer()   │
+     │                               │    (see sizing)   │
+     │                               │ 2. fill loop:     │
+     │                               │    readMore()     │
+     │                               │    until full     │
+     │                               └─────────┬─────────┘
+     │                                         │
+     │                                  next Decode() finds
+     │                                  pre-filled buffer
+     │
      │
      └─ errUnexpectedEOF ──► retryDecode()
                                  │
-                            growAndFill()
-                            (expand buf, fill to capacity)
+                            growAndFill(valueStart)
+                            (expand buf via ensureBuffer, fill to capacity)
                                  │
                             scanValue() again
+                                 │
+                            on success ──► growBufferAndFill()
+                                           (same pre-fill for next value)
 ```
+
+### Why pre-fill matters (`growBufferAndFill`)
+
+After a successful decode, `growBuffer` allocates a correctly-sized new buffer
+and copies the unscanned tail (~few KB). Without filling, the next `Decode`
+call enters `ensureData`, sees `scanAt < bufLen` (the unscanned tail), skips
+reading, and `scanValue` runs with insufficient data — causing an avoidable
+retry. `growBufferAndFill` eliminates this by reading the new buffer full
+immediately after allocation.
 
 ## Prediction: `predictedValueSize()` / `recentAvgValueSize()`
 
@@ -79,10 +95,11 @@ After a 1 MB spike followed by 170-byte values:
 
 For typical spike gaps of 20, the high-water mark remains effective.
 
-## Buffer Sizing: `maybeNewBuffer()`
+## Buffer Sizing: `growBuffer()`
 
-When the current buffer can't hold the next predicted value, the decoder
-computes a new buffer size through these steps:
+When the current buffer can't hold the next predicted value (`len(buf) - scanAt
+< predicted`), `growBufferAndFill` calls `growBuffer` to compute a new buffer
+size through these steps:
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -174,23 +191,86 @@ With the fitness signal (`needed *= 2` when `valuesInBuf < 2`):
   ...    (stable at 256K)
 ```
 
-## Retry: `retryDecode()` + `growAndFill()`
+## Retry Path: `ensureBuffer()` with Prediction-Aware Sizing
 
-When `scanValue` returns `errUnexpectedEOF` (value spans the buffer boundary):
+When `scanValue` returns `errUnexpectedEOF`, the retry loop calls
+`growAndFill(valueStart)` which uses `ensureBuffer()` to allocate larger
+buffers. `ensureBuffer` uses three sizing heuristics in the `unscanned > 0`
+branch:
 
-1. **growAndFill**: expand the buffer via `ensureBuffer()`, then read
-   repeatedly until the buffer is full or EOF. This fill-then-parse approach
-   minimizes the number of retries from `O(valueSize / readChunk)` to
-   `O(log(valueSize / bufSize))`.
-2. **SetZero + re-parse**: the target struct is zeroed (partial writes from
-   the failed parse may have corrupted it), then `scanValue` runs again with
-   more data.
-3. **Loop**: if still `errUnexpectedEOF`, grow again and retry.
+### 1. Baseline
+
+```
+minNeeded = unscanned + minReadSize
+```
+
+This is the absolute minimum — just enough room for the existing data plus
+one read.
+
+### 2. Prediction-aware sizing
+
+```
+if predicted > minReadSize:
+    needed = unscanned + predicted + minReadSize
+    minNeeded = max(minNeeded, needed)
+```
+
+Incorporates the predicted value size so the new buffer is likely large enough
+to hold the complete value, avoiding multiple rounds of grow-retry.
+
+### 3. Cold-start heuristic
+
+```
+if unscanned > predicted:
+    coldNeeded = unscanned * 2 + minReadSize
+    minNeeded = max(minNeeded, coldNeeded)
+```
+
+When `unscanned > predicted`, the prediction is stale or in cold-start (e.g.,
+Value #0 where `predicted = bufSize/4 = 32K` but the actual value is 456K).
+Since the value is provably >= `unscanned` bytes (we already have that much
+data and the value isn't complete), using `2 × unscanned` as the target
+converges exponentially rather than linearly.
+
+### Sizing then proceeds with:
+
+```
+for newSize < minNeeded { newSize *= 2 }
+
+// Value-align (same spike-aware guard as growBuffer)
+if predicted > minReadSize && predicted == avg:
+    aligned = nFit * predicted + minReadSize
+    if aligned >= minNeeded: newSize = aligned
+```
+
+### Example: 456 KB value with 128 KB initial buffer (Twitter)
+
+Without prediction-aware sizing and cold-start heuristic:
+
+```
+  Retry#  unscanned  bufSize   minNeeded (old)    outcome
+  ──────  ─────────  ───────   ───────────────    ───────
+  0       128K       128K      128K + 512         scanValue fails
+  1       129K       129K      129K + 512         scanValue fails
+  2       130K       130K      130K + 512         scanValue fails
+  3       131K       131K      131K + 512         scanValue fails (4 retries to reach 456K!)
+```
+
+With prediction-aware + cold-start:
+
+```
+  Retry#  unscanned  predicted  cold(2x)  minNeeded  newSize  outcome
+  ──────  ─────────  ─────────  ────────  ─────────  ───────  ───────
+  0       128K       32K        256K      257K       262144   fills 256K, scanValue fails
+  1       256K       32K        512K      513K       524288   fills 512K, scanValue OK ✓
+```
+
+Retries drop from 4 to 1.
 
 ## Memory Safety
 
 Buffers grow in response to actual value sizes — small values cannot inflate
-buffers because `maybeNewBuffer` only triggers when `remaining + unscanned <
-predicted`, and `predicted` is bounded by actual decoded sizes. The high-water
-mark decays continuously, so a single large value doesn't permanently inflate
-the prediction.
+buffers because `growBufferAndFill` only triggers when `remaining < predicted`,
+and `predicted` is bounded by actual decoded sizes. The high-water mark decays
+continuously, so a single large value doesn't permanently inflate the
+prediction.

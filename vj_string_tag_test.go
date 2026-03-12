@@ -267,16 +267,16 @@ func TestUnmarshal_StringTag_Null(t *testing.T) {
 	if err := Unmarshal([]byte(`{"count":null}`), &v); err != nil {
 		t.Fatal(err)
 	}
-	if v.Count != 0 {
-		t.Fatalf("got %d, want 0", v.Count)
+	if v.Count != 999 {
+		t.Fatalf("got %d, want 999 (null should leave value unchanged)", v.Count)
 	}
 
 	vb := StringTagBool{Flag: true}
 	if err := Unmarshal([]byte(`{"flag":null}`), &vb); err != nil {
 		t.Fatal(err)
 	}
-	if vb.Flag {
-		t.Fatal("got true, want false")
+	if !vb.Flag {
+		t.Fatal("got false, want true (null should leave value unchanged)")
 	}
 }
 

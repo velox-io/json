@@ -104,12 +104,21 @@ func (sc *Parser) scanQuotedValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 		if parseErr != nil {
 			return newIdx, newSyntaxErrorWrap(fmt.Sprintf("vjson: cannot unmarshal string %q into integer: %v", inner, parseErr), newIdx, parseErr)
 		}
+		if !intFitsKind(v, ti.Kind) {
+			return newIdx, newUnmarshalTypeError("number "+inner, ti.Ext.Type, newIdx)
+		}
 		WriteIntValue(ptr, ti.Kind, v)
 
 	case KindUint, KindUint8, KindUint16, KindUint32, KindUint64:
+		if len(inner) > 0 && inner[0] == '-' {
+			return newIdx, newUnmarshalTypeError("number "+inner, ti.Ext.Type, newIdx)
+		}
 		v, parseErr := strconv.ParseUint(inner, 10, 64)
 		if parseErr != nil {
 			return newIdx, newSyntaxErrorWrap(fmt.Sprintf("vjson: cannot unmarshal string %q into unsigned integer: %v", inner, parseErr), newIdx, parseErr)
+		}
+		if !uintFitsKind(v, ti.Kind) {
+			return newIdx, newUnmarshalTypeError("number "+inner, ti.Ext.Type, newIdx)
 		}
 		WriteUintValue(ptr, ti.Kind, v)
 

@@ -89,8 +89,8 @@ func TestScanNumber_Float32Null(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if s.V != 0 {
-		t.Errorf("got %v, want 0", s.V)
+	if s.V != 99.9 {
+		t.Errorf("got %v, want 99.9 (null should leave value unchanged)", s.V)
 	}
 }
 

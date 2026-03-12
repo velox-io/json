@@ -2,6 +2,7 @@ package vjson
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -323,13 +324,23 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 		if isFloat {
 			return end, newUnmarshalTypeError("number", ti.Ext.Type, end)
 		}
-		v := parseInt64(src, idx, end)
+		v, ok := parseInt64Checked(src, idx, end)
+		if !ok || !intFitsKind(v, ti.Kind) {
+			return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
+		}
 		WriteIntValue(ptr, ti.Kind, v)
 	case KindUint, KindUint8, KindUint16, KindUint32, KindUint64:
 		if isFloat {
 			return end, newUnmarshalTypeError("number", ti.Ext.Type, end)
 		}
-		v := parseUint64(src, idx, end)
+		// Negative numbers cannot be assigned to unsigned types.
+		if src[idx] == '-' {
+			return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
+		}
+		v, ok := parseUint64Checked(src, idx, end)
+		if !ok || !uintFitsKind(v, ti.Kind) {
+			return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
+		}
 		WriteUintValue(ptr, ti.Kind, v)
 	case KindFloat32:
 		v, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 32)
@@ -445,30 +456,18 @@ func (sc *Parser) scanNull(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer
 	newIdx := idx + 4
 
 	switch ti.Kind {
-	case KindString:
-		*(*string)(ptr) = ""
-	case KindBool:
-		*(*bool)(ptr) = false
-	case KindInt, KindInt8, KindInt16, KindInt32, KindInt64:
-		WriteIntValue(ptr, ti.Kind, 0)
-	case KindUint, KindUint8, KindUint16, KindUint32, KindUint64:
-		WriteUintValue(ptr, ti.Kind, 0)
-	case KindFloat32:
-		*(*float32)(ptr) = 0
-	case KindFloat64:
-		*(*float64)(ptr) = 0
 	case KindPointer:
 		*(*unsafe.Pointer)(ptr) = nil
 	case KindSlice:
 		*(*SliceHeader)(ptr) = SliceHeader{}
 	case KindMap:
-		// nil map
 		mapDec := ti.Decoder.(*MapCodec)
 		reflect.NewAt(mapDec.MapType, ptr).Elem().Set(reflect.Zero(mapDec.MapType))
-	case KindStruct:
-		// no-op: struct is already at zero value
 	case KindAny:
 		*(*any)(ptr) = nil
+	default:
+		// Primitive value types (string, bool, int, uint, float) and structs:
+		// null leaves the existing value unchanged, matching encoding/json.
 	}
 	return newIdx, nil
 }
@@ -502,6 +501,8 @@ func (sc *Parser) scanStruct(src []byte, idx int, dec *StructCodec, base unsafe.
 	if src[idx] == '}' {
 		return idx + 1, nil
 	}
+
+	var firstErr error
 
 	for {
 		// Key
@@ -538,10 +539,25 @@ func (sc *Parser) scanStruct(src []byte, idx int, dec *StructCodec, base unsafe.
 				return idx, err
 			}
 		} else {
+			savedIdx := idx
 			fieldPtr := unsafe.Add(base, fi.Offset)
 			idx, err = sc.scanValue(src, idx, fi, fieldPtr)
 			if err != nil {
-				return idx, err
+				var ute *UnmarshalTypeError
+				if !errors.As(err, &ute) {
+					return idx, err // syntax error → abort
+				}
+				// Type mismatch: skip the value and continue.
+				if idx == savedIdx {
+					// Object/array mismatch: scanValue didn't consume the value.
+					idx, err = skipValue(src, idx)
+					if err != nil {
+						return idx, err
+					}
+				}
+				if firstErr == nil {
+					firstErr = ute
+				}
 			}
 		}
 
@@ -556,7 +572,7 @@ func (sc *Parser) scanStruct(src []byte, idx int, dec *StructCodec, base unsafe.
 			continue
 		}
 		if src[idx] == '}' {
-			return idx + 1, nil
+			return idx + 1, firstErr
 		}
 		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in object, got %q", src[idx]), idx)
 	}

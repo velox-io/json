@@ -4,6 +4,7 @@ import (
 	"encoding"
 	"encoding/json"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -317,118 +318,199 @@ func getCodecSlow(t reflect.Type, wait bool) *TypeInfo {
 }
 
 // CollectStructFields collects fields from a struct type, promoting
-// anonymous embedded struct fields. Direct (outer) fields take precedence
-// over embedded fields with the same JSON name.
+// anonymous embedded struct fields using breadth-first search.
+//
+// Priority rules (matching encoding/json):
+//   - Direct (depth-0) fields always win over embedded fields.
+//   - Among embedded fields, shallower depth wins.
+//   - At the same depth, conflicting names cancel each other (neither appears).
+//   - Unexported anonymous struct fields still promote their exported children.
+//   - Field output order matches struct declaration order (by index path).
 func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
-	var fields []TypeInfo
-	seen := make(map[string]bool)
-
-	// Two passes: first direct fields, then embedded structs.
-	// This ensures outer direct fields always override embedded fields.
-	type embeddedEntry struct {
-		typ    reflect.Type
-		offset uintptr
+	// nameInfo tracks the winning field for each JSON name.
+	type nameInfo struct {
+		depth int // depth at which this name was first seen
+		index int // index in fields[]; -1 = canceled
 	}
-	var embedded []embeddedEntry
 
-	for i := range t.NumField() {
-		sf := t.Field(i)
-		if !sf.IsExported() {
-			continue
+	// BFS queue entry.
+	type bfsEntry struct {
+		typ       reflect.Type
+		offset    uintptr
+		indexPath []int // field index path from root
+	}
+
+	// fieldWithOrder pairs a TypeInfo with its index path for sorting.
+	type fieldWithOrder struct {
+		ti        TypeInfo
+		indexPath []int
+	}
+
+	var fields []fieldWithOrder
+	names := make(map[string]*nameInfo) // JSON name → winner info
+
+	// addField attempts to insert a field.
+	addField := func(fi TypeInfo, depth int, idxPath []int) {
+		name := fi.JSONName
+		if ni, ok := names[name]; ok {
+			if ni.depth < depth {
+				return // shallower depth already owns this name
+			}
+			if ni.depth == depth {
+				// Same depth conflict — cancel the earlier entry.
+				if ni.index >= 0 {
+					fields[ni.index].ti = TypeInfo{} // zero out — compacted later
+					ni.index = -1
+				}
+				return
+			}
+			// depth < ni.depth: current field is shallower — replace.
+			if ni.index >= 0 {
+				fields[ni.index].ti = TypeInfo{}
+			}
+			ni.depth = depth
+			ni.index = len(fields)
+			fields = append(fields, fieldWithOrder{fi, idxPath})
+			return
 		}
+		names[name] = &nameInfo{depth: depth, index: len(fields)}
+		fields = append(fields, fieldWithOrder{fi, idxPath})
+	}
 
-		// Collect anonymous embedded structs for second pass
-		if sf.Anonymous && sf.Type.Kind() == reflect.Struct {
-			embedded = append(embedded, embeddedEntry{sf.Type, baseOffset + sf.Offset})
-			continue
-		}
+	// collectDirect scans one struct level: adds non-anonymous exported
+	// fields, and returns embedded structs for the next BFS level.
+	collectDirect := func(st reflect.Type, base uintptr, depth int, parentPath []int) []bfsEntry {
+		var nextLevel []bfsEntry
+		for i := range st.NumField() {
+			sf := st.Field(i)
 
-		// Parse json tag
-		jsonName := sf.Name
-		omitEmpty := false
-		quoted := false
-		if tag := sf.Tag.Get("json"); tag != "" {
-			if tag == "-" {
+			// Build index path for this field.
+			idxPath := make([]int, len(parentPath)+1)
+			copy(idxPath, parentPath)
+			idxPath[len(parentPath)] = i
+
+			// Anonymous struct embedding — queue for next depth level.
+			// Allow unexported anonymous structs (their exported fields
+			// are still promoted per encoding/json rules).
+			if sf.Anonymous {
+				ft := sf.Type
+				if ft.Kind() == reflect.Pointer {
+					ft = ft.Elem()
+				}
+				if ft.Kind() == reflect.Struct {
+					nextLevel = append(nextLevel, bfsEntry{ft, base + sf.Offset, idxPath})
+					continue
+				}
+			}
+
+			if !sf.IsExported() {
 				continue
 			}
-			if before, opts, ok := strings.Cut(tag, ","); ok {
-				jsonName = before
-				omitEmpty = strings.Contains(opts, "omitempty")
-				quoted = strings.Contains(opts, "string")
-			} else {
-				jsonName = tag
-			}
-			if jsonName == "" {
-				jsonName = sf.Name
-			}
-		}
 
-		cached := getCodecForCycle(sf.Type)
-
-		// `,string` is only meaningful for bool, int*, uint*, float*, string, and
-		// pointer-to-those kinds. encoding/json silently ignores it for other types.
-		if quoted {
-			switch cached.Kind {
-			case KindPointer:
-				pDec := cached.Decoder.(*PointerCodec)
-				if !isQuotableKind(pDec.ElemTI.Kind) {
-					quoted = false
+			// Parse json tag.
+			jsonName := sf.Name
+			omitEmpty := false
+			quoted := false
+			if tag := sf.Tag.Get("json"); tag != "" {
+				if tag == "-" {
+					continue
 				}
-			default:
-				if !isQuotableKind(cached.Kind) {
-					quoted = false
+				if before, opts, ok := strings.Cut(tag, ","); ok {
+					jsonName = before
+					omitEmpty = strings.Contains(opts, "omitempty")
+					quoted = strings.Contains(opts, "string")
+				} else {
+					jsonName = tag
+				}
+				if jsonName == "" {
+					jsonName = sf.Name
 				}
 			}
-		}
 
-		fi := TypeInfo{
-			Kind:          cached.Kind,
-			Flags:         cached.Flags,
-			Size:          cached.Size,
-			Offset:        baseOffset + sf.Offset,
-			JSONName:      jsonName,
-			JSONNameLower: toLowerASCII(jsonName),
-			Decoder:       cached.Decoder,
-		}
+			cached := getCodecForCycle(sf.Type)
 
-		// Build Ext with marshal metadata.
-		ext := fi.getOrAllocExt()
-		ext.Type = sf.Type
-		ext.KeyBytes = encodeKeyBytes(jsonName)
-		ext.KeyBytesIndent = encodeKeyBytesIndent(jsonName)
-		ext.IsZeroFn = makeIsZeroFn(sf.Type)
-		if cachedExt := cached.Ext; cachedExt != nil {
-			ext.MarshalFn = cachedExt.MarshalFn
-			ext.UnmarshalFn = cachedExt.UnmarshalFn
-			ext.TextMarshalFn = cachedExt.TextMarshalFn
-			ext.TextUnmarshalFn = cachedExt.TextUnmarshalFn
-		}
+			if quoted {
+				switch cached.Kind {
+				case KindPointer:
+					pDec := cached.Decoder.(*PointerCodec)
+					if !isQuotableKind(pDec.ElemTI.Kind) {
+						quoted = false
+					}
+				default:
+					if !isQuotableKind(cached.Kind) {
+						quoted = false
+					}
+				}
+			}
 
-		if omitEmpty {
-			fi.Flags |= tiFlagOmitEmpty
-		}
-		if quoted {
-			fi.Flags |= tiFlagQuoted
-		}
+			fi := TypeInfo{
+				Kind:          cached.Kind,
+				Flags:         cached.Flags,
+				Size:          cached.Size,
+				Offset:        base + sf.Offset,
+				JSONName:      jsonName,
+				JSONNameLower: toLowerASCII(jsonName),
+				Decoder:       cached.Decoder,
+			}
 
-		if !seen[jsonName] {
-			seen[jsonName] = true
-			fields = append(fields, fi)
+			ext := fi.getOrAllocExt()
+			ext.Type = sf.Type
+			ext.KeyBytes = encodeKeyBytes(jsonName)
+			ext.KeyBytesIndent = encodeKeyBytesIndent(jsonName)
+			ext.IsZeroFn = makeIsZeroFn(sf.Type)
+			if cachedExt := cached.Ext; cachedExt != nil {
+				ext.MarshalFn = cachedExt.MarshalFn
+				ext.UnmarshalFn = cachedExt.UnmarshalFn
+				ext.TextMarshalFn = cachedExt.TextMarshalFn
+				ext.TextUnmarshalFn = cachedExt.TextUnmarshalFn
+			}
+
+			if omitEmpty {
+				fi.Flags |= tiFlagOmitEmpty
+			}
+			if quoted {
+				fi.Flags |= tiFlagQuoted
+			}
+
+			addField(fi, depth, idxPath)
 		}
+		return nextLevel
 	}
 
-	// Second pass: promote fields from embedded structs (lower priority)
-	for _, e := range embedded {
-		inner := CollectStructFields(e.typ, e.offset)
-		for _, fi := range inner {
-			if !seen[fi.JSONName] {
-				seen[fi.JSONName] = true
-				fields = append(fields, fi)
+	// BFS: start with the root struct at depth 0.
+	current := []bfsEntry{{t, baseOffset, nil}}
+	visited := map[reflect.Type]bool{} // prevent infinite recursion
+	for depth := 0; len(current) > 0; depth++ {
+		var next []bfsEntry
+		for _, e := range current {
+			if visited[e.typ] {
+				continue
+			}
+			visited[e.typ] = true
+			next = append(next, collectDirect(e.typ, e.offset, depth, e.indexPath)...)
+		}
+		current = next
+	}
+
+	// Sort by index path to match struct declaration order.
+	sort.Slice(fields, func(i, j int) bool {
+		a, b := fields[i].indexPath, fields[j].indexPath
+		for k := 0; k < len(a) && k < len(b); k++ {
+			if a[k] != b[k] {
+				return a[k] < b[k]
 			}
 		}
-	}
+		return len(a) < len(b)
+	})
 
-	return fields
+	// Compact: remove canceled (zero-value) entries.
+	result := make([]TypeInfo, 0, len(fields))
+	for i := range fields {
+		if fields[i].ti.JSONName != "" {
+			result = append(result, fields[i].ti)
+		}
+	}
+	return result
 }
 
 // --- Codec Builders ---
@@ -617,8 +699,20 @@ func makeIsZeroFn(t reflect.Type) func(unsafe.Pointer) bool {
 		return func(ptr unsafe.Pointer) bool { return *(*float64)(ptr) == 0 }
 	case reflect.String:
 		return func(ptr unsafe.Pointer) bool { return len(*(*string)(ptr)) == 0 }
-	case reflect.Slice, reflect.Map:
-		return func(ptr unsafe.Pointer) bool { return *(*unsafe.Pointer)(ptr) == nil }
+	case reflect.Slice:
+		return func(ptr unsafe.Pointer) bool {
+			sh := (*SliceHeader)(ptr)
+			return sh.Data == nil || sh.Len == 0
+		}
+	case reflect.Map:
+		return func(ptr unsafe.Pointer) bool {
+			// A map variable is a pointer to the internal hmap.
+			// nil pointer → nil map; otherwise use reflect for len check.
+			if *(*unsafe.Pointer)(ptr) == nil {
+				return true
+			}
+			return reflect.NewAt(t, ptr).Elem().Len() == 0
+		}
 	case reflect.Pointer, reflect.Interface:
 		return func(ptr unsafe.Pointer) bool { return *(*unsafe.Pointer)(ptr) == nil }
 	case reflect.Struct:
