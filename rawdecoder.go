@@ -11,135 +11,135 @@ import (
 // Field Metadata Types
 // =============================================================================
 
-type elemTypeKind uint8
+type ElemTypeKind uint8
 
 const (
-	kindBool elemTypeKind = iota
-	kindInt
-	kindInt8
-	kindInt16
-	kindInt32
-	kindInt64
-	kindUint
-	kindUint8
-	kindUint16
-	kindUint32
-	kindUint64
-	kindFloat32
-	kindFloat64
-	kindString
-	kindStruct  // nested struct - decoder field holds *reflectStructDecoder
-	kindSlice   // slice - decoder field holds *reflectSliceDecoder
-	kindPointer // pointer to T - decoder field holds *reflectPointerDecoder
-	kindAny     // interface{} field
-	kindMap     // map type - decoder field holds *reflectMapDecoder
+	KindBool ElemTypeKind = iota
+	KindInt
+	KindInt8
+	KindInt16
+	KindInt32
+	KindInt64
+	KindUint
+	KindUint8
+	KindUint16
+	KindUint32
+	KindUint64
+	KindFloat32
+	KindFloat64
+	KindString
+	KindStruct  // nested struct - Decoder field holds *ReflectStructDecoder
+	KindSlice   // slice - Decoder field holds *ReflectSliceDecoder
+	KindPointer // pointer to T - Decoder field holds *ReflectPointerDecoder
+	KindAny     // interface{} field
+	KindMap     // map type - Decoder field holds *ReflectMapDecoder
 )
 
-// typeInfo holds pre-computed metadata for a type.
+// TypeInfo holds pre-computed metadata for a type.
 // For struct fields it also carries offset and JSON name; for standalone
-// type queries (via getDecoder) only kind/size/decoder are populated.
-type typeInfo struct {
-	kind          elemTypeKind // primitive kind for type-switch dispatch
-	size          uintptr      // size of the field type (for int/uint variations)
-	offset        uintptr      // field offset in struct (for unsafe access)
-	jsonName      string       // from `json:"name"` tag or field name
-	jsonNameLower string       // pre-lowercased jsonName for case-insensitive lookup
-	decoder       any          // nested decoder (*reflectStructDecoder, *reflectSliceDecoder, etc.)
+// type queries (via GetDecoder) only Kind/Size/Decoder are populated.
+type TypeInfo struct {
+	Kind          ElemTypeKind // primitive kind for type-switch dispatch
+	Size          uintptr      // size of the field type (for int/uint variations)
+	Offset        uintptr      // field offset in struct (for unsafe access)
+	JSONName      string       // from `json:"name"` tag or field name
+	JSONNameLower string       // pre-lowercased JSONName for case-insensitive lookup
+	Decoder       any          // nested decoder (*ReflectStructDecoder, *ReflectSliceDecoder, etc.)
 }
 
-// decoderCache maps reflect.Type → *typeInfo.
-// Every type goes through getDecoder exactly once; the returned *typeInfo is
+// decoderCache maps reflect.Type → *TypeInfo.
+// Every type goes through GetDecoder exactly once; the returned *TypeInfo is
 // stable and may be referenced by pointer from other decoders.
-var decoderCache sync.Map // map[reflect.Type]*typeInfo
+var decoderCache sync.Map // map[reflect.Type]*TypeInfo
 
 // =============================================================================
 // Unified Entry Point
 // =============================================================================
 
-// kindForType maps reflect.Kind to the internal elemTypeKind.
+// KindForType maps reflect.Kind to the internal ElemTypeKind.
 // Panics on unsupported types (programming error, not runtime input error).
-func kindForType(t reflect.Type) elemTypeKind {
+func KindForType(t reflect.Type) ElemTypeKind {
 	switch t.Kind() {
 	case reflect.Bool:
-		return kindBool
+		return KindBool
 	case reflect.Int:
-		return kindInt
+		return KindInt
 	case reflect.Int8:
-		return kindInt8
+		return KindInt8
 	case reflect.Int16:
-		return kindInt16
+		return KindInt16
 	case reflect.Int32:
-		return kindInt32
+		return KindInt32
 	case reflect.Int64:
-		return kindInt64
+		return KindInt64
 	case reflect.Uint:
-		return kindUint
+		return KindUint
 	case reflect.Uint8:
-		return kindUint8
+		return KindUint8
 	case reflect.Uint16:
-		return kindUint16
+		return KindUint16
 	case reflect.Uint32:
-		return kindUint32
+		return KindUint32
 	case reflect.Uint64:
-		return kindUint64
+		return KindUint64
 	case reflect.Float32:
-		return kindFloat32
+		return KindFloat32
 	case reflect.Float64:
-		return kindFloat64
+		return KindFloat64
 	case reflect.String:
-		return kindString
+		return KindString
 	case reflect.Struct:
-		return kindStruct
+		return KindStruct
 	case reflect.Slice:
-		return kindSlice
+		return KindSlice
 	case reflect.Pointer:
-		return kindPointer
+		return KindPointer
 	case reflect.Interface:
 		if t.NumMethod() == 0 {
-			return kindAny
+			return KindAny
 		}
 		panic("pjson: non-empty interface types not supported: " + t.String())
 	case reflect.Map:
-		return kindMap
+		return KindMap
 	default:
 		panic("pjson: unsupported type: " + t.String())
 	}
 }
 
-// getDecoder returns the cached *typeInfo for the given type, building it on
+// GetDecoder returns the cached *TypeInfo for the given type, building it on
 // first access. The returned pointer is stable and safe to store by reference.
 //
 // For recursive types (e.g. type Node struct { Children []*Node }), a
-// partially-initialized *typeInfo is stored in the cache before construction
+// partially-initialized *TypeInfo is stored in the cache before construction
 // begins. Composite decoders that reference it via pointer will see the
 // fully-populated value once construction completes.
-func getDecoder(t reflect.Type) *typeInfo {
+func GetDecoder(t reflect.Type) *TypeInfo {
 	if cached, ok := decoderCache.Load(t); ok {
-		return cached.(*typeInfo)
+		return cached.(*TypeInfo)
 	}
 
-	ti := &typeInfo{
-		kind: kindForType(t),
-		size: t.Size(),
+	ti := &TypeInfo{
+		Kind: KindForType(t),
+		Size: t.Size(),
 	}
 
 	// Occupy the cache slot before building the decoder to break cycles.
 	actual, loaded := decoderCache.LoadOrStore(t, ti)
 	if loaded {
-		return actual.(*typeInfo)
+		return actual.(*TypeInfo)
 	}
 
 	// Build decoder for composite types. ti is already in the cache,
-	// so recursive getDecoder calls will hit the cache and return ti's pointer.
+	// so recursive GetDecoder calls will hit the cache and return ti's pointer.
 	switch t.Kind() {
 	case reflect.Struct:
-		ti.decoder = buildStructDecoder(t)
+		ti.Decoder = BuildStructDecoder(t)
 	case reflect.Slice:
-		ti.decoder = buildSliceDecoder(t)
+		ti.Decoder = BuildSliceDecoder(t)
 	case reflect.Pointer:
-		ti.decoder = buildPointerDecoder(t)
+		ti.Decoder = BuildPointerDecoder(t)
 	case reflect.Map:
-		ti.decoder = buildMapDecoder(t)
+		ti.Decoder = BuildMapDecoder(t)
 	}
 
 	return ti
@@ -149,12 +149,12 @@ func getDecoder(t reflect.Type) *typeInfo {
 // Struct Field Collection
 // =============================================================================
 
-// collectStructFields recursively collects fields from a struct type, promoting
+// CollectStructFields recursively collects fields from a struct type, promoting
 // fields from anonymous (embedded) structs. baseOffset is added to each
 // field's offset to handle nested embedding. Outer (earlier) fields with
 // the same JSON name take precedence over inner (embedded) fields.
-func collectStructFields(t reflect.Type, baseOffset uintptr) []typeInfo {
-	var fields []typeInfo
+func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
+	var fields []TypeInfo
 	seen := make(map[string]bool) // track JSON names to handle override
 
 	// Two passes: first direct fields, then embedded structs.
@@ -193,14 +193,14 @@ func collectStructFields(t reflect.Type, baseOffset uintptr) []typeInfo {
 			}
 		}
 
-		cached := getDecoder(sf.Type)
-		fi := typeInfo{
-			kind:          cached.kind,
-			size:          cached.size,
-			offset:        baseOffset + sf.Offset,
-			jsonName:      jsonName,
-			jsonNameLower: toLowerASCII(jsonName),
-			decoder:       cached.decoder,
+		cached := GetDecoder(sf.Type)
+		fi := TypeInfo{
+			Kind:          cached.Kind,
+			Size:          cached.Size,
+			Offset:        baseOffset + sf.Offset,
+			JSONName:      jsonName,
+			JSONNameLower: toLowerASCII(jsonName),
+			Decoder:       cached.Decoder,
 		}
 
 		if !seen[jsonName] {
@@ -211,10 +211,10 @@ func collectStructFields(t reflect.Type, baseOffset uintptr) []typeInfo {
 
 	// Second pass: promote fields from embedded structs (lower priority)
 	for _, e := range embedded {
-		inner := collectStructFields(e.typ, e.offset)
+		inner := CollectStructFields(e.typ, e.offset)
 		for _, fi := range inner {
-			if !seen[fi.jsonName] {
-				seen[fi.jsonName] = true
+			if !seen[fi.JSONName] {
+				seen[fi.JSONName] = true
 				fields = append(fields, fi)
 			}
 		}
@@ -224,82 +224,82 @@ func collectStructFields(t reflect.Type, baseOffset uintptr) []typeInfo {
 }
 
 // =============================================================================
-// Decoder Builders (no caching — that's getDecoder's job)
+// Decoder Builders (no caching — that's GetDecoder's job)
 // =============================================================================
 
-// reflectStructDecoder handles struct decoding using reflect.
-type reflectStructDecoder struct {
-	typ    reflect.Type
-	fields []typeInfo
+// ReflectStructDecoder handles struct decoding using reflect.
+type ReflectStructDecoder struct {
+	Typ    reflect.Type
+	Fields []TypeInfo
 
 	// Tiered lookup — set by buildLookup at construction time.
-	lookupFn  func(dec *reflectStructDecoder, key string) *typeInfo
-	hashSeed  uint64
-	hashShift uint8
-	hashTable []uint8              // indices into fields[], 0xFF = empty slot
-	fieldMap  map[string]*typeInfo // fallback for 33+ fields only
+	LookupFn  func(dec *ReflectStructDecoder, key string) *TypeInfo
+	HashSeed  uint64
+	HashShift uint8
+	HashTable []uint8              // indices into Fields[], 0xFF = empty slot
+	FieldMap  map[string]*TypeInfo // fallback for 33+ fields only
 }
 
-func buildStructDecoder(t reflect.Type) *reflectStructDecoder {
-	dec := &reflectStructDecoder{typ: t}
-	dec.fields = collectStructFields(t, 0)
+func BuildStructDecoder(t reflect.Type) *ReflectStructDecoder {
+	dec := &ReflectStructDecoder{Typ: t}
+	dec.Fields = CollectStructFields(t, 0)
 	buildLookup(dec)
 	return dec
 }
 
-// reflectSliceDecoder handles slice decoding for any element type
-type reflectSliceDecoder struct {
-	sliceType      reflect.Type    // the slice type itself, e.g., []int64
-	elemType       reflect.Type
-	elemSize       uintptr         // size of one element (for unsafe pointer arithmetic)
-	elemTI         *typeInfo       // cached typeInfo for element (pointer for cycle safety)
-	emptySliceData unsafe.Pointer  // pre-created empty slice backing, avoids reflect.MakeSlice per empty []
+// ReflectSliceDecoder handles slice decoding for any element type
+type ReflectSliceDecoder struct {
+	SliceType      reflect.Type    // the slice type itself, e.g., []int64
+	ElemType       reflect.Type
+	ElemSize       uintptr         // size of one element (for unsafe pointer arithmetic)
+	ElemTI         *TypeInfo       // cached TypeInfo for element (pointer for cycle safety)
+	EmptySliceData unsafe.Pointer  // pre-created empty slice backing, avoids reflect.MakeSlice per empty []
 }
 
-func buildSliceDecoder(t reflect.Type) *reflectSliceDecoder {
-	elemTI := getDecoder(t.Elem())
+func BuildSliceDecoder(t reflect.Type) *ReflectSliceDecoder {
+	elemTI := GetDecoder(t.Elem())
 	emptySlice := reflect.MakeSlice(t, 0, 0)
-	return &reflectSliceDecoder{
-		sliceType:      t,
-		elemType:       t.Elem(),
-		elemSize:       t.Elem().Size(),
-		elemTI:         elemTI,
-		emptySliceData: unsafe.Pointer(emptySlice.Pointer()),
+	return &ReflectSliceDecoder{
+		SliceType:      t,
+		ElemType:       t.Elem(),
+		ElemSize:       t.Elem().Size(),
+		ElemTI:         elemTI,
+		EmptySliceData: unsafe.Pointer(emptySlice.Pointer()),
 	}
 }
 
-// reflectMapDecoder handles map decoding for map[string]T types.
-// JSON object keys are always strings; values are decoded according to valTI.
-type reflectMapDecoder struct {
-	mapType reflect.Type // the map type itself, e.g., map[string]int64
-	keyType reflect.Type // always string for JSON
-	valType reflect.Type // value element type
-	valSize uintptr      // size of one value element
-	valTI   *typeInfo    // cached typeInfo for value (pointer for cycle safety)
+// ReflectMapDecoder handles map decoding for map[string]T types.
+// JSON object keys are always strings; values are decoded according to ValTI.
+type ReflectMapDecoder struct {
+	MapType reflect.Type // the map type itself, e.g., map[string]int64
+	KeyType reflect.Type // always string for JSON
+	ValType reflect.Type // value element type
+	ValSize uintptr      // size of one value element
+	ValTI   *TypeInfo    // cached TypeInfo for value (pointer for cycle safety)
 }
 
-func buildMapDecoder(t reflect.Type) *reflectMapDecoder {
-	valTI := getDecoder(t.Elem())
-	return &reflectMapDecoder{
-		mapType: t,
-		keyType: t.Key(),
-		valType: t.Elem(),
-		valSize: t.Elem().Size(),
-		valTI:   valTI,
+func BuildMapDecoder(t reflect.Type) *ReflectMapDecoder {
+	valTI := GetDecoder(t.Elem())
+	return &ReflectMapDecoder{
+		MapType: t,
+		KeyType: t.Key(),
+		ValType: t.Elem(),
+		ValSize: t.Elem().Size(),
+		ValTI:   valTI,
 	}
 }
 
-type reflectPointerDecoder struct {
-	ptrType  reflect.Type // the pointer type itself, e.g., *Foo
-	elemType reflect.Type
-	elemTI   *typeInfo // cached typeInfo for the pointed-to element (pointer for cycle safety)
+type ReflectPointerDecoder struct {
+	PtrType  reflect.Type // the pointer type itself, e.g., *Foo
+	ElemType reflect.Type
+	ElemTI   *TypeInfo // cached TypeInfo for the pointed-to element (pointer for cycle safety)
 }
 
-func buildPointerDecoder(t reflect.Type) *reflectPointerDecoder {
-	elemTI := getDecoder(t.Elem())
-	return &reflectPointerDecoder{
-		ptrType:  t,
-		elemType: t.Elem(),
-		elemTI:   elemTI,
+func BuildPointerDecoder(t reflect.Type) *ReflectPointerDecoder {
+	elemTI := GetDecoder(t.Elem())
+	return &ReflectPointerDecoder{
+		PtrType:  t,
+		ElemType: t.Elem(),
+		ElemTI:   elemTI,
 	}
 }

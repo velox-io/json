@@ -2,6 +2,7 @@ package pjson
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"runtime"
 	"testing"
@@ -714,6 +715,309 @@ func TestParse_MatchesStdlib(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("mismatch:\ngot:  %+v\nwant: %+v", got, want)
 	}
+}
+
+// =============================================================================
+// Optimization 1: parseInt64Fast / parseUint64Fast
+// =============================================================================
+
+func TestParseInt64Fast(t *testing.T) {
+	tests := []struct {
+		input string
+		want  int64
+	}{
+		{"0", 0},
+		{"1", 1},
+		{"42", 42},
+		{"-1", -1},
+		{"-123", -123},
+		{"127", 127},
+		{"-128", -128},
+		{"32767", 32767},
+		{"2147483647", 2147483647},
+		{"-2147483648", -2147483648},
+		{"9223372036854775807", 9223372036854775807},
+		{"999999999999", 999999999999},
+		{"-999999999999", -999999999999},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := parseInt64Fast([]byte(tt.input))
+			if got != tt.want {
+				t.Errorf("parseInt64Fast(%q) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseInt64Fast_Empty(t *testing.T) {
+	got := parseInt64Fast(nil)
+	if got != 0 {
+		t.Errorf("parseInt64Fast(nil) = %d, want 0", got)
+	}
+	got = parseInt64Fast([]byte{})
+	if got != 0 {
+		t.Errorf("parseInt64Fast([]) = %d, want 0", got)
+	}
+}
+
+func TestParseUint64Fast(t *testing.T) {
+	tests := []struct {
+		input string
+		want  uint64
+	}{
+		{"0", 0},
+		{"1", 1},
+		{"255", 255},
+		{"65535", 65535},
+		{"4294967295", 4294967295},
+		{"18446744073709551615", 18446744073709551615},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := parseUint64Fast([]byte(tt.input))
+			if got != tt.want {
+				t.Errorf("parseUint64Fast(%q) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// End-to-end: verify parseInt64Fast produces correct results through Unmarshal.
+func TestParse_Int64Fast_EndToEnd(t *testing.T) {
+	type S struct {
+		A int     `json:"a"`
+		B int8    `json:"b"`
+		C int16   `json:"c"`
+		D int32   `json:"d"`
+		E int64   `json:"e"`
+		F uint    `json:"f"`
+		G uint8   `json:"g"`
+		H uint16  `json:"h"`
+		I uint32  `json:"i"`
+		J uint64  `json:"j"`
+	}
+	data := []byte(`{"a":-42,"b":-100,"c":30000,"d":-2000000,"e":9223372036854775807,"f":100,"g":200,"h":50000,"i":3000000000,"j":18446744073709551615}`)
+
+	var got S
+	if err := Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+
+	var want S
+	if err := json.Unmarshal(data, &want); err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("mismatch:\ngot:  %+v\nwant: %+v", got, want)
+	}
+}
+
+// Zero should be handled correctly.
+func TestParse_IntZero(t *testing.T) {
+	type S struct {
+		X int    `json:"x"`
+		Y uint64 `json:"y"`
+	}
+	var s S
+	if err := Unmarshal([]byte(`{"x": 0, "y": 0}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.X != 0 || s.Y != 0 {
+		t.Errorf("expected zeros, got x=%d y=%d", s.X, s.Y)
+	}
+}
+
+// =============================================================================
+// Optimization 2: hexToRune (unicode escape)
+// =============================================================================
+
+func TestHexToRune(t *testing.T) {
+	tests := []struct {
+		hex  string
+		want rune
+	}{
+		{"0000", 0x0000},
+		{"0041", 'A'},
+		{"0061", 'a'},
+		{"007A", 'z'},
+		{"00e9", '\u00e9'},       // e with acute
+		{"4e2d", '\u4e2d'},       // Chinese character
+		{"FFFF", '\uFFFF'},
+		{"0020", ' '},
+		{"002F", '/'},
+		{"003E", '>'},
+		{"abcd", '\uabcd'},
+		{"ABCD", '\uABCD'},
+	}
+	for _, tt := range tests {
+		t.Run(tt.hex, func(t *testing.T) {
+			got := hexToRune([]byte(tt.hex))
+			if got != tt.want {
+				t.Errorf("hexToRune(%q) = %U, want %U", tt.hex, got, tt.want)
+			}
+		})
+	}
+}
+
+// End-to-end: verify unicode escapes produce correct strings through Unmarshal.
+func TestParse_UnicodeEscape(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"basic ascii", `{"s":"\u0041\u0042\u0043"}`, "ABC"},
+		{"chinese", `{"s":"\u4e2d\u6587"}`, "\u4e2d\u6587"},
+		{"mixed", `{"s":"hello\u0020world"}`, "hello world"},
+		{"slash", `{"s":"a\u002Fb"}`, "a/b"},
+		{"accent", `{"s":"\u00e9"}`, "\u00e9"},
+		{"mixed escapes", `{"s":"tab\there\nnewline\u0021"}`, "tab\there\nnewline!"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			type S struct {
+				Val string `json:"s"`
+			}
+			var got S
+			if err := Unmarshal([]byte(tt.input), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Val != tt.want {
+				t.Errorf("got %q, want %q", got.Val, tt.want)
+			}
+			// cross-check with encoding/json
+			var want S
+			if err := json.Unmarshal([]byte(tt.input), &want); err != nil {
+				t.Fatal(err)
+			}
+			if got.Val != want.Val {
+				t.Errorf("pjson=%q differs from encoding/json=%q", got.Val, want.Val)
+			}
+		})
+	}
+}
+
+// Unicode escapes in keys (via unescapeToBytes).
+func TestParse_UnicodeEscape_InKey(t *testing.T) {
+	type S struct {
+		Val string `json:"ab"`
+	}
+	var s S
+	// key "a\u0062" should be unescaped to "ab" and match the struct tag
+	if err := Unmarshal([]byte(`{"a\u0062": "yes"}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Val != "yes" {
+		t.Errorf("expected %q, got %q", "yes", s.Val)
+	}
+}
+
+// =============================================================================
+// Optimization 3: InternedFloats for KindAny in parseNumberValue
+// =============================================================================
+
+// Verify small integers (0-255) in interface{} struct fields are correctly parsed
+// and return the same interned values as parseNumberAny.
+func TestParse_InternedFloats_KindAny(t *testing.T) {
+	type S struct {
+		V any `json:"v"`
+	}
+	smallInts := []int{0, 1, 42, 127, 200, 255}
+	for _, n := range smallInts {
+		input := []byte(fmt.Sprintf(`{"v": %d}`, n))
+		var s S
+		if err := Unmarshal(input, &s); err != nil {
+			t.Fatalf("n=%d: %v", n, err)
+		}
+		f, ok := s.V.(float64)
+		if !ok {
+			t.Fatalf("n=%d: expected float64, got %T", n, s.V)
+		}
+		if f != float64(n) {
+			t.Errorf("n=%d: expected %v, got %v", n, float64(n), f)
+		}
+		// Verify it's the interned value (same pointer)
+		if &InternedFloats[n] != nil {
+			interned := InternedFloats[n].(float64)
+			if f != interned {
+				t.Errorf("n=%d: value mismatch with InternedFloats", n)
+			}
+		}
+	}
+}
+
+// Numbers outside interned range should still parse correctly.
+func TestParse_InternedFloats_OutOfRange(t *testing.T) {
+	type S struct {
+		V any `json:"v"`
+	}
+	tests := []struct {
+		input string
+		want  float64
+	}{
+		{`{"v": 256}`, 256},
+		{`{"v": 1000}`, 1000},
+		{`{"v": -1}`, -1},
+		{`{"v": 3.14}`, 3.14},
+		{`{"v": 0.5}`, 0.5},
+		{`{"v": 1e10}`, 1e10},
+		{`{"v": -999}`, -999},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			var s S
+			if err := Unmarshal([]byte(tt.input), &s); err != nil {
+				t.Fatal(err)
+			}
+			f, ok := s.V.(float64)
+			if !ok {
+				t.Fatalf("expected float64, got %T", s.V)
+			}
+			if f != tt.want {
+				t.Errorf("got %v, want %v", f, tt.want)
+			}
+		})
+	}
+}
+
+// Verify KindAny numbers match encoding/json exactly.
+func TestParse_KindAny_Numbers_MatchStdlib(t *testing.T) {
+	type S struct {
+		A any `json:"a"`
+		B any `json:"b"`
+		C any `json:"c"`
+		D any `json:"d"`
+		E any `json:"e"`
+	}
+	data := []byte(`{"a": 0, "b": 42, "c": 255, "d": 256, "e": 3.14}`)
+
+	var got S
+	if err := Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	var want S
+	if err := json.Unmarshal(data, &want); err != nil {
+		t.Fatal(err)
+	}
+
+	check := func(name string, g, w any) {
+		gf, gok := g.(float64)
+		wf, wok := w.(float64)
+		if !gok || !wok {
+			t.Errorf("%s: type mismatch: got %T, want %T", name, g, w)
+			return
+		}
+		if gf != wf {
+			t.Errorf("%s: got %v, want %v", name, gf, wf)
+		}
+	}
+	check("a", got.A, want.A)
+	check("b", got.B, want.B)
+	check("c", got.C, want.C)
+	check("d", got.D, want.D)
+	check("e", got.E, want.E)
 }
 
 // =============================================================================

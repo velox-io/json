@@ -9,6 +9,7 @@ import (
 	"github.com/bytedance/sonic"
 	jsonv2 "github.com/go-json-experiment/json"
 	"github.com/penglei/pjson"
+	"github.com/penglei/pjson/s2s"
 )
 
 // =============================================================================
@@ -282,6 +283,73 @@ func Benchmark_JsonV2_Twitter(b *testing.B) {
 	for b.Loop() {
 		var t twitter.TwitterStruct
 		if err := jsonv2.Unmarshal(TwitterJSON, &t); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// =============================================================================
+// S2S (single-pass scanner) Benchmarks
+// =============================================================================
+
+func Benchmark_S2S_Small(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		var v Small
+		if err := s2s.Unmarshal(SmallJSON, &v); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_S2S_Nested(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		var u User
+		if err := s2s.Unmarshal(NestedJSON, &u); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_S2S_SliceOfStructs(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		var ul UserList
+		if err := s2s.Unmarshal(SliceJSON, &ul); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_S2S_EscapeHeavy(b *testing.B) {
+	b.SetBytes(int64(len(EscapeHeavyJSON)))
+	b.ReportAllocs()
+	for b.Loop() {
+		var p EscapeHeavyPayload
+		if err := s2s.Unmarshal(EscapeHeavyJSON, &p); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_S2S_KubePods(b *testing.B) {
+	b.SetBytes(int64(len(PodsJSON)))
+	b.ReportAllocs()
+	for b.Loop() {
+		var pl KubePodList
+		if err := s2s.Unmarshal(PodsJSON, &pl); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_S2S_Twitter(b *testing.B) {
+	b.SetBytes(int64(len(TwitterJSON)))
+	b.ReportAllocs()
+	for b.Loop() {
+		var t twitter.TwitterStruct
+		if err := s2s.Unmarshal(TwitterJSON, &t); err != nil {
 			b.Fatal(err)
 		}
 	}

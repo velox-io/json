@@ -22,10 +22,10 @@ var (
 	errNotPointer    = errors.New("pjson: v must be a non-nil pointer")
 )
 
-// unsafeString converts a byte slice to a string without copying.
+// UnsafeString converts a byte slice to a string without copying.
 // The caller must ensure the byte slice is not modified during the
 // lifetime of the returned string.
-func unsafeString(b []byte) string {
+func UnsafeString(b []byte) string {
 	if len(b) == 0 {
 		return ""
 	}
@@ -50,8 +50,8 @@ func WithParserChunkCap(n int) ParserOption {
 	return func(o *parserOptions) { o.chunkCap = n }
 }
 
-// sliceHeader matches the internal layout of a Go slice.
-type sliceHeader struct {
+// SliceHeader matches the internal layout of a Go slice.
+type SliceHeader struct {
 	Data unsafe.Pointer
 	Len  int
 	Cap  int
@@ -64,7 +64,7 @@ type Parser struct {
 	tok     *Tokenizer
 	data    []byte      // original input buffer
 	tier    int         // pool tier index, used by ParserPool.Put
-	scratch [128]byte   // scratch buffer for lookupFieldBytes lowercase
+	scratch [128]byte   // scratch buffer for LookupFieldBytes lowercase
 }
 
 // NewParser creates a parser with the given SIMD scanner.
@@ -101,7 +101,7 @@ func (p *Parser) Parse(data []byte, v any) error {
 	}
 
 	elemType := rv.Elem().Type()
-	ti := getDecoder(elemType)
+	ti := GetDecoder(elemType)
 	rootPtr := rv.UnsafePointer()
 
 	return p.parseValue(ti, rootPtr)
@@ -147,8 +147,8 @@ func (p *Parser) peekOffset() int {
 // Value Dispatch
 // =============================================================================
 
-func (p *Parser) parseValue(ti *typeInfo, ptr unsafe.Pointer) error {
-	if ti.kind == kindPointer {
+func (p *Parser) parseValue(ti *TypeInfo, ptr unsafe.Pointer) error {
+	if ti.Kind == KindPointer {
 		return p.parsePointerValue(ti, ptr)
 	}
 
@@ -224,7 +224,7 @@ func (p *Parser) parseStringAny() (string, error) {
 
 	if !hasEscape {
 		// Fast path: no escapes, zero-copy string from input buffer
-		return unsafeString(p.data[start:closeOff]), nil
+		return UnsafeString(p.data[start:closeOff]), nil
 	}
 
 	// Slow path: allocate + unescape + unsafe.String (single allocation)
@@ -285,12 +285,10 @@ func (p *Parser) parseStringBytesSlow(start, endOff int) ([]byte, error) {
 			buf = append(buf, '\f')
 		case 'u':
 			if idx+5 < len(data) {
-				r, err := strconv.ParseUint(string(data[idx+2:idx+6]), 16, 32)
-				if err == nil {
-					buf = append(buf, string(rune(r))...)
-					data = data[idx+6:]
-					continue
-				}
+				r := hexToRune(data[idx+2 : idx+6])
+				buf = append(buf, string(r)...)
+				data = data[idx+6:]
+				continue
 			}
 			buf = append(buf, '\\', 'u')
 		default:
@@ -337,12 +335,10 @@ func (p *Parser) unescapeToString(start, endOff int) (string, error) {
 			buf = append(buf, '\f')
 		case 'u':
 			if idx+5 < len(data) {
-				r, err := strconv.ParseUint(string(data[idx+2:idx+6]), 16, 32)
-				if err == nil {
-					buf = append(buf, string(rune(r))...)
-					data = data[idx+6:]
-					continue
-				}
+				r := hexToRune(data[idx+2 : idx+6])
+				buf = append(buf, string(r)...)
+				data = data[idx+6:]
+				continue
 			}
 			buf = append(buf, '\\', 'u')
 		default:
@@ -370,7 +366,7 @@ func (p *Parser) skipString() error {
 	return nil
 }
 
-func (p *Parser) parseStringValue(ti *typeInfo, ptr unsafe.Pointer) error {
+func (p *Parser) parseStringValue(ti *TypeInfo, ptr unsafe.Pointer) error {
 	openOff, closeOff, hasEscape := p.tok.NextString()
 	if openOff < 0 {
 		return errUnexpectedEOF
@@ -388,13 +384,13 @@ func (p *Parser) parseStringValue(ti *typeInfo, ptr unsafe.Pointer) error {
 		if len(raw) > 0 {
 			s = unsafe.String(&raw[0], len(raw))
 		}
-		switch ti.kind {
-		case kindString:
+		switch ti.Kind {
+		case KindString:
 			*(*string)(ptr) = s
-		case kindAny:
+		case KindAny:
 			*(*any)(ptr) = s
 		default:
-			return fmt.Errorf("pjson: cannot assign string to %v field", ti.kind)
+			return fmt.Errorf("pjson: cannot assign string to %v field", ti.Kind)
 		}
 		return nil
 	}
@@ -404,13 +400,13 @@ func (p *Parser) parseStringValue(ti *typeInfo, ptr unsafe.Pointer) error {
 	if err != nil {
 		return err
 	}
-	switch ti.kind {
-	case kindString:
+	switch ti.Kind {
+	case KindString:
 		*(*string)(ptr) = s
-	case kindAny:
+	case KindAny:
 		*(*any)(ptr) = s
 	default:
-		return fmt.Errorf("pjson: cannot assign string to %v field", ti.kind)
+		return fmt.Errorf("pjson: cannot assign string to %v field", ti.Kind)
 	}
 	return nil
 }
@@ -439,52 +435,62 @@ func (p *Parser) parseNumberSpan() ([]byte, error) {
 	return p.data[off:end], nil
 }
 
-func (p *Parser) parseNumberValue(ti *typeInfo, ptr unsafe.Pointer) error {
+func (p *Parser) parseNumberValue(ti *TypeInfo, ptr unsafe.Pointer) error {
 	span, err := p.parseNumberSpan()
 	if err != nil {
 		return err
 	}
 
-	switch ti.kind {
-	case kindInt, kindInt8, kindInt16, kindInt32, kindInt64:
-		v, err := strconv.ParseInt(unsafeString(span), 10, 64)
-		if err != nil {
-			return fmt.Errorf("pjson: invalid integer %q: %w", span, err)
-		}
-		writeIntValue(ptr, ti.kind, v)
-	case kindUint, kindUint8, kindUint16, kindUint32, kindUint64:
-		v, err := strconv.ParseUint(unsafeString(span), 10, 64)
-		if err != nil {
-			return fmt.Errorf("pjson: invalid unsigned integer %q: %w", span, err)
-		}
-		writeUintValue(ptr, ti.kind, v)
-	case kindFloat32:
-		v, err := strconv.ParseFloat(unsafeString(span), 32)
+	switch ti.Kind {
+	case KindInt, KindInt8, KindInt16, KindInt32, KindInt64:
+		v := parseInt64Fast(span)
+		WriteIntValue(ptr, ti.Kind, v)
+	case KindUint, KindUint8, KindUint16, KindUint32, KindUint64:
+		v := parseUint64Fast(span)
+		WriteUintValue(ptr, ti.Kind, v)
+	case KindFloat32:
+		v, err := strconv.ParseFloat(UnsafeString(span), 32)
 		if err != nil {
 			return fmt.Errorf("pjson: invalid float %q: %w", span, err)
 		}
 		*(*float32)(ptr) = float32(v)
-	case kindFloat64:
-		v, err := strconv.ParseFloat(unsafeString(span), 64)
+	case KindFloat64:
+		v, err := strconv.ParseFloat(UnsafeString(span), 64)
 		if err != nil {
 			return fmt.Errorf("pjson: invalid float %q: %w", span, err)
 		}
 		*(*float64)(ptr) = v
-	case kindAny:
-		v, err := strconv.ParseFloat(unsafeString(span), 64)
+	case KindAny:
+		// Fast path: small non-negative integers 0-255 → interned float64
+		if len(span) >= 1 && len(span) <= 3 && span[0] >= '0' && span[0] <= '9' {
+			val := int(span[0] - '0')
+			allDigits := true
+			for j := 1; j < len(span); j++ {
+				if span[j] < '0' || span[j] > '9' {
+					allDigits = false
+					break
+				}
+				val = val*10 + int(span[j]-'0')
+			}
+			if allDigits && val < 256 {
+				*(*any)(ptr) = InternedFloats[val]
+				return nil
+			}
+		}
+		v, err := strconv.ParseFloat(UnsafeString(span), 64)
 		if err != nil {
 			return fmt.Errorf("pjson: invalid number %q: %w", span, err)
 		}
 		*(*any)(ptr) = v
 	default:
-		return fmt.Errorf("pjson: cannot assign number to %v field", ti.kind)
+		return fmt.Errorf("pjson: cannot assign number to %v field", ti.Kind)
 	}
 	return nil
 }
 
-// internedFloats holds pre-boxed float64 values for 0-255 to avoid
+// InternedFloats holds pre-boxed float64 values for 0-255 to avoid
 // heap allocation when returning small integers as any (interface{}).
-var internedFloats = func() [256]any {
+var InternedFloats = func() [256]any {
 	var arr [256]any
 	for i := range arr {
 		arr[i] = float64(i)
@@ -509,42 +515,91 @@ func (p *Parser) parseNumberAny() (any, error) {
 			val = val*10 + int(span[j]-'0')
 		}
 		if allDigits && val < 256 {
-			return internedFloats[val], nil
+			return InternedFloats[val], nil
 		}
 	}
-	v, err := strconv.ParseFloat(unsafeString(span), 64)
+	v, err := strconv.ParseFloat(UnsafeString(span), 64)
 	if err != nil {
 		return nil, fmt.Errorf("pjson: invalid number %q: %w", span, err)
 	}
 	return v, nil
 }
 
-func writeIntValue(ptr unsafe.Pointer, kind elemTypeKind, v int64) {
+// parseInt64Fast parses an integer from a byte span without allocation.
+// Handles optional leading '-'. No overflow or format validation —
+// the SIMD tokenizer has already validated the JSON structure.
+func parseInt64Fast(span []byte) int64 {
+	if len(span) == 0 {
+		return 0
+	}
+	neg := false
+	i := 0
+	if span[0] == '-' {
+		neg = true
+		i = 1
+	}
+	var n int64
+	for ; i < len(span); i++ {
+		n = n*10 + int64(span[i]-'0')
+	}
+	if neg {
+		return -n
+	}
+	return n
+}
+
+// parseUint64Fast parses an unsigned integer from a byte span without allocation.
+func parseUint64Fast(span []byte) uint64 {
+	var n uint64
+	for i := 0; i < len(span); i++ {
+		n = n*10 + uint64(span[i]-'0')
+	}
+	return n
+}
+
+// hexToRune parses exactly 4 hex digits into a rune without allocation.
+func hexToRune(hex []byte) rune {
+	var r rune
+	for _, c := range hex[:4] {
+		r <<= 4
+		switch {
+		case c >= '0' && c <= '9':
+			r |= rune(c - '0')
+		case c >= 'a' && c <= 'f':
+			r |= rune(c - 'a' + 10)
+		case c >= 'A' && c <= 'F':
+			r |= rune(c - 'A' + 10)
+		}
+	}
+	return r
+}
+
+func WriteIntValue(ptr unsafe.Pointer, kind ElemTypeKind, v int64) {
 	switch kind {
-	case kindInt:
+	case KindInt:
 		*(*int)(ptr) = int(v)
-	case kindInt8:
+	case KindInt8:
 		*(*int8)(ptr) = int8(v)
-	case kindInt16:
+	case KindInt16:
 		*(*int16)(ptr) = int16(v)
-	case kindInt32:
+	case KindInt32:
 		*(*int32)(ptr) = int32(v)
-	case kindInt64:
+	case KindInt64:
 		*(*int64)(ptr) = v
 	}
 }
 
-func writeUintValue(ptr unsafe.Pointer, kind elemTypeKind, v uint64) {
+func WriteUintValue(ptr unsafe.Pointer, kind ElemTypeKind, v uint64) {
 	switch kind {
-	case kindUint:
+	case KindUint:
 		*(*uint)(ptr) = uint(v)
-	case kindUint8:
+	case KindUint8:
 		*(*uint8)(ptr) = uint8(v)
-	case kindUint16:
+	case KindUint16:
 		*(*uint16)(ptr) = uint16(v)
-	case kindUint32:
+	case KindUint32:
 		*(*uint32)(ptr) = uint32(v)
-	case kindUint64:
+	case KindUint64:
 		*(*uint64)(ptr) = v
 	}
 }
@@ -553,7 +608,7 @@ func writeUintValue(ptr unsafe.Pointer, kind elemTypeKind, v uint64) {
 // Bool Parsing
 // =============================================================================
 
-func (p *Parser) parseBoolValue(ti *typeInfo, ptr unsafe.Pointer) error {
+func (p *Parser) parseBoolValue(ti *TypeInfo, ptr unsafe.Pointer) error {
 	b := p.next() // consume 't' or 'f'
 
 	var val bool
@@ -566,13 +621,13 @@ func (p *Parser) parseBoolValue(ti *typeInfo, ptr unsafe.Pointer) error {
 		return errSyntax
 	}
 
-	switch ti.kind {
-	case kindBool:
+	switch ti.Kind {
+	case KindBool:
 		*(*bool)(ptr) = val
-	case kindAny:
+	case KindAny:
 		*(*any)(ptr) = val
 	default:
-		return fmt.Errorf("pjson: cannot assign bool to %v field", ti.kind)
+		return fmt.Errorf("pjson: cannot assign bool to %v field", ti.Kind)
 	}
 	return nil
 }
@@ -581,36 +636,36 @@ func (p *Parser) parseBoolValue(ti *typeInfo, ptr unsafe.Pointer) error {
 // Null Parsing
 // =============================================================================
 
-func (p *Parser) parseNullValue(ti *typeInfo, ptr unsafe.Pointer) error {
+func (p *Parser) parseNullValue(ti *TypeInfo, ptr unsafe.Pointer) error {
 	p.next() // consume 'n'
 
-	switch ti.kind {
-	case kindString:
+	switch ti.Kind {
+	case KindString:
 		*(*string)(ptr) = ""
-	case kindBool:
+	case KindBool:
 		*(*bool)(ptr) = false
-	case kindInt, kindInt8, kindInt16, kindInt32, kindInt64:
-		writeIntValue(ptr, ti.kind, 0)
-	case kindUint, kindUint8, kindUint16, kindUint32, kindUint64:
-		writeUintValue(ptr, ti.kind, 0)
-	case kindFloat32:
+	case KindInt, KindInt8, KindInt16, KindInt32, KindInt64:
+		WriteIntValue(ptr, ti.Kind, 0)
+	case KindUint, KindUint8, KindUint16, KindUint32, KindUint64:
+		WriteUintValue(ptr, ti.Kind, 0)
+	case KindFloat32:
 		*(*float32)(ptr) = 0
-	case kindFloat64:
+	case KindFloat64:
 		*(*float64)(ptr) = 0
-	case kindPointer:
+	case KindPointer:
 		// Set pointer to nil — already handled by parsePointerValue
 		// but if called directly, zero the pointer.
 		*(*unsafe.Pointer)(ptr) = nil
-	case kindSlice:
+	case KindSlice:
 		// Set slice to nil
 		*(*[]byte)(ptr) = nil
-	case kindMap:
+	case KindMap:
 		// Set map to nil — write nil pointer at the map location
 		reflect.NewAt(reflect.MapOf(reflect.TypeOf(""), reflect.TypeOf((*any)(nil)).Elem()), ptr).Elem().Set(reflect.Zero(reflect.MapOf(reflect.TypeOf(""), reflect.TypeOf((*any)(nil)).Elem())))
-	case kindStruct:
+	case KindStruct:
 		// null for struct: zero the struct (like encoding/json)
 		// no-op: struct is already at its zero value if freshly allocated
-	case kindAny:
+	case KindAny:
 		*(*any)(ptr) = nil
 	}
 	return nil
@@ -620,13 +675,13 @@ func (p *Parser) parseNullValue(ti *typeInfo, ptr unsafe.Pointer) error {
 // Object Parsing
 // =============================================================================
 
-func (p *Parser) parseObjectValue(ti *typeInfo, ptr unsafe.Pointer) error {
-	switch ti.kind {
-	case kindStruct:
+func (p *Parser) parseObjectValue(ti *TypeInfo, ptr unsafe.Pointer) error {
+	switch ti.Kind {
+	case KindStruct:
 		return p.parseObjectToStruct(ti, ptr)
-	case kindMap:
+	case KindMap:
 		return p.parseObjectToMap(ti, ptr)
-	case kindAny:
+	case KindAny:
 		m, err := p.parseObjectAny()
 		if err != nil {
 			return err
@@ -634,14 +689,14 @@ func (p *Parser) parseObjectValue(ti *typeInfo, ptr unsafe.Pointer) error {
 		*(*any)(ptr) = m
 		return nil
 	default:
-		return fmt.Errorf("pjson: cannot assign object to %v field", ti.kind)
+		return fmt.Errorf("pjson: cannot assign object to %v field", ti.Kind)
 	}
 }
 
-func (p *Parser) parseObjectToStruct(ti *typeInfo, base unsafe.Pointer) error {
+func (p *Parser) parseObjectToStruct(ti *TypeInfo, base unsafe.Pointer) error {
 	p.next() // consume '{'
 
-	sDec := ti.decoder.(*reflectStructDecoder)
+	sDec := ti.Decoder.(*ReflectStructDecoder)
 
 	// Empty object
 	if p.peek() == '}' {
@@ -650,7 +705,7 @@ func (p *Parser) parseObjectToStruct(ti *typeInfo, base unsafe.Pointer) error {
 	}
 
 	for {
-		// Key — zero-copy []byte, looked up via lookupFieldBytes
+		// Key — zero-copy []byte, looked up via LookupFieldBytes
 		keyBytes, err := p.parseStringBytes()
 		if err != nil {
 			return err
@@ -663,14 +718,14 @@ func (p *Parser) parseObjectToStruct(ti *typeInfo, base unsafe.Pointer) error {
 		}
 
 		// Value
-		fi := sDec.lookupFieldBytes(keyBytes, p.scratch[:])
+		fi := sDec.LookupFieldBytes(keyBytes, p.scratch[:])
 		if fi == nil {
 			// Unknown field — skip the value
 			if err := p.skipValue(); err != nil {
 				return err
 			}
 		} else {
-			fieldPtr := unsafe.Add(base, fi.offset)
+			fieldPtr := unsafe.Add(base, fi.Offset)
 			if err := p.parseValue(fi, fieldPtr); err != nil {
 				return err
 			}
@@ -690,16 +745,16 @@ func (p *Parser) parseObjectToStruct(ti *typeInfo, base unsafe.Pointer) error {
 	}
 }
 
-func (p *Parser) parseObjectToMap(ti *typeInfo, ptr unsafe.Pointer) error {
+func (p *Parser) parseObjectToMap(ti *TypeInfo, ptr unsafe.Pointer) error {
 	p.next() // consume '{'
 
-	mDec := ti.decoder.(*reflectMapDecoder)
+	mDec := ti.Decoder.(*ReflectMapDecoder)
 
 	// Obtain reflect.Value of the map
-	mapPtr := reflect.NewAt(mDec.mapType, ptr)
+	mapPtr := reflect.NewAt(mDec.MapType, ptr)
 	mapVal := mapPtr.Elem()
 	if mapVal.IsNil() {
-		mapVal.Set(reflect.MakeMap(mDec.mapType))
+		mapVal.Set(reflect.MakeMap(mDec.MapType))
 	}
 
 	// Empty object
@@ -722,9 +777,9 @@ func (p *Parser) parseObjectToMap(ti *typeInfo, ptr unsafe.Pointer) error {
 		}
 
 		// Value
-		valRV := reflect.New(mDec.valType)
+		valRV := reflect.New(mDec.ValType)
 		valPtr := valRV.UnsafePointer()
-		if err := p.parseValue(mDec.valTI, valPtr); err != nil {
+		if err := p.parseValue(mDec.ValTI, valPtr); err != nil {
 			return err
 		}
 		mapVal.SetMapIndex(reflect.ValueOf(string(keyBytes)), valRV.Elem())
@@ -787,11 +842,11 @@ func (p *Parser) parseObjectAny() (map[string]any, error) {
 // Array Parsing
 // =============================================================================
 
-func (p *Parser) parseArrayValue(ti *typeInfo, ptr unsafe.Pointer) error {
-	switch ti.kind {
-	case kindSlice:
+func (p *Parser) parseArrayValue(ti *TypeInfo, ptr unsafe.Pointer) error {
+	switch ti.Kind {
+	case KindSlice:
 		return p.parseArrayToSlice(ti, ptr)
-	case kindAny:
+	case KindAny:
 		arr, err := p.parseArrayAny()
 		if err != nil {
 			return err
@@ -799,20 +854,20 @@ func (p *Parser) parseArrayValue(ti *typeInfo, ptr unsafe.Pointer) error {
 		*(*any)(ptr) = arr
 		return nil
 	default:
-		return fmt.Errorf("pjson: cannot assign array to %v field", ti.kind)
+		return fmt.Errorf("pjson: cannot assign array to %v field", ti.Kind)
 	}
 }
 
-func (p *Parser) parseArrayToSlice(ti *typeInfo, ptr unsafe.Pointer) error {
+func (p *Parser) parseArrayToSlice(ti *TypeInfo, ptr unsafe.Pointer) error {
 	p.next() // consume '['
 
-	sDec := ti.decoder.(*reflectSliceDecoder)
+	sDec := ti.Decoder.(*ReflectSliceDecoder)
 
 	// Empty array — use pre-created empty slice pointer (no allocation)
 	if p.peek() == ']' {
 		p.next()
-		sh := (*sliceHeader)(ptr)
-		sh.Data = sDec.emptySliceData
+		sh := (*SliceHeader)(ptr)
+		sh.Data = sDec.EmptySliceData
 		sh.Len = 0
 		sh.Cap = 0
 		return nil
@@ -824,24 +879,24 @@ func (p *Parser) parseArrayToSlice(ti *typeInfo, ptr unsafe.Pointer) error {
 	const initCap = 8
 	cap_ := initCap
 	len_ := 0
-	backing := reflect.MakeSlice(sDec.sliceType, initCap, initCap)
+	backing := reflect.MakeSlice(sDec.SliceType, initCap, initCap)
 	base := backing.Pointer() // uintptr
 
 	for {
 		// Grow if needed
 		if len_ == cap_ {
 			newCap := cap_ * 2
-			newBacking := reflect.MakeSlice(sDec.sliceType, newCap, newCap)
+			newBacking := reflect.MakeSlice(sDec.SliceType, newCap, newCap)
 			reflect.Copy(newBacking, backing.Slice(0, len_))
 			backing = newBacking
 			base = newBacking.Pointer() // uintptr
 			cap_ = newCap
 		}
 
-		elemPtr := unsafe.Pointer(base + uintptr(len_)*sDec.elemSize) //nolint:govet
+		elemPtr := unsafe.Pointer(base + uintptr(len_)*sDec.ElemSize) //nolint:govet
 		len_++
 
-		if err := p.parseValue(sDec.elemTI, elemPtr); err != nil {
+		if err := p.parseValue(sDec.ElemTI, elemPtr); err != nil {
 			return err
 		}
 
@@ -853,7 +908,7 @@ func (p *Parser) parseArrayToSlice(ti *typeInfo, ptr unsafe.Pointer) error {
 		if b == ']' {
 			p.next()
 			// Write slice header directly
-			sh := (*sliceHeader)(ptr)
+			sh := (*SliceHeader)(ptr)
 			sh.Data = unsafe.Pointer(base) //nolint:govet
 			sh.Len = len_
 			sh.Cap = cap_
@@ -896,8 +951,8 @@ func (p *Parser) parseArrayAny() ([]any, error) {
 // Pointer Parsing
 // =============================================================================
 
-func (p *Parser) parsePointerValue(ti *typeInfo, ptr unsafe.Pointer) error {
-	pDec := ti.decoder.(*reflectPointerDecoder)
+func (p *Parser) parsePointerValue(ti *TypeInfo, ptr unsafe.Pointer) error {
+	pDec := ti.Decoder.(*ReflectPointerDecoder)
 
 	// null → set pointer to nil
 	if p.peek() == 'n' {
@@ -907,9 +962,9 @@ func (p *Parser) parsePointerValue(ti *typeInfo, ptr unsafe.Pointer) error {
 	}
 
 	// Allocate a new element and parse into it
-	elemRV := reflect.New(pDec.elemType)
+	elemRV := reflect.New(pDec.ElemType)
 	elemPtr := elemRV.UnsafePointer()
-	if err := p.parseValue(pDec.elemTI, elemPtr); err != nil {
+	if err := p.parseValue(pDec.ElemTI, elemPtr); err != nil {
 		return err
 	}
 

@@ -11,6 +11,7 @@ import (
 	"dev.local/benchmark"
 
 	"github.com/penglei/pjson"
+	json "github.com/penglei/pjson"
 	"github.com/urfave/cli/v3"
 )
 
@@ -29,7 +30,7 @@ func cpuprof() {
 
 	// Warm up decoder cache
 	var warmup EscapeHeavyPayload
-	_ = pjson.Unmarshal(escapeHeavyJSON, &warmup)
+	_ = json.Unmarshal(escapeHeavyJSON, &warmup)
 
 	// CPU profile
 	f, err := os.Create(profPath("cpu.prof"))

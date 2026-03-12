@@ -29,6 +29,30 @@ func simpleMixer(s string, seed uint64) uint64 {
 	return h
 }
 
+// mulaccMixer uses a multiply-accumulate chain over 5 character positions:
+// first, last, middle, second, and penultimate bytes, seeded with length.
+// The chained multiply makes each position's contribution dependent on all
+// previous ones, providing much stronger distribution than XOR-based mixers.
+// Still O(1) constant time, works well for 30-100+ fields including sets
+// with shared prefixes (e.g. "profile_*").
+func mulaccMixer(s string, seed uint64) uint64 {
+	n := uint64(len(s))
+	if n == 0 {
+		return seed * 0x9e3779b97f4a7c15
+	}
+	h := seed + n*0x9e3779b97f4a7c15
+	h = h*0xbf58476d1ce4e5b9 + uint64(s[0])
+	h = h*0x94d049bb133111eb + uint64(s[len(s)-1])
+	h = h*0xff51afd7ed558ccd + uint64(s[len(s)/2])
+	if n > 1 {
+		h = h*0xc4ceb9fe1a85ec53 + uint64(s[1])
+	}
+	if n > 2 {
+		h = h*0x62a9d9ed799705f5 + uint64(s[len(s)-2])
+	}
+	return h
+}
+
 // fnv1aMixer hashes all bytes of the string using the FNV-1a algorithm.
 // Stronger distribution than simpleMixer, used as fallback for larger sets
 // or when simpleMixer fails to produce a perfect hash.
@@ -97,24 +121,28 @@ func toLowerASCIIBytes(buf []byte) string {
 // =============================================================================
 
 // buildLookup selects and constructs the optimal lookup strategy for a
-// reflectStructDecoder based on its field count. Called once at construction.
-func buildLookup(dec *reflectStructDecoder) {
-	n := len(dec.fields)
+// ReflectStructDecoder based on its field count. Called once at construction.
+func buildLookup(dec *ReflectStructDecoder) {
+	n := len(dec.Fields)
 	switch {
 	case n == 0:
-		dec.lookupFn = lookupEmpty
+		dec.LookupFn = lookupEmpty
 	case n <= 4:
-		dec.lookupFn = lookupLinear
+		dec.LookupFn = lookupLinear
 	case n <= 32:
 		if tryBuildPerfectHash(dec, simpleMixer) {
-			dec.lookupFn = makePerfectHashLookup(simpleMixer)
+			dec.LookupFn = makePerfectHashLookup(simpleMixer)
 		} else if tryBuildPerfectHash(dec, fnv1aMixer) {
-			dec.lookupFn = makePerfectHashLookup(fnv1aMixer)
+			dec.LookupFn = makePerfectHashLookup(fnv1aMixer)
 		} else {
 			buildMapFallback(dec)
 		}
 	default:
-		buildMapFallback(dec)
+		if tryBuildPerfectHash(dec, mulaccMixer) {
+			dec.LookupFn = makePerfectHashLookup(mulaccMixer)
+		} else {
+			buildMapFallback(dec)
+		}
 	}
 }
 
@@ -135,15 +163,15 @@ const maxSeedAttempts = 1 << 16 // 64K seeds, each tested against all shifts
 // Strategy: for each seed, compute all hashes once, then sweep all useful shift
 // values to find a zero-collision mapping. This is much faster than calling
 // findBestShift as a separate function with its own allocations.
-func tryBuildPerfectHash(dec *reflectStructDecoder, mixer hashMixer) bool {
-	n := len(dec.fields)
+func tryBuildPerfectHash(dec *ReflectStructDecoder, mixer hashMixer) bool {
+	n := len(dec.Fields)
 	tableSize := nextPowerOf2(n * 2) // load factor ~50%
 	mask := uint64(tableSize - 1)
 
 	// Pre-compute lowercased names (used once)
 	names := make([]string, n)
-	for i := range dec.fields {
-		names[i] = dec.fields[i].jsonNameLower
+	for i := range dec.Fields {
+		names[i] = dec.Fields[i].JSONNameLower
 	}
 
 	// Reusable buffers
@@ -179,15 +207,15 @@ func tryBuildPerfectHash(dec *reflectStructDecoder, mixer hashMixer) bool {
 
 			if !collision {
 				// Found a perfect hash — build the table
-				dec.hashSeed = seed
-				dec.hashShift = shift
-				dec.hashTable = make([]uint8, tableSize)
-				for i := range dec.hashTable {
-					dec.hashTable[i] = 0xFF
+				dec.HashSeed = seed
+				dec.HashShift = shift
+				dec.HashTable = make([]uint8, tableSize)
+				for i := range dec.HashTable {
+					dec.HashTable[i] = 0xFF
 				}
 				for i, h := range hashes {
 					slot := (h >> shift) & mask
-					dec.hashTable[slot] = uint8(i)
+					dec.HashTable[slot] = uint8(i)
 				}
 				return true
 			}
@@ -196,13 +224,13 @@ func tryBuildPerfectHash(dec *reflectStructDecoder, mixer hashMixer) bool {
 	return false
 }
 
-// buildMapFallback initializes the traditional map[string]*fieldInfo for large structs.
-func buildMapFallback(dec *reflectStructDecoder) {
-	dec.fieldMap = make(map[string]*typeInfo, len(dec.fields))
-	for i := range dec.fields {
-		dec.fieldMap[dec.fields[i].jsonNameLower] = &dec.fields[i]
+// buildMapFallback initializes the traditional map[string]*TypeInfo for large structs.
+func buildMapFallback(dec *ReflectStructDecoder) {
+	dec.FieldMap = make(map[string]*TypeInfo, len(dec.Fields))
+	for i := range dec.Fields {
+		dec.FieldMap[dec.Fields[i].JSONNameLower] = &dec.Fields[i]
 	}
-	dec.lookupFn = lookupMap
+	dec.LookupFn = lookupMap
 }
 
 // =============================================================================
@@ -210,16 +238,16 @@ func buildMapFallback(dec *reflectStructDecoder) {
 // =============================================================================
 
 // lookupEmpty always returns nil (zero-field struct).
-func lookupEmpty(_ *reflectStructDecoder, _ string) *typeInfo {
+func lookupEmpty(_ *ReflectStructDecoder, _ string) *TypeInfo {
 	return nil
 }
 
 // lookupLinear performs a linear scan over 1-4 fields.
 // The key must already be lowercased.
-func lookupLinear(dec *reflectStructDecoder, key string) *typeInfo {
-	fields := dec.fields
+func lookupLinear(dec *ReflectStructDecoder, key string) *TypeInfo {
+	fields := dec.Fields
 	for i := range fields {
-		if fields[i].jsonNameLower == key {
+		if fields[i].JSONNameLower == key {
 			return &fields[i]
 		}
 	}
@@ -227,18 +255,18 @@ func lookupLinear(dec *reflectStructDecoder, key string) *typeInfo {
 }
 
 // makePerfectHashLookup returns a lookup function bound to a specific mixer.
-func makePerfectHashLookup(mixer hashMixer) func(*reflectStructDecoder, string) *typeInfo {
-	return func(dec *reflectStructDecoder, key string) *typeInfo {
-		h := mixer(key, dec.hashSeed)
-		slot := int(h>>dec.hashShift) & (len(dec.hashTable) - 1)
+func makePerfectHashLookup(mixer hashMixer) func(*ReflectStructDecoder, string) *TypeInfo {
+	return func(dec *ReflectStructDecoder, key string) *TypeInfo {
+		h := mixer(key, dec.HashSeed)
+		slot := int(h>>dec.HashShift) & (len(dec.HashTable) - 1)
 
-		idx := dec.hashTable[slot]
+		idx := dec.HashTable[slot]
 		if idx == 0xFF {
 			return nil
 		}
 
-		fi := &dec.fields[idx]
-		if fi.jsonNameLower == key {
+		fi := &dec.Fields[idx]
+		if fi.JSONNameLower == key {
 			return fi
 		}
 		return nil
@@ -247,31 +275,57 @@ func makePerfectHashLookup(mixer hashMixer) func(*reflectStructDecoder, string) 
 
 // lookupMap uses the fallback map for large structs.
 // The key must already be lowercased.
-func lookupMap(dec *reflectStructDecoder, key string) *typeInfo {
-	return dec.fieldMap[key]
+func lookupMap(dec *ReflectStructDecoder, key string) *TypeInfo {
+	return dec.FieldMap[key]
 }
 
-// lookupField is the public entry point for field lookup.
+// LookupField is the public entry point for field lookup.
 // It lowercases the key (ASCII fast path) and dispatches to the tiered strategy.
-func (dec *reflectStructDecoder) lookupField(key string) *typeInfo {
-	return dec.lookupFn(dec, toLowerASCII(key))
+func (dec *ReflectStructDecoder) LookupField(key string) *TypeInfo {
+	return dec.LookupFn(dec, toLowerASCII(key))
 }
 
-// lookupFieldBytes is the zero-allocation entry point for field lookup from []byte.
-// It lowercases the key in a scratch buffer and dispatches to the tiered strategy.
-// The scratch buffer is provided by the caller to avoid allocation.
-func (dec *reflectStructDecoder) lookupFieldBytes(key []byte, scratch []byte) *typeInfo {
-	// Fast path: if key is already all-lowercase ASCII, skip copy+toLower entirely.
-	allLower := true
-	for _, c := range key {
-		if c >= 'A' && c <= 'Z' {
-			allLower = false
-			break
+// swarLo64 and swarHi64 are SWAR broadcast constants.
+const (
+	swarLo64 = uint64(0x0101010101010101)
+	swarHi64 = uint64(0x8080808080808080)
+)
+
+// hasUpperASCII reports whether any byte in key is an uppercase ASCII letter (A-Z).
+// Uses SWAR to check 8 bytes at a time.
+//
+// Technique: for a byte b in [0x41, 0x5A], adding (0x80-0x5B)=0x25 will NOT
+// set the high bit, but adding (0x80-0x41)=0x3F WILL set it. XOR detects this
+// difference.
+func hasUpperASCII(key []byte) bool {
+	const (
+		addLo = (0x80 - 0x5B) * swarLo64 // 0x2525252525252525
+		addHi = (0x80 - 0x41) * swarLo64 // 0x3F3F3F3F3F3F3F3F
+	)
+	i := 0
+	for i+8 <= len(key) {
+		w := *(*uint64)(unsafe.Pointer(&key[i]))
+		if ((w+addHi)^(w+addLo))&swarHi64 != 0 {
+			return true
+		}
+		i += 8
+	}
+	for ; i < len(key); i++ {
+		if key[i] >= 'A' && key[i] <= 'Z' {
+			return true
 		}
 	}
-	if allLower {
+	return false
+}
+
+// LookupFieldBytes is the zero-allocation entry point for field lookup from []byte.
+// It lowercases the key in a scratch buffer and dispatches to the tiered strategy.
+// The scratch buffer is provided by the caller to avoid allocation.
+func (dec *ReflectStructDecoder) LookupFieldBytes(key []byte, scratch []byte) *TypeInfo {
+	// Fast path: if key is already all-lowercase ASCII, skip copy+toLower entirely.
+	if !hasUpperASCII(key) {
 		k := unsafe.String(unsafe.SliceData(key), len(key))
-		return dec.lookupFn(dec, k)
+		return dec.LookupFn(dec, k)
 	}
 
 	// Slow path: copy into scratch and lowercase.
@@ -281,5 +335,5 @@ func (dec *reflectStructDecoder) lookupFieldBytes(key []byte, scratch []byte) *t
 	buf := scratch[:len(key)]
 	copy(buf, key)
 	lowered := toLowerASCIIBytes(buf)
-	return dec.lookupFn(dec, lowered)
+	return dec.LookupFn(dec, lowered)
 }
