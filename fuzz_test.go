@@ -246,10 +246,10 @@ func FuzzUnmarshalNested(f *testing.F) {
 func FuzzNoCrash(f *testing.F) {
 	seeds := []string{
 		`null`, `true`, `false`, `0`, `""`, `{}`, `[]`,
-		`"\uD800"`,        // lone surrogate
-		`"\uD800\uD800"`,  // two high surrogates
-		`"\u0000"`,        // null byte in string
-		string([]byte{0x22, 0x00, 0x22}), // raw null in string
+		`"\uD800"`,                           // lone surrogate
+		`"\uD800\uD800"`,                     // two high surrogates
+		`"\u0000"`,                           // null byte in string
+		string([]byte{0x22, 0x00, 0x22}),     // raw null in string
 		`{"a":` + string([]byte{0xff}) + `}`, // invalid byte
 	}
 	for _, s := range seeds {

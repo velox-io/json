@@ -38,10 +38,6 @@ func TestToLowerASCII_AllLower(t *testing.T) {
 	if result != "hello_world" {
 		t.Errorf("expected hello_world, got %s", result)
 	}
-	// Should return the same string pointer (zero alloc)
-	if &([]byte(s))[0] != &([]byte(result))[0] {
-		// Note: Go string comparison — if no mutation, same string should be returned
-	}
 }
 
 func TestToLowerASCII_WithUpper(t *testing.T) {

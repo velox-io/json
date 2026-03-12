@@ -48,6 +48,7 @@ func safetyInput(i int) ([]byte, SafetyItem) {
 	return []byte(json), want
 }
 
+//nolint:unused
 func verifySafetyItem(t *testing.T, prefix string, got, want SafetyItem) {
 	t.Helper()
 	if got.Name != want.Name {

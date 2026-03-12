@@ -1,0 +1,89 @@
+run:
+  timeout: 5m
+  tests: true
+
+output:
+  print-issued-lines: true
+  print-linter-name: true
+
+linters:
+  enable:
+    # Default linters
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+    # Essential additional linters
+    - gofmt
+    - goimports
+    - gosec
+    - misspell
+    - revive
+
+linters-settings:
+  errcheck:
+    check-type-assertions: false
+    check-blank: false
+
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+
+  misspell:
+    locale: US
+
+  revive:
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+      - name: var-declaration
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+
+  gosec:
+    excludes:
+      - G104 # Audit errors not checked
+      - G304 # File path provided as taint input
+      - G115 # Integer overflow conversion
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+
+    - path: benchmark/
+      linters:
+        - gosec
+
+    # Allow unsafe usage in performance-critical code
+    - linters:
+        - gosec
+      text: "G103:"
+
+    # Allow type assertions without check (panics are intentional)
+    - linters:
+        - errcheck
+      text: "type assertion"
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false

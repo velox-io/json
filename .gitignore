@@ -1,6 +1,26 @@
 /local
 /benchmark/local
+
+# Profiling
 *.prof
+*.out
+cpu.out
+mem.out
+
+# Editor/IDE
 *.bak
+*.swp
+*.swo
+.idea/
+.vscode/
+*.sublime-*
+
+# Test/Benchmark artifacts
 *.png
 *.test
+coverage.out
+coverage.html
+
+# OS
+.DS_Store
+Thumbs.db

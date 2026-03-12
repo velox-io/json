@@ -21,6 +21,8 @@ func hasZeroByte(x uint64) uint64 {
 //
 // NOTE: The Go compiler does not inline this function (cost 185 > budget 80),
 // so skipContainer manually inlines the SWAR logic for performance.
+//
+//nolint:unused
 func findStructuralChar(src []byte, idx int) (int, byte) {
 	n := len(src)
 

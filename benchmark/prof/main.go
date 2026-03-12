@@ -10,8 +10,8 @@ import (
 
 	"dev.local/benchmark"
 
-	vjson "github.com/velox-io/json"
 	"github.com/urfave/cli/v3"
+	vjson "github.com/velox-io/json"
 )
 
 type EscapeHeavyPayload = benchmark.EscapeHeavyPayload

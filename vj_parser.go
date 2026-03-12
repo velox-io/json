@@ -8,10 +8,11 @@ import (
 )
 
 const (
-	// 32-bit little-endian representations for literal validation
-	lit_true = uint32(0x65757274) // "true"
-	lit_alse = uint32(0x65736c61) // "alse"
-	lit_null = uint32(0x6c6c756e) // "null"
+	// 32-bit little-endian representations for literal validation.
+	litU32True = uint32(0x65757274) // "true"
+	litU32Null = uint32(0x6c6c756e) // "null"
+	// "a" + "l" + "se" suffix for f@lse literal
+	litU32Alse = uint32(0x65736c61)
 )
 
 func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
@@ -408,7 +409,7 @@ func (sc *Parser) scanTrue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer
 	if idx+4 > len(src) {
 		return idx, errUnexpectedEOF
 	}
-	if *(*uint32)(unsafe.Pointer(&src[idx])) != lit_true {
+	if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32True {
 		return idx, fmt.Errorf("vjson: invalid literal at offset %d", idx)
 	}
 	switch ti.Kind {
@@ -426,7 +427,7 @@ func (sc *Parser) scanFalse(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 	if idx+5 > len(src) {
 		return idx, errUnexpectedEOF
 	}
-	if *(*uint32)(unsafe.Pointer(&src[idx+1])) != lit_alse {
+	if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // f@lse suffix
 		return idx, fmt.Errorf("vjson: invalid literal at offset %d", idx)
 	}
 	switch ti.Kind {
@@ -444,7 +445,7 @@ func (sc *Parser) scanNull(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer
 	if idx+4 > len(src) {
 		return idx, errUnexpectedEOF
 	}
-	if *(*uint32)(unsafe.Pointer(&src[idx])) != lit_null {
+	if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null {
 		return idx, fmt.Errorf("vjson: invalid literal at offset %d", idx)
 	}
 	newIdx := idx + 4
@@ -783,8 +784,8 @@ func (sc *Parser) scanArray(src []byte, idx int, sDec *ReflectSliceDecoder, ptr 
 	// Build slice with initial capacity of 2 (same as Sonic) to minimize over-allocation.
 	const initCap = 2
 	elemSize := sDec.ElemSize
-	cap_ := initCap
-	len_ := 0
+	sliceCap := initCap
+	sliceLen := 0
 
 	// Two allocation strategies based on whether elements contain GC-managed pointers:
 	//
@@ -808,13 +809,13 @@ func (sc *Parser) scanArray(src []byte, idx int, sDec *ReflectSliceDecoder, ptr 
 
 	for {
 		// Grow if needed
-		if len_ == cap_ {
-			newCap := cap_ * 2
+		if sliceLen == sliceCap {
+			newCap := sliceCap * 2
 			if sDec.ElemHasPtr {
 				newBase := unsafe_NewArray(sDec.ElemRType, newCap)
 				// typedslicecopy triggers write barriers, ensuring GC
 				// correctly tracks pointer fields during concurrent marking.
-				typedslicecopy(sDec.ElemRType, newBase, newCap, base, len_)
+				typedslicecopy(sDec.ElemRType, newBase, newCap, base, sliceLen)
 				base = newBase
 			} else {
 				newBacking := make([]byte, newCap*int(elemSize))
@@ -822,11 +823,11 @@ func (sc *Parser) scanArray(src []byte, idx int, sDec *ReflectSliceDecoder, ptr 
 				backingBytes = newBacking
 				base = unsafe.Pointer(&backingBytes[0])
 			}
-			cap_ = newCap
+			sliceCap = newCap
 		}
 
-		elemPtr := unsafe.Add(base, uintptr(len_)*elemSize)
-		len_++
+		elemPtr := unsafe.Add(base, uintptr(sliceLen)*elemSize)
+		sliceLen++
 
 		var err error
 		idx, err = sc.scanValue(src, idx, sDec.ElemTI, elemPtr)
@@ -846,8 +847,8 @@ func (sc *Parser) scanArray(src []byte, idx int, sDec *ReflectSliceDecoder, ptr 
 		if src[idx] == ']' {
 			sh := (*SliceHeader)(ptr)
 			sh.Data = base
-			sh.Len = len_
-			sh.Cap = cap_
+			sh.Len = sliceLen
+			sh.Cap = sliceCap
 			return idx + 1, nil
 		}
 		return idx, fmt.Errorf("vjson: expected ',' or ']' in array, got %q", src[idx])
@@ -964,7 +965,7 @@ func (sc *Parser) scanAnyValue(src []byte, idx int) (int, any, error) {
 		if idx+4 > len(src) {
 			return idx, nil, errUnexpectedEOF
 		}
-		if *(*uint32)(unsafe.Pointer(&src[idx])) != lit_true {
+		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32True {
 			return idx, nil, fmt.Errorf("vjson: invalid literal at offset %d", idx)
 		}
 		return idx + 4, true, nil
@@ -972,7 +973,7 @@ func (sc *Parser) scanAnyValue(src []byte, idx int) (int, any, error) {
 		if idx+5 > len(src) {
 			return idx, nil, errUnexpectedEOF
 		}
-		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != lit_alse {
+		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // f@lse suffix
 			return idx, nil, fmt.Errorf("vjson: invalid literal at offset %d", idx)
 		}
 		return idx + 5, false, nil
@@ -980,7 +981,7 @@ func (sc *Parser) scanAnyValue(src []byte, idx int) (int, any, error) {
 		if idx+4 > len(src) {
 			return idx, nil, errUnexpectedEOF
 		}
-		if *(*uint32)(unsafe.Pointer(&src[idx])) != lit_null {
+		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null {
 			return idx, nil, fmt.Errorf("vjson: invalid literal at offset %d", idx)
 		}
 		return idx + 4, nil, nil
@@ -1005,7 +1006,7 @@ func skipValue(src []byte, idx int) (int, error) {
 		if idx+4 > len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if *(*uint32)(unsafe.Pointer(&src[idx])) != lit_true {
+		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32True {
 			return idx, fmt.Errorf("vjson: invalid literal at offset %d", idx)
 		}
 		return idx + 4, nil
@@ -1013,7 +1014,7 @@ func skipValue(src []byte, idx int) (int, error) {
 		if idx+5 > len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != lit_alse {
+		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // f@lse suffix
 			return idx, fmt.Errorf("vjson: invalid literal at offset %d", idx)
 		}
 		return idx + 5, nil
@@ -1021,7 +1022,7 @@ func skipValue(src []byte, idx int) (int, error) {
 		if idx+4 > len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if *(*uint32)(unsafe.Pointer(&src[idx])) != lit_null {
+		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null {
 			return idx, fmt.Errorf("vjson: invalid literal at offset %d", idx)
 		}
 		return idx + 4, nil

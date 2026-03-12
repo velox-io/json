@@ -171,6 +171,8 @@ func TestScanNumber_FloatToInt(t *testing.T) {
 }
 
 var sinkUint64 uint64
+
+//nolint:unused
 var sinkInt64 int64
 
 func BenchmarkParseUint64_4digits(b *testing.B) {

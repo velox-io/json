@@ -32,32 +32,29 @@ const (
 )
 
 // TypeInfo holds pre-computed metadata for a type.
-// For struct fields it also carries offset and JSON name; for standalone
-// type queries (via GetDecoder) only Kind/Size/Decoder are populated.
 type TypeInfo struct {
-	Kind          ElemTypeKind // primitive kind for type-switch dispatch
-	Size          uintptr      // size of the field type (for int/uint variations)
-	Offset        uintptr      // field offset in struct (for unsafe access)
-	JSONName      string       // from `json:"name"` tag or field name
-	JSONNameLower string       // pre-lowercased JSONName for case-insensitive lookup
-	Decoder       any          // nested decoder (*ReflectStructDecoder, *ReflectSliceDecoder, etc.)
+	Kind          ElemTypeKind
+	Size          uintptr
+	Offset        uintptr
+	JSONName      string
+	JSONNameLower string
+	Decoder       any
+
+	// Marshal metadata
+	KeyBytes       []byte // pre-encoded `"name":` (compact)
+	KeyBytesIndent []byte // pre-encoded `"name": ` (indented)
+	OmitEmpty      bool
+	IsZeroFn       func(ptr unsafe.Pointer) bool
 }
 
-// decoderCache maps reflect.Type → *decoderEntry.
-// Every type goes through GetDecoder exactly once; the returned *TypeInfo is
-// stable and may be referenced by pointer from other decoders.
-var decoderCache sync.Map // map[reflect.Type]*decoderEntry
+var decoderCache sync.Map
 
-// decoderEntry wraps a *TypeInfo with a channel that is closed once the
-// decoder (TypeInfo.Decoder) is fully initialized. Concurrent readers
-// wait on the channel before using the TypeInfo.
 type decoderEntry struct {
 	ti   *TypeInfo
-	done chan struct{} // closed when ti.Decoder is set
+	done chan struct{}
 }
 
-// KindForType maps reflect.Kind to the internal ElemTypeKind.
-// Panics on unsupported types (programming error, not runtime input error).
+// KindForType maps reflect.Kind to ElemTypeKind.
 func KindForType(t reflect.Type) ElemTypeKind {
 	switch t.Kind() {
 	case reflect.Bool:
@@ -106,13 +103,8 @@ func KindForType(t reflect.Type) ElemTypeKind {
 	}
 }
 
-// GetDecoder returns the cached *TypeInfo for the given type, building it on
-// first access. The returned pointer is stable and safe to store by reference.
-//
-// Thread-safe: concurrent first-time access to the same type will block
-// until the decoder is fully initialized. For recursive types (e.g.
-// type Node struct { Children []*Node }), internal builder calls use
-// getDecoderForCycle which returns the pointer without waiting.
+// GetDecoder returns the cached *TypeInfo for the given type.
+// Thread-safe; blocks until the decoder is fully initialized.
 func GetDecoder(t reflect.Type) *TypeInfo {
 	if v, ok := decoderCache.Load(t); ok {
 		e := v.(*decoderEntry)
@@ -122,15 +114,10 @@ func GetDecoder(t reflect.Type) *TypeInfo {
 	return getDecoderSlow(t, true)
 }
 
-// getDecoderForCycle is used by composite decoder builders to resolve
-// element types. It returns the *TypeInfo pointer immediately without
-// waiting for the decoder to be built, which breaks recursive cycles.
-// The pointer is stable and the Decoder field will be populated by the
-// time any parsing occurs.
+// getDecoderForCycle returns *TypeInfo without waiting, breaking recursive cycles.
 func getDecoderForCycle(t reflect.Type) *TypeInfo {
 	if v, ok := decoderCache.Load(t); ok {
 		e := v.(*decoderEntry)
-		// Don't wait — may be called during initialization of this very type.
 		return e.ti
 	}
 	return getDecoderSlow(t, false)
@@ -151,9 +138,7 @@ func getDecoderSlow(t reflect.Type, wait bool) *TypeInfo {
 		return existing.ti
 	}
 
-	// We won the race — build the decoder.
-	// e.ti is already in the cache, so recursive getDecoderForCycle calls
-	// will return e.ti's pointer (without waiting).
+	// Won the race — build the decoder.
 	switch t.Kind() {
 	case reflect.Struct:
 		e.ti.Decoder = BuildStructDecoder(t)
@@ -169,13 +154,11 @@ func getDecoderSlow(t reflect.Type, wait bool) *TypeInfo {
 	return e.ti
 }
 
-// CollectStructFields recursively collects fields from a struct type, promoting
-// fields from anonymous (embedded) structs. baseOffset is added to each
-// field's offset to handle nested embedding. Outer (earlier) fields with
-// the same JSON name take precedence over inner (embedded) fields.
+// CollectStructFields collects fields from a struct type, promoting
+// embedded struct fields. Outer fields take precedence.
 func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 	var fields []TypeInfo
-	seen := make(map[string]bool) // track JSON names to handle override
+	seen := make(map[string]bool)
 
 	// Two passes: first direct fields, then embedded structs.
 	// This ensures outer direct fields always override embedded fields.
@@ -199,12 +182,14 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 
 		// Parse json tag
 		jsonName := sf.Name
+		omitEmpty := false
 		if tag := sf.Tag.Get("json"); tag != "" {
 			if tag == "-" {
 				continue
 			}
-			if before, _, ok := strings.Cut(tag, ","); ok {
+			if before, opts, ok := strings.Cut(tag, ","); ok {
 				jsonName = before
+				omitEmpty = strings.Contains(opts, "omitempty")
 			} else {
 				jsonName = tag
 			}
@@ -215,12 +200,16 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 
 		cached := getDecoderForCycle(sf.Type)
 		fi := TypeInfo{
-			Kind:          cached.Kind,
-			Size:          cached.Size,
-			Offset:        baseOffset + sf.Offset,
-			JSONName:      jsonName,
-			JSONNameLower: toLowerASCII(jsonName),
-			Decoder:       cached.Decoder,
+			Kind:           cached.Kind,
+			Size:           cached.Size,
+			Offset:         baseOffset + sf.Offset,
+			JSONName:       jsonName,
+			JSONNameLower:  toLowerASCII(jsonName),
+			Decoder:        cached.Decoder,
+			KeyBytes:       encodeKeyBytes(jsonName),
+			KeyBytesIndent: encodeKeyBytesIndent(jsonName),
+			OmitEmpty:      omitEmpty,
+			IsZeroFn:       makeIsZeroFn(sf.Type),
 		}
 
 		if !seen[jsonName] {
@@ -245,7 +234,7 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 
 // --- Decoder Builders ---
 
-// ReflectStructDecoder handles struct decoding using reflect.
+// ReflectStructDecoder handles struct decoding.
 type ReflectStructDecoder struct {
 	Typ    reflect.Type
 	Fields []TypeInfo
@@ -254,8 +243,8 @@ type ReflectStructDecoder struct {
 	LookupFn  func(dec *ReflectStructDecoder, key string) *TypeInfo
 	HashSeed  uint64
 	HashShift uint8
-	HashTable []uint8              // indices into Fields[], 0xFF = empty slot
-	FieldMap  map[string]*TypeInfo // fallback for 33+ fields only
+	HashTable []uint8              // indices into Fields[]; 0xFF = empty
+	FieldMap  map[string]*TypeInfo // fallback for 33+ fields
 }
 
 func BuildStructDecoder(t reflect.Type) *ReflectStructDecoder {
@@ -265,15 +254,15 @@ func BuildStructDecoder(t reflect.Type) *ReflectStructDecoder {
 	return dec
 }
 
-// ReflectSliceDecoder handles slice decoding for any element type
+// ReflectSliceDecoder handles slice decoding.
 type ReflectSliceDecoder struct {
-	SliceType      reflect.Type   // the slice type itself, e.g., []int64
+	SliceType      reflect.Type
 	ElemType       reflect.Type
-	ElemSize       uintptr        // size of one element (for unsafe pointer arithmetic)
-	ElemTI         *TypeInfo      // cached TypeInfo for element (pointer for cycle safety)
-	EmptySliceData unsafe.Pointer // pre-created empty slice backing, avoids reflect.MakeSlice per empty []
-	ElemHasPtr     bool           // true if element type contains pointer-like fields (string, slice, ptr, etc.)
-	ElemRType      unsafe.Pointer // cached *abi.Type for element, used with runtime alloc via go:linkname
+	ElemSize       uintptr
+	ElemTI         *TypeInfo
+	EmptySliceData unsafe.Pointer
+	ElemHasPtr     bool
+	ElemRType      unsafe.Pointer
 }
 
 func BuildSliceDecoder(t reflect.Type) *ReflectSliceDecoder {
@@ -290,8 +279,7 @@ func BuildSliceDecoder(t reflect.Type) *ReflectSliceDecoder {
 	}
 }
 
-// typeContainsPointer reports whether a type contains any pointer-like fields
-// that require GC scanning (pointers, strings, slices, maps, interfaces, etc.).
+// typeContainsPointer reports whether a type contains pointer-like fields.
 func typeContainsPointer(t reflect.Type) bool {
 	switch t.Kind() {
 	case reflect.Bool,
@@ -313,22 +301,19 @@ func typeContainsPointer(t reflect.Type) bool {
 		}
 		return false
 	default:
-		// Ptr, Map, Chan, Func, Interface, Slice, String, UnsafePointer
 		return true
 	}
 }
 
-// ReflectMapDecoder handles map decoding for map[string]T types.
-// JSON object keys are always strings; values are decoded according to ValTI.
+// ReflectMapDecoder handles map[string]T decoding.
 type ReflectMapDecoder struct {
-	MapType reflect.Type // the map type itself, e.g., map[string]int64
-	KeyType reflect.Type // always string for JSON
-	ValType reflect.Type // value element type
-	ValSize uintptr      // size of one value element
-	ValTI   *TypeInfo    // cached TypeInfo for value (pointer for cycle safety)
+	MapType reflect.Type
+	KeyType reflect.Type
+	ValType reflect.Type
+	ValSize uintptr
+	ValTI   *TypeInfo
 
-	// ValIsString is true for map[string]string, enabling zero-reflection fast path.
-	ValIsString bool
+	ValIsString bool // true for map[string]string fast path
 }
 
 func BuildMapDecoder(t reflect.Type) *ReflectMapDecoder {
@@ -344,12 +329,12 @@ func BuildMapDecoder(t reflect.Type) *ReflectMapDecoder {
 }
 
 type ReflectPointerDecoder struct {
-	PtrType    reflect.Type   // the pointer type itself, e.g., *Foo
+	PtrType    reflect.Type
 	ElemType   reflect.Type
-	ElemTI     *TypeInfo      // cached TypeInfo for the pointed-to element (pointer for cycle safety)
-	ElemSize   uintptr        // size of the element type for allocation
-	ElemHasPtr bool           // true if element type contains pointer-like fields
-	ElemRType  unsafe.Pointer // cached *abi.Type for element, used with runtime alloc via go:linkname
+	ElemTI     *TypeInfo
+	ElemSize   uintptr
+	ElemHasPtr bool
+	ElemRType  unsafe.Pointer
 }
 
 func BuildPointerDecoder(t reflect.Type) *ReflectPointerDecoder {
@@ -361,5 +346,97 @@ func BuildPointerDecoder(t reflect.Type) *ReflectPointerDecoder {
 		ElemSize:   t.Elem().Size(),
 		ElemHasPtr: typeContainsPointer(t.Elem()),
 		ElemRType:  rtypePtr(t.Elem()),
+	}
+}
+
+// --- Marshal helpers ---
+
+// encodeKeyBytes returns `"name":`
+func encodeKeyBytes(name string) []byte {
+	buf := make([]byte, 0, len(name)+4)
+	buf = appendEscapedString(buf, name, 0)
+	buf = append(buf, ':')
+	return buf
+}
+
+// encodeKeyBytesIndent returns `"name": `
+func encodeKeyBytesIndent(name string) []byte {
+	buf := make([]byte, 0, len(name)+5)
+	buf = appendEscapedString(buf, name, 0)
+	buf = append(buf, ':', ' ')
+	return buf
+}
+
+// --- Zero-value detection for omitempty ---
+
+// makeIsZeroFn returns a zero-value check for the given type. Nil if not applicable.
+func makeIsZeroFn(t reflect.Type) func(unsafe.Pointer) bool {
+	switch t.Kind() {
+	case reflect.Bool:
+		return func(ptr unsafe.Pointer) bool { return !*(*bool)(ptr) }
+	case reflect.Int:
+		return func(ptr unsafe.Pointer) bool { return *(*int)(ptr) == 0 }
+	case reflect.Int8:
+		return func(ptr unsafe.Pointer) bool { return *(*int8)(ptr) == 0 }
+	case reflect.Int16:
+		return func(ptr unsafe.Pointer) bool { return *(*int16)(ptr) == 0 }
+	case reflect.Int32:
+		return func(ptr unsafe.Pointer) bool { return *(*int32)(ptr) == 0 }
+	case reflect.Int64:
+		return func(ptr unsafe.Pointer) bool { return *(*int64)(ptr) == 0 }
+	case reflect.Uint:
+		return func(ptr unsafe.Pointer) bool { return *(*uint)(ptr) == 0 }
+	case reflect.Uint8:
+		return func(ptr unsafe.Pointer) bool { return *(*uint8)(ptr) == 0 }
+	case reflect.Uint16:
+		return func(ptr unsafe.Pointer) bool { return *(*uint16)(ptr) == 0 }
+	case reflect.Uint32:
+		return func(ptr unsafe.Pointer) bool { return *(*uint32)(ptr) == 0 }
+	case reflect.Uint64:
+		return func(ptr unsafe.Pointer) bool { return *(*uint64)(ptr) == 0 }
+	case reflect.Float32:
+		return func(ptr unsafe.Pointer) bool { return *(*float32)(ptr) == 0 }
+	case reflect.Float64:
+		return func(ptr unsafe.Pointer) bool { return *(*float64)(ptr) == 0 }
+	case reflect.String:
+		return func(ptr unsafe.Pointer) bool { return len(*(*string)(ptr)) == 0 }
+	case reflect.Slice, reflect.Map:
+		return func(ptr unsafe.Pointer) bool { return *(*unsafe.Pointer)(ptr) == nil }
+	case reflect.Pointer, reflect.Interface:
+		return func(ptr unsafe.Pointer) bool { return *(*unsafe.Pointer)(ptr) == nil }
+	case reflect.Struct:
+		return makeIsZeroStruct(t)
+	default:
+		return nil
+	}
+}
+
+// makeIsZeroStruct builds a zero-check for a struct type.
+func makeIsZeroStruct(t reflect.Type) func(unsafe.Pointer) bool {
+	type fieldCheck struct {
+		offset uintptr
+		fn     func(unsafe.Pointer) bool
+	}
+	var checks []fieldCheck
+	for i := range t.NumField() {
+		sf := t.Field(i)
+		if !sf.IsExported() {
+			continue
+		}
+		fn := makeIsZeroFn(sf.Type)
+		if fn != nil {
+			checks = append(checks, fieldCheck{sf.Offset, fn})
+		}
+	}
+	if len(checks) == 0 {
+		return func(_ unsafe.Pointer) bool { return true }
+	}
+	return func(ptr unsafe.Pointer) bool {
+		for _, c := range checks {
+			if !c.fn(unsafe.Add(ptr, c.offset)) {
+				return false
+			}
+		}
+		return true
 	}
 }

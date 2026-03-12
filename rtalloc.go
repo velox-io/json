@@ -16,11 +16,11 @@ import (
 
 //go:linkname unsafe_New reflect.unsafe_New
 //go:noescape
-func unsafe_New(typ unsafe.Pointer) unsafe.Pointer
+func unsafe_New(typ unsafe.Pointer) unsafe.Pointer //nolint:revive
 
 //go:linkname unsafe_NewArray reflect.unsafe_NewArray
 //go:noescape
-func unsafe_NewArray(typ unsafe.Pointer, n int) unsafe.Pointer
+func unsafe_NewArray(typ unsafe.Pointer, n int) unsafe.Pointer //nolint:revive
 
 //go:linkname typedslicecopy runtime.typedslicecopy
 //go:nosplit
