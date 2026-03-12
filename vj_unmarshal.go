@@ -115,7 +115,6 @@ func unmarshalInto(sc *Parser, data []byte, v any) error {
 	if newIdx < len(data) {
 		return newSyntaxError(fmt.Sprintf("vjson: invalid character %q after top-level value", data[newIdx]), newIdx)
 	}
-	_ = newIdx
 	return nil
 }
 

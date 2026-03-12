@@ -328,15 +328,15 @@ func FuzzMarshalString(f *testing.F) {
 		// Mixed
 		"hello\n\t\"world\"\x00<>&\u2028\xff中文\U0001F600",
 		// Length boundary cases for SIMD
-		"abcdefghijklmno",       // 15 bytes
-		"abcdefghijklmnop",      // 16 bytes — exact SIMD width
-		"abcdefghijklmnopq",     // 17 bytes
-		"abcdefghijklmnopqrstuvwxyz012345", // 31 bytes
+		"abcdefghijklmno",                   // 15 bytes
+		"abcdefghijklmnop",                  // 16 bytes — exact SIMD width
+		"abcdefghijklmnopq",                 // 17 bytes
+		"abcdefghijklmnopqrstuvwxyz012345",  // 31 bytes
 		"abcdefghijklmnopqrstuvwxyz0123456", // 32 bytes — exact AVX2 width
 		// All-escape strings at SIMD boundaries
-		"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",                                 // 15
-		"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10",                              // 16
-		"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11",                          // 17
+		"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",         // 15
+		"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10",     // 16
+		"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11", // 17
 	}
 	for _, s := range seeds {
 		f.Add(s)
@@ -403,14 +403,14 @@ func FuzzMarshalStruct(f *testing.F) {
 	}
 
 	type FuzzS struct {
-		Name    string            `json:"name"`
-		Age     int64             `json:"age"`
-		Score   float64           `json:"score"`
-		Active  bool              `json:"active"`
-		Tags    []string          `json:"tags"`
-		Meta    map[string]string `json:"meta"`
-		Inner   *Inner            `json:"inner,omitempty"`
-		Data    []byte            `json:"data,omitempty"`
+		Name   string            `json:"name"`
+		Age    int64             `json:"age"`
+		Score  float64           `json:"score"`
+		Active bool              `json:"active"`
+		Tags   []string          `json:"tags"`
+		Meta   map[string]string `json:"meta"`
+		Inner  *Inner            `json:"inner,omitempty"`
+		Data   []byte            `json:"data,omitempty"`
 	}
 
 	f.Fuzz(func(t *testing.T, data []byte) {

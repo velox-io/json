@@ -10,13 +10,15 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-var SmallJSON = []byte(`{
+var TinyJSON = []byte(`{
 	"bool": true,
 	"int": 42,
 	"int64": 9223372036854775807,
 	"float64": 3.14159265358979,
 	"string": "hello world benchmark"
 }`)
+
+var SmallJSON = []byte(`{"id":12125925,"ids":[-2147483648,2147483647],"title":"未来简史-从智人到智神","titles":["hello","world"],"price":40.8,"prices":[-0.1,0.1],"hot":true,"hots":[true,true,true],"author":{"name":"json","age":99,"male":true},"authors":[{"name":"json","age":99,"male":true},{"name":"json","age":99,"male":true},{"name":"json","age":99,"male":true}],"weights":[]}`)
 
 //go:embed testdata/escape_heavy.json
 var EscapeHeavyJSON []byte
@@ -42,6 +44,9 @@ func LoadLogNDJSON() []byte {
 
 // Compact (whitespace-stripped) versions of all JSON test data, lazily initialized.
 var (
+	tinyCompactOnce sync.Once
+	tinyCompactData []byte
+
 	smallCompactOnce sync.Once
 	smallCompactData []byte
 
@@ -54,6 +59,11 @@ var (
 	twitterCompactOnce sync.Once
 	twitterCompactData []byte
 )
+
+func LoadTinyCompactJSON() []byte {
+	tinyCompactOnce.Do(func() { tinyCompactData = compact(TinyJSON) })
+	return tinyCompactData
+}
 
 func LoadSmallCompactJSON() []byte {
 	smallCompactOnce.Do(func() { smallCompactData = compact(SmallJSON) })

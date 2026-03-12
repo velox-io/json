@@ -1,17 +1,17 @@
 /*
- * encvm_memory.h — Velox JSON C Engine: Memory Primitives
+ * memfn.h — Velox JSON C Engine: Memory Primitives
  *
  * SIMD-accelerated inline copy helpers used throughout the encoder.
- * Depends on stdlib/memfn.h for memcpy/memset declarations.
+ * Depends on stdlib/memory.h for memcpy/memset declarations.
  */
 
-#ifndef VJ_ENCVM_MEMORY_H
-#define VJ_ENCVM_MEMORY_H
+#ifndef VJ_ENCVM_MEMFN_H
+#define VJ_ENCVM_MEMFN_H
 
 // clang-format off
 
 #include <stdint.h>
-#include "stdlib/memfn.h"
+#include "stdlib/memory.h"
 
 #ifdef __aarch64__
 #include "sse2neon.h"
@@ -181,4 +181,4 @@ vj_copy_var(uint8_t *dst, const void *src, size_t n) {
 
 #endif /* SIMD check */
 
-#endif /* VJ_ENCVM_MEMORY_H */
+#endif /* VJ_ENCVM_MEMFN_H */

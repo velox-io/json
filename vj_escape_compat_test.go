@@ -22,6 +22,7 @@ func TestEscape_StdCompat(t *testing.T) {
 		{"invalid_utf8_truncated", "abc\xc0def"},
 		{"lone_surrogate", "abc\xed\xa0\x80def"},
 		{"null_byte", "abc\x00def"},
+		{"null_byte_before_digits", "0\x00 00000"},
 		{"mixed", "hello\n\t\"world\"\x00<>&\u2028"},
 		{"all_control", "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"},
 		{"surrogate_pair_bytes", "\xed\xa0\xbd\xed\xb8\x80"},

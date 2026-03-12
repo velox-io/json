@@ -7,44 +7,86 @@ import (
 	"strings"
 )
 
-// Layout constants — all coordinates are within a 1100px wide SVG.
+// Layout constants — all coordinates are within a 960px wide SVG.
 const (
-	svgWidth   = 1100
-	padLeft    = 40
-	padRight   = 40
+	svgWidth   = 960
+	padLeft    = 30
+	padRight   = 30
 	padTop     = 30
 	headerH    = 90  // title + subtitle + legend
-	groupGap   = 24  // vertical gap between groups
+	groupGap   = 18  // vertical gap between groups within a section
+	secGap     = 36  // vertical gap before a new section
+	secHdrH    = 36  // section header height (text + rule)
 	footerH    = 40
 	barH       = 20  // bar height
 	barSpacing = 7   // vertical spacing between bars
 	barRx      = 3   // bar corner radius
-	sectionHdr = 28  // group section header height
+	grpHdr     = 28  // group card header height
 	colHdr     = 16  // column header row height
 
 	// Column layout: libLabel | nsOp chart | gap | bOp chart | gap | allocs chart
+	// Total budget: svgWidth - padLeft - padRight - 14 (x0 offset) = 886
 	libLabelW = 68
-	nsBarW    = 370  // max bar width for ns/op
-	bBarW     = 220  // max bar width for B/op
-	aBarW     = 130  // max bar width for allocs/op
+	nsBarW    = 280  // max bar width for ns/op
+	bBarW     = 170  // max bar width for B/op
+	aBarW     = 100  // max bar width for allocs/op
 	colGapW   = 10   // gap between columns
 	// Text annotation widths (space after bar for value + badge)
-	nsAnnotW = 120
+	nsAnnotW = 110
 	bAnnotW  = 70
 	aAnnotW  = 60
 )
+
+// groupLibCount returns the number of libraries that have data for the given group.
+func groupLibCount(data *BenchData, group string) int {
+	gr := data.Results[group]
+	n := 0
+	for _, lib := range data.Libs {
+		if _, ok := gr[lib]; ok {
+			n++
+		}
+	}
+	return n
+}
+
+// groupHeight returns the card height for a group based on how many libraries have data.
+func groupHeight(nLibs int) int {
+	rowH := barH + barSpacing
+	return grpHdr + colHdr + nLibs*rowH + 4
+}
 
 // RenderSVG generates the complete SVG string from parsed benchmark data.
 func RenderSVG(data *BenchData) string {
 	var b strings.Builder
 
-	nLibs := len(data.Libs)
-	nGroups := len(data.Groups)
-	rowH := barH + barSpacing
-	groupBodyH := nLibs*rowH + 4
-	groupH := sectionHdr + colHdr + groupBodyH
+	// Use sections if available, otherwise fall back to flat group list
+	sections := data.Sections
+	hasSections := len(sections) > 1 // only show section headers if >1 section
+	if len(sections) == 0 {
+		// Fallback: put all groups in a single unnamed section
+		sections = []Section{{Name: "", Groups: data.Groups}}
+		hasSections = false
+	}
 
-	totalH := padTop + headerH + nGroups*(groupH+groupGap) + footerH
+	// Compute total height
+	totalH := padTop + headerH
+	for si, sec := range sections {
+		if hasSections {
+			if si == 0 {
+				totalH += secGap / 2
+			} else {
+				totalH += secGap
+			}
+			totalH += secHdrH
+		}
+		for gi, group := range sec.Groups {
+			if gi > 0 {
+				totalH += groupGap
+			}
+			totalH += groupHeight(groupLibCount(data, group))
+		}
+	}
+	totalH += footerH
 
 	// SVG open
 	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" font-family="%s" font-size="13">`+"\n",
@@ -70,15 +112,37 @@ func RenderSVG(data *BenchData) string {
 	y += 26
 	renderLegend(&b, data.Libs, y)
 
-	// === Groups ===
-	groupY := padTop + headerH
-	for _, group := range data.Groups {
-		renderGroup(&b, data, group, groupY, groupH)
-		groupY += groupH + groupGap
+	// === Sections & Groups ===
+	curY := padTop + headerH
+	contentW := svgWidth - padLeft - padRight
+	for si, sec := range sections {
+		if hasSections {
+			if si == 0 {
+				curY += secGap / 2
+			} else {
+				curY += secGap
+			}
+			renderSectionHeader(&b, sec.Name, curY, contentW)
+			curY += secHdrH
+		}
+		for gi, group := range sec.Groups {
+			if gi > 0 {
+				curY += groupGap
+			}
+			// Show dataset-only name when sections are active
+			displayName := group
+			if hasSections {
+				_, ds := splitGroupToSection(group)
+				displayName = ds
+			}
+			gh := groupHeight(groupLibCount(data, group))
+			renderGroup(&b, data, group, displayName, curY, gh)
+			curY += gh
+		}
 	}
 
 	// === Footer ===
-	footerY := groupY + 10
+	footerY := curY + footerH/2 + 4
 	countStr := ""
 	if data.RunCount > 0 {
 		countStr = fmt.Sprintf("  |  count=%d (median)", data.RunCount)
@@ -94,8 +158,10 @@ func svgStyles() string {
 	return fmt.Sprintf(`  <style>
     .title { font-size: 22px; font-weight: bold; fill: %s; font-family: %s; }
     .subtitle { font-size: 13px; fill: %s; font-family: %s; }
+    .sec-title { font-size: 16px; font-weight: bold; fill: %s; font-family: %s; letter-spacing: 0.5px; }
     .grp-title { font-size: 14px; font-weight: bold; fill: %s; font-family: %s; }
     .col-hdr { font-size: 10px; fill: %s; font-weight: 600; font-family: %s; letter-spacing: 0.3px; }
+    .col-hdr-hint { font-size: 10px; fill: %s; font-weight: 600; font-style: italic; font-family: %s; }
     .lib-label { font-size: 11px; font-weight: bold; }
     .bar-val { font-size: 10.5px; fill: %s; }
     .badge-fast { font-size: 9.5px; fill: %s; font-weight: bold; }
@@ -105,7 +171,9 @@ func svgStyles() string {
 `, ColorTitle, FontSans,
 		ColorSubtitle, FontSans,
 		ColorTitle, FontSans,
+		ColorTitle, FontSans,
 		ColorDim, FontSans,
+		ColorSlowest, FontSans,
 		ColorText,
 		ColorFastest,
 		ColorSlowest,
@@ -130,7 +198,22 @@ func renderLegend(b *strings.Builder, libs []string, y int) {
 	}
 }
 
-func renderGroup(b *strings.Builder, data *BenchData, group string, gy, groupH int) {
+// renderSectionHeader draws a section divider with title and horizontal rule.
+func renderSectionHeader(b *strings.Builder, name string, y, contentW int) {
+	fmt.Fprintf(b, "\n  <!-- Section: %s -->\n", esc(name))
+
+	// Section title
+	textY := y + 18
+	fmt.Fprintf(b, `  <text x="%d" y="%d" class="sec-title">%s</text>`+"\n",
+		padLeft+4, textY, esc(name))
+
+	// Subtle horizontal rule
+	ruleY := y + secHdrH - 4
+	fmt.Fprintf(b, `  <line x1="%d" y1="%d" x2="%d" y2="%d" stroke="%s" stroke-width="1" opacity="0.5"/>`+"\n",
+		padLeft, ruleY, padLeft+contentW, ruleY, ColorCardBdr)
+}
+
+func renderGroup(b *strings.Builder, data *BenchData, group, displayName string, gy, groupH int) {
 	libs := data.Libs
 	gr := data.Results[group]
 	contentW := svgWidth - padLeft - padRight
@@ -142,9 +225,9 @@ func renderGroup(b *strings.Builder, data *BenchData, group string, gy, groupH i
 		padLeft, gy, contentW, groupH, ColorCardBg, ColorCardBdr)
 
 	// Group title (left-aligned)
-	displayName := strings.ReplaceAll(group, "_", " ")
+	displayTitle := strings.ReplaceAll(displayName, "_", " ")
 	fmt.Fprintf(b, `  <text x="%d" y="%d" class="grp-title">%s</text>`+"\n",
-		padLeft+14, gy+20, esc(displayName))
+		padLeft+14, gy+20, esc(displayTitle))
 
 	// Column start x positions
 	// Layout: | padLeft+14 | libLabelW | nsBar+nsAnnot | gap | bBar+bAnnot | gap | aBar+aAnnot |
@@ -154,8 +237,9 @@ func renderGroup(b *strings.Builder, data *BenchData, group string, gy, groupH i
 	aX := bX + bBarW + bAnnotW + colGapW
 
 	// Column headers
-	hdrY := gy + sectionHdr + 10
-	fmt.Fprintf(b, `  <text x="%d" y="%d" class="col-hdr">ns/op (lower is better)</text>`+"\n", nsX, hdrY)
+	hdrY := gy + grpHdr + 10
+	fmt.Fprintf(b, `  <text x="%d" y="%d" class="col-hdr">ns/op</text>`+"\n", nsX, hdrY)
+	fmt.Fprintf(b, `  <text x="%d" y="%d" class="col-hdr-hint">lower is better ↓</text>`+"\n", nsX+34, hdrY)
 	fmt.Fprintf(b, `  <text x="%d" y="%d" class="col-hdr">B/op</text>`+"\n", bX, hdrY)
 	fmt.Fprintf(b, `  <text x="%d" y="%d" class="col-hdr">allocs/op</text>`+"\n", aX, hdrY)
 
@@ -177,12 +261,14 @@ func renderGroup(b *strings.Builder, data *BenchData, group string, gy, groupH i
 	}
 
 	barsTopY := hdrY + 8
-	for li, lib := range libs {
+	row := 0
+	for _, lib := range libs {
 		r, ok := gr[lib]
 		if !ok {
 			continue
 		}
-		rowY := barsTopY + li*(barH+barSpacing)
+		rowY := barsTopY + row*(barH+barSpacing)
+		row++
 		color := LibraryColor(lib)
 		textY := rowY + barH/2 + 4
 

@@ -22,13 +22,24 @@ func TestNativeEscape_StdCompat(t *testing.T) {
 		// 16-byte control chars: exercises SIMD simd_tail path with remaining==16.
 		// Previously this was a known divergence (0x1F threshold bug in SIMD masks).
 		{"ctrl_16_all", "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"},
-		{"ctrl_only_0x1f", "\x1f"},                                  // single 0x1F
-		{"ctrl_0x1f_in_simd_tail", "abcdefghij\x1f"},                // 0x1F in simd tail
-		{"ctrl_0x1f_boundary", "abcdefghijklmno\x1f"},               // 16 bytes, 0x1F at pos 15
+		{"ctrl_only_0x1f", "\x1f"},                    // single 0x1F
+		{"ctrl_0x1f_in_simd_tail", "abcdefghij\x1f"},  // 0x1F in simd tail
+		{"ctrl_0x1f_boundary", "abcdefghijklmno\x1f"}, // 16 bytes, 0x1F at pos 15
+		// Null byte followed by space + digits: \u0000 must not swallow subsequent chars.
+		// Regression: native encoder was producing "0\u000000000" instead of "0\u0000 00000".
+		{"null_byte_before_digits", "0\x00 00000"},
+		{"null_byte_before_hex", "\x00a"}, // \u0000 followed by 'a' (hex-like)
+		{"null_byte_alone", "\x00"},
+		{"null_byte_between_zeros", "0\x000"},
+		// Length boundary tests: bug appears at length 8 (SWAR path)
+		{"null_byte_len7", "0\x00 0000"},            // scalar tail — PASS
+		{"null_byte_len8", "0\x00 00000"},           // SWAR boundary — FAIL
+		{"null_byte_len17", "0\x00 00000000000000"}, // SIMD main — PASS
+
 		// Surrogate byte sequences: each byte replaced individually (matching stdlib).
-		{"surrogate_3byte", "\xed\xa0\x80"},       // U+D800 encoding → 3× \ufffd
-		{"surrogate_high", "\xed\xb0\x80"},        // U+DC00 encoding → 3× \ufffd
-		{"surrogate_in_text", "a\xed\xa0\x80b"},   // surrounded by ASCII
+		{"surrogate_3byte", "\xed\xa0\x80"},     // U+D800 encoding → 3× \ufffd
+		{"surrogate_high", "\xed\xb0\x80"},      // U+DC00 encoding → 3× \ufffd
+		{"surrogate_in_text", "a\xed\xa0\x80b"}, // surrounded by ASCII
 
 		// --- HTML ---
 		{"html_lt", "<script>alert(1)</script>"},
@@ -179,6 +190,8 @@ func TestNativeEscape_FastPath(t *testing.T) {
 		{"quote", `a"b`, `{"v":"a\"b"}`},
 		{"backslash", `a\b`, `{"v":"a\\b"}`},
 		{"control", "\n\t\x00", `{"v":"\n\t\u0000"}`},
+		// Null byte followed by space + digits: regression for \u0000 swallowing chars.
+		{"null_byte_before_digits", "0\x00 00000", "{\"v\":\"0\\u0000 00000\"}"},
 	}
 
 	for _, tc := range cases {

@@ -1255,6 +1255,53 @@ func TestSkipString_TailInvalidUnicodeHex(t *testing.T) {
 	}
 }
 
+func TestSkipString_EscapedQuoteAndClosingQuoteSameWindow(t *testing.T) {
+	type S struct {
+		Name string `json:"name"`
+	}
+	var s S
+	// Keep unknown field near the end so skipValue/skipString handles it.
+	// String contains escaped quote before final closing quote.
+	err := Unmarshal([]byte(`{"name":"ok","x":"abcdef\\\"gh"}`), &s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.Name != "ok" {
+		t.Errorf("got %q, want %q", s.Name, "ok")
+	}
+}
+
+func TestSkipString_UnicodeEscapeAcrossSWARWindow(t *testing.T) {
+	type S struct {
+		Name string `json:"name"`
+	}
+	var s S
+	// Crafted so that \uXXXX appears after a 7-byte prefix inside the skipped string,
+	// exercising escape handling near SWAR-window boundaries.
+	err := Unmarshal([]byte(`{"name":"ok","x":"1234567\\u0041tail"}`), &s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.Name != "ok" {
+		t.Errorf("got %q, want %q", s.Name, "ok")
+	}
+}
+
+func TestSkipString_DenseBackslashes(t *testing.T) {
+	type S struct {
+		Name string `json:"name"`
+	}
+	var s S
+	// Dense backslashes to stress repeated escape handling in single-pass mode.
+	err := Unmarshal([]byte(`{"name":"ok","x":"\\\\\\\\\\\\\\\\\\\\\\\\\\\\"}`), &s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.Name != "ok" {
+		t.Errorf("got %q, want %q", s.Name, "ok")
+	}
+}
+
 // ---------- skipContainer: tail path for { [ } ] ----------
 
 func TestSkipContainer_TailNested(t *testing.T) {

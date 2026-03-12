@@ -67,7 +67,7 @@ TARGET_ARCH ?= $(_HOST_ARCH)
 gen:
 	@SOURCE_FILE="$(CURDIR)/native/encvm/impl/encvm.c" \
 	 TARGET_DIR="$(CURDIR)/native/encvm" \
-	 STDLIB_SOURCES="$(CURDIR)/native/stdlib/memfn.c" \
+	 STDLIB_SOURCES="$(CURDIR)/native/stdlib/memory.c" \
 	 bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) "$(TARGET_OS)" "$(TARGET_ARCH)"
 
 # Generate benchmark visualization SVG

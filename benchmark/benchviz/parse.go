@@ -13,8 +13,8 @@ import (
 
 // BenchResult holds a single benchmark measurement.
 type BenchResult struct {
-	Name    string  // full benchmark name (e.g. "Benchmark_Marshal_Small_StdJSON-16")
-	Group   string  // dataset group (e.g. "Marshal_Small")
+	Name    string  // full benchmark name (e.g. "Benchmark_Marshal_Tiny_StdJSON-16")
+	Group   string  // dataset group (e.g. "Marshal_Tiny")
 	Library string  // library name (e.g. "StdJSON", "Sonic", "Velox")
 	NsOp    float64 // nanoseconds per operation
 	BOp     float64 // bytes allocated per operation
@@ -30,23 +30,61 @@ type GroupResult struct {
 	AllocsOp float64
 }
 
+// Section represents a top-level benchmark category (e.g. "Marshal", "Parallel Unmarshal").
+type Section struct {
+	Name    string   // display name (e.g. "Parallel Marshal")
+	Groups  []string // ordered group names belonging to this section
+}
+
 // BenchData holds all parsed and aggregated benchmark data.
 type BenchData struct {
 	Title    string        // from -title flag or auto-detected
 	Subtitle string       // goos/goarch/cpu metadata
 	Groups   []string      // ordered list of unique groups
+	Sections []Section     // ordered sections, each containing its groups
 	Libs     []string      // ordered list of unique libraries
 	Results  map[string]map[string]*GroupResult // group -> library -> result
 	RunCount int           // number of runs per benchmark (from -count)
 }
 
 // knownLibraries lists the recognized library suffixes in display order.
-var knownLibraries = []string{"StdJSON", "Std", "Sonic", "Velox"}
+var knownLibraries = []string{"StdJSON", "Sonic", "GoJSON", "EasyJSON", "Velox"}
+
+// knownSectionPrefixes maps group name prefixes to section display names.
+// Order matters: longer prefixes must come first to match correctly.
+var knownSectionPrefixes = []struct {
+	prefix  string
+	section string
+}{
+	{"Parallel_Marshal_", "Parallel Marshal"},
+	{"Parallel_Unmarshal_", "Parallel Unmarshal"},
+	{"Marshal_", "Marshal"},
+	{"Unmarshal_", "Unmarshal"},
+	{"Decoder_", "Decoder"},
+}
+
+// splitGroupToSection splits a group name like "Parallel_Marshal_Twitter" into
+// section="Parallel Marshal" and dataset="Twitter".
+func splitGroupToSection(group string) (section, dataset string) {
+	for _, kp := range knownSectionPrefixes {
+		if strings.HasPrefix(group, kp.prefix) {
+			return kp.section, group[len(kp.prefix):]
+		}
+	}
+	// Fallback: first segment is section, rest is dataset
+	idx := strings.Index(group, "_")
+	if idx > 0 {
+		return group[:idx], group[idx+1:]
+	}
+	return group, group
+}
 
 // benchLineRe matches a standard Go benchmark output line.
+// The optional MB/s field can appear between ns/op and B/op.
 var benchLineRe = regexp.MustCompile(
 	`^(Benchmark\S+)-\d+\s+\d+\s+` +
 		`([\d.]+)\s+ns/op` +
+		`(?:\s+[\d.]+\s+MB/s)?` +
 		`(?:\s+([\d.]+)\s+B/op)?` +
 		`(?:\s+(\d+)\s+allocs/op)?`,
 )
@@ -54,7 +92,7 @@ var benchLineRe = regexp.MustCompile(
 // metaLineRe matches goos/goarch/cpu lines.
 var metaLineRe = regexp.MustCompile(`^(goos|goarch|cpu|pkg):\s+(.+)`)
 
-// splitBenchName splits "Benchmark_Marshal_Small_StdJSON" into ("Marshal_Small", "StdJSON").
+// splitBenchName splits "Benchmark_Marshal_Tiny_StdJSON" into ("Marshal_Tiny", "StdJSON").
 // It tries known library suffixes first, then falls back to the last "_"-separated segment.
 func splitBenchName(name string) (group, library string) {
 	// Strip "Benchmark_" prefix
@@ -207,9 +245,23 @@ func aggregateResults(results []BenchResult, meta map[string]string) *BenchData 
 		}
 	}
 
+	// Build sections from groups (preserving order)
+	var sections []Section
+	sectionIdx := make(map[string]int) // section name -> index in sections slice
+	for _, g := range groups {
+		sec, _ := splitGroupToSection(g)
+		if idx, ok := sectionIdx[sec]; ok {
+			sections[idx].Groups = append(sections[idx].Groups, g)
+		} else {
+			sectionIdx[sec] = len(sections)
+			sections = append(sections, Section{Name: sec, Groups: []string{g}})
+		}
+	}
+
 	return &BenchData{
 		Subtitle: strings.Join(subtitleParts, "  |  "),
 		Groups:   groups,
+		Sections: sections,
 		Libs:     libs,
 		Results:  aggResults,
 		RunCount: runCount,

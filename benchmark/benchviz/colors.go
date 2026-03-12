@@ -9,10 +9,14 @@ func LibraryColor(lib string) string {
 		return "#27ae60" // green — this project
 	case "Sonic":
 		return "#3498db" // blue
-	case "StdJSON", "Std":
+	case "StdJSON":
 		return "#e67e22" // orange
+	case "GoJSON":
+		return "#8e44ad" // purple
+	case "EasyJSON":
+		return "#e74c8b" // pink
 	default:
-		return "#8e44ad" // purple — unknown
+		return "#95a5a6" // grey — unknown
 	}
 }
 
@@ -23,10 +27,14 @@ func LibraryColorLight(lib string) string {
 		return "#eafaf1"
 	case "Sonic":
 		return "#ebf5fb"
-	case "StdJSON", "Std":
+	case "StdJSON":
 		return "#fef5e7"
-	default:
+	case "GoJSON":
 		return "#f5eef8"
+	case "EasyJSON":
+		return "#fdeef4"
+	default:
+		return "#eef0f1"
 	}
 }
 

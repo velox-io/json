@@ -591,6 +591,9 @@ escape_string_content_impl(uint8_t *buf, const uint8_t *src, int64_t src_len,
           out += escape_byte(out, _c);
         } else if ((html) && (_c == '<' || _c == '>' || _c == '&')) {
           out += write_unicode_escape(out, _c);
+        } else {
+          /* SWAR mask false positive (borrow propagation) — copy byte as-is. */
+          *out++ = _c;
         }
         i++;
         mask >>= safe + 1;
@@ -629,6 +632,9 @@ escape_string_content_impl(uint8_t *buf, const uint8_t *src, int64_t src_len,
           out += escape_byte(out, _c);
         } else if ((html) && (_c == '<' || _c == '>' || _c == '&')) {
           out += write_unicode_escape(out, _c);
+        } else {
+          /* SWAR mask false positive (borrow propagation) — copy byte as-is. */
+          *out++ = _c;
         }
         i++;
         mask >>= safe + 1;
@@ -684,6 +690,9 @@ escape_string_content_impl(uint8_t *buf, const uint8_t *src, int64_t src_len,
           out += escape_byte(out, _c);
         } else if ((html) && (_c == '<' || _c == '>' || _c == '&')) {
           out += write_unicode_escape(out, _c);
+        } else {
+          /* SWAR mask false positive (borrow propagation) — copy byte as-is. */
+          *out++ = _c;
         }
         i++;
         mask >>= safe + 1;
@@ -762,7 +771,15 @@ int escape_string_content_fast(uint8_t *buf, const uint8_t *src, int64_t src_len
           out += safe;
           i += safe;
         }
-        out += escape_byte(out, src[i]);
+        {
+          uint8_t _c = src[i];
+          if (_c < 0x20 || _c == '"' || _c == '\\') {
+            out += escape_byte(out, _c);
+          } else {
+            /* SWAR mask false positive (borrow propagation) — copy byte as-is. */
+            *out++ = _c;
+          }
+        }
         i++;
         mask >>= safe + 1;
       } while (mask != 0);
@@ -788,7 +805,15 @@ int escape_string_content_fast(uint8_t *buf, const uint8_t *src, int64_t src_len
           out += safe;
           i += safe;
         }
-        out += escape_byte(out, src[i]);
+        {
+          uint8_t _c = src[i];
+          if (_c < 0x20 || _c == '"' || _c == '\\') {
+            out += escape_byte(out, _c);
+          } else {
+            /* SWAR mask false positive (borrow propagation) — copy byte as-is. */
+            *out++ = _c;
+          }
+        }
         i++;
         mask >>= safe + 1;
       } while (mask != 0);
@@ -829,7 +854,15 @@ int escape_string_content_fast(uint8_t *buf, const uint8_t *src, int64_t src_len
           out += safe;
           i += safe;
         }
-        out += escape_byte(out, src[i]);
+        {
+          uint8_t _c = src[i];
+          if (_c < 0x20 || _c == '"' || _c == '\\') {
+            out += escape_byte(out, _c);
+          } else {
+            /* SWAR mask false positive (borrow propagation) — copy byte as-is. */
+            *out++ = _c;
+          }
+        }
         i++;
         mask >>= safe + 1;
       } while (mask != 0);

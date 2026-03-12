@@ -169,6 +169,9 @@ func (sc *Parser) scanPointerQuoted(src []byte, idx int, ti *TypeInfo, ptr unsaf
 		if idx+4 > len(src) {
 			return idx, errUnexpectedEOF
 		}
+		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null {
+			return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
+		}
 		*(*unsafe.Pointer)(ptr) = nil
 		return idx + 4, nil
 	}

@@ -1,6 +1,7 @@
 package vjson
 
 import (
+	"fmt"
 	"reflect"
 	"sort"
 	"sync"
@@ -86,7 +87,7 @@ func kindToOpcode(k ElemTypeKind) uint16 {
 	case k == KindNumber:
 		return opNumber
 	default:
-		panic("kindToOpcode: no direct opcode for this ElemTypeKind")
+		panic(fmt.Sprintf("kindToOpcode: no direct opcode for ElemTypeKind %d", k))
 	}
 }
 
@@ -376,20 +377,20 @@ func initPrimitiveIfaceCache() {
 		tag uint8
 	}{
 		// Tag stored as (opcode + 1) so tag=0 means "no tag".
-		{reflect.TypeOf(false), uint8(opBool) + 1},
-		{reflect.TypeOf(int(0)), uint8(opInt) + 1},
-		{reflect.TypeOf(int8(0)), uint8(opInt8) + 1},
-		{reflect.TypeOf(int16(0)), uint8(opInt16) + 1},
-		{reflect.TypeOf(int32(0)), uint8(opInt32) + 1},
-		{reflect.TypeOf(int64(0)), uint8(opInt64) + 1},
-		{reflect.TypeOf(uint(0)), uint8(opUint) + 1},
-		{reflect.TypeOf(uint8(0)), uint8(opUint8) + 1},
-		{reflect.TypeOf(uint16(0)), uint8(opUint16) + 1},
-		{reflect.TypeOf(uint32(0)), uint8(opUint32) + 1},
-		{reflect.TypeOf(uint64(0)), uint8(opUint64) + 1},
-		{reflect.TypeOf(float32(0)), uint8(opFloat32) + 1},
-		{reflect.TypeOf(float64(0)), uint8(opFloat64) + 1},
-		{reflect.TypeOf(""), uint8(opString) + 1},
+		{reflect.TypeFor[bool](), uint8(opBool) + 1},
+		{reflect.TypeFor[int](), uint8(opInt) + 1},
+		{reflect.TypeFor[int8](), uint8(opInt8) + 1},
+		{reflect.TypeFor[int16](), uint8(opInt16) + 1},
+		{reflect.TypeFor[int32](), uint8(opInt32) + 1},
+		{reflect.TypeFor[int64](), uint8(opInt64) + 1},
+		{reflect.TypeFor[uint](), uint8(opUint) + 1},
+		{reflect.TypeFor[uint8](), uint8(opUint8) + 1},
+		{reflect.TypeFor[uint16](), uint8(opUint16) + 1},
+		{reflect.TypeFor[uint32](), uint8(opUint32) + 1},
+		{reflect.TypeFor[uint64](), uint8(opUint64) + 1},
+		{reflect.TypeFor[float32](), uint8(opFloat32) + 1},
+		{reflect.TypeFor[float64](), uint8(opFloat64) + 1},
+		{reflect.TypeFor[string](), uint8(opString) + 1},
 	}
 	table := make([]VjIfaceCacheEntry, len(entries))
 	for i, e := range entries {
@@ -404,7 +405,6 @@ func initPrimitiveIfaceCache() {
 	globalIfaceCache.current.Store(&ifaceCacheSnapshot{entries: table})
 }
 
-// ensureIfaceCache initializes the primitive type cache on first use.
 func ensureIfaceCache() {
 	initPrimitiveIfaceCacheOnce.Do(initPrimitiveIfaceCache)
 }

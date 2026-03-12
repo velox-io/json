@@ -621,8 +621,7 @@ func emitYield(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fieldOff u
 }
 
 // emitSkipIfZero emits a OP_SKIP_IF_ZERO instruction with a known skip count.
-func emitSkipIfZero(b *blueprintBuilder, fixups *[]keyFixup, _ *TypeInfo, fieldOff uintptr, skipCount int, kind ElemTypeKind) {
-	_ = fixups // no key for skip instructions
+func emitSkipIfZero(b *blueprintBuilder, _ *[]keyFixup, _ *TypeInfo, fieldOff uintptr, skipCount int, kind ElemTypeKind) {
 	b.emit(VjOpStep{
 		OpType:   opSkipIfZero | (uint16(kind) << 8), // high byte = ZeroCheckTag (matches ElemTypeKind)
 		FieldOff: uint32(fieldOff),
@@ -632,8 +631,7 @@ func emitSkipIfZero(b *blueprintBuilder, fixups *[]keyFixup, _ *TypeInfo, fieldO
 
 // emitSkipIfZeroPlaceholder emits a OP_SKIP_IF_ZERO with OperandA=0 (to be patched).
 // Returns the index of the emitted instruction.
-func emitSkipIfZeroPlaceholder(b *blueprintBuilder, fixups *[]keyFixup, _ *TypeInfo, fieldOff uintptr, kind ElemTypeKind) int {
-	_ = fixups
+func emitSkipIfZeroPlaceholder(b *blueprintBuilder, _ *[]keyFixup, _ *TypeInfo, fieldOff uintptr, kind ElemTypeKind) int {
 	return b.emit(VjOpStep{
 		OpType:   opSkipIfZero | (uint16(kind) << 8),
 		FieldOff: uint32(fieldOff),

@@ -16,6 +16,7 @@ func vjVMExecDefaultSSE42(ctx unsafe.Pointer)
 
 //go:noescape
 //go:nosplit
+//nolint:unused // AVX2 entry kept for generated/native symbol compatibility.
 func vjVMExecDefaultAVX2(ctx unsafe.Pointer)
 
 //go:noescape
@@ -30,6 +31,7 @@ func vjVMExecFastSSE42(ctx unsafe.Pointer)
 
 //go:noescape
 //go:nosplit
+//nolint:unused // AVX2 entry kept for generated/native symbol compatibility.
 func vjVMExecFastAVX2(ctx unsafe.Pointer)
 
 //go:noescape

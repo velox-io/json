@@ -8,6 +8,7 @@ import (
 
 func main() {
 	title := flag.String("title", "", "chart title (auto-detected if empty)")
+	format := flag.String("format", "svg", "output format: svg or html")
 	flag.Parse()
 
 	data, err := ParseBenchOutput(os.Stdin)
@@ -20,6 +21,13 @@ func main() {
 		data.Title = *title
 	}
 
-	svg := RenderSVG(data)
-	fmt.Print(svg)
+	switch *format {
+	case "svg":
+		fmt.Print(RenderSVG(data))
+	case "html":
+		fmt.Print(RenderHTML(data))
+	default:
+		fmt.Fprintf(os.Stderr, "benchviz: unknown format %q (use svg or html)\n", *format)
+		os.Exit(1)
+	}
 }

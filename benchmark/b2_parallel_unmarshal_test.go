@@ -10,10 +10,10 @@ import (
 )
 
 // =============================================================================
-// Parallel EscapeHeavy: real-world ~4KB JSON with ~40% escape density
+// Parallel Unmarshal EscapeHeavy: real-world ~4KB JSON with ~40% escape density
 // =============================================================================
 
-func Benchmark_Parallel_EscapeHeavy_Sonic(b *testing.B) {
+func Benchmark_Parallel_Unmarshal_EscapeHeavy_Sonic(b *testing.B) {
 	b.SetBytes(int64(len(EscapeHeavyJSON)))
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
@@ -26,7 +26,7 @@ func Benchmark_Parallel_EscapeHeavy_Sonic(b *testing.B) {
 	})
 }
 
-func Benchmark_Parallel_EscapeHeavy_Velox(b *testing.B) {
+func Benchmark_Parallel_Unmarshal_EscapeHeavy_Velox(b *testing.B) {
 	b.SetBytes(int64(len(EscapeHeavyJSON)))
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
@@ -40,10 +40,10 @@ func Benchmark_Parallel_EscapeHeavy_Velox(b *testing.B) {
 }
 
 // =============================================================================
-// Parallel KubePods: Kubernetes Pod List (~25KB, deeply nested, 3 pods)
+// Parallel Unmarshal KubePods: Kubernetes Pod List (~25KB, deeply nested, 3 pods)
 // =============================================================================
 
-func Benchmark_Parallel_KubePods_Sonic(b *testing.B) {
+func Benchmark_Parallel_Unmarshal_KubePods_Sonic(b *testing.B) {
 	b.SetBytes(int64(len(PodsJSON)))
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
@@ -56,7 +56,7 @@ func Benchmark_Parallel_KubePods_Sonic(b *testing.B) {
 	})
 }
 
-func Benchmark_Parallel_KubePods_Velox(b *testing.B) {
+func Benchmark_Parallel_Unmarshal_KubePods_Velox(b *testing.B) {
 	b.SetBytes(int64(len(PodsJSON)))
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
@@ -70,10 +70,10 @@ func Benchmark_Parallel_KubePods_Velox(b *testing.B) {
 }
 
 // =============================================================================
-// Parallel Twitter: Twitter search API response (~617KB, deeply nested)
+// Parallel Unmarshal Twitter: Twitter search API response (~617KB, deeply nested)
 // =============================================================================
 
-func Benchmark_Parallel_Twitter_Sonic(b *testing.B) {
+func Benchmark_Parallel_Unmarshal_Twitter_Sonic(b *testing.B) {
 	b.SetBytes(int64(len(TwitterJSON)))
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
@@ -86,7 +86,7 @@ func Benchmark_Parallel_Twitter_Sonic(b *testing.B) {
 	})
 }
 
-func Benchmark_Parallel_Twitter_Velox(b *testing.B) {
+func Benchmark_Parallel_Unmarshal_Twitter_Velox(b *testing.B) {
 	b.SetBytes(int64(len(TwitterJSON)))
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {

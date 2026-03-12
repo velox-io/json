@@ -1,11 +1,11 @@
 /*
- * encvm_pointer.h — Velox JSON C Engine: Pointer Primitive Encoder
+ * pointer.h — Velox JSON C Engine: Pointer Primitive Encoder
  *
  * Out-of-line encoder for dereferenced pointer values (*bool, *int, etc.).
  * Marked noinline to keep the VM's code footprint small
  * and avoid icache pressure on the hot dispatch loop.
  *
- * Depends on: encvm_types.h, encvm_number.h, encvm_string.h, ryu.h.
+ * Depends on: types.h, number.h, strfn.h, ryu.h.
  */
 
 #ifndef VJ_ENCVM_POINTER_H
@@ -13,9 +13,9 @@
 
 // clang-format off
 
-#include "encvm_types.h"
-#include "encvm_number.h"
-#include "encvm_string.h"
+#include "types.h"
+#include "number.h"
+#include "strfn.h"
 
 /* ---- Out-of-line pointer-primitive encoder ----
  *
@@ -72,7 +72,7 @@ vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend,
     if (__builtin_expect(__builtin_isnan(fval) || __builtin_isinf(fval), 0)) {
       return (VjPtrEncResult){NULL, VJ_ERR_NAN_INF};
     }
-    buf += vj_write_float32(buf, fval);
+    buf += us_write_float32(buf, fval);
     break;
   }
   case OP_FLOAT64: {
@@ -81,7 +81,7 @@ vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend,
     if (__builtin_expect(__builtin_isnan(dval) || __builtin_isinf(dval), 0)) {
       return (VjPtrEncResult){NULL, VJ_ERR_NAN_INF};
     }
-    buf += vj_write_float64(buf, dval);
+    buf += us_write_float64(buf, dval);
     break;
   }
   case OP_STRING: {

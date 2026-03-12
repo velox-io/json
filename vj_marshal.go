@@ -48,7 +48,7 @@ func WithEscapeHTML() MarshalOption {
 	return func(m *Marshaler) { m.flags |= escapeHTML }
 }
 
-// WithNoEscapeHTML disables escaping of <, >, &.
+// WithoutEscapeHTML disables escaping of <, >, &.
 func WithoutEscapeHTML() MarshalOption {
 	return func(m *Marshaler) { m.flags &^= escapeHTML }
 }
@@ -68,7 +68,7 @@ func WithUTF8Correction() MarshalOption {
 	return func(m *Marshaler) { m.flags |= escapeInvalidUTF8 }
 }
 
-// WithUTF8Correction disables replacing invalid UTF-8 in strings.
+// WithoutUTF8Correction disables replacing invalid UTF-8 in strings.
 func WithoutUTF8Correction() MarshalOption {
 	return func(m *Marshaler) { m.flags &^= escapeInvalidUTF8 }
 }

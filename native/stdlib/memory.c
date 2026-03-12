@@ -1,15 +1,15 @@
 /*
- * memfn.c — Minimal C Runtime: memcpy/memset Implementation
+ * memory.c — Minimal C Runtime: memcpy/memset Implementation
  *
  * Compiled once (no ISA flags) and linked alongside the ISA-specific
  * objects, so that memcpy/memset symbols appear exactly once in the
  * final .syso.
  *
- * The declarations (with __asm__ symbol renaming) live in memfn.h
+ * The declarations (with __asm__ symbol renaming) live in memory.h
  * so that every translation unit sees them as extern.
  */
 
-#include "memfn.h"
+#include "memory.h"
 #include <stdint.h>
 
 /* Use __builtin_memcpy throughout the code. The compiler will inline

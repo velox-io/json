@@ -17,6 +17,7 @@ mem.out
 *.sublime-*
 .clangd
 .cache/
+*.dSYM
 
 # Test/Benchmark artifacts
 *.png
@@ -28,7 +29,10 @@ coverage_*.html
 # Benchmark data (local only)
 .benchdata/
 .benchmarks/
+benchmark/benchviz/benchviz
+testdata/fuzz/
 
 # OS
 .DS_Store
 Thumbs.db
+

@@ -83,14 +83,6 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 		}
 
 		workBuf := m.buf[len(m.buf):cap(m.buf)]
-		if len(workBuf) == 0 {
-			newCap := max(cap(m.buf)*2, len(m.buf)+4096)
-			newBuf := make([]byte, len(m.buf), newCap)
-			copy(newBuf, m.buf)
-			m.buf = newBuf
-			continue
-		}
-
 		bufStart := unsafe.Pointer(&workBuf[0])
 		ctx.BufCur = bufStart
 		ctx.BufEnd = uintptr(bufStart) + uintptr(len(workBuf))

@@ -1,8 +1,8 @@
 /*
- * encvm_types.h — Velox JSON C Engine: Type Definitions & Constants
+ * types.h — Velox JSON C Engine: Type Definitions & Constants
  *
  * Shared enums, structs, and constants used by all encoder modules.
- * Included first by encvm.h — no dependencies on other encvm_*.h files.
+ * Included first by encvm.h — no dependencies on other impl headers.
  */
 
 #ifndef VJ_ENCVM_TYPES_H
@@ -10,7 +10,7 @@
 
 // clang-format off
 
-#include "encvm_memory.h"
+#include "memfn.h"
 
 /* ================================================================
  *  Constants

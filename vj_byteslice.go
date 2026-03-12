@@ -23,7 +23,7 @@ func (sc *Parser) scanStringToSlice(src []byte, idx int, ti *TypeInfo, ptr unsaf
 	if len(raw) == 0 {
 		// "" → empty (non-nil) byte slice
 		sh := (*SliceHeader)(ptr)
-		sh.Data = unsafe.Pointer(&raw) // non-nil but zero-length
+		sh.Data = sDec.EmptySliceData
 		sh.Len = 0
 		sh.Cap = 0
 		return newIdx, nil

@@ -556,17 +556,56 @@ func (sc *Parser) scanStruct(src []byte, idx int, dec *StructCodec, base unsafe.
 			}
 		}
 
-		idx = skipWS(src, idx)
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] == ',' {
+		c := src[idx]
+		if c == ',' {
 			idx++
+			if idx >= len(src) {
+				return idx, errUnexpectedEOF
+			}
+			if src[idx] == '"' {
+				continue
+			}
 			idx = skipWSLong(src, idx)
+			if idx >= len(src) {
+				return idx, errUnexpectedEOF
+			}
+			if src[idx] != '"' {
+				return idx, newSyntaxError("vjson: syntax error", idx)
+			}
 			continue
 		}
-		if src[idx] == '}' {
+		if c == '}' {
 			return idx + 1, firstErr
+		}
+		if wsLUT[c] != 0 {
+			idx = skipWSLong(src, idx)
+			if idx >= len(src) {
+				return idx, errUnexpectedEOF
+			}
+			c = src[idx]
+			if c == ',' {
+				idx++
+				if idx >= len(src) {
+					return idx, errUnexpectedEOF
+				}
+				if src[idx] == '"' {
+					continue
+				}
+				idx = skipWSLong(src, idx)
+				if idx >= len(src) {
+					return idx, errUnexpectedEOF
+				}
+				if src[idx] != '"' {
+					return idx, newSyntaxError("vjson: syntax error", idx)
+				}
+				continue
+			}
+			if c == '}' {
+				return idx + 1, firstErr
+			}
 		}
 		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in object, got %q", src[idx]), idx)
 	}
@@ -631,17 +670,56 @@ func (sc *Parser) scanMap(src []byte, idx int, mDec *MapCodec, ptr unsafe.Pointe
 		}
 		mapVal.SetMapIndex(keyRV, valRV.Elem())
 
-		idx = skipWS(src, idx)
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] == ',' {
+		c := src[idx]
+		if c == ',' {
 			idx++
+			if idx >= len(src) {
+				return idx, errUnexpectedEOF
+			}
+			if src[idx] == '"' {
+				continue
+			}
 			idx = skipWSLong(src, idx)
+			if idx >= len(src) {
+				return idx, errUnexpectedEOF
+			}
+			if src[idx] != '"' {
+				return idx, newSyntaxError("vjson: syntax error", idx)
+			}
 			continue
 		}
-		if src[idx] == '}' {
+		if c == '}' {
 			return idx + 1, nil
+		}
+		if wsLUT[c] != 0 {
+			idx = skipWSLong(src, idx)
+			if idx >= len(src) {
+				return idx, errUnexpectedEOF
+			}
+			c = src[idx]
+			if c == ',' {
+				idx++
+				if idx >= len(src) {
+					return idx, errUnexpectedEOF
+				}
+				if src[idx] == '"' {
+					continue
+				}
+				idx = skipWSLong(src, idx)
+				if idx >= len(src) {
+					return idx, errUnexpectedEOF
+				}
+				if src[idx] != '"' {
+					return idx, newSyntaxError("vjson: syntax error", idx)
+				}
+				continue
+			}
+			if c == '}' {
+				return idx + 1, nil
+			}
 		}
 		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in map, got %q", src[idx]), idx)
 	}
@@ -696,17 +774,56 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 		}
 		m[key] = val
 
-		idx = skipWS(src, idx)
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] == ',' {
+		c := src[idx]
+		if c == ',' {
 			idx++
+			if idx >= len(src) {
+				return idx, errUnexpectedEOF
+			}
+			if src[idx] == '"' {
+				continue
+			}
 			idx = skipWSLong(src, idx)
+			if idx >= len(src) {
+				return idx, errUnexpectedEOF
+			}
+			if src[idx] != '"' {
+				return idx, newSyntaxError("vjson: syntax error", idx)
+			}
 			continue
 		}
-		if src[idx] == '}' {
+		if c == '}' {
 			return idx + 1, nil
+		}
+		if wsLUT[c] != 0 {
+			idx = skipWSLong(src, idx)
+			if idx >= len(src) {
+				return idx, errUnexpectedEOF
+			}
+			c = src[idx]
+			if c == ',' {
+				idx++
+				if idx >= len(src) {
+					return idx, errUnexpectedEOF
+				}
+				if src[idx] == '"' {
+					continue
+				}
+				idx = skipWSLong(src, idx)
+				if idx >= len(src) {
+					return idx, errUnexpectedEOF
+				}
+				if src[idx] != '"' {
+					return idx, newSyntaxError("vjson: syntax error", idx)
+				}
+				continue
+			}
+			if c == '}' {
+				return idx + 1, nil
+			}
 		}
 		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in map, got %q", src[idx]), idx)
 	}
@@ -756,17 +873,56 @@ func (sc *Parser) scanMapAny(src []byte, idx int) (int, map[string]any, error) {
 		}
 		m[key] = val
 
-		idx = skipWS(src, idx)
 		if idx >= len(src) {
 			return idx, nil, errUnexpectedEOF
 		}
-		if src[idx] == ',' {
+		c := src[idx]
+		if c == ',' {
 			idx++
+			if idx >= len(src) {
+				return idx, nil, errUnexpectedEOF
+			}
+			if src[idx] == '"' {
+				continue
+			}
 			idx = skipWSLong(src, idx)
+			if idx >= len(src) {
+				return idx, nil, errUnexpectedEOF
+			}
+			if src[idx] != '"' {
+				return idx, nil, newSyntaxError("vjson: syntax error", idx)
+			}
 			continue
 		}
-		if src[idx] == '}' {
+		if c == '}' {
 			return idx + 1, m, nil
+		}
+		if wsLUT[c] != 0 {
+			idx = skipWSLong(src, idx)
+			if idx >= len(src) {
+				return idx, nil, errUnexpectedEOF
+			}
+			c = src[idx]
+			if c == ',' {
+				idx++
+				if idx >= len(src) {
+					return idx, nil, errUnexpectedEOF
+				}
+				if src[idx] == '"' {
+					continue
+				}
+				idx = skipWSLong(src, idx)
+				if idx >= len(src) {
+					return idx, nil, errUnexpectedEOF
+				}
+				if src[idx] != '"' {
+					return idx, nil, newSyntaxError("vjson: syntax error", idx)
+				}
+				continue
+			}
+			if c == '}' {
+				return idx + 1, m, nil
+			}
 		}
 		return idx, nil, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in any object, got %q", src[idx]), idx)
 	}
@@ -1071,82 +1227,79 @@ func skipValue(src []byte, idx int) (int, error) {
 	}
 }
 
+// skipStringEscape validates and skips a JSON escape sequence at escIdx (src[escIdx] == '\\').
+// Returns the next index after the escape.
+func skipStringEscape(src []byte, escIdx, n int) (int, error) {
+	if escIdx+1 >= n {
+		return escIdx, errUnexpectedEOF
+	}
+
+	next := src[escIdx+1]
+	if next == 'u' {
+		// \uXXXX — exactly 4 hex digits.
+		if escIdx+5 >= n {
+			return escIdx, errUnexpectedEOF
+		}
+		if !isHexChar(src[escIdx+2]) || !isHexChar(src[escIdx+3]) || !isHexChar(src[escIdx+4]) || !isHexChar(src[escIdx+5]) {
+			return escIdx, newSyntaxError(fmt.Sprintf("vjson: invalid unicode escape in string at offset %d", escIdx), escIdx)
+		}
+		return escIdx + 6, nil
+	}
+
+	if escapeTable[next] == 0 {
+		return escIdx, newSyntaxError(fmt.Sprintf("vjson: invalid escape '\\%c' in string at offset %d", next, escIdx), escIdx)
+	}
+	return escIdx + 2, nil
+}
+
 // skipString skips a JSON string starting at idx (the opening '"').
 func skipString(src []byte, idx int) (int, error) {
 	i := idx + 1
 	n := len(src)
+	limit := n - 8
 
-	for i < n {
-		// SWAR scan 8 bytes at a time for '"', '\\', or control chars (< 0x20)
-		if i+8 <= n {
-			w := *(*uint64)(unsafe.Pointer(&src[i]))
-			mq := hasZeroByte(w ^ (lo64 * 0x22)) // '"'
-			mb := hasZeroByte(w ^ (lo64 * 0x5C)) // '\\'
-			mc := (w - lo64*0x20) & ^w & hi64    // < 0x20
-			combined := mq | mb | mc
-			if combined == 0 {
-				i += 8
-				continue
-			}
-			off := firstMarkedByteIndex(combined)
-			c := src[i+off]
-			if c == '"' {
-				return i + off + 1, nil
-			}
-			if c == '\\' {
-				// Validate escape sequence
-				escIdx := i + off
-				if escIdx+1 >= n {
-					return escIdx, errUnexpectedEOF
-				}
-				next := src[escIdx+1]
-				if next == 'u' {
-					// \uXXXX — need 4 hex digits
-					if escIdx+5 >= n {
-						return escIdx, errUnexpectedEOF
-					}
-					for k := escIdx + 2; k < escIdx+6; k++ {
-						if !isHexChar(src[k]) {
-							return escIdx, newSyntaxError(fmt.Sprintf("vjson: invalid unicode escape in string at offset %d", escIdx), escIdx)
-						}
-					}
-					i = escIdx + 6
-				} else if escapeTable[next] != 0 {
-					i = escIdx + 2
-				} else {
-					return escIdx, newSyntaxError(fmt.Sprintf("vjson: invalid escape '\\%c' in string at offset %d", next, escIdx), escIdx)
-				}
-				continue
-			}
-			// control character
-			return i + off, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", i+off), i+off)
+	// SWAR scan 8 bytes at a time for '"', '\\', or control chars (< 0x20).
+	for i <= limit {
+		w := *(*uint64)(unsafe.Pointer(&src[i]))
+		mq := hasZeroByte(w ^ (lo64 * 0x22)) // '"'
+		mb := hasZeroByte(w ^ (lo64 * 0x5C)) // '\\'
+		mc := (w - lo64*0x20) & ^w & hi64    // < 0x20
+		combined := mq | mb | mc
+		if combined == 0 {
+			i += 8
+			continue
 		}
 
-		// Tail: byte-at-a-time
+		off := firstMarkedByteIndex(combined)
+		pos := i + off
+		c := src[pos]
+		if c == '"' {
+			return pos + 1, nil
+		}
+		if c == '\\' {
+			next, err := skipStringEscape(src, pos, n)
+			if err != nil {
+				return pos, err
+			}
+			i = next
+			continue
+		}
+		// control character
+		return pos, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", pos), pos)
+	}
+
+	// Tail: byte-at-a-time
+	for i < n {
 		c := src[i]
 		if c == '"' {
 			return i + 1, nil
 		}
 		if c == '\\' {
-			if i+1 >= n {
-				return i, errUnexpectedEOF
+			next, err := skipStringEscape(src, i, n)
+			if err != nil {
+				return i, err
 			}
-			next := src[i+1]
-			if next == 'u' {
-				if i+5 >= n {
-					return i, errUnexpectedEOF
-				}
-				for k := i + 2; k < i+6; k++ {
-					if !isHexChar(src[k]) {
-						return i, newSyntaxError(fmt.Sprintf("vjson: invalid unicode escape in string at offset %d", i), i)
-					}
-				}
-				i += 6
-			} else if escapeTable[next] != 0 {
-				i += 2
-			} else {
-				return i, newSyntaxError(fmt.Sprintf("vjson: invalid escape '\\%c' in string at offset %d", next, i), i)
-			}
+			i = next
 			continue
 		}
 		if c < 0x20 {
@@ -1168,11 +1321,13 @@ func skipContainer(src []byte, idx int) (int, error) {
 		if i+8 <= n {
 			w := *(*uint64)(unsafe.Pointer(&src[i]))
 
-			m := hasZeroByte(w ^ (lo64 * 0x7B)) // {
-			m |= hasZeroByte(w ^ (lo64 * 0x7D)) // }
-			m |= hasZeroByte(w ^ (lo64 * 0x5B)) // [
-			m |= hasZeroByte(w ^ (lo64 * 0x5D)) // ]
-			m |= hasZeroByte(w ^ (lo64 * 0x22)) // "
+			// Fold bit 0x20 so '{' and '[' share 0x5B, '}' and ']' share 0x5D.
+			// This reduces brace checks from 4 probes to 2 while preserving exact
+			// classification via the original byte read below.
+			wNoCase := w & ^(lo64 * 0x20)
+			m := hasZeroByte(wNoCase ^ (lo64 * 0x5B)) // '{' or '['
+			m |= hasZeroByte(wNoCase ^ (lo64 * 0x5D)) // '}' or ']'
+			m |= hasZeroByte(w ^ (lo64 * 0x22))       // '"'
 
 			if m == 0 {
 				i += 8

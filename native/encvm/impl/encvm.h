@@ -8,13 +8,13 @@
  * modular sub-headers.  The VM implementation is included below.
  *
  * Sub-headers (included in dependency order):
- *   encvm_memory.h    — SIMD copy helpers (depends on stdlib/memfn.h)
- *   encvm_types.h     — enums, structs, constants
- *   encvm_number.h    — integer-to-ASCII formatting
- *   encvm_string.h    — JSON string escaping (SIMD/SWAR)
- *   ryu.h             — float-to-ASCII (Ryu algorithm)
- *   encvm_pointer.h   — out-of-line pointer primitive encoder
- *   encvm_interface.h — out-of-line interface value encoder
+ *   memfn.h     — SIMD copy helpers (depends on stdlib/memory.h)
+ *   types.h     — enums, structs, constants
+ *   number.h    — integer-to-ASCII formatting
+ *   strfn.h     — JSON string escaping (SIMD/SWAR)
+ *   ryu.h       — float-to-ASCII (Ryu algorithm)
+ *   pointer.h   — out-of-line pointer primitive encoder
+ *   iface.h     — out-of-line Go interface value encoder
  *
  * Design constraints:
  *   - All memory referenced by the engine is pinned by Go (runtime.Pinner)
@@ -27,12 +27,12 @@
 // clang-format off
 
 /* ---- Sub-headers (order matters: each may depend on predecessors) ---- */
-#include "encvm_types.h"
-#include "encvm_number.h"
-#include "encvm_string.h"
-#include "ryu.h"
-#include "encvm_pointer.h"
-#include "encvm_interface.h"
+#include "types.h"
+#include "number.h"
+#include "strfn.h"
+#include "uscale.h"
+#include "pointer.h"
+#include "iface.h"
 
 /* ================================================================
  *  VM Implementation — threaded-code interpreter for []VjOpStep
@@ -298,7 +298,7 @@ vj_op_float32: {
   }
   VM_CHECK(op->key_len + 1 + 60);
   VM_WRITE_KEY();
-  buf += vj_write_float32(buf, fval);
+  buf += us_write_float32(buf, fval);
   VM_NEXT();
 }
 
@@ -311,7 +311,7 @@ vj_op_float64: {
   }
   VM_CHECK(op->key_len + 1 + 330);
   VM_WRITE_KEY();
-  buf += vj_write_float64(buf, dval);
+  buf += us_write_float64(buf, dval);
   VM_NEXT();
 }
 

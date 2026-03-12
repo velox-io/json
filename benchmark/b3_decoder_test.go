@@ -32,6 +32,8 @@ func repeatNDJSON(jsonVal []byte, n int) []byte {
 
 // NDJSON streams, lazily built from compact JSON data.
 var (
+	tinyNDJSONOnce        sync.Once
+	tinyNDJSONData        []byte
 	smallNDJSONOnce       sync.Once
 	smallNDJSONData       []byte
 	escapeHeavyNDJSONOnce sync.Once
@@ -40,9 +42,14 @@ var (
 	kubePodsNDJSONData    []byte
 	twitterNDJSONOnce     sync.Once
 	twitterNDJSONData     []byte
-	tinyNDJSONOnce        sync.Once
-	tinyNDJSONData        []byte
+	emptyObjNDJSONOnce    sync.Once
+	emptyObjNDJSONData    []byte
 )
+
+func loadTinyNDJSON() []byte {
+	tinyNDJSONOnce.Do(func() { tinyNDJSONData = repeatNDJSON(LoadTinyCompactJSON(), 100) })
+	return tinyNDJSONData
+}
 
 func loadSmallNDJSON() []byte {
 	smallNDJSONOnce.Do(func() { smallNDJSONData = repeatNDJSON(LoadSmallCompactJSON(), 100) })
@@ -64,23 +71,81 @@ func loadTwitterNDJSON() []byte {
 	return twitterNDJSONData
 }
 
-func loadTinyNDJSON() []byte {
-	tinyNDJSONOnce.Do(func() { tinyNDJSONData = []byte(strings.Repeat("{}\n", 1000)) })
-	return tinyNDJSONData
+func loadEmptyObjNDJSON() []byte {
+	emptyObjNDJSONOnce.Do(func() { emptyObjNDJSONData = []byte(strings.Repeat("{}\n", 1000)) })
+	return emptyObjNDJSONData
 }
 
 // =============================================================================
-// Small NDJSON Stream (100 copies of SmallCompactJSON)
+// Tiny NDJSON Stream (100 copies of TinyCompactJSON)
 // =============================================================================
 
-func Benchmark_Decoder_Small_Std(b *testing.B) {
+func Benchmark_Decoder_Tiny_StdJSON(b *testing.B) {
+	data := loadTinyNDJSON()
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	for b.Loop() {
+		dec := json.NewDecoder(bytes.NewReader(data))
+		for {
+			var s Tiny
+			if err := dec.Decode(&s); err != nil {
+				if err == io.EOF {
+					break
+				}
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+func Benchmark_Decoder_Tiny_Sonic(b *testing.B) {
+	data := loadTinyNDJSON()
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	for b.Loop() {
+		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(data))
+		for {
+			var s Tiny
+			if err := dec.Decode(&s); err != nil {
+				if err == io.EOF {
+					break
+				}
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+func Benchmark_Decoder_Tiny_Velox(b *testing.B) {
+	data := loadTinyNDJSON()
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	for b.Loop() {
+		dec := vjson.NewDecoder(bytes.NewReader(data))
+		for {
+			var s Tiny
+			if err := dec.Decode(&s); err != nil {
+				if err == io.EOF {
+					break
+				}
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+// =============================================================================
+// Small NDJSON Stream (100 copies of SmallCompactJSON — Book/Author)
+// =============================================================================
+
+func Benchmark_Decoder_Small_StdJSON(b *testing.B) {
 	data := loadSmallNDJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		dec := json.NewDecoder(bytes.NewReader(data))
 		for {
-			var s Small
+			var s Book
 			if err := dec.Decode(&s); err != nil {
 				if err == io.EOF {
 					break
@@ -98,7 +163,7 @@ func Benchmark_Decoder_Small_Sonic(b *testing.B) {
 	for b.Loop() {
 		dec := sonic.ConfigDefault.NewDecoder(bytes.NewReader(data))
 		for {
-			var s Small
+			var s Book
 			if err := dec.Decode(&s); err != nil {
 				if err == io.EOF {
 					break
@@ -116,7 +181,7 @@ func Benchmark_Decoder_Small_Velox(b *testing.B) {
 	for b.Loop() {
 		dec := vjson.NewDecoder(bytes.NewReader(data))
 		for {
-			var s Small
+			var s Book
 			if err := dec.Decode(&s); err != nil {
 				if err == io.EOF {
 					break
@@ -131,7 +196,7 @@ func Benchmark_Decoder_Small_Velox(b *testing.B) {
 // EscapeHeavy NDJSON Stream (50 copies)
 // =============================================================================
 
-func Benchmark_Decoder_EscapeHeavy_Std(b *testing.B) {
+func Benchmark_Decoder_EscapeHeavy_StdJSON(b *testing.B) {
 	data := loadEscapeHeavyNDJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
@@ -189,7 +254,7 @@ func Benchmark_Decoder_EscapeHeavy_Velox(b *testing.B) {
 // KubePods NDJSON Stream (50 copies)
 // =============================================================================
 
-func Benchmark_Decoder_KubePods_Std(b *testing.B) {
+func Benchmark_Decoder_KubePods_StdJSON(b *testing.B) {
 	data := loadKubePodsNDJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
@@ -247,7 +312,7 @@ func Benchmark_Decoder_KubePods_Velox(b *testing.B) {
 // Twitter NDJSON Stream (10 copies — large payload ~617KB each)
 // =============================================================================
 
-func Benchmark_Decoder_Twitter_Std(b *testing.B) {
+func Benchmark_Decoder_Twitter_StdJSON(b *testing.B) {
 	data := loadTwitterNDJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
@@ -305,7 +370,7 @@ func Benchmark_Decoder_Twitter_Velox(b *testing.B) {
 // Single Large Value (Twitter — tests stream overhead for a single decode)
 // =============================================================================
 
-func Benchmark_Decoder_SingleLarge_Std(b *testing.B) {
+func Benchmark_Decoder_SingleLarge_StdJSON(b *testing.B) {
 	data := LoadTwitterCompactJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
@@ -345,11 +410,11 @@ func Benchmark_Decoder_SingleLarge_Velox(b *testing.B) {
 }
 
 // =============================================================================
-// Tiny Values Stream: 1000 x `{}` — tests scanner + queue overhead
+// EmptyObj Stream: 1000 x `{}` — tests scanner + queue overhead
 // =============================================================================
 
-func Benchmark_Decoder_TinyValues_Std(b *testing.B) {
-	data := loadTinyNDJSON()
+func Benchmark_Decoder_EmptyObj_StdJSON(b *testing.B) {
+	data := loadEmptyObjNDJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
@@ -366,8 +431,8 @@ func Benchmark_Decoder_TinyValues_Std(b *testing.B) {
 	}
 }
 
-func Benchmark_Decoder_TinyValues_Sonic(b *testing.B) {
-	data := loadTinyNDJSON()
+func Benchmark_Decoder_EmptyObj_Sonic(b *testing.B) {
+	data := loadEmptyObjNDJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
@@ -384,8 +449,8 @@ func Benchmark_Decoder_TinyValues_Sonic(b *testing.B) {
 	}
 }
 
-func Benchmark_Decoder_TinyValues_Velox(b *testing.B) {
-	data := loadTinyNDJSON()
+func Benchmark_Decoder_EmptyObj_Velox(b *testing.B) {
+	data := loadEmptyObjNDJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
@@ -409,7 +474,7 @@ func Benchmark_Decoder_TinyValues_Velox(b *testing.B) {
 // (average of last 2), so every spike is a cold miss.
 // =============================================================================
 
-func Benchmark_Decoder_Spiky_Std(b *testing.B) {
+func Benchmark_Decoder_Spiky_StdJSON(b *testing.B) {
 	data := LoadSpikyNDJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
@@ -468,7 +533,7 @@ func Benchmark_Decoder_Spiky_Velox(b *testing.B) {
 // buffer. Tests buffer reuse efficiency when every value forces a new buffer.
 // =============================================================================
 
-func Benchmark_Decoder_HalfBuf_Std(b *testing.B) {
+func Benchmark_Decoder_HalfBuf_StdJSON(b *testing.B) {
 	data := LoadHalfBufNDJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
@@ -528,7 +593,7 @@ func Benchmark_Decoder_HalfBuf_Velox(b *testing.B) {
 // 3, so switches happen every 2 values (~50% utilization).
 // =============================================================================
 
-func Benchmark_Decoder_ThirdBuf_Std(b *testing.B) {
+func Benchmark_Decoder_ThirdBuf_StdJSON(b *testing.B) {
 	data := LoadThirdBufNDJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
@@ -587,7 +652,7 @@ func Benchmark_Decoder_ThirdBuf_Velox(b *testing.B) {
 // Tests sustained high-count decoding with realistic small structured values.
 // =============================================================================
 
-func Benchmark_Decoder_Log_Std(b *testing.B) {
+func Benchmark_Decoder_Log_StdJSON(b *testing.B) {
 	LogNDJSON := LoadLogNDJSON()
 	b.SetBytes(int64(len(LogNDJSON)))
 	b.ReportAllocs()

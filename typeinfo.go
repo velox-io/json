@@ -557,6 +557,7 @@ type StructCodec struct {
 
 	// Tiered lookup — set by buildLookup at construction time.
 	LookupFn     func(dec *StructCodec, key string) *TypeInfo
+	LookupMode   uint8
 	HashSeed     uint64
 	HashShift    uint8
 	HashTable    []uint8              // indices into Fields[]; 0xFF = empty

@@ -5,6 +5,15 @@ import (
 	"unsafe"
 )
 
+const (
+	lookupModeEmpty uint8 = iota
+	lookupModeLinear
+	lookupModePerfectSimple
+	lookupModePerfectFNV
+	lookupModePerfectMulacc
+	lookupModeMap
+)
+
 // LookupFieldBytes looks up a struct field by JSON key.
 // It tries an exact match first (fast path), then falls back to
 // case-insensitive matching (strings.EqualFold) per encoding/json semantics.
@@ -12,7 +21,25 @@ func (dec *StructCodec) LookupFieldBytes(key []byte) *TypeInfo {
 	k := unsafe.String(unsafe.SliceData(key), len(key))
 
 	// Fast path: exact match against original tag names.
-	if fi := dec.LookupFn(dec, k); fi != nil {
+	var fi *TypeInfo
+	switch dec.LookupMode {
+	case lookupModeEmpty:
+		fi = nil
+	case lookupModeLinear:
+		fi = lookupLinear(dec, k)
+	case lookupModePerfectSimple:
+		fi = lookupPerfectByHash(dec, k, simpleMixer(k, dec.HashSeed))
+	case lookupModePerfectFNV:
+		fi = lookupPerfectByHash(dec, k, fnv1aMixer(k, dec.HashSeed))
+	case lookupModePerfectMulacc:
+		fi = lookupPerfectByHash(dec, k, mulaccMixer(k, dec.HashSeed))
+	case lookupModeMap:
+		fi = lookupMap(dec, k)
+	default:
+		// Safety fallback for unexpected mode values.
+		fi = dec.LookupFn(dec, k)
+	}
+	if fi != nil {
 		return fi
 	}
 
@@ -46,19 +73,24 @@ func buildLookup(dec *StructCodec) {
 	switch {
 	case n == 0:
 		dec.LookupFn = lookupEmpty
+		dec.LookupMode = lookupModeEmpty
 	case n <= 4:
 		dec.LookupFn = lookupLinear
+		dec.LookupMode = lookupModeLinear
 	case n <= 32:
 		if tryBuildPerfectHash(dec, simpleMixer) {
 			dec.LookupFn = makePerfectHashLookup(simpleMixer)
+			dec.LookupMode = lookupModePerfectSimple
 		} else if tryBuildPerfectHash(dec, fnv1aMixer) {
 			dec.LookupFn = makePerfectHashLookup(fnv1aMixer)
+			dec.LookupMode = lookupModePerfectFNV
 		} else {
 			buildMapFallback(dec)
 		}
 	default:
 		if tryBuildPerfectHash(dec, mulaccMixer) {
 			dec.LookupFn = makePerfectHashLookup(mulaccMixer)
+			dec.LookupMode = lookupModePerfectMulacc
 		} else {
 			buildMapFallback(dec)
 		}
@@ -140,6 +172,7 @@ func buildMapFallback(dec *StructCodec) {
 		dec.FieldMap[dec.Fields[i].JSONName] = &dec.Fields[i]
 	}
 	dec.LookupFn = lookupMap
+	dec.LookupMode = lookupModeMap
 }
 
 // --- Lookup strategies (one is selected per struct by buildLookup) ---
@@ -160,22 +193,25 @@ func lookupLinear(dec *StructCodec, key string) *TypeInfo {
 	return nil
 }
 
+func lookupPerfectByHash(dec *StructCodec, key string, h uint64) *TypeInfo {
+	slot := int(h>>dec.HashShift) & (len(dec.HashTable) - 1)
+
+	idx := dec.HashTable[slot]
+	if idx == 0xFF {
+		return nil
+	}
+
+	fi := &dec.Fields[idx]
+	if fi.JSONName == key {
+		return fi
+	}
+	return nil
+}
+
 // makePerfectHashLookup returns a lookup function bound to a specific mixer.
 func makePerfectHashLookup(mixer hashMixer) func(*StructCodec, string) *TypeInfo {
 	return func(dec *StructCodec, key string) *TypeInfo {
-		h := mixer(key, dec.HashSeed)
-		slot := int(h>>dec.HashShift) & (len(dec.HashTable) - 1)
-
-		idx := dec.HashTable[slot]
-		if idx == 0xFF {
-			return nil
-		}
-
-		fi := &dec.Fields[idx]
-		if fi.JSONName == key {
-			return fi
-		}
-		return nil
+		return lookupPerfectByHash(dec, key, mixer(key, dec.HashSeed))
 	}
 }
 

@@ -3,6 +3,7 @@ package vjson
 import (
 	"io"
 	"reflect"
+	"runtime"
 	"unsafe"
 )
 
@@ -87,6 +88,10 @@ func (enc *Encoder) Encode(v any) error {
 	}
 
 	rv := reflect.ValueOf(v)
+	if !rv.IsValid() {
+		// Untyped nil (e.g. enc.Encode(nil)); match encoding/json behavior.
+		return enc.write([]byte("null\n"))
+	}
 
 	var ptr unsafe.Pointer
 	var elemType reflect.Type
@@ -97,14 +102,33 @@ func (enc *Encoder) Encode(v any) error {
 		ptr = rv.UnsafePointer()
 		elemType = rv.Elem().Type()
 	} else {
-		tmp := reflect.New(rv.Type())
-		tmp.Elem().Set(rv)
-		ptr = tmp.UnsafePointer()
+		// reflect forbids taking the address of a non-addressable Value.
+		// Rather than copying via reflect.New+Set, we extract the data
+		// pointer straight from the interface's eface layout {_type, data}.
+		ptr = (*[2]unsafe.Pointer)(unsafe.Pointer(&v))[1]
 		elemType = rv.Type()
 	}
 
-	ti := GetCodec(elemType)
+	err := enc.encodePtr(GetCodec(elemType), ptr)
+	// Keep v alive so the GC does not collect the eface data pointer
+	// while encodePtr is using it.
+	runtime.KeepAlive(v)
+	return err
+}
 
+// EncodeValue is a generic, zero-allocation alternative to [Encoder.Encode].
+// Because the type parameter provides compile-time type information and the
+// caller passes a typed pointer directly, it avoids interface boxing, reflect
+// overhead, and the eface data-pointer extraction needed by Encode.
+func EncodeValue[T any](enc *Encoder, v *T) error {
+	if enc.err != nil {
+		return enc.err
+	}
+	return enc.encodePtr(GetCodec(reflect.TypeFor[T]()), unsafe.Pointer(v))
+}
+
+// encodePtr is the shared encoding core for Encode and EncodeValue.
+func (enc *Encoder) encodePtr(ti *TypeInfo, ptr unsafe.Pointer) error {
 	m := getMarshaler()
 	m.flags = enc.flags
 	m.prefix = enc.prefix
@@ -129,9 +153,4 @@ func (enc *Encoder) write(p []byte) error {
 		enc.err = err
 	}
 	return err
-}
-
-// EncodeValue is a generic convenience wrapper around [Encoder.Encode].
-func EncodeValue[T any](enc *Encoder, v *T) error {
-	return enc.Encode(v)
 }
