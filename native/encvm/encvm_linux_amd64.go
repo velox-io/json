@@ -1,6 +1,6 @@
 //go:build linux && amd64
 
-package encoder
+package encvm
 
 import (
 	"unsafe"

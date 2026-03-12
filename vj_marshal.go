@@ -10,7 +10,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/velox-io/json/native/encoder"
+	"github.com/velox-io/json/native/encvm"
 )
 
 // Pre-computed string representations for 0-999.
@@ -51,6 +51,16 @@ func WithEscapeHTML() MarshalOption {
 // WithNoEscapeHTML disables escaping of <, >, &.
 func WithoutEscapeHTML() MarshalOption {
 	return func(m *Marshaler) { m.flags &^= escapeHTML }
+}
+
+// WithEscapeLineTerms enables escaping of U+2028 and U+2029 line terminators in strings.
+func WithEscapeLineTerms() MarshalOption {
+	return func(m *Marshaler) { m.flags |= escapeLineTerms }
+}
+
+// WithoutEscapeLineTerms disables escaping of U+2028 and U+2029.
+func WithoutEscapeLineTerms() MarshalOption {
+	return func(m *Marshaler) { m.flags &^= escapeLineTerms }
 }
 
 // WithUTF8Correction enables replacing invalid UTF-8 with \ufffd in strings.
@@ -791,7 +801,7 @@ func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
 	// Native VM path: flat linear instruction stream with yield protocol.
 	// This handles ALL struct types (including those with custom marshalers,
 	// maps, slices, etc.) by yielding to Go for unsupported fields.
-	if encoder.Available {
+	if encvm.Available {
 		return m.encodeStructNative(dec, base)
 	}
 

@@ -1,0 +1,268 @@
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"io"
+	"math"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// BenchResult holds a single benchmark measurement.
+type BenchResult struct {
+	Name    string  // full benchmark name (e.g. "Benchmark_Marshal_Small_StdJSON-16")
+	Group   string  // dataset group (e.g. "Marshal_Small")
+	Library string  // library name (e.g. "StdJSON", "Sonic", "Velox")
+	NsOp    float64 // nanoseconds per operation
+	BOp     float64 // bytes allocated per operation
+	AllocsOp float64 // allocations per operation
+}
+
+// GroupResult holds the aggregated (median) result for a library within a group.
+type GroupResult struct {
+	Group    string
+	Library  string
+	NsOp     float64
+	BOp      float64
+	AllocsOp float64
+}
+
+// BenchData holds all parsed and aggregated benchmark data.
+type BenchData struct {
+	Title    string        // from -title flag or auto-detected
+	Subtitle string       // goos/goarch/cpu metadata
+	Groups   []string      // ordered list of unique groups
+	Libs     []string      // ordered list of unique libraries
+	Results  map[string]map[string]*GroupResult // group -> library -> result
+	RunCount int           // number of runs per benchmark (from -count)
+}
+
+// knownLibraries lists the recognized library suffixes in display order.
+var knownLibraries = []string{"StdJSON", "Std", "Sonic", "Velox"}
+
+// benchLineRe matches a standard Go benchmark output line.
+var benchLineRe = regexp.MustCompile(
+	`^(Benchmark\S+)-\d+\s+\d+\s+` +
+		`([\d.]+)\s+ns/op` +
+		`(?:\s+([\d.]+)\s+B/op)?` +
+		`(?:\s+(\d+)\s+allocs/op)?`,
+)
+
+// metaLineRe matches goos/goarch/cpu lines.
+var metaLineRe = regexp.MustCompile(`^(goos|goarch|cpu|pkg):\s+(.+)`)
+
+// splitBenchName splits "Benchmark_Marshal_Small_StdJSON" into ("Marshal_Small", "StdJSON").
+// It tries known library suffixes first, then falls back to the last "_"-separated segment.
+func splitBenchName(name string) (group, library string) {
+	// Strip "Benchmark_" prefix
+	trimmed := strings.TrimPrefix(name, "Benchmark_")
+
+	// Try known suffixes
+	for _, lib := range knownLibraries {
+		suffix := "_" + lib
+		if strings.HasSuffix(trimmed, suffix) {
+			return strings.TrimSuffix(trimmed, suffix), lib
+		}
+	}
+
+	// Fallback: last segment
+	idx := strings.LastIndex(trimmed, "_")
+	if idx > 0 {
+		return trimmed[:idx], trimmed[idx+1:]
+	}
+	return trimmed, "Unknown"
+}
+
+// ParseBenchOutput reads Go benchmark output from r and returns structured data.
+func ParseBenchOutput(r io.Reader) (*BenchData, error) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+
+	var results []BenchResult
+	meta := make(map[string]string)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Check for metadata lines
+		if m := metaLineRe.FindStringSubmatch(line); m != nil {
+			meta[m[1]] = m[2]
+			continue
+		}
+
+		// Check for benchmark result lines
+		m := benchLineRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+
+		fullName := m[1]
+		nsOp, err := strconv.ParseFloat(m[2], 64)
+		if err != nil {
+			continue
+		}
+
+		var bOp, allocsOp float64
+		if m[3] != "" {
+			bOp, _ = strconv.ParseFloat(m[3], 64)
+		}
+		if m[4] != "" {
+			allocsOp, _ = strconv.ParseFloat(m[4], 64)
+		}
+
+		group, library := splitBenchName(fullName)
+		results = append(results, BenchResult{
+			Name:     fullName,
+			Group:    group,
+			Library:  library,
+			NsOp:     nsOp,
+			BOp:      bOp,
+			AllocsOp: allocsOp,
+		})
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("reading input: %w", err)
+	}
+
+	if len(results) == 0 {
+		return nil, fmt.Errorf("no benchmark results found in input")
+	}
+
+	return aggregateResults(results, meta), nil
+}
+
+// aggregateResults groups raw results by (group, library), takes medians, and builds BenchData.
+func aggregateResults(results []BenchResult, meta map[string]string) *BenchData {
+	type key struct{ group, library string }
+
+	// Collect all measurements per (group, library)
+	measurements := make(map[key][]BenchResult)
+	groupOrder := make(map[string]int)
+	libSet := make(map[string]bool)
+	orderIdx := 0
+
+	for _, r := range results {
+		k := key{r.Group, r.Library}
+		measurements[k] = append(measurements[k], r)
+		if _, exists := groupOrder[r.Group]; !exists {
+			groupOrder[r.Group] = orderIdx
+			orderIdx++
+		}
+		libSet[r.Library] = true
+	}
+
+	// Order groups by first appearance
+	groups := make([]string, len(groupOrder))
+	for g, idx := range groupOrder {
+		groups[idx] = g
+	}
+
+	// Order libraries: known ones first (in defined order), then unknown alphabetically
+	var libs []string
+	for _, kl := range knownLibraries {
+		if libSet[kl] {
+			libs = append(libs, kl)
+			delete(libSet, kl)
+		}
+	}
+	var unknowns []string
+	for lib := range libSet {
+		unknowns = append(unknowns, lib)
+	}
+	sort.Strings(unknowns)
+	libs = append(libs, unknowns...)
+
+	// Compute medians
+	aggResults := make(map[string]map[string]*GroupResult)
+	for k, ms := range measurements {
+		if _, ok := aggResults[k.group]; !ok {
+			aggResults[k.group] = make(map[string]*GroupResult)
+		}
+		aggResults[k.group][k.library] = &GroupResult{
+			Group:    k.group,
+			Library:  k.library,
+			NsOp:     medianFloat(ms, func(r BenchResult) float64 { return r.NsOp }),
+			BOp:      medianFloat(ms, func(r BenchResult) float64 { return r.BOp }),
+			AllocsOp: medianFloat(ms, func(r BenchResult) float64 { return r.AllocsOp }),
+		}
+	}
+
+	// Build subtitle from metadata
+	var subtitleParts []string
+	for _, key := range []string{"goos", "goarch", "cpu"} {
+		if v, ok := meta[key]; ok {
+			subtitleParts = append(subtitleParts, key+": "+v)
+		}
+	}
+
+	// Determine run count from measurements
+	runCount := 0
+	for _, ms := range measurements {
+		if len(ms) > runCount {
+			runCount = len(ms)
+		}
+	}
+
+	return &BenchData{
+		Subtitle: strings.Join(subtitleParts, "  |  "),
+		Groups:   groups,
+		Libs:     libs,
+		Results:  aggResults,
+		RunCount: runCount,
+	}
+}
+
+// medianFloat computes the median of a float64 field from a slice.
+func medianFloat(items []BenchResult, extract func(BenchResult) float64) float64 {
+	vals := make([]float64, len(items))
+	for i, item := range items {
+		vals[i] = extract(item)
+	}
+	sort.Float64s(vals)
+	n := len(vals)
+	if n == 0 {
+		return 0
+	}
+	if n%2 == 1 {
+		return vals[n/2]
+	}
+	return (vals[n/2-1] + vals[n/2]) / 2
+}
+
+// FormatNsOp formats nanoseconds with appropriate units.
+func FormatNsOp(ns float64) string {
+	switch {
+	case ns >= 1e9:
+		return fmt.Sprintf("%.2fs", ns/1e9)
+	case ns >= 1e6:
+		return fmt.Sprintf("%.1fms", ns/1e6)
+	case ns >= 1e3:
+		return fmt.Sprintf("%.1f\u00b5s", ns/1e3)
+	default:
+		return fmt.Sprintf("%.1fns", ns)
+	}
+}
+
+// FormatBytes formats byte counts with appropriate units.
+func FormatBytes(b float64) string {
+	switch {
+	case b >= 1024*1024:
+		return fmt.Sprintf("%.1fMB", b/(1024*1024))
+	case b >= 1024:
+		return fmt.Sprintf("%.1fKB", b/1024)
+	default:
+		return fmt.Sprintf("%.0fB", b)
+	}
+}
+
+// FormatAllocs formats allocation count.
+func FormatAllocs(a float64) string {
+	if a == math.Trunc(a) {
+		return fmt.Sprintf("%d", int64(a))
+	}
+	return fmt.Sprintf("%.1f", a)
+}

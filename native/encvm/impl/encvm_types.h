@@ -1,16 +1,16 @@
 /*
- * encoder_types.h — Velox JSON C Engine: Type Definitions & Constants
+ * encvm_types.h — Velox JSON C Engine: Type Definitions & Constants
  *
  * Shared enums, structs, and constants used by all encoder modules.
- * Included first by encoder.h — no dependencies on other encoder_*.h files.
+ * Included first by encvm.h — no dependencies on other encvm_*.h files.
  */
 
-#ifndef VJ_ENCODER_TYPES_H
-#define VJ_ENCODER_TYPES_H
+#ifndef VJ_ENCVM_TYPES_H
+#define VJ_ENCVM_TYPES_H
 
 // clang-format off
 
-#include "encoder_memory.h"
+#include "encvm_memory.h"
 
 /* ================================================================
  *  Constants
@@ -300,7 +300,7 @@ typedef struct VjStackFrame {
 _Static_assert(sizeof(VjStackFrame) == 72, "VjStackFrame must be 72 bytes");
 
 /* ================================================================
- *  Yield Codes
+ *  YieldCodes
  * ================================================================ */
 
 enum {
@@ -387,4 +387,4 @@ _Static_assert(offsetof(VjExecCtx, yield_field_idx) == 88,
                "yield_field_idx offset");
 _Static_assert(offsetof(VjExecCtx, stack) == 96, "stack offset");
 
-#endif /* VJ_ENCODER_TYPES_H */
+#endif /* VJ_ENCVM_TYPES_H */

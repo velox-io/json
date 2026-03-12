@@ -1,21 +1,21 @@
 /*
- * encoder_pointer.h — Velox JSON C Engine: Pointer Primitive Encoder
+ * encvm_pointer.h — Velox JSON C Engine: Pointer Primitive Encoder
  *
  * Out-of-line encoder for dereferenced pointer values (*bool, *int, etc.).
  * Marked noinline to keep the VM's code footprint small
  * and avoid icache pressure on the hot dispatch loop.
  *
- * Depends on: encoder_types.h, encoder_number.h, encoder_string.h, ryu.h.
+ * Depends on: encvm_types.h, encvm_number.h, encvm_string.h, ryu.h.
  */
 
-#ifndef VJ_ENCODER_POINTER_H
-#define VJ_ENCODER_POINTER_H
+#ifndef VJ_ENCVM_POINTER_H
+#define VJ_ENCVM_POINTER_H
 
 // clang-format off
 
-#include "encoder_types.h"
-#include "encoder_number.h"
-#include "encoder_string.h"
+#include "encvm_types.h"
+#include "encvm_number.h"
+#include "encvm_string.h"
 
 /* ---- Out-of-line pointer-primitive encoder ----
  *
@@ -135,4 +135,4 @@ vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend,
   return (VjPtrEncResult){buf, 0};
 }
 
-#endif /* VJ_ENCODER_POINTER_H */
+#endif /* VJ_ENCVM_POINTER_H */

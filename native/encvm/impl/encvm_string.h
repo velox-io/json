@@ -1,5 +1,5 @@
-#ifndef VJ_ENCODER_STRING_H
-#define VJ_ENCODER_STRING_H
+#ifndef VJ_ENCVM_STRING_H
+#define VJ_ENCVM_STRING_H
 
 #include <stdint.h>
 
@@ -896,4 +896,4 @@ vj_escape_string_fast(uint8_t *buf, const uint8_t *src, int64_t src_len) {
   return (int)(out - buf);
 }
 
-#endif /* VJ_ENCODER_STRING_H */
+#endif /* VJ_ENCVM_STRING_H */

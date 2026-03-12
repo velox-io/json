@@ -1,59 +1,23 @@
 /*
- * encoder_memory.h — Velox JSON C Engine: Memory Primitives
+ * encvm_memory.h — Velox JSON C Engine: Memory Primitives
  *
- * Custom memcpy/memset implementations (to avoid libc dependencies in the
- * .syso object) and SIMD-accelerated inline copy helpers used throughout
- * the encoder.
- *
- * Included first by encoder_types.h — no dependencies on other encoder_*.h
- * files.  Only depends on <stddef.h>, <stdint.h>, and SIMD headers.
+ * SIMD-accelerated inline copy helpers used throughout the encoder.
+ * Depends on stdlib/memfn.h for memcpy/memset declarations.
  */
 
-#ifndef VJ_ENCODER_MEMORY_H
-#define VJ_ENCODER_MEMORY_H
+#ifndef VJ_ENCVM_MEMORY_H
+#define VJ_ENCVM_MEMORY_H
 
 // clang-format off
 
 #include <stdint.h>
+#include "stdlib/memfn.h"
 
 #ifdef __aarch64__
 #include "sse2neon.h"
 #else
 #include <immintrin.h>
 #endif
-
-/* ================================================================
- *  memcpy / memset — custom implementations
- *
- *  The .syso object must not reference libc.  We provide hidden-
- *  visibility implementations that the compiler resolves via
- *  __asm__ symbol renaming.
- *
- *  The actual function bodies live in encoder_memfn.c (compiled once,
- *  without ISA flags) to avoid duplicate symbols when multiple ISA
- *  objects are linked into a single .syso.
- * ================================================================ */
-
-/* Platform-specific symbol naming:
- * macOS Mach-O: C symbols have _ prefix (_memcpy, _memset)
- * Linux ELF:    C symbols have no prefix (memcpy, memset) */
-#if defined(__APPLE__)
-  #define VJ_MEMCPY_SYM "_memcpy"
-  #define VJ_MEMSET_SYM "_memset"
-#else
-  #define VJ_MEMCPY_SYM "memcpy"
-  #define VJ_MEMSET_SYM "memset"
-#endif
-
-/* Declarations — always visible so each ISA TU can link against
- * the single memcpy/memset compiled from encoder_memfn.c. */
-__attribute__((visibility("hidden"))) void *
-vj_memcpy_impl(void *__restrict dst, const void *__restrict src,
-               size_t n) __asm__(VJ_MEMCPY_SYM);
-
-__attribute__((visibility("hidden"))) void *
-vj_memset_impl(void *dst, int c, size_t n) __asm__(VJ_MEMSET_SYM);
-
 
 /* ================================================================
  *  Small copy helper
@@ -217,4 +181,4 @@ vj_copy_var(uint8_t *dst, const void *src, size_t n) {
 
 #endif /* SIMD check */
 
-#endif /* VJ_ENCODER_MEMORY_H */
+#endif /* VJ_ENCVM_MEMORY_H */

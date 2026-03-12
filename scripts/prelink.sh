@@ -312,7 +312,7 @@ SO_TO_OBJ="$REPO_ROOT/build/bin/so-to-obj"
 if [ ! -x "$SO_TO_OBJ" ]; then
     log "  Building so-to-obj..."
     mkdir -p "$(dirname "$SO_TO_OBJ")"
-    (cd "$REPO_ROOT/cmd/so-to-obj" && go build -o "$SO_TO_OBJ" .)
+    (cd "$REPO_ROOT/scripts/cmd/so-to-obj" && go build -o "$SO_TO_OBJ" .)
 fi
 
 log "  Creating object file..."

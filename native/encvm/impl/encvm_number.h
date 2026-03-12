@@ -8,8 +8,8 @@
  * - XLarge (>= 10^16): scalar prefix + SSE2 for remaining 16 digits
  */
 
-#ifndef VJ_ENCODER_NUMBER_H
-#define VJ_ENCODER_NUMBER_H
+#ifndef VJ_ENCVM_NUMBER_H
+#define VJ_ENCVM_NUMBER_H
 
 // clang-format off
 
@@ -246,4 +246,4 @@ static inline int write_int64(uint8_t *buf, int64_t v) {
   return 1 + write_uint64(buf + 1, uv);
 }
 
-#endif /* VJ_ENCODER_NUMBER_H */
+#endif /* VJ_ENCVM_NUMBER_H */

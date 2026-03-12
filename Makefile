@@ -65,8 +65,23 @@ TARGET_OS ?= $(_HOST_OS)
 TARGET_ARCH ?= $(_HOST_ARCH)
 
 gen:
-	@SOURCE_FILE="$(CURDIR)/native/impl/encoder.c" \
-	 TARGET_DIR="$(CURDIR)/native/encoder" \
+	@SOURCE_FILE="$(CURDIR)/native/encvm/impl/encvm.c" \
+	 TARGET_DIR="$(CURDIR)/native/encvm" \
+	 STDLIB_SOURCES="$(CURDIR)/native/stdlib/memfn.c" \
 	 bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) "$(TARGET_OS)" "$(TARGET_ARCH)"
 
-.PHONY: lint lint-ci fmt test test-coverage bench bench-baseline bench-check bench-check-threshold clean fuzz gen
+# Generate benchmark visualization SVG
+# Usage: make benchviz
+#        make benchviz BENCH_FILTER="Benchmark_Marshal.*" BENCH_TITLE="Marshal Performance"
+BENCH_FILTER ?= .
+BENCH_TITLE ?= Benchmark Results
+BENCH_COUNT ?= 3
+BENCH_OUTPUT ?= local/benchmark.svg
+
+benchviz:
+	@mkdir -p $(dir $(BENCH_OUTPUT))
+	cd benchmark && go test -run='^$$' -bench='$(BENCH_FILTER)' -benchmem -count=$(BENCH_COUNT) . \
+	  | go run ./benchviz/ -title '$(BENCH_TITLE)' > '../$(BENCH_OUTPUT)'
+	@echo "SVG saved to $(BENCH_OUTPUT)"
+
+.PHONY: lint lint-ci fmt test test-coverage bench bench-baseline bench-check bench-check-threshold clean fuzz gen benchviz

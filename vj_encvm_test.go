@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/velox-io/json/native/encoder"
+	"github.com/velox-io/json/native/encvm"
 )
 
 // ================================================================
@@ -98,7 +98,7 @@ func TestVjEncFlagsAlignedWithEscapeFlags(t *testing.T) {
 func TestNativeEncodeStructBridgeAvailable(t *testing.T) {
 	// On darwin/arm64 the native encoder should be available.
 	// This test confirms the .syso is linked and the trampoline works.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available on this platform")
 	}
 }
@@ -283,7 +283,7 @@ func TestNativeEncodeOmitemptyConsistency(t *testing.T) {
 
 func TestHotResumeMapFieldMiddle(t *testing.T) {
 	// Map field in the middle: C handles ID, Go handles Tags, C resumes for Name.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -306,7 +306,7 @@ func TestHotResumeMapFieldMiddle(t *testing.T) {
 
 func TestHotResumeMapFieldFirst(t *testing.T) {
 	// Map field is the first field: Go handles it, C resumes for the rest.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -329,7 +329,7 @@ func TestHotResumeMapFieldFirst(t *testing.T) {
 
 func TestHotResumeMapFieldLast(t *testing.T) {
 	// Map field is the last field: C handles all fields until map, Go finishes.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -352,7 +352,7 @@ func TestHotResumeMapFieldLast(t *testing.T) {
 
 func TestHotResumeSliceField(t *testing.T) {
 	// Slice field triggers fallback.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -375,7 +375,7 @@ func TestHotResumeSliceField(t *testing.T) {
 
 func TestHotResumeInterfaceField(t *testing.T) {
 	// Interface field triggers fallback.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -398,7 +398,7 @@ func TestHotResumeInterfaceField(t *testing.T) {
 
 func TestNativePointerField(t *testing.T) {
 	// Pointer field is now handled natively by C engine.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -422,7 +422,7 @@ func TestNativePointerField(t *testing.T) {
 
 func TestNativePointerFieldNil(t *testing.T) {
 	// Nil pointer field → JSON null, handled natively.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -445,7 +445,7 @@ func TestNativePointerFieldNil(t *testing.T) {
 
 func TestNativePointerPrimitiveTypes(t *testing.T) {
 	// Various pointer-to-primitive types, all handled by C engine.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -498,7 +498,7 @@ func TestNativePointerPrimitiveTypes(t *testing.T) {
 
 func TestNativePointerAllNil(t *testing.T) {
 	// All pointer fields nil → all "null".
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -521,7 +521,7 @@ func TestNativePointerAllNil(t *testing.T) {
 
 func TestNativePointerStruct(t *testing.T) {
 	// *PureStruct: non-nil → nested JSON object.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -547,7 +547,7 @@ func TestNativePointerStruct(t *testing.T) {
 
 func TestNativePointerStructNil(t *testing.T) {
 	// *PureStruct: nil → "null".
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -572,7 +572,7 @@ func TestNativePointerStructNil(t *testing.T) {
 
 func TestNativePointerOmitemptyNil(t *testing.T) {
 	// *int with omitempty, nil → field omitted.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -594,7 +594,7 @@ func TestNativePointerOmitemptyNil(t *testing.T) {
 
 func TestNativePointerOmitemptyNonNil(t *testing.T) {
 	// *int with omitempty, non-nil → field present.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -618,7 +618,7 @@ func TestNativePointerOmitemptyNonNil(t *testing.T) {
 func TestNativePointerOmitemptyZeroValue(t *testing.T) {
 	// *int with omitempty, pointing to zero value → field present (not omitted).
 	// Only nil pointers are considered "empty", not zero-valued pointees.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -641,7 +641,7 @@ func TestNativePointerOmitemptyZeroValue(t *testing.T) {
 
 func TestNativePointerMixedWithRegularFields(t *testing.T) {
 	// Struct with mix of regular and pointer fields → should be nativeFull.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -670,7 +670,7 @@ func TestNativePointerMixedWithRegularFields(t *testing.T) {
 
 func TestHotResumePointerToNonNativeStruct(t *testing.T) {
 	// *MixedStruct (contains map) → falls back to Go for pointer field.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -695,7 +695,7 @@ func TestHotResumePointerToNonNativeStruct(t *testing.T) {
 
 func TestHotResumePointerToPointer(t *testing.T) {
 	// **int → falls back to Go.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -719,7 +719,7 @@ func TestHotResumePointerToPointer(t *testing.T) {
 
 func TestNativePointerConsistencyWithStdlib(t *testing.T) {
 	// Comprehensive stdlib consistency check for pointer scenarios.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -772,7 +772,7 @@ func TestNativePointerConsistencyWithStdlib(t *testing.T) {
 func TestNativePointerToCustomMarshaler(t *testing.T) {
 	// *big.Int has MarshalJSON on the element type — must fall back to Go,
 	// not be treated as native *Struct.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -794,7 +794,7 @@ func TestNativePointerToCustomMarshaler(t *testing.T) {
 
 func TestHotResumeMultipleFallbacks(t *testing.T) {
 	// Multiple fallback fields: C→Go→C→Go→C pattern.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -825,7 +825,7 @@ func TestHotResumeMultipleFallbacks(t *testing.T) {
 
 func TestHotResumeAllFallbackFields(t *testing.T) {
 	// All fields are fallback — still uses hot resume path.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -852,7 +852,7 @@ func TestHotResumeAllFallbackFields(t *testing.T) {
 
 func TestHotResumeWithOmitempty(t *testing.T) {
 	// Fallback field with native omitempty fields.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -888,7 +888,7 @@ func TestHotResumeWithOmitempty(t *testing.T) {
 
 func TestHotResumeEmptyMapField(t *testing.T) {
 	// Empty map still goes through fallback path.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -911,7 +911,7 @@ func TestHotResumeEmptyMapField(t *testing.T) {
 
 func TestHotResumeNilMapField(t *testing.T) {
 	// Nil map still goes through fallback path.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -934,7 +934,7 @@ func TestHotResumeNilMapField(t *testing.T) {
 
 func TestHotResumeNestedImpureStruct(t *testing.T) {
 	// Nested struct with unsupported fields gets fallback at depth=0.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -962,7 +962,7 @@ func TestHotResumeNestedImpureStruct(t *testing.T) {
 func TestHotResumeConsistencyWithStdlib(t *testing.T) {
 	// Comprehensive consistency test: compare Marshal output with encoding/json
 	// for various mixed structs.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -1061,7 +1061,7 @@ func TestHotResumeConsistencyWithStdlib(t *testing.T) {
 // ================================================================
 
 func TestNativeSliceOfStruct(t *testing.T) {
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -1087,7 +1087,7 @@ func TestNativeSliceOfStruct(t *testing.T) {
 }
 
 func TestNativeSliceOfStructEmpty(t *testing.T) {
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -1107,7 +1107,7 @@ func TestNativeSliceOfStructEmpty(t *testing.T) {
 }
 
 func TestNativeSliceOfStructNil(t *testing.T) {
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -1127,7 +1127,7 @@ func TestNativeSliceOfStructNil(t *testing.T) {
 }
 
 func TestNativeSliceOfStructSingleElement(t *testing.T) {
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -1151,7 +1151,7 @@ func TestNativeSliceOfStructSingleElement(t *testing.T) {
 
 func TestNativeSliceOfStructLarge(t *testing.T) {
 	// Large slice to force buffer growth (BUF_FULL resume).
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -1178,7 +1178,7 @@ func TestNativeSliceOfStructLarge(t *testing.T) {
 
 func TestNativeSliceOfStructNested(t *testing.T) {
 	// Struct with nested struct — still fully native.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -1208,7 +1208,7 @@ func TestNativeSliceOfStructNested(t *testing.T) {
 
 func TestNativeSliceOfStructWithPointers(t *testing.T) {
 	// Struct with pointer fields — should be fully native.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -1236,7 +1236,7 @@ func TestNativeSliceOfStructWithPointers(t *testing.T) {
 }
 
 func TestNativeSliceOfStructWithOmitempty(t *testing.T) {
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -1264,7 +1264,7 @@ func TestNativeSliceOfStructWithOmitempty(t *testing.T) {
 
 func TestSliceOfNonNativeStructFallsBack(t *testing.T) {
 	// Struct with map field is not nativeFull — should use Go loop.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -1290,7 +1290,7 @@ func TestSliceOfNonNativeStructFallsBack(t *testing.T) {
 
 func TestNativeSliceOfStructConsistencyWithStdlib(t *testing.T) {
 	// Comprehensive stdlib consistency across various struct shapes.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 
@@ -1325,7 +1325,7 @@ func TestNativeSliceOfStructConsistencyWithStdlib(t *testing.T) {
 func TestNativeSliceInStructField(t *testing.T) {
 	// []NativeStruct as a field of another struct — triggers hot resume
 	// for the outer struct, but the slice itself should be batch-encoded.
-	if !encoder.Available {
+	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
 

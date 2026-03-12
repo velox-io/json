@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"unsafe"
 
-	"github.com/velox-io/json/native/encoder"
+	"github.com/velox-io/json/native/encvm"
 )
 
 // ================================================================
@@ -13,7 +13,7 @@ import (
 //
 // The execVM function drives the C VM engine in a loop:
 //   1. Set up ExecCtx with buffer, blueprint ops, base pointer
-//   2. Call into C (encoder.VMExec)
+//   2. Call into C (encvm.VMExec)
 //   3. Inspect error code:
 //      - vjOK: done
 //      - vjErrBufFull: grow buffer, re-enter
@@ -43,7 +43,7 @@ func (m *Marshaler) encodeStructNative(dec *StructCodec, base unsafe.Pointer) er
 // Uses the reusable m.vmCtx to avoid per-call stack zeroing of the
 // 1248-byte VjExecCtx. IfaceCache is already set by getMarshaler.
 func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
-	if !encoder.Available {
+	if !encvm.Available {
 		return fmt.Errorf("vjson: native encoder not available")
 	}
 
@@ -67,9 +67,9 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	// Select VM mode: fast mode when no string escape flags are active,
 	// default mode otherwise. Fast mode eliminates runtime flag dispatch
 	// for string escaping (compile-time fast path only).
-	vmExec := encoder.VMExecFast
+	vmExec := encvm.VMExecFast
 	if m.flags&escapeStringFlags != 0 {
-		vmExec = encoder.VMExec
+		vmExec = encvm.VMExec
 	}
 
 	for {

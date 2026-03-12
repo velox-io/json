@@ -93,8 +93,9 @@ func TestNativeEscape_StdCompat(t *testing.T) {
 	}
 }
 
-// TestNativeEscape_Default verifies the default Marshal behavior (escapeLineTerms only).
-// HTML chars pass through, invalid UTF-8 passes through, but U+2028/2029 are escaped.
+// TestNativeEscape_Default verifies the default Marshal behavior (fast mode, flags=0).
+// Only mandatory JSON escapes (control chars, '"', '\\'). HTML, line terminators,
+// and invalid UTF-8 all pass through.
 func TestNativeEscape_Default(t *testing.T) {
 	cases := []struct {
 		name string
@@ -103,8 +104,8 @@ func TestNativeEscape_Default(t *testing.T) {
 	}{
 		{"ascii", "hello", `{"v":"hello"}`},
 		{"html_passthrough", "<>&", `{"v":"<>&"}`},
-		{"line_sep", "a\u2028b", `{"v":"a\u2028b"}`},
-		{"para_sep", "a\u2029b", `{"v":"a\u2029b"}`},
+		{"line_sep_passthrough", "a\u2028b", "{\"v\":\"a\xe2\x80\xa8b\"}"},
+		{"para_sep_passthrough", "a\u2029b", "{\"v\":\"a\xe2\x80\xa9b\"}"},
 		{"invalid_utf8_passthrough", "a\xffb", "{\"v\":\"a\xffb\"}"},
 		{"chinese", "中文", `{"v":"中文"}`},
 		{"quote", `a"b`, `{"v":"a\"b"}`},
@@ -117,6 +118,41 @@ func TestNativeEscape_Default(t *testing.T) {
 				V string `json:"v"`
 			}
 			got, err := Marshal(&S{V: tc.s})
+			if err != nil {
+				t.Fatalf("error: %v", err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("mismatch:\n  input: %q\n  want:  %s\n  got:   %s", tc.s, tc.want, got)
+			}
+		})
+	}
+}
+
+// TestNativeEscape_LineTerms verifies WithEscapeLineTerms escapes U+2028/U+2029
+// while leaving HTML and invalid UTF-8 untouched.
+func TestNativeEscape_LineTerms(t *testing.T) {
+	cases := []struct {
+		name string
+		s    string
+		want string
+	}{
+		{"ascii", "hello", `{"v":"hello"}`},
+		{"html_passthrough", "<>&", `{"v":"<>&"}`},
+		{"line_sep", "a\u2028b", `{"v":"a\u2028b"}`},
+		{"para_sep", "a\u2029b", `{"v":"a\u2029b"}`},
+		{"both_seps", "\u2028\u2029", `{"v":"\u2028\u2029"}`},
+		{"invalid_utf8_passthrough", "a\xffb", "{\"v\":\"a\xffb\"}"},
+		{"chinese", "中文", `{"v":"中文"}`},
+		{"quote", `a"b`, `{"v":"a\"b"}`},
+		{"control", "\n\t", `{"v":"\n\t"}`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			type S struct {
+				V string `json:"v"`
+			}
+			got, err := Marshal(&S{V: tc.s}, WithEscapeLineTerms())
 			if err != nil {
 				t.Fatalf("error: %v", err)
 			}
@@ -267,9 +303,9 @@ func TestNativeEscape_LongStrings(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// Default: line terms escaped, but no HTML, no UTF-8 correction
-		if !containsBytes(got, []byte(`\u2028`)) {
-			t.Errorf("expected \\u2028 in output: %s", got)
+		// Default is fast mode: line terms should NOT be escaped
+		if containsBytes(got, []byte(`\u2028`)) {
+			t.Errorf("unexpected line term escaping in default mode: %s", got)
 		}
 		// HTML chars should NOT be escaped
 		if containsBytes(got, []byte(`\u003c`)) {

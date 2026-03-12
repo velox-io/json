@@ -25,6 +25,16 @@ func EncoderSetEscapeHTML(on bool) EncoderOption {
 	}
 }
 
+func EncoderSetEscapeLineTerms(on bool) EncoderOption {
+	return func(enc *Encoder) {
+		if on {
+			enc.flags |= escapeLineTerms
+		} else {
+			enc.flags &^= escapeLineTerms
+		}
+	}
+}
+
 // Encoder writes JSON values to an output stream.
 // Each Encode call writes one JSON value followed by a newline.
 type Encoder struct {
@@ -57,6 +67,14 @@ func (enc *Encoder) SetEscapeHTML(on bool) {
 		enc.flags |= escapeHTML
 	} else {
 		enc.flags &^= escapeHTML
+	}
+}
+
+func (enc *Encoder) SetEscapeLineTerms(on bool) {
+	if on {
+		enc.flags |= escapeLineTerms
+	} else {
+		enc.flags &^= escapeLineTerms
 	}
 }
 

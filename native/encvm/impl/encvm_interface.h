@@ -1,17 +1,17 @@
 /*
- * encoder_interface.h -- Velox JSON C Engine: Interface Value Encoder
+ * encvm_interface.h -- Velox JSON C Engine: Interface Value Encoder
  *
  * Out-of-line encoder for interface{} (eface) values.
  * Marked noinline to keep the VM's hot dispatch loop compact
  * and avoid register spill from the cold interface logic
  * (binary search, primitive tag switch, Blueprint dispatch).
  *
- * Depends on: encoder_types.h, encoder_number.h, encoder_string.h,
- *             ryu.h, encoder_pointer.h.
+ * Depends on: encvm_types.h, encvm_number.h, encvm_string.h,
+ *             ryu.h, encvm_pointer.h.
  */
 
-#ifndef VJ_ENCODER_INTERFACE_H
-#define VJ_ENCODER_INTERFACE_H
+#ifndef VJ_ENCVM_INTERFACE_H
+#define VJ_ENCVM_INTERFACE_H
 
 /* ================================================================
  *  Interface encode action codes
@@ -122,4 +122,4 @@ vj_encode_interface_value(
   return (VjIfaceResult){buf, cached_ops, type_ptr, data_ptr, VJ_IFACE_SWITCH_OPS};
 }
 
-#endif /* VJ_ENCODER_INTERFACE_H */
+#endif /* VJ_ENCVM_INTERFACE_H */

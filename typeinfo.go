@@ -563,16 +563,16 @@ type StructCodec struct {
 	FieldMap     map[string]*TypeInfo // fallback for 33+ fields
 	HasMixedCase bool                 // true if any JSONName differs from JSONNameLower
 
-	// Native C encoder cache — lazily initialized by getBlueprint().
-	native *nativeEncoderCache
+	// Native C encoder VM cache — lazily initialized by getBlueprint().
+	vm *encvmCache
 }
 
-// nativeCache returns the (lazily allocated) native encoder cache.
-func (dec *StructCodec) nativeCache() *nativeEncoderCache {
-	if dec.native == nil {
-		dec.native = &nativeEncoderCache{}
+// vmCache returns the (lazily allocated) encoder VM cache.
+func (dec *StructCodec) vmCache() *encvmCache {
+	if dec.vm == nil {
+		dec.vm = &encvmCache{}
 	}
-	return dec.native
+	return dec.vm
 }
 
 func BuildStructCodec(t reflect.Type) *StructCodec {

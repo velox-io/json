@@ -166,10 +166,10 @@ type fbInfo struct {
 	Offset uintptr   // field offset from current struct base
 }
 
-// nativeEncoderCache holds compiled native encoder data for a StructCodec.
+// encvmCache holds compiled encoder VM data for a StructCodec.
 // Stored as a separate struct to avoid bloating the StructCodec with
 // fields that are only relevant when the native encoder is available.
-type nativeEncoderCache struct {
+type encvmCache struct {
 	once      sync.Once  // once for Blueprint compilation
 	blueprint *Blueprint // compiled Blueprint (flat instruction stream)
 }

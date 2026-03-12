@@ -1,16 +1,15 @@
 /*
- * encoder_memfn.c — Standalone memcpy/memset for the native encoder .syso.
+ * memfn.c — Minimal C Runtime: memcpy/memset Implementation
  *
  * Compiled once (no ISA flags) and linked alongside the ISA-specific
- * encoder objects, so that memcpy/memset symbols appear exactly once
- * in the final .syso.
+ * objects, so that memcpy/memset symbols appear exactly once in the
+ * final .syso.
  *
- * The declarations (with __asm__ symbol renaming) live in encoder_memory.h
- * so that every ISA translation unit sees them as extern.
+ * The declarations (with __asm__ symbol renaming) live in memfn.h
+ * so that every translation unit sees them as extern.
  */
 
-#include "encoder_memory.h"
-#include <stddef.h>
+#include "memfn.h"
 #include <stdint.h>
 
 /* Use __builtin_memcpy throughout the code. The compiler will inline

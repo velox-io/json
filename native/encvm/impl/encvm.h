@@ -1,5 +1,5 @@
 /*
- * encoder.h — Velox JSON C Encoding Engine
+ * encvm.h — Velox JSON C Encoding Engine
  *
  * Three-layer architecture:
  *   Go Pre-compiler  ->  Assembly Bridge  ->  C Engine (this file)
@@ -8,31 +8,31 @@
  * modular sub-headers.  The VM implementation is included below.
  *
  * Sub-headers (included in dependency order):
- *   encoder_memory.h  — memcpy/memset impls, SIMD copy helpers
- *   encoder_types.h   — enums, structs, constants
- *   encoder_number.h  — integer-to-ASCII formatting
- *   encoder_string.h  — JSON string escaping (SIMD/SWAR)
+ *   encvm_memory.h    — SIMD copy helpers (depends on stdlib/memfn.h)
+ *   encvm_types.h     — enums, structs, constants
+ *   encvm_number.h    — integer-to-ASCII formatting
+ *   encvm_string.h    — JSON string escaping (SIMD/SWAR)
  *   ryu.h             — float-to-ASCII (Ryu algorithm)
- *   encoder_pointer.h — out-of-line pointer primitive encoder
- *   encoder_interface.h — out-of-line interface value encoder
+ *   encvm_pointer.h   — out-of-line pointer primitive encoder
+ *   encvm_interface.h — out-of-line interface value encoder
  *
  * Design constraints:
  *   - All memory referenced by the engine is pinned by Go (runtime.Pinner)
  *     before entry; the engine never allocates.
  */
 
-#ifndef VJ_ENCODER_H
-#define VJ_ENCODER_H
+#ifndef VJ_ENCVM_H
+#define VJ_ENCVM_H
 
 // clang-format off
 
 /* ---- Sub-headers (order matters: each may depend on predecessors) ---- */
-#include "encoder_types.h"
-#include "encoder_number.h"
-#include "encoder_string.h"
+#include "encvm_types.h"
+#include "encvm_number.h"
+#include "encvm_string.h"
 #include "ryu.h"
-#include "encoder_pointer.h"
-#include "encoder_interface.h"
+#include "encvm_pointer.h"
+#include "encvm_interface.h"
 
 /* ================================================================
  *  VM Implementation — threaded-code interpreter for []VjOpStep
@@ -676,4 +676,4 @@ vj_op_yield: {
 
 #undef VM_SAVE_AND_RETURN
 
-#endif /* VJ_ENCODER_H */
+#endif /* VJ_ENCVM_H */

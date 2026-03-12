@@ -1,6 +1,6 @@
-//go:build linux && arm64
+//go:build darwin && arm64
 
-package encoder
+package encvm
 
 import "unsafe"
 

@@ -648,7 +648,7 @@ func emitSkipIfZeroPlaceholder(b *blueprintBuilder, fixups *[]keyFixup, _ *TypeI
 // getBlueprint returns the compiled Blueprint for this StructCodec.
 // Results are cached after the first call (thread-safe).
 func (dec *StructCodec) getBlueprint() *Blueprint {
-	cache := dec.nativeCache()
+	cache := dec.vmCache()
 	cache.once.Do(func() {
 		cache.blueprint = compileBlueprint(dec)
 	})

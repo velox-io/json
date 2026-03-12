@@ -17,6 +17,12 @@
 #   TARGET_DIR    - Target directory for .syso/.s files.
 #   OUTPUT_DIR    - Output directory for .c/.o files. Default: build/native
 #
+# Environment variables (optional):
+#   STDLIB_SOURCES - Space-separated list of stdlib .c files (e.g. memcpy/memset
+#                    implementations). Compiled with -fno-builtin-memcpy/memset.
+#   EXTRA_SOURCES  - Space-separated list of additional .c files to compile
+#                    and link.
+#
 # Output:
 #   - {OUTPUT_DIR}/{basename}[_{mode}]_{os}_{arch}_{isa}.c
 #   - {OUTPUT_DIR}/{basename}[_{mode}]_{os}_{arch}_{isa}.o
@@ -60,7 +66,7 @@ fi
 
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/build/native}"
 
-VJ_LIB_DIR="native/impl"
+VJ_LIB_DIR="native/encvm/impl"
 
 # Derive base name from source file
 BASENAME=$(basename "$SOURCE_FILE" .c)
@@ -173,7 +179,7 @@ fi
 # ============================================================
 #  Platform-ISA constraints
 #  Each platform may compile one or more ISA variants. When multiple
-#  ISAs are listed, the Go init() in encoder_<os>_<arch>.go selects
+#  ISAs are listed, the Go init() in encvm_<os>_<arch>.go selects
 #  the best one at runtime via golang.org/x/sys/cpu detection.
 #  darwin: arm64 (neon)
 #  linux:  arm64 (neon) or amd64 (sse42 avx2 avx512)
@@ -270,21 +276,47 @@ echo ""
 ALL_OBJS=""
 
 # ============================================================
-#  Compile shared memcpy/memset (ISA-independent, compiled once)
+#  Compile stdlib sources (minimal C runtime, ISA-independent)
 #
-#  Each ISA object references memcpy/memset via extern declarations.
-#  This single object provides the definitions, avoiding duplicate
-#  symbol errors when multiple ISA objects are linked together.
+#  These provide basic libc functions (memcpy, memset, etc.) that the
+#  main code may call. We compile them with -fno-builtin-memcpy/memset
+#  because they contain manual loops that the compiler could otherwise
+#  optimize into memcpy/memset calls, causing infinite recursion.
 # ============================================================
-MEMFN_SRC="$(dirname "$SOURCE_FILE")/encoder_memfn.c"
-if [ -f "$MEMFN_SRC" ]; then
-    MEMFN_OBJ="${OUTPUT_DIR}/encoder_memfn_${TARGET_OS}_${TARGET_ARCH}.o"
-    echo "  Compiling $(basename "$MEMFN_OBJ") (shared memcpy/memset)"
-    $CC -O3 -fPIC -g0 -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset $ARCH_FLAGS \
-        -I"$(dirname "$MEMFN_SRC")" -I"$REPO_ROOT/native/include" \
-        -c "$MEMFN_SRC" -o "$MEMFN_OBJ"
-    ALL_OBJS="$MEMFN_OBJ"
-fi
+
+for stdlib_src in $STDLIB_SOURCES; do
+    if [ -f "$stdlib_src" ]; then
+        stdlib_base=$(basename "$stdlib_src" .c)
+        stdlib_obj="${OUTPUT_DIR}/${stdlib_base}_${TARGET_OS}_${TARGET_ARCH}.o"
+        echo "  Compiling $(basename "$stdlib_obj") (stdlib)"
+        $CC -O3 -fPIC -g0 -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset $ARCH_FLAGS \
+            -I"$(dirname "$stdlib_src")" -I"$REPO_ROOT/native/include" -I"$REPO_ROOT/native" \
+            -c "$stdlib_src" -o "$stdlib_obj"
+        ALL_OBJS="$ALL_OBJS $stdlib_obj"
+    else
+        echo "Warning: STDLIB_SOURCES file not found: $stdlib_src"
+    fi
+done
+
+# ============================================================
+#  Compile extra sources (ISA-independent, compiled once per target)
+#
+#  Each extra source is compiled once and linked with all ISA objects.
+# ============================================================
+
+for extra_src in $EXTRA_SOURCES; do
+    if [ -f "$extra_src" ]; then
+        extra_base=$(basename "$extra_src" .c)
+        extra_obj="${OUTPUT_DIR}/${extra_base}_${TARGET_OS}_${TARGET_ARCH}.o"
+        echo "  Compiling $(basename "$extra_obj") (extra source)"
+        $CC -O3 -fPIC -g0 -fno-stack-protector $ARCH_FLAGS \
+            -I"$(dirname "$extra_src")" -I"$REPO_ROOT/native/include" \
+            -c "$extra_src" -o "$extra_obj"
+        ALL_OBJS="$ALL_OBJS $extra_obj"
+    else
+        echo "Warning: EXTRA_SOURCES file not found: $extra_src"
+    fi
+done
 
 # Collect flags for .clangd generation (from first ISA/mode combination)
 CLANGD_FLAGS_COLLECTED=false
@@ -321,12 +353,14 @@ for isa in $ISAS; do
             -I"$(dirname "$SOURCE_FILE")" \
             -I"$REPO_ROOT/$VJ_LIB_DIR" \
             -I"$REPO_ROOT/native/include" \
+            -I"$REPO_ROOT/native" \
             "$SOURCE_FILE" \
             -o "$CFILE"
 
         # Step 2: Compile to object
         echo "  Compiling $(basename "$OFILE")"
-        $CC -O3 -fPIC -g0 -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset $ARCH_FLAGS $ISA_FLAGS -c "$CFILE" -o "$OFILE"
+        $CC -O3 -fPIC -g0 -fno-stack-protector $ARCH_FLAGS $ISA_FLAGS \
+            -I"$REPO_ROOT/native" -c "$CFILE" -o "$OFILE"
         ALL_OBJS="$ALL_OBJS $OFILE"
 
         # Capture flags for .clangd from the first ISA/mode combination
@@ -337,7 +371,8 @@ for isa in $ISAS; do
 
         # Step 3: Generate assembly for reference (strip debug info)
         echo "  Generating $(basename "$SFILE")"
-        $CC -S -O3 -g0 -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset $ARCH_FLAGS -fno-asynchronous-unwind-tables $ISA_FLAGS "$CFILE" -o "$SFILE"
+        $CC -S -O3 -g0 -fno-stack-protector $ARCH_FLAGS -fno-asynchronous-unwind-tables $ISA_FLAGS \
+            -I"$REPO_ROOT/native" "$CFILE" -o "$SFILE"
 
         # Remove debug directives
         sed -i '/^[[:space:]]*\.file[[:space:]]/d' "$SFILE"
@@ -391,7 +426,7 @@ if [ "$TARGET_OS" = "linux" ] && [ "$TARGET_ARCH" = "amd64" ]; then
 
     # Linux amd64: use prelink.sh (Go internal linker cannot handle R_X86_64_PC32)
     ZIG_TARGET=$(get_zig_target "$TARGET_OS" "$TARGET_ARCH")
-    "$REPO_ROOT/hack/prelink.sh" -l -o "$SYSO_PATH" -t "$ZIG_TARGET" $ALL_OBJS
+    "$REPO_ROOT/scripts/prelink.sh" -l -o "$SYSO_PATH" -t "$ZIG_TARGET" $ALL_OBJS
 fi
 
 if [ "$NEEDS_PRELINK" != true ]; then

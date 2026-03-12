@@ -27,10 +27,10 @@
 #endif
 
 /* ---------- Engine implementation ---------- */
-#include "encoder.h"
+#include "encvm.h"
 
 /* ---------- Mode + ISA suffixed entry point ----------
- * vj_vm_exec is static (defined in encoder.h).  Here we generate a
+ * vj_vm_exec is static (defined in encvm.h).  Here we generate a
  * non-static wrapper whose symbol name carries both the mode and ISA
  * suffix (e.g. vj_vm_exec_default_neon, vj_vm_exec_fast_sse42).
  * The Go trampoline references this suffixed symbol. */
