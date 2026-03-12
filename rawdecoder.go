@@ -276,16 +276,20 @@ type ReflectMapDecoder struct {
 	ValType reflect.Type // value element type
 	ValSize uintptr      // size of one value element
 	ValTI   *TypeInfo    // cached TypeInfo for value (pointer for cycle safety)
+
+	// ValIsString is true for map[string]string, enabling zero-reflection fast path.
+	ValIsString bool
 }
 
 func BuildMapDecoder(t reflect.Type) *ReflectMapDecoder {
 	valTI := GetDecoder(t.Elem())
 	return &ReflectMapDecoder{
-		MapType: t,
-		KeyType: t.Key(),
-		ValType: t.Elem(),
-		ValSize: t.Elem().Size(),
-		ValTI:   valTI,
+		MapType:    t,
+		KeyType:    t.Key(),
+		ValType:    t.Elem(),
+		ValSize:    t.Elem().Size(),
+		ValTI:      valTI,
+		ValIsString: valTI.Kind == KindString,
 	}
 }
 
@@ -293,6 +297,7 @@ type ReflectPointerDecoder struct {
 	PtrType  reflect.Type // the pointer type itself, e.g., *Foo
 	ElemType reflect.Type
 	ElemTI   *TypeInfo // cached TypeInfo for the pointed-to element (pointer for cycle safety)
+	ElemSize uintptr    // size of the element type for allocation
 }
 
 func BuildPointerDecoder(t reflect.Type) *ReflectPointerDecoder {
@@ -301,5 +306,6 @@ func BuildPointerDecoder(t reflect.Type) *ReflectPointerDecoder {
 		PtrType:  t,
 		ElemType: t.Elem(),
 		ElemTI:   elemTI,
+		ElemSize: t.Elem().Size(),
 	}
 }
