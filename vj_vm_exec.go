@@ -85,9 +85,9 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	ctx.PC = 0
 	ctx.CurBase = base
 
-	// Build initial vmstate: first=1, flags from m.flags|m.encFlags,
-	// cdepth=0, idepth=0, err=0, yield=0.
-	ctx.VMState = vmstateBuildInitial(uint32(m.flags) | m.encFlags)
+	// Build initial vmstate: first=1, flags from m.flags,
+	// depth=0, err=0, yield=0.
+	ctx.VMState = vmstateBuildInitial(m.flags)
 
 	// Select VM mode: three-way dispatch based on indent and escape flags.
 	//
@@ -110,7 +110,7 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 		ctx.IndentStep = 0
 		ctx.IndentPrefixLen = 0
 		ctx.IndentDepth = 0
-		if m.flags&escapeStringFlags != 0 {
+		if m.flags&uint32(escapeStringFlags) != 0 {
 			vmExec = encvm.VMExecCompact
 		} else {
 			vmExec = encvm.VMExecFast

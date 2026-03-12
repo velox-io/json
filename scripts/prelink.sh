@@ -375,11 +375,29 @@ EOF
         (cd "$REPO_ROOT/scripts/cmd/so-to-obj" && go build -o "$SO_TO_OBJ" .)
     fi
 
+    # Build so-to-obj flags.
+    # If EXPORT_LIST is provided, derive an export prefix from the first symbol
+    # in the list and pass it via -export-prefix so that so-to-obj demotes
+    # non-matching symbols to STB_LOCAL in the output ET_REL.
+    # This avoids using --version-script during LTO linking, which would change
+    # symbol visibility and alter the optimizer's inlining decisions.
+    SO_TO_OBJ_FLAGS=""
+    if [ -n "$EXPORT_LIST" ] && [ -f "$EXPORT_LIST" ]; then
+        # Read the first non-empty symbol and strip trailing _<mode>_<isa> suffix
+        # to get the bare prefix (e.g. "vj_vm_exec_fast_sse42" → "vj_vm_exec").
+        _first_sym=$(grep -m1 . "$EXPORT_LIST")
+        if [ -n "$_first_sym" ]; then
+            # Strip the last two underscore-delimited tokens (mode and isa)
+            _prefix=$(printf '%s' "$_first_sym" | sed 's/_[^_]*_[^_]*$//')
+            SO_TO_OBJ_FLAGS="-export-prefix $_prefix"
+        fi
+    fi
+
     log "  Creating object file..."
     if [ "$QUIET" = true ]; then
-        "$SO_TO_OBJ" -q -o "$OUTPUT" "$MERGED_SO"
+        "$SO_TO_OBJ" -q $SO_TO_OBJ_FLAGS -o "$OUTPUT" "$MERGED_SO"
     else
-        "$SO_TO_OBJ" -o "$OUTPUT" "$MERGED_SO"
+        "$SO_TO_OBJ" $SO_TO_OBJ_FLAGS -o "$OUTPUT" "$MERGED_SO"
     fi
 fi
 

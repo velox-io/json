@@ -86,9 +86,9 @@ const (
 )
 
 // Encoding flags — Go-side bit positions (low 4 bits).
-// These match the VJ_FLAGS_* legacy constants extracted by VJ_ST_GET_FLAGS().
+// These match the VJ_FLAGS_* constants extracted by VJ_ST_GET_FLAGS().
+// Bits 0-2 mirror escapeFlags (escapeHTML, escapeLineTerms, escapeInvalidUTF8).
 const (
-	vjEncEscapeHTML   uint32 = 1 << 0
 	vjEncFloatExpAuto uint32 = 1 << 3 // scientific notation for |f|<1e-6 or |f|>=1e21
 )
 
@@ -113,15 +113,11 @@ const (
 // ================================================================
 
 const (
-	vjStDepthShift = 0
 	vjStDepthMask  = uint64(0x000000FF)
 	vjStFirstBit   = uint64(1) << 16
 	vjStFlagsShift = 17
-	vjStFlagsMask  = uint64(0xFFFE0000) // bits [17..31]
 	vjStErrShift   = 32
-	vjStErrMask    = uint64(0x000000FF00000000)
 	vjStYieldShift = 40
-	vjStYieldMask  = uint64(0x0000FF0000000000)
 )
 
 // vmstateGetErr extracts the error code from vmstate.
@@ -145,9 +141,8 @@ func vmstateGetDepth(st uint64) int32 {
 }
 
 // vmstateBuildInitial builds the initial vmstate for VM entry.
-// flags contains escape flags (bits 0-3) already combined from
-// escapeFlags and vjEncFloatExpAuto. The first bit is set.
-// cdepth=0, idepth=0, err=0, yield=0.
+// flags contains escape flags (bits 0-2) and vjEncFloatExpAuto (bit 3).
+// The first bit is set. depth=0, err=0, yield=0.
 func vmstateBuildInitial(flags uint32) uint64 {
 	return vjStFirstBit | (uint64(flags) << vjStFlagsShift)
 }

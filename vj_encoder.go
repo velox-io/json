@@ -19,9 +19,9 @@ func EncoderSetIndent(prefix, indent string) EncoderOption {
 func EncoderSetEscapeHTML(on bool) EncoderOption {
 	return func(enc *Encoder) {
 		if on {
-			enc.flags |= escapeHTML
+			enc.flags |= uint32(escapeHTML)
 		} else {
-			enc.flags &^= escapeHTML
+			enc.flags &^= uint32(escapeHTML)
 		}
 	}
 }
@@ -29,9 +29,9 @@ func EncoderSetEscapeHTML(on bool) EncoderOption {
 func EncoderSetEscapeLineTerms(on bool) EncoderOption {
 	return func(enc *Encoder) {
 		if on {
-			enc.flags |= escapeLineTerms
+			enc.flags |= uint32(escapeLineTerms)
 		} else {
-			enc.flags &^= escapeLineTerms
+			enc.flags &^= uint32(escapeLineTerms)
 		}
 	}
 }
@@ -41,9 +41,9 @@ func EncoderSetEscapeLineTerms(on bool) EncoderOption {
 func EncoderSetFloatExpAuto(on bool) EncoderOption {
 	return func(enc *Encoder) {
 		if on {
-			enc.encFlags |= vjEncFloatExpAuto
+			enc.flags |= vjEncFloatExpAuto
 		} else {
-			enc.encFlags &^= vjEncFloatExpAuto
+			enc.flags &^= vjEncFloatExpAuto
 		}
 	}
 }
@@ -51,19 +51,17 @@ func EncoderSetFloatExpAuto(on bool) EncoderOption {
 // Encoder writes JSON values to an output stream.
 // Each Encode call writes one JSON value followed by a newline.
 type Encoder struct {
-	w        io.Writer
-	err      error // sticky write error
-	prefix   string
-	indent   string
-	flags    escapeFlags
-	encFlags uint32 // extra VjEncFlags bits (float format, etc.)
+	w      io.Writer
+	err    error // sticky write error
+	prefix string
+	indent string
+	flags  uint32 // escapeFlags (bits 0-2) | vjEncFloatExpAuto (bit 3)
 }
 
 // NewEncoder creates an Encoder that writes to w.
 func NewEncoder(w io.Writer, opts ...EncoderOption) *Encoder {
 	enc := &Encoder{
-		w:     w,
-		flags: escapeDefault,
+		w: w,
 	}
 	for _, opt := range opts {
 		opt(enc)
@@ -78,17 +76,17 @@ func (enc *Encoder) SetIndent(prefix, indent string) {
 
 func (enc *Encoder) SetEscapeHTML(on bool) {
 	if on {
-		enc.flags |= escapeHTML
+		enc.flags |= uint32(escapeHTML)
 	} else {
-		enc.flags &^= escapeHTML
+		enc.flags &^= uint32(escapeHTML)
 	}
 }
 
 func (enc *Encoder) SetEscapeLineTerms(on bool) {
 	if on {
-		enc.flags |= escapeLineTerms
+		enc.flags |= uint32(escapeLineTerms)
 	} else {
-		enc.flags &^= escapeLineTerms
+		enc.flags &^= uint32(escapeLineTerms)
 	}
 }
 
@@ -149,7 +147,6 @@ func EncodeValue[T any](enc *Encoder, v *T) error {
 func (enc *Encoder) encodePtr(ti *TypeInfo, ptr unsafe.Pointer) error {
 	m := getMarshaler()
 	m.flags = enc.flags
-	m.encFlags = enc.encFlags
 	m.prefix = enc.prefix
 	m.indent = enc.indent
 

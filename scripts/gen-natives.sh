@@ -21,7 +21,7 @@
 #
 # Output:
 #   - {OUTPUT_DIR}/{basename}[_{mode}]_{os}_{arch}_{isa}.o
-#   - {TARGET_DIR}/{basename}_{os}_{arch}.syso  (all ISAs, all modes combined)
+#   - {TARGET_DIR}/{basename}_{mode}_{isa}_{os}_{arch}.syso  (one per mode×ISA)
 #   - {TARGET_DIR}/asm/{basename}[_{mode}]_{os}_{arch}_{isa}.s (if --asm)
 #
 # Cross-compilation terminology:
@@ -325,7 +325,8 @@ echo "  Source: $SOURCE_FILE"
 echo "  Output: $OUTPUT_DIR"
 echo ""
 
-ALL_OBJS=""
+STDLIB_OBJS=""
+EXTRA_OBJS=""
 
 # ============================================================
 #  Compile stdlib sources (minimal C runtime, ISA-independent)
@@ -344,7 +345,7 @@ for stdlib_src in $STDLIB_SOURCES; do
         $CC -O3 -fPIC -g0 -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset $ARCH_FLAGS \
             -I"$(dirname "$stdlib_src")" -I"$REPO_ROOT/native/include" -I"$REPO_ROOT/native" \
             -c "$stdlib_src" -o "$stdlib_obj"
-        ALL_OBJS="$ALL_OBJS $stdlib_obj"
+        STDLIB_OBJS="$STDLIB_OBJS $stdlib_obj"
     else
         echo "Warning: STDLIB_SOURCES file not found: $stdlib_src"
     fi
@@ -371,7 +372,7 @@ for extra_src in $EXTRA_SOURCES; do
             -I"$(dirname "$extra_src")" -I"$REPO_ROOT/native/include" -I"$REPO_ROOT/native" \
             ${EXTRA_CFLAGS:-} \
             -c "$extra_src" -o "$extra_obj"
-        ALL_OBJS="$ALL_OBJS $extra_obj"
+        EXTRA_OBJS="$EXTRA_OBJS $extra_obj"
     else
         echo "Warning: EXTRA_SOURCES file not found: $extra_src"
     fi
@@ -404,7 +405,6 @@ for isa in $ISAS; do
         $CC -O3 $LTO_FLAG -fPIC -g0 -fno-stack-protector $ARCH_FLAGS $ISA_FLAGS \
             $COMMON_DEFS $COMMON_INCLUDES \
             -c "$SOURCE_FILE" -o "$OFILE"
-        ALL_OBJS="$ALL_OBJS $OFILE"
 
         # Capture flags for .clangd from the first ISA/mode combination
         if [ "$CLANGD_FLAGS_COLLECTED" = false ]; then
@@ -449,22 +449,17 @@ HEADER
 done
 
 # ============================================================
-#  Link into single .syso
+#  Link each mode×ISA into separate .syso
 #
 #  Strategy based on target platform:
 #  - darwin, linux/amd64: prelink (LTO link → extract .text → zero-relocation object)
 #  - linux/arm64, windows: ld -r (simple relocatable link)
+#
+#  Each (mode, isa) combination produces one syso containing:
+#    stdlib objs + extra objs + {basename}_{mode}_{os}_{arch}_{isa}.o
 # ============================================================
 
-SYSO_NAME="${BASENAME}_${TARGET_OS}_${TARGET_ARCH}.syso"
-SYSO_PATH="$TARGET_DIR/$SYSO_NAME"
-
 echo ""
-echo "Linking $SYSO_NAME..."
-echo "Objects to link:"
-for obj in $ALL_OBJS; do
-    echo "  $obj"
-done
 
 # Check if target platform needs prelink (resolved relocations, zero-reloc output)
 needs_prelink() {
@@ -473,36 +468,54 @@ needs_prelink() {
     return 1
 }
 
-if needs_prelink; then
-    ZIG_TARGET=$(get_zig_target "$TARGET_OS" "$TARGET_ARCH")
-    PRELINK_FLAGS="-o $SYSO_PATH -t $ZIG_TARGET"
-    if [ "$USE_LTO" = true ]; then
-        PRELINK_FLAGS="-l $PRELINK_FLAGS"
-    fi
+ALL_SYSO_PATHS=""
 
-    # Darwin export symbol list (from EXPORT_SYMBOL_PREFIX in sources.sh)
-    if [ "$TARGET_OS" = "darwin" ] && [ -n "${EXPORT_SYMBOL_PREFIX:-}" ]; then
-        EXPORT_LIST="$OUTPUT_DIR/_exports.txt"
-        > "$EXPORT_LIST"
-        for isa in $ISAS; do
-            for mode in $ALL_MODES; do
-                echo "_${EXPORT_SYMBOL_PREFIX}_${mode}_${isa}" >> "$EXPORT_LIST"
-            done
-        done
-        PRELINK_FLAGS="$PRELINK_FLAGS -e $EXPORT_LIST"
-    fi
+for isa in $ISAS; do
+    for mode in $ALL_MODES; do
+        MODE_SUFFIX="_${mode}"
+        MAIN_OBJ="${OUTPUT_DIR}/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.o"
+        LINK_OBJS="$STDLIB_OBJS $EXTRA_OBJS $MAIN_OBJ"
 
-    "$REPO_ROOT/scripts/prelink.sh" $PRELINK_FLAGS $ALL_OBJS
-else
-    # Simple relocatable link (linux/arm64, windows, etc.)
-    if [ "$USE_ZIG" = true ]; then
-        echo "Create syso without pre-linking..."
-        zig ld.lld -r $ALL_OBJS -o "$SYSO_PATH"
-    else
-        echo "Create syso without pre-linking..."
-        ld -r -o "$SYSO_PATH" $ALL_OBJS
-    fi
-fi
+        SYSO_NAME="${BASENAME}_${mode}_${isa}_${TARGET_OS}_${TARGET_ARCH}.syso"
+        SYSO_PATH="$TARGET_DIR/$SYSO_NAME"
+
+        echo "Linking $SYSO_NAME..."
+
+        if needs_prelink; then
+            ZIG_TARGET=$(get_zig_target "$TARGET_OS" "$TARGET_ARCH")
+            PRELINK_FLAGS="-o $SYSO_PATH -t $ZIG_TARGET"
+            if [ "$USE_LTO" = true ]; then
+                PRELINK_FLAGS="-l $PRELINK_FLAGS"
+            fi
+
+            # Export symbol list: only the single vj_vm_exec_* symbol for this mode×ISA.
+            # Darwin uses _exported_symbols_list; Linux uses --version-script (via prelink.sh).
+            # Both are driven by the same -e flag passed to prelink.sh.
+            if [ -n "${EXPORT_SYMBOL_PREFIX:-}" ]; then
+                EXPORT_LIST="$OUTPUT_DIR/_exports_${mode}_${isa}.txt"
+                if [ "$TARGET_OS" = "darwin" ]; then
+                    # macOS ld: symbol names must be prefixed with '_'
+                    echo "_${EXPORT_SYMBOL_PREFIX}_${mode}_${isa}" > "$EXPORT_LIST"
+                else
+                    # ELF ld: no leading underscore
+                    echo "${EXPORT_SYMBOL_PREFIX}_${mode}_${isa}" > "$EXPORT_LIST"
+                fi
+                PRELINK_FLAGS="$PRELINK_FLAGS -e $EXPORT_LIST"
+            fi
+
+            "$REPO_ROOT/scripts/prelink.sh" $PRELINK_FLAGS $LINK_OBJS
+        else
+            # Simple relocatable link (linux/arm64, windows, etc.)
+            if [ "$USE_ZIG" = true ]; then
+                zig ld.lld -r $LINK_OBJS -o "$SYSO_PATH"
+            else
+                ld -r -o "$SYSO_PATH" $LINK_OBJS
+            fi
+        fi
+
+        ALL_SYSO_PATHS="$ALL_SYSO_PATHS $SYSO_PATH"
+    done
+done
 
 # ============================================================
 #  Generate .clangd for IDE support (clangd, ccls, etc.)
@@ -533,6 +546,8 @@ echo "Generated $CLANGD_PATH"
 
 echo ""
 echo "Generated files:"
-echo "  $SYSO_PATH"
+for syso in $ALL_SYSO_PATHS; do
+    echo "  $syso"
+done
 echo ""
 echo "Done!"

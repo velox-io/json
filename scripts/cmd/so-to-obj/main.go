@@ -37,6 +37,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func usage() {
@@ -75,6 +76,7 @@ func fatalf(format string, args ...any) {
 func main() {
 	var output string
 	var input string
+	var exportPrefix string
 	quiet := false
 
 	args := os.Args[1:]
@@ -86,6 +88,12 @@ func main() {
 				fatalf("-o requires an argument")
 			}
 			output = args[i]
+		case "-export-prefix":
+			i++
+			if i >= len(args) {
+				fatalf("-export-prefix requires an argument")
+			}
+			exportPrefix = args[i]
 		case "-q":
 			quiet = true
 		case "-h", "--help":
@@ -142,6 +150,18 @@ func main() {
 	}
 	if len(syms) == 0 {
 		fatalf("no function symbols found in .text section")
+	}
+
+	// If -export-prefix is set, demote any symbol whose name does not start
+	// with the prefix to local (STB_LOCAL). This replaces the --version-script
+	// approach so that LTO visibility constraints are not imposed during linking
+	// (which would alter inlining decisions).
+	if exportPrefix != "" {
+		for i := range syms {
+			if !syms[i].Local && !strings.HasPrefix(syms[i].Name, exportPrefix) {
+				syms[i].Local = true
+			}
+		}
 	}
 
 	// Verify at least one global symbol exists

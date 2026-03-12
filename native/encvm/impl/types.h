@@ -271,12 +271,6 @@ enum VjError {
 #define VJ_ST_YIELD_SHIFT    40
 #define VJ_ST_YIELD_MASK     ((uint64_t)0x0000FF0000000000ULL) /* bits [40..47] */
 
-/* Encoding config flag positions within vmstate (at bit 17+). */
-#define VJ_ENC_ESCAPE_HTML          ((uint64_t)1 << (17 + 0)) /* bit 17 */
-#define VJ_ENC_ESCAPE_LINE_TERMS    ((uint64_t)1 << (17 + 1)) /* bit 18 */
-#define VJ_ENC_ESCAPE_INVALID_UTF8  ((uint64_t)1 << (17 + 2)) /* bit 19 */
-#define VJ_ENC_FLOAT_EXP_AUTO       ((uint64_t)1 << (17 + 3)) /* bit 20 */
-
 /* Access macros — extract fields from vmstate. */
 #define VJ_ST_GET_DEPTH(st)   ((int32_t)((st) & VJ_ST_DEPTH_MASK))
 #define VJ_ST_GET_FIRST(st)   ((int)(((st) & VJ_ST_FIRST_BIT) != 0))
@@ -285,6 +279,8 @@ enum VjError {
 #define VJ_ST_GET_YIELD(st)   ((uint32_t)(((st) >> VJ_ST_YIELD_SHIFT) & 0xFF))
 
 /* Mutate macros — modify fields within vmstate. */
+
+/* First-flag mutators */
 #define VJ_ST_SET_FIRST_1(st)   ((st) |= VJ_ST_FIRST_BIT)
 #define VJ_ST_SET_FIRST_0(st)   ((st) &= ~VJ_ST_FIRST_BIT)
 #define VJ_ST_SET_ERR(st, v)    ((st) = ((st) & ~VJ_ST_ERR_MASK) | (((uint64_t)(v) & 0xFF) << VJ_ST_ERR_SHIFT))
@@ -295,17 +291,41 @@ enum VjError {
 #define VJ_ST_INC_DEPTH(st)   ((st) += 1)
 #define VJ_ST_DEC_DEPTH(st)   ((st) -= 1)
 
-/* Legacy-compatible flag masks for helper functions that take a
- * uint32_t 'flags' parameter (e.g. vj_escape_string).  These match
- * the original VjEncFlags bit positions (0-3) extracted by
- * VJ_ST_GET_FLAGS(). */
+/* VJ_ST_BTR_FIRST — test-and-clear of the first flag (bit 16).
+ *
+ * On x86-64 this emits a single `btrq $16, %reg` instruction which
+ * copies bit 16 into CF and clears it in one shot, replacing the
+ * compiler's separate testl + unconditional andq sequence.
+ *
+ * Usage:  int was_first; VJ_ST_BTR_FIRST(vmstate, was_first);
+ *         if (!was_first) { write comma; }
+ *
+ * was_first receives 1 if bit was set (i.e. first element), 0 otherwise.
+ */
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#define VJ_ST_BTR_FIRST(st, was_first)                                         \
+  __asm__ volatile(                                                            \
+      "btrq $16, %[state]"                                                     \
+      : [state] "+r"(st), "=@ccc"(was_first)                                   \
+      : /* no input-only */                                                     \
+      : "cc"                                                                    \
+  )
+#else
+/* Portable fallback: separate test + clear. */
+#define VJ_ST_BTR_FIRST(st, was_first)                                         \
+  do {                                                                         \
+    (was_first) = (int)(((st) & VJ_ST_FIRST_BIT) != 0);                        \
+    (st) &= ~VJ_ST_FIRST_BIT;                                                  \
+  } while (0)
+#endif
+
+/* Encoding config flag masks (bits 0-3 of extracted flags).
+ * Used by helper functions that receive a uint32_t 'flags' parameter
+ * (e.g. vj_escape_string) and by VJ_ST_GET_FLAGS() extraction. */
 #define VJ_FLAGS_ESCAPE_HTML          (1 << 0)
 #define VJ_FLAGS_ESCAPE_LINE_TERMS    (1 << 1)
 #define VJ_FLAGS_ESCAPE_INVALID_UTF8  (1 << 2)
 #define VJ_FLAGS_FLOAT_EXP_AUTO       (1 << 3)
-
-
-
 
 typedef struct VjOpStep {
   uint16_t op_type;     /*  0: opcode | flags (high byte = ZeroCheckTag for OP_SKIP_IF_ZERO) */
@@ -376,7 +396,6 @@ _Static_assert(offsetof(VjStackFrame, frame_type) == 12, "VjStackFrame.frame_typ
 _Static_assert(offsetof(VjStackFrame, ret_base) == 16, "VjStackFrame.ret_base offset");
 _Static_assert(offsetof(VjStackFrame, first) == 24, "VjStackFrame.first offset");
 
-
 enum {
   VJ_ERR_YIELD = 6,  /* VM yielded to Go */
 };
@@ -425,8 +444,7 @@ typedef struct VjExecCtx {
   /* Data source */
   const uint8_t   *cur_base;          /*  32: current struct/elem base */
 
-  /* Packed VM state — see VMState layout above.
-   * Replaces: enc_flags, error_code, depth. */
+  /* Packed VM state — see VMState layout in types.h. */
   uint64_t         vmstate;           /*  40: packed state register */
 
   /* Interface cache (hot: checked on every interface{} field) */
@@ -479,6 +497,5 @@ _Static_assert(offsetof(VjExecCtx, yield_field_idx) == 88,
                "yield_field_idx offset");
 _Static_assert(offsetof(VjExecCtx, stack) == 96, "stack offset");
 _Static_assert(offsetof(VjExecCtx, trace_buf) == 1440, "trace_buf offset");
-
 
 #endif /* VJ_ENCVM_TYPES_H */

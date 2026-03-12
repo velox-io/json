@@ -18,7 +18,6 @@ const (
 // which only performs mandatory JSON escapes (control chars, '"', '\\').
 const escapeStringFlags = escapeHTML | escapeLineTerms | escapeInvalidUTF8
 const escapeStdCompat = escapeStringFlags
-const escapeDefault escapeFlags = 0
 
 var (
 	needsEscape          [256]bool

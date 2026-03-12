@@ -81,12 +81,14 @@ func TestKindToOpcodePanicsForStructural(t *testing.T) {
 }
 
 // ================================================================
-// VjEncFlags ↔ escapeFlags alignment
+// Encoding flags bit position sanity check
 // ================================================================
 
-func TestVjEncFlagsAlignedWithEscapeFlags(t *testing.T) {
-	if vjEncEscapeHTML != uint32(escapeHTML) {
-		t.Errorf("vjEncEscapeHTML=%d != escapeHTML=%d", vjEncEscapeHTML, escapeHTML)
+func TestEncFlagsBitPositions(t *testing.T) {
+	// escapeFlags bits 0-2 must not overlap with vjEncFloatExpAuto (bit 3).
+	if uint32(escapeStringFlags)&vjEncFloatExpAuto != 0 {
+		t.Errorf("escapeStringFlags (0x%x) overlaps with vjEncFloatExpAuto (0x%x)",
+			escapeStringFlags, vjEncFloatExpAuto)
 	}
 }
 

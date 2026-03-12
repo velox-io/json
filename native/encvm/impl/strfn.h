@@ -659,7 +659,7 @@ static inline int escape_string_content_fast(uint8_t *buf, const uint8_t *src, i
 /* Dispatch to the appropriate specialization. */
 static inline int escape_string_content(uint8_t *buf, const uint8_t *src,
                                         int64_t src_len, uint32_t flags) {
-  if (flags & VJ_ENC_ESCAPE_HTML)
+  if (flags & VJ_FLAGS_ESCAPE_HTML)
     return escape_string_content_impl(buf, src, src_len, flags, /*html=*/1);
   return escape_string_content_impl(buf, src, src_len, flags, /*html=*/0);
 }

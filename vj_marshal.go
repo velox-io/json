@@ -47,39 +47,38 @@ type MarshalOption func(*Marshaler)
 
 // WithEscapeHTML enables escaping of <, >, & in strings.
 func WithEscapeHTML() MarshalOption {
-	return func(m *Marshaler) { m.flags |= escapeHTML }
+	return func(m *Marshaler) { m.flags |= uint32(escapeHTML) }
 }
 
 // WithoutEscapeHTML disables escaping of <, >, &.
 func WithoutEscapeHTML() MarshalOption {
-	return func(m *Marshaler) { m.flags &^= escapeHTML }
+	return func(m *Marshaler) { m.flags &^= uint32(escapeHTML) }
 }
 
 // WithEscapeLineTerms enables escaping of U+2028 and U+2029 line terminators in strings.
 func WithEscapeLineTerms() MarshalOption {
-	return func(m *Marshaler) { m.flags |= escapeLineTerms }
+	return func(m *Marshaler) { m.flags |= uint32(escapeLineTerms) }
 }
 
 // WithoutEscapeLineTerms disables escaping of U+2028 and U+2029.
 func WithoutEscapeLineTerms() MarshalOption {
-	return func(m *Marshaler) { m.flags &^= escapeLineTerms }
+	return func(m *Marshaler) { m.flags &^= uint32(escapeLineTerms) }
 }
 
 // WithUTF8Correction enables replacing invalid UTF-8 with \ufffd in strings.
 func WithUTF8Correction() MarshalOption {
-	return func(m *Marshaler) { m.flags |= escapeInvalidUTF8 }
+	return func(m *Marshaler) { m.flags |= uint32(escapeInvalidUTF8) }
 }
 
 // WithoutUTF8Correction disables replacing invalid UTF-8 in strings.
 func WithoutUTF8Correction() MarshalOption {
-	return func(m *Marshaler) { m.flags &^= escapeInvalidUTF8 }
+	return func(m *Marshaler) { m.flags &^= uint32(escapeInvalidUTF8) }
 }
 
 // WithStdCompat enables full encoding/json compatibility.
 func WithStdCompat() MarshalOption {
 	return func(m *Marshaler) {
-		m.flags = escapeStdCompat
-		m.encFlags |= vjEncFloatExpAuto
+		m.flags = uint32(escapeStdCompat) | vjEncFloatExpAuto
 	}
 }
 
@@ -87,7 +86,7 @@ func WithStdCompat() MarshalOption {
 // for floats with |f| < 1e-6 or |f| >= 1e21 (e.g. 1e-7, 1e+21).
 // By default, floats are always formatted in fixed-point notation.
 func WithFloatExpAuto() MarshalOption {
-	return func(m *Marshaler) { m.encFlags |= vjEncFloatExpAuto }
+	return func(m *Marshaler) { m.flags |= vjEncFloatExpAuto }
 }
 
 // WithFastEscape disables all string-level escape features
@@ -95,19 +94,18 @@ func WithFloatExpAuto() MarshalOption {
 // Only mandatory JSON escapes (control chars, '"', '\\') are performed.
 // This enables the fastest string encoding path in the native encoder.
 func WithFastEscape() MarshalOption {
-	return func(m *Marshaler) { m.flags &^= escapeHTML | escapeLineTerms | escapeInvalidUTF8 }
+	return func(m *Marshaler) { m.flags &^= uint32(escapeHTML | escapeLineTerms | escapeInvalidUTF8) }
 }
 
 // Marshaler is a pooled JSON encoder.
 type Marshaler struct {
-	buf      []byte
-	indent   string
-	prefix   string
-	depth    int
-	flags    escapeFlags
-	encFlags uint32    // extra VjEncFlags bits (float format, etc.) ORed with flags for VM
-	vmCtx    VjExecCtx // reusable C VM context (avoids per-call stack zeroing of 1448 bytes)
-	inVM     bool      // true while execVM is active; prevents re-entrant VM calls
+	buf    []byte
+	indent string
+	prefix string
+	depth  int
+	flags  uint32    // escapeFlags (bits 0-2) | vjEncFloatExpAuto (bit 3)
+	vmCtx  VjExecCtx // reusable C VM context (avoids per-call stack zeroing of 1448 bytes)
+	inVM   bool      // true while execVM is active; prevents re-entrant VM calls
 
 	// indentTpl holds the precomputed "\n" + prefix + indent×MAX_DEPTH template
 	// for the C VM indent path. Only used when isSimpleIndent returns true.
@@ -141,7 +139,6 @@ func getMarshaler() *Marshaler {
 	m.prefix = ""
 	m.depth = 0
 	m.flags = 0
-	m.encFlags = 0
 	m.flushFn = nil
 	initMarshalerVMCtx(m)
 	m.setupVMTrace()
@@ -747,13 +744,13 @@ func (m *Marshaler) encodeValueSlow(ti *TypeInfo, ptr unsafe.Pointer) error {
 }
 
 func (m *Marshaler) encodeString(s string) {
-	m.buf = appendEscapedString(m.buf, s, m.flags)
+	m.buf = appendEscapedString(m.buf, s, escapeFlags(m.flags))
 }
 
 // encodeQuotedString double-encodes a string: Go "hello" → JSON "\"hello\"".
 func (m *Marshaler) encodeQuotedString(s string) {
-	inner := appendEscapedString(nil, s, m.flags)
-	m.buf = appendEscapedString(m.buf, unsafeString(inner), m.flags)
+	inner := appendEscapedString(nil, s, escapeFlags(m.flags))
+	m.buf = appendEscapedString(m.buf, unsafeString(inner), escapeFlags(m.flags))
 }
 
 // encodeValueQuoted encodes a value wrapped in a JSON string (for `,string` tag).
@@ -851,7 +848,7 @@ func (m *Marshaler) appendUint64(v uint64) error {
 // encoding/json format: scientific notation for |f| < 1e-6 or |f| >= 1e21.
 // Otherwise uses fixed-point notation.
 func (m *Marshaler) appendJSONFloat64(f float64) {
-	if m.encFlags&vjEncFloatExpAuto != 0 {
+	if m.flags&vjEncFloatExpAuto != 0 {
 		abs := math.Abs(f)
 		if abs != 0 && (abs < 1e-6 || abs >= 1e21) {
 			m.buf = strconv.AppendFloat(m.buf, f, 'e', -1, 64)
@@ -870,7 +867,7 @@ func (m *Marshaler) appendJSONFloat64(f float64) {
 // encoding/json format: scientific notation for |f| < 1e-6 or |f| >= 1e21.
 // Otherwise uses fixed-point notation.
 func (m *Marshaler) appendJSONFloat32(f float64) {
-	if m.encFlags&vjEncFloatExpAuto != 0 {
+	if m.flags&vjEncFloatExpAuto != 0 {
 		abs := float32(math.Abs(f))
 		if abs != 0 && (abs < 1e-6 || abs >= 1e21) {
 			m.buf = strconv.AppendFloat(m.buf, f, 'e', -1, 32)

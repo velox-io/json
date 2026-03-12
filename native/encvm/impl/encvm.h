@@ -80,8 +80,8 @@ VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
   const VjOpStep *op = &ops[ctx->pc];
   const uint8_t *base = ctx->cur_base;
 
-  /* Packed VM state — single register holding cdepth, idepth, first,
-   * enc_flags, error_code, yield_reason.  See types.h for layout.
+  /* Packed VM state — single register holding depth, first, flags,
+   * error_code, yield_reason.  See types.h for layout.
    *
    * The hot-path first-flag check runs every opcode dispatch — a stack
    * round-trip there costs ~2-3 extra cycles per instruction.  We use
@@ -141,7 +141,7 @@ VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
   #define VM_SAVE_INDENT_DEPTH() (ctx->indent_depth = indent_depth)
 #endif
 
-  /* The 'first' flag and enc_flags are packed in vmstate.
+  /* The 'first' flag and encoding flags are packed in vmstate.
    * Go sets vmstate with the correct first/flags state before entry.
    * No RESUME flag parsing needed — vmstate is the single source of truth. */
 
@@ -224,11 +224,12 @@ VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
 #define VM_WRITE_KEY()                                                         \
   do {                                                                         \
     VM_PIN_VMSTATE();                                                          \
-    if (!VJ_ST_GET_FIRST(vmstate)) {                                           \
+    int _was_first;                                                            \
+    VJ_ST_BTR_FIRST(vmstate, _was_first);                                      \
+    if (!_was_first) {                                                         \
       *buf++ = ',';                                                            \
       VM_WRITE_INDENT();                                                       \
     }                                                                          \
-    VJ_ST_SET_FIRST_0(vmstate);                                                \
     if (op->key_len > 0) {                                                     \
       vj_copy_key(buf, op->key_ptr, op->key_len);                              \
       buf += op->key_len;                                                      \
@@ -396,7 +397,7 @@ vj_op_float32: {
   }
   VM_CHECK(op->key_len + 1 + 60 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
-  buf += us_write_float32(buf, fval, (vmstate & VJ_ENC_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED);
+  buf += us_write_float32(buf, fval, (VJ_ST_GET_FLAGS(vmstate) & VJ_FLAGS_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED);
   VM_NEXT();
 }
 
@@ -409,7 +410,7 @@ vj_op_float64: {
   }
   VM_CHECK(op->key_len + 1 + 330 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
-  buf += us_write_float64(buf, dval, (vmstate & VJ_ENC_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED);
+  buf += us_write_float64(buf, dval, (VJ_ST_GET_FLAGS(vmstate) & VJ_FLAGS_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED);
   VM_NEXT();
 }
 
@@ -616,9 +617,10 @@ vj_op_obj_close: {
    * No stack frame pop — mirrors vj_op_obj_open. */
   VM_INDENT_DEC();
   VM_CHECK(1 + VM_INDENT_PAD(indent_depth));
-  if (!VJ_ST_GET_FIRST(vmstate)) { VM_WRITE_INDENT(); }
+  { int _was_first; VJ_ST_BTR_FIRST(vmstate, _was_first);
+    if (!_was_first) { VM_WRITE_INDENT(); }
+  }
   *buf++ = '}';
-  VJ_ST_SET_FIRST_0(vmstate);
   VM_NEXT();
 }
 

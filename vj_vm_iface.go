@@ -66,7 +66,7 @@ func (m *Marshaler) handleInterfaceYield(ctx *VjExecCtx, activeBP *Blueprint) er
 			m.vmWriteIndent(ctx)
 			m.buf = append(m.buf, ']')
 			// Decrement depth in vmstate and clear first flag.
-			ctx.VMState -= 1 // VJ_ST_DEC_DEPTH: depth at bits [0..7]
+			ctx.VMState-- // VJ_ST_DEC_DEPTH: depth at bits [0..7]
 			ctx.VMState &^= vjStFirstBit
 			ctx.CurBase = frame.RetBase
 			bodyLen := activeBP.Ops[ctx.PC-1].OperandB

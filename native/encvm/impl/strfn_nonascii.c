@@ -231,8 +231,8 @@ static inline void vj_validate_utf8_run(uint8_t **out_ptr, const uint8_t *src, i
 /* ---- Non-ASCII run dispatcher ---- */
 
 int64_t vj_escape_nonascii_run(uint8_t **out_ptr, const uint8_t *src, int64_t i, int64_t src_len, uint32_t flags) {
-  const int check_utf8 = (flags & VJ_ENC_ESCAPE_INVALID_UTF8) != 0;
-  const int check_line_terms = (flags & VJ_ENC_ESCAPE_LINE_TERMS) != 0;
+  const int check_utf8 = (flags & VJ_FLAGS_ESCAPE_INVALID_UTF8) != 0;
+  const int check_line_terms = (flags & VJ_FLAGS_ESCAPE_LINE_TERMS) != 0;
 
   /* Find end of non-ASCII run. */
   int64_t run_end = i;

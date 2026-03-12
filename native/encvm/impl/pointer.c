@@ -55,8 +55,8 @@ VjPtrEncResult vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend,
       return (VjPtrEncResult){NULL, VJ_ERR_NAN_INF};
     }
     buf += us_write_float32(buf, fval,
-                            (flags & VJ_ENC_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO
-                                                            : US_FMT_FIXED);
+                            (flags & VJ_FLAGS_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO
+                                                              : US_FMT_FIXED);
     break;
   }
   case OP_FLOAT64: {
@@ -66,8 +66,8 @@ VjPtrEncResult vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend,
       return (VjPtrEncResult){NULL, VJ_ERR_NAN_INF};
     }
     buf += us_write_float64(buf, dval,
-                            (flags & VJ_ENC_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO
-                                                            : US_FMT_FIXED);
+                            (flags & VJ_FLAGS_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO
+                                                              : US_FMT_FIXED);
     break;
   }
   case OP_STRING: {
