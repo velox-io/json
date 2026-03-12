@@ -25,17 +25,16 @@ func TestTokenizer_EmptyBuffer(t *testing.T) {
 func TestTokenizer_SimpleObject(t *testing.T) {
 	// {"a":1}
 	// 0123456
-	// StructuralStart tokens: { " : 1 }
-	// Positions:              0 1 4 5 6
-	// Note: position 1 is opening quote (string scalar start),
-	//       position 3 (closing quote) is NOT a token start.
+	// Structural tokens (with closing quotes): { " " : 1 }
+	// Positions:                                0 1 3 4 5 6
+	// Note: both opening quote (1) and closing quote (3) are tokens.
 	data := []byte(`{"a":1}`)
 	cm := NewChunkManager(DefaultScanner)
 	cm.FeedBuffer(data)
 	tok := NewTokenizer(cm)
 
-	expected := []int{0, 1, 4, 5, 6}
-	expectedChars := []byte{'{', '"', ':', '1', '}'}
+	expected := []int{0, 1, 3, 4, 5, 6}
+	expectedChars := []byte{'{', '"', '"', ':', '1', '}'}
 
 	for i, want := range expected {
 		off := tok.Next()
@@ -179,8 +178,8 @@ func TestTokenizer_MultiChunk(t *testing.T) {
 	cm := NewChunkManager(DefaultScanner)
 	cm.FeedBuffer(data)
 
-	if len(cm.chunks) < 2 {
-		t.Fatalf("expected multi-chunk, got %d chunks for %d bytes", len(cm.chunks), len(data))
+	if cm.numChunks() < 2 {
+		t.Fatalf("expected multi-chunk, got %d chunks for %d bytes", cm.numChunks(), len(data))
 	}
 
 	tok := NewTokenizer(cm)
@@ -247,10 +246,10 @@ func TestTokenizer_HeadAlignment(t *testing.T) {
 	cm.FeedBuffer(buf)
 
 	// Should have a head chunk
-	if len(cm.chunks) == 0 {
+	if cm.numChunks() == 0 {
 		t.Fatal("no chunks produced")
 	}
-	if !cm.chunks[0].IsHeadSpan {
+	if !cm.chunkIsHead(0) {
 		t.Log("warning: no head chunk produced (buffer may be short enough for single tail)")
 	}
 
@@ -258,13 +257,14 @@ func TestTokenizer_HeadAlignment(t *testing.T) {
 
 	// {"x":2}
 	// 0123456
-	// Expected tokens: { " : 2 }  at offsets 0 1 4 5 6
+	// Expected tokens (with closing quotes): { " " : 2 }  at offsets 0 1 3 4 5 6
 	expected := []struct {
 		off  int
 		char byte
 	}{
 		{0, '{'},
 		{1, '"'},
+		{3, '"'},
 		{4, ':'},
 		{5, '2'},
 		{6, '}'},

@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"unsafe"
 )
 
 // =============================================================================
@@ -248,19 +249,22 @@ func buildStructDecoder(t reflect.Type) *reflectStructDecoder {
 
 // reflectSliceDecoder handles slice decoding for any element type
 type reflectSliceDecoder struct {
-	sliceType   reflect.Type // the slice type itself, e.g., []int64
-	elemType    reflect.Type
-	elemSize    uintptr   // size of one element (for unsafe pointer arithmetic)
-	elemTI      *typeInfo // cached typeInfo for element (pointer for cycle safety)
+	sliceType      reflect.Type    // the slice type itself, e.g., []int64
+	elemType       reflect.Type
+	elemSize       uintptr         // size of one element (for unsafe pointer arithmetic)
+	elemTI         *typeInfo       // cached typeInfo for element (pointer for cycle safety)
+	emptySliceData unsafe.Pointer  // pre-created empty slice backing, avoids reflect.MakeSlice per empty []
 }
 
 func buildSliceDecoder(t reflect.Type) *reflectSliceDecoder {
 	elemTI := getDecoder(t.Elem())
+	emptySlice := reflect.MakeSlice(t, 0, 0)
 	return &reflectSliceDecoder{
-		sliceType: t,
-		elemType:  t.Elem(),
-		elemSize:  t.Elem().Size(),
-		elemTI:    elemTI,
+		sliceType:      t,
+		elemType:       t.Elem(),
+		elemSize:       t.Elem().Size(),
+		elemTI:         elemTI,
+		emptySliceData: unsafe.Pointer(emptySlice.Pointer()),
 	}
 }
 

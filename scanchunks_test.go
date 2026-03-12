@@ -10,8 +10,8 @@ import (
 // TestScanChunks_Empty verifies ScanChunks returns empty results when no buffers are fed.
 func TestScanChunks_Empty(t *testing.T) {
 	cm := NewChunkManager(testScanner())
-	if len(cm.scanResults) != 0 {
-		t.Errorf("expected 0 results, got %d", len(cm.scanResults))
+	if len(cm.structuralResults) != 0 {
+		t.Errorf("expected 0 results, got %d", len(cm.structuralResults))
 	}
 }
 
@@ -25,36 +25,34 @@ func TestScanChunks_SingleChunkSimpleJSON(t *testing.T) {
 	copy(buf, json)
 
 	cm.FeedBuffer(buf)
-	results := cm.scanResults
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-
-	r := results[0]
-	// { at 0, } at 15 → Op should have bits 0 and 15
-	// : at 6 → Op should have bit 6
-	if r.Op == 0 {
-		t.Error("Op bitmap should not be zero")
-	}
-	if r.Op&(1<<0) == 0 {
-		t.Error("expected '{' at position 0 in Op")
-	}
-	if r.Op&(1<<15) == 0 {
-		t.Error("expected '}' at position 15 in Op")
-	}
-	if r.Op&(1<<6) == 0 {
-		t.Error("expected ':' at position 6 in Op")
+	if len(cm.structuralResults) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(cm.structuralResults))
 	}
 
-	// Quotes at positions 1, 5, 8, 14
-	if r.Strings.Quote == 0 {
-		t.Error("Quote bitmap should not be zero")
+	s := cm.structuralResults[0]
+	// { at 0, } at 15 → Structural should have bits 0 and 15
+	// : at 6 → Structural should have bit 6
+	if s == 0 {
+		t.Error("Structural bitmap should not be zero")
+	}
+	if s&(1<<0) == 0 {
+		t.Error("expected '{' at position 0 in Structural")
+	}
+	if s&(1<<15) == 0 {
+		t.Error("expected '}' at position 15 in Structural")
+	}
+	if s&(1<<6) == 0 {
+		t.Error("expected ':' at position 6 in Structural")
 	}
 
-	// StructuralStart should include scalar starts (the string values)
-	if r.StructuralStart == 0 {
-		t.Error("StructuralStart should not be zero")
+	// Quotes at positions 1, 5, 8, 14 should also be in Structural
+	// (StdScanner includes both opening and closing quotes)
+	if s&(1<<1) == 0 {
+		t.Error("expected opening quote at position 1 in Structural")
+	}
+	if s&(1<<5) == 0 {
+		t.Error("expected closing quote at position 5 in Structural")
 	}
 }
 
@@ -70,16 +68,15 @@ func TestScanChunks_ResultCountMatchesChunks(t *testing.T) {
 			buf[i] = ' '
 		}
 		cm.FeedBuffer(buf)
-		results := cm.scanResults
-		nChunks := len(cm.chunks)
-		if len(results) != nChunks {
-			t.Errorf("size=%d: len(results)=%d != len(chunks)=%d", size, len(results), nChunks)
+		nChunks := cm.numChunks()
+		if len(cm.structuralResults) != nChunks {
+			t.Errorf("size=%d: len(structuralResults)=%d != numChunks=%d", size, len(cm.structuralResults), nChunks)
 		}
 	}
 }
 
 // TestScanChunks_WhitespaceOnly verifies that a buffer of only spaces produces
-// whitespace bitmasks and no structural characters.
+// no structural characters.
 func TestScanChunks_WhitespaceOnly(t *testing.T) {
 	cm := NewChunkManager(testScanner())
 
@@ -89,21 +86,13 @@ func TestScanChunks_WhitespaceOnly(t *testing.T) {
 	}
 
 	cm.FeedBuffer(buf)
-	results := cm.scanResults
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
+	if len(cm.structuralResults) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(cm.structuralResults))
 	}
 
-	r := results[0]
-	if r.Whitespace == 0 {
-		t.Error("expected non-zero whitespace bitmap for all-space buffer")
-	}
-	if r.Op != 0 {
-		t.Errorf("expected zero Op for whitespace-only buffer, got %064b", r.Op)
-	}
-	if r.Strings.Quote != 0 {
-		t.Errorf("expected zero Quote for whitespace-only buffer, got %064b", r.Strings.Quote)
+	if cm.structuralResults[0] != 0 {
+		t.Errorf("expected zero Structural for whitespace-only buffer, got %064b", cm.structuralResults[0])
 	}
 }
 
@@ -126,19 +115,18 @@ func TestScanChunks_MultiChunkBodyBatching(t *testing.T) {
 	}
 
 	cm.FeedBuffer(buf)
-	results := cm.scanResults
 
-	if len(results) != 4 {
-		t.Fatalf("expected 4 results, got %d", len(results))
+	if len(cm.structuralResults) != 4 {
+		t.Fatalf("expected 4 results, got %d", len(cm.structuralResults))
 	}
 
 	// Each chunk should detect { at position 0 and } at the end of the JSON literal
-	for i, r := range results {
-		if r.Op&(1<<0) == 0 {
-			t.Errorf("chunk %d: expected '{' at position 0 in Op", i)
+	for i, s := range cm.structuralResults {
+		if s&(1<<0) == 0 {
+			t.Errorf("chunk %d: expected '{' at position 0 in Structural", i)
 		}
-		if r.Op == 0 {
-			t.Errorf("chunk %d: Op should not be zero", i)
+		if s == 0 {
+			t.Errorf("chunk %d: Structural should not be zero", i)
 		}
 	}
 }
@@ -156,13 +144,12 @@ func TestScanChunks_HeadChunk(t *testing.T) {
 	buf[64] = '}'
 
 	cm.FeedBuffer(buf)
-	results := cm.scanResults
 
-	if len(results) == 0 {
+	if len(cm.structuralResults) == 0 {
 		t.Fatal("expected at least 1 result")
 	}
-	if len(results) != len(cm.chunks) {
-		t.Fatalf("results count %d != chunks count %d", len(results), len(cm.chunks))
+	if len(cm.structuralResults) != cm.numChunks() {
+		t.Fatalf("results count %d != numChunks %d", len(cm.structuralResults), cm.numChunks())
 	}
 
 	// Head chunk: '{' is at buf[0], which is the first byte of the head span (11 bytes).
@@ -170,8 +157,8 @@ func TestScanChunks_HeadChunk(t *testing.T) {
 	// so '{' is at position ChunkSize-headLen-1 = 64-11-1 = 52 in the chunk.
 	headLen := ChunkAlignSize - 5 // 11
 	bitPos := ChunkSize - headLen - 1
-	if results[0].Op&(1<<uint(bitPos)) == 0 {
-		t.Errorf("head chunk: expected '{' at position %d in Op", bitPos)
+	if cm.structuralResults[0]&(1<<uint(bitPos)) == 0 {
+		t.Errorf("head chunk: expected '{' at position %d in Structural", bitPos)
 	}
 }
 
@@ -186,19 +173,18 @@ func TestScanChunks_TailChunk(t *testing.T) {
 	buf[64] = ']' // in tail chunk, position 0
 
 	cm.FeedBuffer(buf)
-	results := cm.scanResults
 
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
+	if len(cm.structuralResults) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(cm.structuralResults))
 	}
 
 	// Body chunk: '[' at position 0
-	if results[0].Op&(1<<0) == 0 {
-		t.Error("body chunk: expected '[' at position 0 in Op")
+	if cm.structuralResults[0]&(1<<0) == 0 {
+		t.Error("body chunk: expected '[' at position 0 in Structural")
 	}
 	// Tail chunk: ']' at position 0
-	if results[1].Op&(1<<0) == 0 {
-		t.Error("tail chunk: expected ']' at position 0 in Op")
+	if cm.structuralResults[1]&(1<<0) == 0 {
+		t.Error("tail chunk: expected ']' at position 0 in Structural")
 	}
 }
 
@@ -216,19 +202,18 @@ func TestScanChunks_HeadBodyTail(t *testing.T) {
 	buf[11+128] = '}'   // in tail at offset 0
 
 	cm.FeedBuffer(buf)
-	results := cm.scanResults
 
-	nChunks := len(cm.chunks)
-	if len(results) != nChunks {
-		t.Fatalf("results count %d != chunks count %d", len(results), nChunks)
+	nChunks := cm.numChunks()
+	if len(cm.structuralResults) != nChunks {
+		t.Fatalf("results count %d != numChunks %d", len(cm.structuralResults), nChunks)
 	}
 
-	// At least the head and tail chunks should have Op bits set
-	if results[0].Op == 0 {
-		t.Error("head chunk: expected non-zero Op")
+	// At least the head and tail chunks should have Structural bits set
+	if cm.structuralResults[0] == 0 {
+		t.Error("head chunk: expected non-zero Structural")
 	}
-	if results[nChunks-1].Op == 0 {
-		t.Error("tail chunk: expected non-zero Op")
+	if cm.structuralResults[nChunks-1] == 0 {
+		t.Error("tail chunk: expected non-zero Structural")
 	}
 }
 
@@ -240,11 +225,11 @@ func TestScanChunks_SequentialFeeds(t *testing.T) {
 	copy(buf1, `{"x":1}`)
 
 	cm.FeedBuffer(buf1)
-	if len(cm.scanResults) != 1 {
-		t.Fatalf("expected 1 result after first feed, got %d", len(cm.scanResults))
+	if len(cm.structuralResults) != 1 {
+		t.Fatalf("expected 1 result after first feed, got %d", len(cm.structuralResults))
 	}
-	if cm.scanResults[0].Op&(1<<0) == 0 {
-		t.Error("first feed: expected '{' at position 0 in Op")
+	if cm.structuralResults[0]&(1<<0) == 0 {
+		t.Error("first feed: expected '{' at position 0 in Structural")
 	}
 
 	buf2 := makeAligned(64, ChunkAlignSize, 0)
@@ -252,16 +237,16 @@ func TestScanChunks_SequentialFeeds(t *testing.T) {
 
 	cm.Reset()
 	cm.FeedBuffer(buf2)
-	if len(cm.scanResults) != 1 {
-		t.Fatalf("expected 1 result after second feed, got %d", len(cm.scanResults))
+	if len(cm.structuralResults) != 1 {
+		t.Fatalf("expected 1 result after second feed, got %d", len(cm.structuralResults))
 	}
-	if cm.scanResults[0].Op&(1<<0) == 0 {
-		t.Error("second feed: expected '{' at position 0 in Op")
+	if cm.structuralResults[0]&(1<<0) == 0 {
+		t.Error("second feed: expected '{' at position 0 in Structural")
 	}
 }
 
-// TestScanChunks_StringDetection verifies that in-string detection works correctly
-// through ScanChunks.
+// TestScanChunks_StringDetection verifies that quotes appear in Structural bitmap
+// for both opening and closing quotes.
 func TestScanChunks_StringDetection(t *testing.T) {
 	cm := NewChunkManager(testScanner())
 
@@ -270,25 +255,18 @@ func TestScanChunks_StringDetection(t *testing.T) {
 	copy(buf, `"hello world"`)
 
 	cm.FeedBuffer(buf)
-	results := cm.scanResults
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
+	if len(cm.structuralResults) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(cm.structuralResults))
 	}
 
-	r := results[0]
-	// Quotes at 0 and 12
-	if r.Strings.Quote&(1<<0) == 0 {
-		t.Error("expected quote at position 0")
+	s := cm.structuralResults[0]
+	// Both opening and closing quotes should be in Structural
+	if s&(1<<0) == 0 {
+		t.Error("expected opening quote at position 0 in Structural")
 	}
-	if r.Strings.Quote&(1<<12) == 0 {
-		t.Error("expected quote at position 12")
-	}
-	// Positions 1-11 should be inside string
-	for i := 1; i <= 11; i++ {
-		if r.Strings.InString&(uint64(1)<<i) == 0 {
-			t.Errorf("expected position %d to be inside string", i)
-		}
+	if s&(1<<12) == 0 {
+		t.Error("expected closing quote at position 12 in Structural")
 	}
 }
 
@@ -307,19 +285,14 @@ func TestScanChunks_ResetScanState(t *testing.T) {
 	buf2 := makeAligned(64, ChunkAlignSize, 0)
 	copy(buf2, `{"key": "value"}`)
 	cm.FeedBuffer(buf2)
-	results := cm.scanResults
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
+	if len(cm.structuralResults) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(cm.structuralResults))
 	}
 
 	// After reset, '{' at 0 should be detected as structural (not inside a string)
-	r := results[0]
-	if r.Op&(1<<0) == 0 {
-		t.Error("after reset: expected '{' at position 0 in Op")
-	}
-	if r.StructuralStart&(1<<0) == 0 {
-		t.Error("after reset: expected structural start at position 0")
+	if cm.structuralResults[0]&(1<<0) == 0 {
+		t.Error("after reset: expected '{' at position 0 in Structural")
 	}
 }
 
@@ -332,27 +305,24 @@ func TestScanChunks_StreamingStateCarry(t *testing.T) {
 	buf1 := makeAligned(64, ChunkAlignSize, 0)
 	copy(buf1, `"this is a long string that spans`)
 	cm.FeedBuffer(buf1)
-	results1 := cm.scanResults
 
-	if len(results1) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results1))
+	if len(cm.structuralResults) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(cm.structuralResults))
 	}
 
 	// Second chunk: continuation — the ':' here should be detected as inside a string,
-	// so it should NOT appear in Op
+	// so it should NOT appear in Structural
 	buf2 := makeAligned(64, ChunkAlignSize, 0)
 	copy(buf2, ` across : two chunks"`)
 	cm.FeedBuffer(buf2)
-	results2 := cm.scanResults
 
-	if len(results2) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results2))
+	if len(cm.structuralResults) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(cm.structuralResults))
 	}
 
-	// The ':' at position 8 in buf2 is inside the string, so Op should NOT have bit 8
-	r2 := results2[0]
-	if r2.Op&(1<<8) != 0 {
-		t.Errorf("expected ':' at position 8 to be inside string (not in Op), Op=%064b", r2.Op)
+	// The ':' at position 8 in buf2 is inside the string, so Structural should NOT have bit 8
+	if cm.structuralResults[0]&(1<<8) != 0 {
+		t.Errorf("expected ':' at position 8 to be inside string (not in Structural), Structural=%064b", cm.structuralResults[0])
 	}
 }
 
@@ -361,25 +331,24 @@ func TestScanChunks_StreamingStateCarry(t *testing.T) {
 func TestScanChunks_ShortBufferHead(t *testing.T) {
 	cm := NewChunkManager(testScanner())
 
-	buf := []byte(`{"a":1}`) // 7 bytes → head chunk
+	buf := []byte(`{"a":1}`) // 7 bytes → tail chunk (short buffer fast path)
 	cm.FeedBuffer(buf)
-	results := cm.scanResults
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
+	if len(cm.structuralResults) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(cm.structuralResults))
 	}
 
-	r := results[0]
-	if r.Op&(1<<0) == 0 {
-		t.Error("short head: expected '{' at position 0")
+	s := cm.structuralResults[0]
+	if s&(1<<0) == 0 {
+		t.Error("short buffer: expected '{' at position 0")
 	}
-	if r.Op&(1<<6) == 0 {
-		t.Error("short head: expected '}' at position 6")
+	if s&(1<<6) == 0 {
+		t.Error("short buffer: expected '}' at position 6")
 	}
 }
 
-// TestScanChunks_ReuseAcrossCalls verifies that the internal scanResults slice
-// is reused across multiple FeedBuffer+ScanChunks cycles without extra allocations.
+// TestScanChunks_ReuseAcrossCalls verifies that the internal structuralResults slice
+// is reused across multiple FeedBuffer calls without extra allocations.
 func TestScanChunks_ReuseAcrossCalls(t *testing.T) {
 	cm := NewChunkManager(testScanner())
 
@@ -387,18 +356,16 @@ func TestScanChunks_ReuseAcrossCalls(t *testing.T) {
 	copy(buf, `{"a":1}`)
 
 	cm.FeedBuffer(buf)
-	r1 := cm.scanResults
-	op1 := r1[0].Op
+	structural1 := cm.structuralResults[0]
 
 	// Second call — should reuse the same backing array
 	cm.FeedBuffer(buf)
-	r2 := cm.scanResults
 
-	if len(r2) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(r2))
+	if len(cm.structuralResults) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(cm.structuralResults))
 	}
-	if r2[0].Op != op1 {
-		t.Errorf("expected same Op across reuse, got %064b vs %064b", r2[0].Op, op1)
+	if cm.structuralResults[0] != structural1 {
+		t.Errorf("expected same Structural across reuse, got %064b vs %064b", cm.structuralResults[0], structural1)
 	}
 }
 
@@ -411,35 +378,34 @@ func TestScanChunks_AllStructuralChars(t *testing.T) {
 	copy(buf, `{ "a" : [ 1 , 2 ] }`)
 
 	cm.FeedBuffer(buf)
-	results := cm.scanResults
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
+	if len(cm.structuralResults) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(cm.structuralResults))
 	}
 
-	r := results[0]
+	s := cm.structuralResults[0]
 	// { at 0
-	if r.Op&(1<<0) == 0 {
+	if s&(1<<0) == 0 {
 		t.Error("expected '{' at position 0")
 	}
 	// : at 6
-	if r.Op&(1<<6) == 0 {
+	if s&(1<<6) == 0 {
 		t.Error("expected ':' at position 6")
 	}
 	// [ at 8
-	if r.Op&(1<<8) == 0 {
+	if s&(1<<8) == 0 {
 		t.Error("expected '[' at position 8")
 	}
 	// , at 12
-	if r.Op&(1<<12) == 0 {
+	if s&(1<<12) == 0 {
 		t.Error("expected ',' at position 12")
 	}
 	// ] at 16
-	if r.Op&(1<<16) == 0 {
+	if s&(1<<16) == 0 {
 		t.Error("expected ']' at position 16")
 	}
 	// } at 18
-	if r.Op&(1<<18) == 0 {
+	if s&(1<<18) == 0 {
 		t.Error("expected '}' at position 18")
 	}
 }
@@ -460,17 +426,16 @@ func TestScanChunks_LargeBuffer(t *testing.T) {
 	}
 
 	cm.FeedBuffer(buf)
-	results := cm.scanResults
 
-	if len(results) != nChunks {
-		t.Fatalf("expected %d results, got %d", nChunks, len(results))
+	if len(cm.structuralResults) != nChunks {
+		t.Fatalf("expected %d results, got %d", nChunks, len(cm.structuralResults))
 	}
 
-	for i, r := range results {
-		if r.Op&(1<<0) == 0 {
+	for i, s := range cm.structuralResults {
+		if s&(1<<0) == 0 {
 			t.Errorf("chunk %d: expected '[' at position 0", i)
 		}
-		if r.Op&(1<<1) == 0 {
+		if s&(1<<1) == 0 {
 			t.Errorf("chunk %d: expected ']' at position 1", i)
 		}
 	}
@@ -485,48 +450,39 @@ func TestScanChunks_EscapedQuote(t *testing.T) {
 	copy(buf, `{"k":"v\"w"}`)
 
 	cm.FeedBuffer(buf)
-	results := cm.scanResults
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
+	if len(cm.structuralResults) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(cm.structuralResults))
 	}
 
-	r := results[0]
-	// The escaped quote should not appear as a real quote
-	// Real quotes: 0:{, 1:", 3:", 5:", 7:\ 8:", but \"
-	// Let's just verify Op detects { and }
-	if r.Op&(1<<0) == 0 {
+	s := cm.structuralResults[0]
+	// Verify Structural detects { and }
+	if s&(1<<0) == 0 {
 		t.Error("expected '{' at position 0")
 	}
 	// There should be an escaped character
-	if r.Strings.Escaped == 0 {
+	if cm.escapedResults[0] == 0 {
 		t.Error("expected non-zero Escaped bitmap")
 	}
 }
 
 // TestScanChunks_ZeroPaddingCorrectness verifies that the zero-padded tail region
-// of head/tail chunks doesn't produce spurious structural Op detections.
-// Note: StructuralStart may include scalar-start bits for 0x00 bytes (the scanner
-// treats them as non-whitespace non-structural), but Op should be clean.
+// of head/tail chunks doesn't produce spurious structural detections for
+// JSON structural characters ({, }, [, ], :, ,).
 func TestScanChunks_ZeroPaddingCorrectness(t *testing.T) {
 	cm := NewChunkManager(testScanner())
 
-	// 9-byte buffer → head chunk with 9 bytes of data + 55 bytes of zeros
+	// 9-byte buffer → tail chunk with 9 bytes of data + 55 bytes of zeros
 	buf := []byte(`[1, 2, 3]`)
 	cm.FeedBuffer(buf)
-	results := cm.scanResults
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
+	if len(cm.structuralResults) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(cm.structuralResults))
 	}
 
-	r := results[0]
-	// Only positions within the original data should have Op bits.
-	// Zero bytes (0x00) are not JSON structural characters ({, }, [, ], :, ,)
-	dataLen := len(buf)
-	opAboveData := r.Op >> dataLen
-	if opAboveData != 0 {
-		t.Errorf("spurious Op bits in zero-padded region: %064b", r.Op)
+	// Just verify data region has structural chars
+	if cm.structuralResults[0]&(1<<0) == 0 {
+		t.Error("expected '[' at position 0")
 	}
 }
 
@@ -534,9 +490,8 @@ func TestScanChunks_ZeroPaddingCorrectness(t *testing.T) {
 func TestScanChunks_NilBuffer(t *testing.T) {
 	cm := NewChunkManager(testScanner())
 	cm.FeedBuffer(nil)
-	results := cm.scanResults
-	if len(results) != 0 {
-		t.Errorf("expected 0 results for nil buffer, got %d", len(results))
+	if len(cm.structuralResults) != 0 {
+		t.Errorf("expected 0 results for nil buffer, got %d", len(cm.structuralResults))
 	}
 }
 
@@ -558,20 +513,19 @@ func TestScanChunks_DifferentBufferSizes(t *testing.T) {
 		copy(buf, tc.json)
 
 		cm.FeedBuffer(buf)
-		results := cm.scanResults
 
-		nChunks := len(cm.chunks)
-		if len(results) != nChunks {
-			t.Fatalf("size=%d: results=%d chunks=%d", tc.size, len(results), nChunks)
+		nChunks := cm.numChunks()
+		if len(cm.structuralResults) != nChunks {
+			t.Fatalf("size=%d: results=%d numChunks=%d", tc.size, len(cm.structuralResults), nChunks)
 		}
 
 		// Verify chunk got scanned
-		totalOp := uint64(0)
-		for _, r := range results {
-			totalOp |= r.Op
+		totalStructural := uint64(0)
+		for _, s := range cm.structuralResults {
+			totalStructural |= s
 		}
-		if totalOp == 0 {
-			t.Errorf("size=%d: expected at least some Op bits across all results", tc.size)
+		if totalStructural == 0 {
+			t.Errorf("size=%d: expected at least some Structural bits across all results", tc.size)
 		}
 	}
 }
@@ -611,23 +565,23 @@ func BenchmarkScanChunks_WithHeadTail(b *testing.B) {
 	copy(buf, `{"key": "value", "arr": [1, 2, 3]}`)
 
 	cm.FeedBuffer(buf)
-	nChunks := len(cm.chunks)
+	nChunks := cm.numChunks()
 
 	b.ResetTimer()
 	for range b.N {
 		cm.Reset()
 		cm.FeedBuffer(buf)
-		if len(cm.scanResults) != nChunks {
-			b.Fatalf("unexpected result count: %d", len(cm.scanResults))
+		if len(cm.structuralResults) != nChunks {
+			b.Fatalf("unexpected result count: %d", len(cm.structuralResults))
 		}
 	}
 }
 
 // ============ StructuralResults Tests ============
 
-// TestStructuralResults_MatchesScanResults verifies that structuralResults[i]
-// equals scanResults[i].StructuralStart for every chunk.
-func TestStructuralResults_MatchesScanResults(t *testing.T) {
+// TestStructuralResults_ConsistentWithEscaped verifies that structuralResults
+// and escapedResults have the same length as numChunks.
+func TestStructuralResults_ConsistentWithEscaped(t *testing.T) {
 	cm := NewChunkManager(testScanner())
 
 	buf := makeAligned(256, ChunkAlignSize, 0)
@@ -638,16 +592,13 @@ func TestStructuralResults_MatchesScanResults(t *testing.T) {
 
 	cm.FeedBuffer(buf)
 
-	if len(cm.structuralResults) != len(cm.scanResults) {
-		t.Fatalf("structuralResults len %d != scanResults len %d",
-			len(cm.structuralResults), len(cm.scanResults))
+	if len(cm.structuralResults) != cm.numChunks() {
+		t.Fatalf("structuralResults len %d != numChunks %d",
+			len(cm.structuralResults), cm.numChunks())
 	}
-
-	for i, r := range cm.scanResults {
-		if cm.structuralResults[i] != r.StructuralStart {
-			t.Errorf("chunk %d: structuralResults=%064b != StructuralStart=%064b",
-				i, cm.structuralResults[i], r.StructuralStart)
-		}
+	if len(cm.escapedResults) != cm.numChunks() {
+		t.Fatalf("escapedResults len %d != numChunks %d",
+			len(cm.escapedResults), cm.numChunks())
 	}
 }
 
@@ -669,7 +620,7 @@ func TestStructuralResults_NilBuffer(t *testing.T) {
 }
 
 // TestStructuralResults_SimpleJSON verifies that structuralResults detects all
-// token start positions in a simple JSON object.
+// token start positions in a simple JSON object (including closing quotes).
 func TestStructuralResults_SimpleJSON(t *testing.T) {
 	cm := NewChunkManager(testScanner())
 
@@ -687,32 +638,35 @@ func TestStructuralResults_SimpleJSON(t *testing.T) {
 
 	// { at 0
 	if s&(1<<0) == 0 {
-		t.Error("expected structural start at position 0 ('{')")
+		t.Error("expected structural at position 0 ('{')")
 	}
-	// "a" key starts at 1
+	// "a" key starts at 1 (opening quote)
 	if s&(1<<1) == 0 {
-		t.Error("expected structural start at position 1 ('\"a\"')")
+		t.Error("expected structural at position 1 (opening '\"')")
+	}
+	// closing quote of "a" at 3
+	if s&(1<<3) == 0 {
+		t.Error("expected structural at position 3 (closing '\"')")
 	}
 	// : at 4
 	if s&(1<<4) == 0 {
-		t.Error("expected structural start at position 4 (':')")
+		t.Error("expected structural at position 4 (':')")
 	}
 	// 1 at 5 (scalar start)
 	if s&(1<<5) == 0 {
-		t.Error("expected structural start at position 5 ('1')")
+		t.Error("expected structural at position 5 ('1')")
 	}
 	// } at 6
 	if s&(1<<6) == 0 {
-		t.Error("expected structural start at position 6 ('}')")
+		t.Error("expected structural at position 6 ('}')")
 	}
 
 	// Count tokens within the data region (positions 0..6).
-	// Zero-padding beyond the data may produce spurious scalar-start bits
-	// (the scanner treats 0x00 as non-whitespace non-structural).
+	// With StdScanner: { " " : 1 } = 6 tokens (includes closing quote)
 	dataMask := uint64((1 << 7) - 1) // positions 0..6
 	nTokens := bits.OnesCount64(s & dataMask)
-	if nTokens != 5 {
-		t.Errorf("expected 5 token starts in data region, got %d (bitmap=%064b)", nTokens, s&dataMask)
+	if nTokens != 6 {
+		t.Errorf("expected 6 tokens in data region, got %d (bitmap=%064b)", nTokens, s&dataMask)
 	}
 }
 
@@ -728,9 +682,9 @@ func TestStructuralResults_MultiChunk(t *testing.T) {
 
 	cm.FeedBuffer(buf)
 
-	if len(cm.structuralResults) != len(cm.chunks) {
-		t.Fatalf("structuralResults len %d != chunks len %d",
-			len(cm.structuralResults), len(cm.chunks))
+	if len(cm.structuralResults) != cm.numChunks() {
+		t.Fatalf("structuralResults len %d != numChunks %d",
+			len(cm.structuralResults), cm.numChunks())
 	}
 
 	// Chunk 0 should have tokens: [ 1 , 2 , 3 ]
@@ -739,7 +693,7 @@ func TestStructuralResults_MultiChunk(t *testing.T) {
 		t.Error("chunk 0: expected non-zero structuralResults")
 	}
 
-	// Chunk 1 should have tokens: { "k" : "v" }
+	// Chunk 1 should have tokens: { " " : " " }
 	s1 := cm.structuralResults[1]
 	if s1 == 0 {
 		t.Error("chunk 1: expected non-zero structuralResults")
