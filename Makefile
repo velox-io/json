@@ -45,4 +45,24 @@ fuzz:
 	go test -fuzz=FuzzUnmarshalNested -fuzztime=$(FUZZ_TIME) .
 	go test -fuzz=FuzzNoCrash -fuzztime=$(FUZZ_TIME) .
 
-.PHONY: lint lint-ci fmt test test-coverage bench bench-baseline bench-check bench-check-threshold clean fuzz
+# Detect host platform
+_HOST_OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+_HOST_ARCH := $(shell uname -m)
+
+# Normalize arch
+ifeq ($(_HOST_ARCH),x86_64)
+  _HOST_ARCH := amd64
+else ifeq ($(_HOST_ARCH),aarch64)
+  _HOST_ARCH := arm64
+endif
+
+# Default to host platform
+TARGET_OS ?= $(_HOST_OS)
+TARGET_ARCH ?= $(_HOST_ARCH)
+
+gen:
+	@SOURCE_FILE="$(CURDIR)/native/vj_encoder.c" \
+	 TARGET_DIR="$(CURDIR)/native/encoder" \
+	 bash scripts/gen-natives.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
+
+.PHONY: lint lint-ci fmt test test-coverage bench bench-baseline bench-check bench-check-threshold clean fuzz gen

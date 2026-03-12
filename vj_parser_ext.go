@@ -173,12 +173,15 @@ func (sc *Parser) scanPointerQuoted(src []byte, idx int, ti *TypeInfo, ptr unsaf
 		return idx + 4, nil
 	}
 
-	var elemPtr unsafe.Pointer
-	if pDec.ElemHasPtr {
-		elemPtr = sc.ptrAlloc(pDec.ElemRType, pDec.ElemSize)
-	} else {
-		backing := make([]byte, pDec.ElemSize)
-		elemPtr = unsafe.Pointer(&backing[0])
+	// Reuse existing allocation if non-nil (matches encoding/json behavior).
+	elemPtr := *(*unsafe.Pointer)(ptr)
+	if elemPtr == nil {
+		if pDec.ElemHasPtr {
+			elemPtr = sc.ptrAlloc(pDec.ElemRType, pDec.ElemSize)
+		} else {
+			backing := make([]byte, pDec.ElemSize)
+			elemPtr = unsafe.Pointer(&backing[0])
+		}
 	}
 
 	// Shallow copy to propagate Quoted flag to the element.

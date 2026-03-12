@@ -432,7 +432,7 @@ func (sc *Parser) scanFalse(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 	if idx+5 > len(src) {
 		return idx, errUnexpectedEOF
 	}
-	if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "alse" suffix; 'f' already matched by caller
+	if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "else" suffix; 'f' already matched by caller
 		return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 	}
 	switch ti.Kind {
@@ -939,16 +939,17 @@ func (sc *Parser) scanPointer(src []byte, idx int, ti *TypeInfo, ptr unsafe.Poin
 		return idx + 4, nil
 	}
 
-	// Allocate a new element.
-	// For pointer-free types, use make([]byte) (fast, no reflect overhead).
-	// For pointer-containing types, use unsafe_New (runtime.mallocgc via
-	// go:linkname) for GC-correct type metadata.
-	var elemPtr unsafe.Pointer
-	if pDec.ElemHasPtr {
-		elemPtr = sc.ptrAlloc(pDec.ElemRType, pDec.ElemSize)
-	} else {
-		backing := make([]byte, pDec.ElemSize)
-		elemPtr = unsafe.Pointer(&backing[0])
+	// Reuse existing allocation if non-nil (matches encoding/json behavior).
+	// Otherwise allocate: pointer-containing types use unsafe_New for
+	// GC-correct type metadata; pointer-free types use make([]byte).
+	elemPtr := *(*unsafe.Pointer)(ptr)
+	if elemPtr == nil {
+		if pDec.ElemHasPtr {
+			elemPtr = sc.ptrAlloc(pDec.ElemRType, pDec.ElemSize)
+		} else {
+			backing := make([]byte, pDec.ElemSize)
+			elemPtr = unsafe.Pointer(&backing[0])
+		}
 	}
 
 	newIdx, err := sc.scanValue(src, idx, pDec.ElemTI, elemPtr)
@@ -1003,7 +1004,7 @@ func (sc *Parser) scanValueAny(src []byte, idx int) (int, any, error) {
 		if idx+5 > len(src) {
 			return idx, nil, errUnexpectedEOF
 		}
-		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "alse" suffix; 'f' already matched by caller
+		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "else" suffix; 'f' already matched by caller
 			return idx, nil, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 		}
 		return idx + 5, false, nil
@@ -1044,7 +1045,7 @@ func skipValue(src []byte, idx int) (int, error) {
 		if idx+5 > len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "alse" suffix; 'f' already matched by caller
+		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "else" suffix; 'f' already matched by caller
 			return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 		}
 		return idx + 5, nil

@@ -1,0 +1,331 @@
+#!/usr/bin/env bash
+#
+# gen-natives.sh - Expand macros, compile, and generate Go integration files
+#
+# Usage:
+#   ./gen-natives.sh [target_os] [target_arch]
+#
+# Arguments:
+#   target_os   - Target OS (linux, darwin, windows). Default: host OS.
+#   target_arch - Target architecture (arm64, amd64). Default: host arch.
+#
+# Environment variables (required):
+#   SOURCE_FILE   - Source C file.
+#   TARGET_DIR    - Target directory for .syso/.s files.
+#   OUTPUT_DIR    - Output directory for .c/.o files. Default: build/native
+#
+# Output:
+#   - {OUTPUT_DIR}/{basename}[_{mode}]_{os}_{arch}_{isa}.c
+#   - {OUTPUT_DIR}/{basename}[_{mode}]_{os}_{arch}_{isa}.o
+#   - {TARGET_DIR}/{basename}_{os}_{arch}.syso  (all ISAs, all modes combined)
+#   - {TARGET_DIR}/asm/{basename}[_{mode}]_{os}_{arch}_{isa}.s
+#
+# Cross-compilation terminology:
+#   HOST  - The machine running the compiler (current machine)
+#   TARGET - The machine that will run the compiled code
+#
+
+set -e
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# ============================================================
+#  Configuration (required)
+# ============================================================
+
+if [ -z "$SOURCE_FILE" ]; then
+    echo "Error: SOURCE_FILE is required"
+    exit 1
+fi
+
+if [ -z "$TARGET_DIR" ]; then
+    echo "Error: TARGET_DIR is required"
+    exit 1
+fi
+
+OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/build/native}"
+
+VJ_LIB_DIR="native/impl"
+
+# Derive base name from source file
+BASENAME=$(basename "$SOURCE_FILE" .c)
+
+mkdir -p "$OUTPUT_DIR" "$TARGET_DIR/asm"
+
+# ============================================================
+#  Host platform detection
+# ============================================================
+
+# OS detection
+HOST_OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+case "$HOST_OS" in
+    darwin)              HOST_OS="darwin" ;;
+    linux)               HOST_OS="linux" ;;
+    mingw*|msys*|cygwin*) HOST_OS="windows" ;;
+esac
+
+# Arch detection
+HOST_ARCH=$(uname -m)
+case "$HOST_ARCH" in
+    arm64|aarch64) HOST_ARCH="arm64" ;;
+    x86_64|amd64)  HOST_ARCH="amd64" ;;
+esac
+
+# ============================================================
+#  Target platform (can be overridden by arguments)
+# ============================================================
+
+TARGET_OS="${1:-$HOST_OS}"
+TARGET_ARCH="${2:-$HOST_ARCH}"
+
+# Normalize target OS name
+case "$TARGET_OS" in
+    darwin)  TARGET_OS="darwin" ;;
+    linux)   TARGET_OS="linux" ;;
+    windows) TARGET_OS="windows" ;;
+esac
+
+# ============================================================
+#  Compiler selection (zig cc for cross-compilation)
+# ============================================================
+
+# Check if cross-compiling
+NEEDS_CROSS_COMPILE=false
+if [ "$TARGET_OS" != "$HOST_OS" ] || [ "$TARGET_ARCH" != "$HOST_ARCH" ]; then
+    NEEDS_CROSS_COMPILE=true
+fi
+
+# Build zig target triple
+get_zig_target() {
+    local os=$1
+    local arch=$2
+
+    case "$arch" in
+        amd64)  arch="x86_64" ;;
+    esac
+
+    case "$os" in
+        darwin)  echo "${arch}-macos" ;;
+        linux)   echo "${arch}-linux" ;;
+        windows) echo "${arch}-windows" ;;
+        *)       echo "${arch}-${os}" ;;
+    esac
+}
+
+# Select compiler
+if [ "$NEEDS_CROSS_COMPILE" = true ]; then
+    if command -v zig &> /dev/null; then
+        ZIG_TARGET=$(get_zig_target "$TARGET_OS" "$TARGET_ARCH")
+        CC="zig cc -target $ZIG_TARGET"
+        echo "Cross-compiling with zig cc (target: $ZIG_TARGET)"
+    else
+        echo "Error: Cross-compilation requires zig."
+        exit 1
+    fi
+else
+    CC="clang"
+fi
+
+# ============================================================
+#  Platform-ISA constraints
+#  darwin: only arm64 + neon
+#  linux: amd64 (sse42/avx512) or arm64 (neon)
+#  windows: amd64 (sse42/avx512)
+# ============================================================
+
+get_available_isas() {
+    local os=$1
+    local arch=$2
+
+    case "$os" in
+        darwin)
+            if [ "$arch" = "arm64" ]; then
+                echo "neon"
+            else
+                echo ""
+            fi
+            ;;
+        linux)
+            case "$arch" in
+                arm64) echo "neon" ;;
+                amd64) echo "sse42 avx512" ;;
+            esac
+            ;;
+        windows)
+            if [ "$arch" = "amd64" ]; then
+                echo "sse42 avx512"
+            else
+                echo ""
+            fi
+            ;;
+        *)
+            case "$arch" in
+                arm64) echo "neon" ;;
+                amd64) echo "sse42 avx512" ;;
+            esac
+            ;;
+    esac
+}
+
+DEFAULT_ISAS=$(get_available_isas "$TARGET_OS" "$TARGET_ARCH")
+ISAS="${ISAs:-$DEFAULT_ISAS}"
+
+if [ -z "$ISAS" ]; then
+    echo "Error: No valid ISA for $TARGET_OS/$TARGET_ARCH"
+    exit 1
+fi
+
+# Modes
+ALL_MODES="${MODES:-default}"
+
+# ============================================================
+#  ISA-specific compiler flags
+# ============================================================
+
+get_isa_flags() {
+    case "$1" in
+        neon)   echo "" ;;
+        sse42)  echo "-msse4.2 -mpclmul" ;;
+        avx512) echo "-mavx512f -mavx512bw -mpclmul" ;;
+        *)      echo "" ;;
+    esac
+}
+
+# ============================================================
+#  Main build process
+# ============================================================
+
+echo "Building native files for: $TARGET_OS/$TARGET_ARCH (ISAs: $ISAS)"
+echo "  Source: $SOURCE_FILE"
+echo "  Output: $OUTPUT_DIR"
+echo ""
+
+ALL_OBJS=""
+
+for isa in $ISAS; do
+    ISA_FLAGS=$(get_isa_flags "$isa")
+
+    for mode in $ALL_MODES; do
+        # Determine mode suffix and compiler flag
+        MODE_SUFFIX="_${mode}"
+        MODE_FLAG=""
+        if [ "$mode" = "default" ]; then
+            MODE_FLAG="-DMODE_default"
+        #elif [ "$mode" = "minify" ]; then
+        #    MODE_FLAG="-DMODE_minify"
+        #elif [ "$mode" = "container_size" ]; then
+        #    MODE_FLAG="-DMODE_container_size"
+        fi
+        # full: no MODE_FLAG needed, SJ_MODE defaults to SJ_MODE_FULL
+
+        # File names
+        CFILE="${OUTPUT_DIR}/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.c"
+        OFILE="${OUTPUT_DIR}/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.o"
+        SFILE="$TARGET_DIR/asm/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.s"
+
+        # Step 1: Expand macros (use target compiler for correct headers)
+        echo "  Expanding $(basename "$CFILE")"
+        # 使用 ISA_xxx 宏而非 ISA=xxx 避免预处理标识符比较问题
+        ISA_MACRO="-DISA_${isa}"
+        $CC -E -P \
+            -DOS=${TARGET_OS} \
+            -DARCH=${TARGET_ARCH} \
+            $ISA_MACRO \
+            $MODE_FLAG \
+            -I"$(dirname "$SOURCE_FILE")" \
+            -I"$REPO_ROOT/$VJ_LIB_DIR" \
+            -I"$REPO_ROOT/include" \
+            "$SOURCE_FILE" \
+            -o "$CFILE"
+
+        # Step 2: Compile to object
+        echo "  Compiling $(basename "$OFILE")"
+        $CC -O3 -fPIC -g0 $ISA_FLAGS -c "$CFILE" -o "$OFILE"
+        ALL_OBJS="$ALL_OBJS $OFILE"
+
+        # Step 3: Generate assembly for reference (strip debug info)
+        echo "  Generating $(basename "$SFILE")"
+        $CC -S -O3 -g0 -fno-asynchronous-unwind-tables $ISA_FLAGS "$CFILE" -o "$SFILE"
+
+        # Remove debug directives
+        sed -i '/^[[:space:]]*\.file[[:space:]]/d' "$SFILE"
+        sed -i '/^[[:space:]]*\.loc[[:space:]]/d' "$SFILE"
+        sed -i '/^[[:space:]]*\.cfi_[[:alpha:]]/d' "$SFILE"
+        sed -i '/^[[:space:]]*#DEBUG_VALUE/d' "$SFILE"
+        sed -i '/^[[:space:]]*\.Lfunc_begin/d' "$SFILE"
+        sed -i '/^[[:space:]]*\.Lfunc_end/d' "$SFILE"
+        sed -i '/^[[:space:]]*\.Ltmp/d' "$SFILE"
+        # Remove .size directives that reference removed labels
+        sed -i '/\.size.*\.Lfunc_end/d' "$SFILE"
+
+        TMP_ASM=$(mktemp)
+        cat > "$TMP_ASM" << HEADER
+// ============================================================
+//
+//  Platform: $TARGET_OS/$TARGET_ARCH ($isa)
+//
+// ============================================================
+
+HEADER
+        cat "$SFILE" >> "$TMP_ASM"
+        mv "$TMP_ASM" "$SFILE"
+    done
+done
+
+# ============================================================
+#  Link into single .syso
+#
+#  Strategy based on target platform:
+#  - Linux amd64: use prelink.sh (Go internal linker cannot handle R_X86_64_PC32)
+#  - Linux arm64: ld -r (NEON has no cross-section relocations)
+#  - Darwin: ld -r (macOS uses external linker by default)
+#  - Windows: ld -r
+# ============================================================
+
+SYSO_NAME="${BASENAME}_${TARGET_OS}_${TARGET_ARCH}.syso"
+SYSO_PATH="$TARGET_DIR/$SYSO_NAME"
+
+echo ""
+echo "Linking $SYSO_NAME..."
+echo "Objects to link:"
+for obj in $ALL_OBJS; do
+    echo "  $obj"
+done
+
+# Check if target platform needs prelink (ET_DYN → ET_REL conversion)
+NEEDS_PRELINK=false
+if [ "$TARGET_OS" = "linux" ] && [ "$TARGET_ARCH" = "amd64" ]; then
+    NEEDS_PRELINK=true
+fi
+
+if [ "$NEEDS_PRELINK" = true ]; then
+    # Linux amd64: use prelink.sh (Go internal linker cannot handle R_X86_64_PC32)
+    ZIG_TARGET=$(get_zig_target "$TARGET_OS" "$TARGET_ARCH")
+    "$REPO_ROOT/hack/prelink.sh" -l -o "$SYSO_PATH" -t "$ZIG_TARGET" $ALL_OBJS
+else
+    # Other platforms: use ld -r directly
+    if [ "$NEEDS_CROSS_COMPILE" = true ]; then
+        $CC -r $ALL_OBJS -o "$SYSO_PATH"
+    elif [ "$TARGET_OS" = "darwin" ]; then
+        # Native darwin: use system ld (Apple ld64) explicitly
+        /usr/bin/ld -r -arch "$TARGET_ARCH" -o "$SYSO_PATH" $ALL_OBJS
+    else
+        ld -r -o "$SYSO_PATH" $ALL_OBJS
+    fi
+fi
+
+# ============================================================
+#  Summary
+# ============================================================
+
+echo ""
+echo "Generated files:"
+echo "  $SYSO_PATH"
+for isa in $ISAS; do
+    for mode in $ALL_MODES; do
+        MODE_SUFFIX="_${mode}"
+        echo "  $TARGET_DIR/asm/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.s"
+    done
+done
+echo ""
+echo "Done!"
