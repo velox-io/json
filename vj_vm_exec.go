@@ -80,13 +80,18 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	m.inVM = true
 	defer func() { m.inVM = false }()
 
+	m.traceRecordBlueprint(bp)
+	if vjTraceEnabled {
+		defer m.traceFlushBlueprints()
+	}
+
 	ctx := &m.vmCtx
 	ctx.OpsPtr = unsafe.Pointer(&bp.Ops[0])
 	ctx.PC = 0
 	ctx.CurBase = base
 
 	// Build initial vmstate: first=1, flags from m.flags,
-	// depth=0, err=0, yield=0.
+	// depth=0, exit=0, yield=0.
 	ctx.VMState = vmstateBuildInitial(m.flags)
 
 	// Select VM mode: three-way dispatch based on indent and escape flags.
@@ -150,12 +155,12 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 
 		written := int(uintptr(ctx.BufCur) - uintptr(bufStart))
 
-		switch vmstateGetErr(ctx.VMState) {
-		case vjOK:
+		switch vmstateGetExit(ctx.VMState) {
+		case vjExitOK:
 			m.buf = m.buf[:len(m.buf)+written]
 			return nil
 
-		case vjErrBufFull:
+		case vjExitBufFull:
 			m.buf = m.buf[:len(m.buf)+written]
 
 			if m.flushFn != nil {
@@ -171,7 +176,7 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 				m.buf = newBuf
 			}
 
-		case vjErrYield:
+		case vjExitYieldToGo:
 			m.buf = m.buf[:len(m.buf)+written]
 
 			// Sync Go-side indent depth from C VM state so that Go-driven
@@ -197,8 +202,9 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 				// (hot path: single pointer compare), but after SWITCH_OPS
 				// the VM may be executing a child Blueprint's ops.
 				activeBP := activeBlueprint(ctx, bp)
+				m.traceRecordBlueprint(activeBP)
 
-				if activeBP.Ops[ctx.PC].OpType&opTypeMask == opInterface {
+				if activeBP.Ops[ctx.PC].OpType == opInterface {
 					// Hot path: OP_INTERFACE yield.
 					if err := m.handleInterfaceYield(ctx, activeBP); err == errVMContinue {
 						continue // batch slice takeover: PC already past SLICE_END
@@ -212,8 +218,9 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 					}
 				}
 
-			case yieldMapNext:
+			case yieldMapHandoff:
 				activeBP := activeBlueprint(ctx, bp)
+				m.traceRecordBlueprint(activeBP)
 				if err := m.handleMapIteration(ctx, activeBP); err != nil {
 					return err
 				}
@@ -222,15 +229,15 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 				return fmt.Errorf("vjson: unknown yield reason %d", vmstateGetYield(ctx.VMState))
 			}
 
-		case vjErrStackOvfl:
+		case vjExitStackOvfl:
 			return fmt.Errorf("vjson: nesting depth exceeds limit (depth=%d/%d)",
-				vmstateGetDepth(ctx.VMState), maxDepth)
+				vmstateGetDepth(ctx.VMState), VJ_MAX_DEPTH)
 
-		case vjErrNanInf:
+		case vjExitNanInf:
 			return &UnsupportedValueError{Str: "NaN or Inf float value"}
 
 		default:
-			return fmt.Errorf("vjson: native encoder error %d", vmstateGetErr(ctx.VMState))
+			return fmt.Errorf("vjson: native encoder exit code %d", vmstateGetExit(ctx.VMState))
 		}
 	}
 }
@@ -276,6 +283,9 @@ func (m *Marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 	}
 
 	insertIfaceCache(typePtr, bp, tag)
+	if bp != nil {
+		m.traceRecordBlueprint(bp)
+	}
 	return nil
 }
 
@@ -352,7 +362,7 @@ func (m *Marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 // avoiding the reflect-based encodeMapGeneric path.
 func (m *Marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 	op := bp.Ops[ctx.PC]
-	opCode := op.OpType & opTypeMask
+	opCode := op.OpType
 
 	// Extract the 'first' flag from vmstate (set by VM before yielding).
 	isFirst := vmstateGetFirst(ctx.VMState)

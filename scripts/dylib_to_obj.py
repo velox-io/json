@@ -3,10 +3,12 @@
 dylib-to-obj: Extract a zero-relocation Mach-O MH_OBJECT from a dylib.
 
 This script reads a Mach-O dylib (where all relocations are resolved),
-extracts the __TEXT segment content, and writes a new MH_OBJECT with:
-  - Single __TEXT,__text section covering VA 0 to end-of-text
+extracts the __TEXT segment content plus any data segments (e.g. __DATA_CONST
+for jump tables), and writes a new MH_OBJECT with:
+  - Single __TEXT,__text section covering VA 0 to end of all included segments
   - Symbol table with function symbols at their original VA offsets
   - Zero relocation entries
+  - Chained fixup rebase pointers resolved to raw VAs
 
 Since Go's linker may not page-align the section, ADRP+ADD pairs that
 reference within the section are patched to ADR+NOP (PC-relative, no
@@ -28,6 +30,7 @@ CPU_SUBTYPE_ARM64_ALL = 0x0
 LC_SEGMENT_64 = 0x19
 LC_SYMTAB = 0x2
 LC_BUILD_VERSION = 0x32
+LC_DYLD_CHAINED_FIXUPS = 0x80000034
 N_SECT = 0xE
 N_EXT = 0x01
 
@@ -58,8 +61,11 @@ def parse_macho(data):
 
     # Parse load commands
     text_seg = None
+    extra_segments = []  # non-__TEXT, non-__LINKEDIT, non-__PAGEZERO segments
+    all_segments = []    # all segments in order (for chained fixups indexing)
     symtab_info = None
     build_version = None
+    chained_fixups_offset = None  # file offset of chained fixups data
 
     off = 32  # sizeof(mach_header_64)
     for _ in range(ncmds):
@@ -74,34 +80,44 @@ def parse_macho(data):
             filesize = read_u64(data, off + 48)
             nsects = read_u32(data, off + 64)
 
-            if segname == '__TEXT':
-                # Parse sections
-                sections = []
-                sect_off = off + 72  # after segment_command_64
-                for _ in range(nsects):
-                    sectname = data[sect_off:sect_off+16].split(b'\0')[0].decode()
-                    sec_segname = data[sect_off+16:sect_off+32].split(b'\0')[0].decode()
-                    sec_addr = read_u64(data, sect_off + 32)
-                    sec_size = read_u64(data, sect_off + 40)
-                    sec_offset = read_u32(data, sect_off + 48)
-                    sec_nreloc = read_u32(data, sect_off + 56)
-                    sections.append({
-                        'sectname': sectname,
-                        'segname': sec_segname,
-                        'addr': sec_addr,
-                        'size': sec_size,
-                        'offset': sec_offset,
-                        'nreloc': sec_nreloc,
-                    })
-                    sect_off += 80  # sizeof(section_64)
+            # Parse sections for every segment
+            sections = []
+            sect_off = off + 72  # after segment_command_64
+            for _ in range(nsects):
+                sectname = data[sect_off:sect_off+16].split(b'\0')[0].decode()
+                sec_segname = data[sect_off+16:sect_off+32].split(b'\0')[0].decode()
+                sec_addr = read_u64(data, sect_off + 32)
+                sec_size = read_u64(data, sect_off + 40)
+                sec_offset = read_u32(data, sect_off + 48)
+                sec_nreloc = read_u32(data, sect_off + 56)
+                sections.append({
+                    'sectname': sectname,
+                    'segname': sec_segname,
+                    'addr': sec_addr,
+                    'size': sec_size,
+                    'offset': sec_offset,
+                    'nreloc': sec_nreloc,
+                })
+                sect_off += 80  # sizeof(section_64)
 
-                text_seg = {
-                    'vmaddr': vmaddr,
-                    'vmsize': vmsize,
-                    'fileoff': fileoff,
-                    'filesize': filesize,
-                    'sections': sections,
-                }
+            seg_info = {
+                'segname': segname,
+                'vmaddr': vmaddr,
+                'vmsize': vmsize,
+                'fileoff': fileoff,
+                'filesize': filesize,
+                'sections': sections,
+            }
+            all_segments.append(seg_info)
+
+            if segname == '__TEXT':
+                text_seg = seg_info
+            elif segname not in ('__LINKEDIT', '__PAGEZERO'):
+                extra_segments.append(seg_info)
+
+        elif cmd == LC_DYLD_CHAINED_FIXUPS:
+            dataoff = read_u32(data, off + 8)
+            chained_fixups_offset = dataoff
 
         elif cmd == LC_SYMTAB:
             symoff = read_u32(data, off + 8)
@@ -150,7 +166,7 @@ def parse_macho(data):
             name = data[name_start:name_end].decode()
             symbols.append({'name': name, 'value': n_value, 'sect': n_sect})
 
-    return text_seg, symbols, build_version
+    return text_seg, extra_segments, all_segments, symbols, build_version, chained_fixups_offset
 
 
 def find_text_extent(text_seg):
@@ -168,6 +184,89 @@ def find_text_extent(text_seg):
             max_end = sec_end
 
     return max_end
+
+
+def parse_chained_fixups(data, fixups_offset, all_segments):
+    """Parse LC_DYLD_CHAINED_FIXUPS and return resolved rebase entries.
+
+    Returns list of (file_offset, resolved_va) for each rebase fixup.
+    Only supports DYLD_CHAINED_PTR_64_OFFSET (format=6) and
+    DYLD_CHAINED_PTR_64 (format=2).
+    """
+    # dyld_chained_fixups_header: { fixups_version(u32), starts_offset(u32), ... }
+    starts_offset = read_u32(data, fixups_offset + 4)
+    starts_abs = fixups_offset + starts_offset
+
+    # dyld_chained_starts_in_image: { seg_count(u32), seg_info_offset[seg_count](u32) }
+    seg_count = read_u32(data, starts_abs)
+
+    rebases = []
+
+    for seg_idx in range(seg_count):
+        seg_info_off = read_u32(data, starts_abs + 4 + seg_idx * 4)
+        if seg_info_off == 0:
+            continue  # no fixups in this segment
+
+        seg_starts_abs = starts_abs + seg_info_off
+
+        # dyld_chained_starts_in_segment:
+        #   size(u32), page_size(u16), pointer_format(u16), segment_offset(u64),
+        #   max_valid_pointer(u32), page_count(u16), page_start[page_count](u16)
+        page_size = struct.unpack_from('<H', data, seg_starts_abs + 4)[0]
+        pointer_format = struct.unpack_from('<H', data, seg_starts_abs + 6)[0]
+        segment_offset = read_u64(data, seg_starts_abs + 8)
+        page_count = struct.unpack_from('<H', data, seg_starts_abs + 20)[0]
+
+        if pointer_format not in (2, 6):
+            raise ValueError(f"Unsupported chained fixup pointer_format={pointer_format} "
+                             f"in segment {seg_idx} (only format 2 and 6 supported)")
+
+        # Find this segment's vmaddr for VA resolution
+        if seg_idx >= len(all_segments):
+            raise ValueError(f"Chained fixups reference segment {seg_idx} but only "
+                             f"{len(all_segments)} segments exist")
+        seg_vmaddr = all_segments[seg_idx]['vmaddr']
+
+        DYLD_CHAINED_PTR_START_NONE = 0xFFFF
+
+        for page_idx in range(page_count):
+            page_start = struct.unpack_from('<H', data, seg_starts_abs + 22 + page_idx * 2)[0]
+            if page_start == DYLD_CHAINED_PTR_START_NONE:
+                continue
+
+            # Walk the chain within this page
+            page_file_offset = segment_offset + page_idx * page_size
+            chain_offset = page_file_offset + page_start
+
+            while True:
+                raw_value = read_u64(data, chain_offset)
+
+                # Both format 2 and 6 share the same bit layout:
+                #   bit 63 = bind(1) / rebase(0)
+                #   For rebase:
+                #     format 2 (DYLD_CHAINED_PTR_64):
+                #       bits[0:35]  = target (absolute VA)
+                #       bits[36:51] = high8 (top byte of pointer, shifted to bits 56..63)
+                #       bits[51:63] = next (stride=4)
+                #     format 6 (DYLD_CHAINED_PTR_64_OFFSET):
+                #       bits[0:35]  = target (offset from mach_header, i.e. VA for 0-based)
+                #       bits[36:51] = high8
+                #       bits[51:63] = next (stride=4)
+                bind = (raw_value >> 63) & 1
+                if not bind:
+                    target = raw_value & 0x7FFFFFFFF       # bits [0:35]
+                    high8 = (raw_value >> 36) & 0xFF        # bits [36:43] (8 bits at 36)
+                    # Reconstruct full VA: high8 goes to bits 56..63
+                    resolved_va = target | (high8 << 56)
+                    rebases.append((chain_offset, resolved_va))
+
+                # next delta (bits 51..62, 12 bits)
+                next_delta = (raw_value >> 51) & 0xFFF
+                if next_delta == 0:
+                    break
+                chain_offset += next_delta * 4
+
+    return rebases
 
 
 def encode_adr(rd, offset):
@@ -192,12 +291,15 @@ def decode_adrp(inst):
     return (rd, page_delta)
 
 
-def patch_adrp_to_adr(blob, extent):
-    """Patch ADRP instructions whose targets lie within the section.
+def patch_adrp_to_adr(blob, code_extent, blob_extent):
+    """Patch ADRP instructions whose targets lie within the blob.
 
     Go's linker does not guarantee page-aligned placement of syso sections.
     ADRP computes page(PC) + page_offset, which breaks when the section
     isn't page-aligned.
+
+    code_extent: scan range for ADRP instructions (code area only)
+    blob_extent: total blob size (code + data), used for target validity check
 
     We handle three patterns:
 
@@ -223,7 +325,7 @@ def patch_adrp_to_adr(blob, extent):
 
     NOP = 0xD503201F
 
-    for off in range(0, extent - 4, 4):
+    for off in range(0, code_extent - 4, 4):
         inst = struct.unpack_from('<I', blob, off)[0]
 
         adrp = decode_adrp(inst)
@@ -234,11 +336,11 @@ def patch_adrp_to_adr(blob, extent):
         adrp_pc_page = (off >> 12) << 12  # page(PC of ADRP)
         target_page = adrp_pc_page + page_delta
 
-        # Skip ADRP whose target is outside the section (not our data).
-        if target_page < 0 or target_page >= extent + 0x1000:
+        # Skip ADRP whose target is outside the blob (not our data).
+        if target_page < 0 or target_page >= blob_extent + 0x1000:
             continue
 
-        if off + 4 >= extent:
+        if off + 4 >= code_extent:
             continue
         next_inst = struct.unpack_from('<I', blob, off + 4)[0]
 
@@ -340,21 +442,21 @@ def patch_adrp_to_adr(blob, extent):
     else:
         print(f"  No ADRP pairs found to patch")
 
-    # --- Verification: no ADRP referencing within the section should remain ---
+    # --- Verification: no ADRP referencing within the blob should remain ---
     remaining = []
-    for off in range(0, extent - 4, 4):
+    for off in range(0, code_extent - 4, 4):
         inst = struct.unpack_from('<I', blob, off)[0]
         adrp = decode_adrp(inst)
         if adrp is None:
             continue
         rd, page_delta = adrp
         target_page = ((off >> 12) << 12) + page_delta
-        if 0 <= target_page < extent + 0x1000:
+        if 0 <= target_page < blob_extent + 0x1000:
             remaining.append((off, rd, target_page))
 
     if remaining:
         print(f"\n  ERROR: {len(remaining)} ADRP instruction(s) still reference "
-              f"within the section after patching:", file=sys.stderr)
+              f"within the blob after patching:", file=sys.stderr)
         for off, rd, tp in remaining:
             print(f"    0x{off:X}: ADRP x{rd}, target page 0x{tp:X}",
                   file=sys.stderr)
@@ -503,36 +605,91 @@ def main():
     with open(input_path, 'rb') as f:
         data = f.read()
 
-    text_seg, symbols, build_version = parse_macho(data)
+    text_seg, extra_segments, all_segments, symbols, build_version, chained_fixups_offset = parse_macho(data)
 
-    # Determine extent of useful content in __TEXT
-    extent = find_text_extent(text_seg)
+    # Determine code extent (end of useful __TEXT content, used for ADRP scan range)
+    code_extent = find_text_extent(text_seg)
     print(f"__TEXT segment: vmaddr=0x{text_seg['vmaddr']:X}, vmsize=0x{text_seg['vmsize']:X}")
-    print(f"Useful content extent: 0x{extent:X} ({extent} bytes)")
+    print(f"Code extent: 0x{code_extent:X} ({code_extent} bytes)")
+
+    if extra_segments:
+        for seg in extra_segments:
+            print(f"Extra segment {seg['segname']}: vmaddr=0x{seg['vmaddr']:X}, vmsize=0x{seg['vmsize']:X}")
+            for sec in seg['sections']:
+                print(f"  section {sec['segname']},{sec['sectname']}: "
+                      f"addr=0x{sec['addr']:X}, size=0x{sec['size']:X}")
+
+    # Determine blob extent: max VA end across __TEXT and extra segments
+    blob_extent = code_extent
+    for seg in extra_segments:
+        seg_end = seg['vmaddr'] + seg['vmsize']
+        if seg_end > blob_extent:
+            blob_extent = seg_end
+
+    print(f"Blob extent: 0x{blob_extent:X} ({blob_extent} bytes)")
     print(f"Symbols: {len(symbols)}")
     for sym in symbols:
         print(f"  {sym['name']} at 0x{sym['value']:X}")
 
-    # Extract bytes from file: VA 0 maps to fileoff of segment
-    # We need bytes from fileoff to fileoff + extent
+    # Build the combined blob: __TEXT content + zero-fill gaps + extra segment content
     seg_fileoff = text_seg['fileoff']
-    text_blob = data[seg_fileoff:seg_fileoff + extent]
+    blob = bytearray(data[seg_fileoff:seg_fileoff + code_extent])
 
-    # Pad to extent if needed (shouldn't be, but just in case)
-    if len(text_blob) < extent:
-        text_blob += b'\0' * (extent - len(text_blob))
+    # Pad __TEXT portion to code_extent if needed
+    if len(blob) < code_extent:
+        blob += b'\0' * (code_extent - len(blob))
+
+    # Append extra segments (with zero-fill gaps between)
+    for seg in extra_segments:
+        seg_start = seg['vmaddr']
+        seg_end = seg_start + seg['vmsize']
+
+        # Zero-fill gap between current blob end and this segment's start
+        if len(blob) < seg_start:
+            blob += b'\0' * (seg_start - len(blob))
+
+        # Copy segment content from file
+        seg_data = data[seg['fileoff']:seg['fileoff'] + seg['filesize']]
+        blob[seg_start:seg_start + len(seg_data)] = seg_data
+
+        # Zero-fill remainder of vmsize if filesize < vmsize
+        if seg['filesize'] < seg['vmsize']:
+            remaining = seg['vmsize'] - seg['filesize']
+            blob[seg_start + seg['filesize']:seg_end] = b'\0' * remaining
+
+    # Ensure blob is exactly blob_extent
+    if len(blob) < blob_extent:
+        blob += b'\0' * (blob_extent - len(blob))
+
+    # Apply chained fixup rebases (resolve dyld pointer format to raw VAs)
+    if chained_fixups_offset is not None:
+        rebases = parse_chained_fixups(data, chained_fixups_offset, all_segments)
+        applied = 0
+        for file_offset, resolved_va in rebases:
+            # The file_offset in the dylib maps to a VA; compute blob offset
+            # Find which segment contains this file_offset
+            blob_off = None
+            for seg in [text_seg] + extra_segments:
+                if seg['fileoff'] <= file_offset < seg['fileoff'] + seg['filesize']:
+                    blob_off = seg['vmaddr'] + (file_offset - seg['fileoff'])
+                    break
+            if blob_off is not None and blob_off + 8 <= blob_extent:
+                struct.pack_into('<Q', blob, blob_off, resolved_va)
+                applied += 1
+        if applied:
+            print(f"Applied {applied} chained fixup rebases")
 
     # Patch ADRP+ADD pairs to ADR+NOP (Go's linker doesn't page-align sections)
-    text_blob = patch_adrp_to_adr(text_blob, extent)
+    blob = patch_adrp_to_adr(bytes(blob), code_extent, blob_extent)
 
     # Build output MH_OBJECT
-    obj_data = build_mh_object(text_blob, symbols, build_version)
+    obj_data = build_mh_object(blob, symbols, build_version)
 
     with open(output_path, 'wb') as f:
         f.write(obj_data)
 
     print(f"\nOutput: {output_path} ({len(obj_data)} bytes)")
-    print(f"  Section: __TEXT,__text ({extent} bytes, 0 relocations)")
+    print(f"  Section: __TEXT,__text ({blob_extent} bytes, 0 relocations)")
     print(f"  Symbols: {len(symbols)}")
 
 

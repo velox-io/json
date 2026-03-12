@@ -14,10 +14,19 @@ type blueprintBuilder struct {
 	keyPool   []byte
 	fallbacks map[int]*fbInfo // PC index → fallback info
 
-	// visiting tracks struct types on the current recursive call chain
-	// to detect pointer cycles (e.g. type A struct { B *B }; type B struct { A *A }).
-	// Cycles emit OP_FALLBACK instead of inlining.
-	visiting map[reflect.Type]bool
+	// visiting tracks struct types currently on the compilation call chain.
+	// Value semantics:
+	//   present && value == -1: visiting, no subroutine allocated yet
+	//   present && value >= 0:  subroutine already emitted at that PC
+	visiting map[reflect.Type]int
+
+	// pendingSubs records struct types that need subroutine emission.
+	// Populated when a cycle is first detected; drained by emitPendingSubs.
+	pendingSubs []*StructCodec
+
+	// recurseFixups records OP_RECURSE instructions whose operand_a (target_pc)
+	// must be patched after the subroutine for the target type is emitted.
+	recurseFixups []recurseFixup
 }
 
 // emit appends an instruction and returns its index.
@@ -48,17 +57,24 @@ type keyFixup struct {
 	poolOffset int // offset in b.keyPool
 }
 
+// recurseFixup records an OP_RECURSE instruction that needs its operand_a
+// patched to the subroutine's start PC once the subroutine is emitted.
+type recurseFixup struct {
+	opIdx    int          // index of the OP_RECURSE in b.ops
+	targetTy reflect.Type // the struct type whose subroutine we jump to
+}
+
 // compileBlueprint compiles a StructCodec into a Blueprint.
 // The resulting Blueprint contains a single flat instruction stream
 // for the entire type tree, with all nested types inlined.
 func compileBlueprint(dec *StructCodec) *Blueprint {
 	var b blueprintBuilder
 	b.fallbacks = make(map[int]*fbInfo)
-	b.visiting = make(map[reflect.Type]bool)
+	b.visiting = make(map[reflect.Type]int)
 	var fixups []keyFixup
 
 	// Mark top-level struct as visiting to detect cycles.
-	b.visiting[dec.Typ] = true
+	b.visiting[dec.Typ] = -1
 
 	// Emit top-level struct as OBJ_OPEN + body + OBJ_CLOSE.
 	b.emit(VjOpStep{
@@ -71,13 +87,19 @@ func compileBlueprint(dec *StructCodec) *Blueprint {
 		OpType: opObjClose,
 	})
 
-	// Terminate
+	// Terminate the main instruction stream. At depth=0 vj_op_end returns
+	// to Go, so subroutines placed after this are only reachable via
+	// OP_RECURSE CALL frames.
 	b.emit(VjOpStep{OpType: opEnd})
+
+	// Emit subroutines for cycle-participating struct types.
+	emitPendingSubs(&b, &fixups)
 
 	// Fix up key pointers
 	applyKeyFixups(&b, fixups)
 
 	return &Blueprint{
+		Name:      dec.Typ.String(),
 		Ops:       b.ops,
 		KeyPool:   b.keyPool,
 		Fallbacks: b.fallbacks,
@@ -94,6 +116,43 @@ func applyKeyFixups(b *blueprintBuilder, fixups []keyFixup) {
 	}
 }
 
+// emitPendingSubs emits subroutines for all cycle-participating struct types
+// and patches the OP_RECURSE instructions that reference them.
+//
+// Each subroutine is: OBJ_OPEN + struct body + OBJ_CLOSE + OP_END.
+// The OP_END causes the existing CALL frame return in vj_op_end to fire,
+// restoring ops/pc/base from the caller's stack frame.
+//
+// pendingSubs is drained iteratively because emitting a subroutine body may
+// discover additional cycles (e.g. mutual recursion A↔B), appending new
+// entries to pendingSubs.
+func emitPendingSubs(b *blueprintBuilder, fixups *[]keyFixup) {
+	for len(b.pendingSubs) > 0 {
+		// Pop one pending subroutine.
+		sub := b.pendingSubs[0]
+		b.pendingSubs = b.pendingSubs[1:]
+
+		// Record subroutine start PC and update visiting map.
+		subPC := b.pc()
+		b.visiting[sub.Typ] = subPC
+
+		// Emit subroutine body: OBJ_OPEN + fields + OBJ_CLOSE + OP_END.
+		b.emit(VjOpStep{OpType: opObjOpen})
+		emitStructBody(b, fixups, sub, 0)
+		b.emit(VjOpStep{OpType: opObjClose})
+		b.emit(VjOpStep{OpType: opEnd})
+	}
+
+	// Patch all OP_RECURSE instructions with resolved subroutine PCs.
+	for _, fix := range b.recurseFixups {
+		pc, ok := b.visiting[fix.targetTy]
+		if !ok || pc < 0 {
+			panic("vjson: compileBlueprint: unresolved recurse fixup for " + fix.targetTy.String())
+		}
+		b.ops[fix.opIdx].OperandA = int32(pc)
+	}
+}
+
 // compileStandaloneSliceBlueprint builds a Blueprint for encoding a slice
 // whose type was discovered at runtime (e.g. inside an interface{}).
 // The ops encode: SLICE_BEGIN + element body + SLICE_END + END.
@@ -101,7 +160,7 @@ func applyKeyFixups(b *blueprintBuilder, fixups []keyFixup) {
 func compileStandaloneSliceBlueprint(dec *SliceCodec) *Blueprint {
 	var b blueprintBuilder
 	b.fallbacks = make(map[int]*fbInfo)
-	b.visiting = make(map[reflect.Type]bool)
+	b.visiting = make(map[reflect.Type]int)
 	var fixups []keyFixup
 
 	emitSliceInner(&b, &fixups, 0, dec)
@@ -109,6 +168,7 @@ func compileStandaloneSliceBlueprint(dec *SliceCodec) *Blueprint {
 
 	applyKeyFixups(&b, fixups)
 	return &Blueprint{
+		Name:      dec.SliceType.String(),
 		Ops:       b.ops,
 		KeyPool:   b.keyPool,
 		Fallbacks: b.fallbacks,
@@ -130,7 +190,7 @@ func emitStructBody(b *blueprintBuilder, fixups *[]keyFixup, dec *StructCodec, b
 			if needsOmitempty {
 				emitSkipIfZero(b, fixups, fi, fieldOff, 1, fi.Kind)
 			}
-			emitYield(b, fixups, fi, fieldOff, i)
+			emitYield(b, fixups, fi, fieldOff, i, fallbackReasonFromFlags(fi.Flags))
 			continue
 		}
 
@@ -180,7 +240,7 @@ func emitStructBody(b *blueprintBuilder, fixups *[]keyFixup, dec *StructCodec, b
 				if needsOmitempty {
 					emitSkipIfZero(b, fixups, fi, fieldOff, 1, KindSlice)
 				}
-				emitYield(b, fixups, fi, fieldOff, i)
+				emitYield(b, fixups, fi, fieldOff, i, fbReasonByteSlice)
 				continue
 			}
 			if needsOmitempty {
@@ -195,7 +255,7 @@ func emitStructBody(b *blueprintBuilder, fixups *[]keyFixup, dec *StructCodec, b
 			aDec := fi.resolveCodec().(*ArrayCodec)
 			// [N]byte needs base64 encoding — yield to Go.
 			if aDec.ElemTI.Kind == KindUint8 && aDec.ElemSize == 1 {
-				emitYield(b, fixups, fi, fieldOff, i)
+				emitYield(b, fixups, fi, fieldOff, i, fbReasonByteArray)
 				continue
 			}
 			// Arrays can't be nil; omitempty is not meaningful.
@@ -206,7 +266,7 @@ func emitStructBody(b *blueprintBuilder, fixups *[]keyFixup, dec *StructCodec, b
 			if needsOmitempty {
 				// Map omitempty needs Go-side len check (C only checks nil).
 				// Emit as fallback so Go handles omitempty + full map encoding.
-				emitYield(b, fixups, fi, fieldOff, i)
+				emitYield(b, fixups, fi, fieldOff, i, fbReasonMapOmitempty)
 			} else if mapDec.ValIsString && mapDec.KeyType.Kind() == reflect.String {
 				// map[string]string: single C opcode with native Swiss Map iteration.
 				emitMapStrStr(b, fixups, fi, fieldOff)
@@ -225,7 +285,7 @@ func emitStructBody(b *blueprintBuilder, fixups *[]keyFixup, dec *StructCodec, b
 			if needsOmitempty {
 				emitSkipIfZero(b, fixups, fi, fieldOff, 1, fi.Kind)
 			}
-			emitYield(b, fixups, fi, fieldOff, i)
+			emitYield(b, fixups, fi, fieldOff, i, fbReasonUnknown)
 		}
 	}
 }
@@ -260,8 +320,8 @@ func emitNestedStruct(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fie
 	}
 
 	// Mark type as visiting to detect cycles through pointers.
-	wasVisiting := b.visiting[subDec.Typ]
-	b.visiting[subDec.Typ] = true
+	_, wasVisiting := b.visiting[subDec.Typ]
+	b.visiting[subDec.Typ] = -1
 
 	// Emit child fields with accumulated offset (no base switch).
 	emitStructBody(b, fixups, subDec, fieldOff)
@@ -311,7 +371,8 @@ func emitDerefBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) {
 	// Custom marshalers → yield
 	if elemTI.Flags&(tiFlagHasMarshalFn|tiFlagHasTextMarshalFn) != 0 {
 		idx := b.emit(VjOpStep{
-			OpType: opFallback,
+			OpType:   opFallback,
+			OperandB: fallbackReasonFromFlags(elemTI.Flags),
 		})
 		b.fallbacks[idx] = &fbInfo{
 			TI:     elemTI,
@@ -336,19 +397,13 @@ func emitDerefBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) {
 	case KindStruct:
 		subDec := elemTI.resolveCodec().(*StructCodec)
 		// Cycle detection: if this struct type is already being compiled
-		// along the current call chain, emit a fallback to avoid infinite
-		// recursion. The Go encoder will handle the recursive type at runtime.
-		if b.visiting[subDec.Typ] {
-			idx := b.emit(VjOpStep{
-				OpType: opFallback,
-			})
-			b.fallbacks[idx] = &fbInfo{
-				TI:     elemTI,
-				Offset: 0,
-			}
+		// along the current call chain, emit OP_RECURSE to call the
+		// subroutine that will be emitted at the end of the Blueprint.
+		if _, visiting := b.visiting[subDec.Typ]; visiting {
+			emitRecurse(b, subDec, 0)
 			return
 		}
-		b.visiting[subDec.Typ] = true
+		b.visiting[subDec.Typ] = -1
 		// Inline the struct with OBJ_OPEN/CLOSE (keyless, off=0)
 		b.emit(VjOpStep{
 			OpType: opObjOpen,
@@ -397,7 +452,8 @@ func emitDerefBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) {
 	default:
 		// Fallback
 		idx := b.emit(VjOpStep{
-			OpType: opFallback,
+			OpType:   opFallback,
+			OperandB: fallbackReasonFromFlags(elemTI.Flags),
 		})
 		b.fallbacks[idx] = &fbInfo{
 			TI:     elemTI,
@@ -519,7 +575,7 @@ func emitArrayInner(b *blueprintBuilder, fixups *[]keyFixup, fieldOff uintptr, a
 func compileStandaloneArrayBlueprint(dec *ArrayCodec) *Blueprint {
 	var b blueprintBuilder
 	b.fallbacks = make(map[int]*fbInfo)
-	b.visiting = make(map[reflect.Type]bool)
+	b.visiting = make(map[reflect.Type]int)
 	var fixups []keyFixup
 
 	emitArrayInner(&b, &fixups, 0, dec)
@@ -527,6 +583,7 @@ func compileStandaloneArrayBlueprint(dec *ArrayCodec) *Blueprint {
 
 	applyKeyFixups(&b, fixups)
 	return &Blueprint{
+		Name:      dec.ArrayType.String(),
 		Ops:       b.ops,
 		KeyPool:   b.keyPool,
 		Fallbacks: b.fallbacks,
@@ -537,7 +594,10 @@ func compileStandaloneArrayBlueprint(dec *ArrayCodec) *Blueprint {
 // (used in slice loops). base points to the element.
 func emitElementBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) {
 	if elemTI.Flags&(tiFlagHasMarshalFn|tiFlagHasTextMarshalFn) != 0 {
-		idx := b.emit(VjOpStep{OpType: opFallback})
+		idx := b.emit(VjOpStep{
+			OpType:   opFallback,
+			OperandB: fallbackReasonFromFlags(elemTI.Flags),
+		})
 		b.fallbacks[idx] = &fbInfo{
 			TI:     elemTI,
 			Offset: 0, // base is the element pointer
@@ -560,15 +620,11 @@ func emitElementBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) 
 	case KindStruct:
 		subDec := elemTI.resolveCodec().(*StructCodec)
 		// Cycle detection (same as emitDerefBody).
-		if b.visiting[subDec.Typ] {
-			idx := b.emit(VjOpStep{OpType: opFallback})
-			b.fallbacks[idx] = &fbInfo{
-				TI:     elemTI,
-				Offset: 0,
-			}
+		if _, visiting := b.visiting[subDec.Typ]; visiting {
+			emitRecurse(b, subDec, 0)
 			return
 		}
-		b.visiting[subDec.Typ] = true
+		b.visiting[subDec.Typ] = -1
 		b.emit(VjOpStep{
 			OpType: opObjOpen,
 		})
@@ -611,7 +667,10 @@ func emitElementBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) 
 		})
 
 	default:
-		idx := b.emit(VjOpStep{OpType: opFallback})
+		idx := b.emit(VjOpStep{
+			OpType:   opFallback,
+			OperandB: fallbackReasonFromFlags(elemTI.Flags),
+		})
 		b.fallbacks[idx] = &fbInfo{
 			TI:     elemTI,
 			Offset: 0,
@@ -691,6 +750,39 @@ func emitMapStrStrInner(b *blueprintBuilder, fieldOff uintptr) {
 	})
 }
 
+// emitRecurse emits an OP_RECURSE instruction for a cycle-participating struct.
+// If the subroutine for dec has already been emitted (visiting[dec.Typ] >= 0),
+// the target PC is set directly. Otherwise, a fixup is recorded and a pending
+// subroutine is registered for later emission.
+func emitRecurse(b *blueprintBuilder, dec *StructCodec, fieldOff uintptr) {
+	idx := b.emit(VjOpStep{
+		OpType:   opRecurse,
+		FieldOff: uint32(fieldOff),
+	})
+
+	if pc := b.visiting[dec.Typ]; pc >= 0 {
+		// Subroutine already emitted — set target directly.
+		b.ops[idx].OperandA = int32(pc)
+	} else {
+		// Subroutine not yet emitted — record fixup and schedule emission.
+		b.recurseFixups = append(b.recurseFixups, recurseFixup{
+			opIdx:    idx,
+			targetTy: dec.Typ,
+		})
+		// Only append to pendingSubs if not already pending.
+		alreadyPending := false
+		for _, p := range b.pendingSubs {
+			if p.Typ == dec.Typ {
+				alreadyPending = true
+				break
+			}
+		}
+		if !alreadyPending {
+			b.pendingSubs = append(b.pendingSubs, dec)
+		}
+	}
+}
+
 // emitInterface emits a single OP_INTERFACE instruction.
 func emitInterface(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fieldOff uintptr) {
 	poolOff, keyLen := b.addKey(fi.Ext.KeyBytes)
@@ -704,14 +796,31 @@ func emitInterface(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fieldO
 	}
 }
 
+// fallbackReasonFromFlags returns the FallbackReason for a field based on its TypeInfo flags.
+// Priority: Marshaler > TextMarshaler > Quoted > Unknown.
+func fallbackReasonFromFlags(flags tiFlag) int32 {
+	if flags&tiFlagHasMarshalFn != 0 {
+		return fbReasonMarshaler
+	}
+	if flags&tiFlagHasTextMarshalFn != 0 {
+		return fbReasonTextMarshaler
+	}
+	if flags&tiFlagQuoted != 0 {
+		return fbReasonQuoted
+	}
+	return fbReasonUnknown
+}
+
 // emitYield emits a single OP_YIELD instruction for Go fallback.
-func emitYield(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fieldOff uintptr, fieldIdx int) {
+// reason is stored in OperandB for debug trace (see FallbackReason in types.h).
+func emitYield(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fieldOff uintptr, fieldIdx int, reason int32) {
 	poolOff, keyLen := b.addKey(fi.Ext.KeyBytes)
 	idx := b.emit(VjOpStep{
 		OpType:   opFallback,
 		KeyLen:   keyLen,
 		FieldOff: uint32(fieldOff),
 		OperandA: int32(fieldIdx), // Go needs this to find the field's TypeInfo
+		OperandB: reason,
 	})
 	if keyLen > 0 {
 		*fixups = append(*fixups, keyFixup{opIdx: idx, poolOffset: poolOff})
@@ -726,9 +835,10 @@ func emitYield(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fieldOff u
 // emitSkipIfZero emits a OP_SKIP_IF_ZERO instruction with a known skip count.
 func emitSkipIfZero(b *blueprintBuilder, _ *[]keyFixup, _ *TypeInfo, fieldOff uintptr, skipCount int, kind ElemTypeKind) {
 	b.emit(VjOpStep{
-		OpType:   opSkipIfZero | (uint16(kind) << 8), // high byte = ZeroCheckTag (matches ElemTypeKind)
+		OpType:   opSkipIfZero,
 		FieldOff: uint32(fieldOff),
 		OperandA: int32(skipCount),
+		OperandB: int32(kind), // ZeroCheckTag (matches ElemTypeKind)
 	})
 }
 
@@ -736,9 +846,10 @@ func emitSkipIfZero(b *blueprintBuilder, _ *[]keyFixup, _ *TypeInfo, fieldOff ui
 // Returns the index of the emitted instruction.
 func emitSkipIfZeroPlaceholder(b *blueprintBuilder, _ *[]keyFixup, _ *TypeInfo, fieldOff uintptr, kind ElemTypeKind) int {
 	return b.emit(VjOpStep{
-		OpType:   opSkipIfZero | (uint16(kind) << 8),
+		OpType:   opSkipIfZero,
 		FieldOff: uint32(fieldOff),
-		OperandA: 0, // placeholder, patched by caller
+		OperandA: 0,           // placeholder, patched by caller
+		OperandB: int32(kind), // ZeroCheckTag (matches ElemTypeKind)
 	})
 }
 

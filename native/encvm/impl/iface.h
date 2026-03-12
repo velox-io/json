@@ -11,7 +11,6 @@
 #ifndef VJ_ENCVM_IFACE_H
 #define VJ_ENCVM_IFACE_H
 
-#include "pointer.h"
 #include "types.h"
 
 enum VjIfaceAction {
@@ -31,6 +30,11 @@ typedef struct {
   const uint8_t *data_ptr; /* eface.data_ptr (valid when action=SWITCH_OPS) */
   int32_t action;          /* VjIfaceAction */
 } VjIfaceResult;
+
+typedef struct {
+  uint8_t *buf; /* advanced buffer pointer; NULL on error */
+  int exit_code; /* 0 = ok, VJ_EXIT_BUF_FULL, VJ_EXIT_NAN_INF */
+} VjPtrEncResult;
 
 VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend,
                                         const uint8_t *iface_ptr,

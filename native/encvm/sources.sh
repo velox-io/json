@@ -19,7 +19,6 @@ STDLIB_SOURCES="native/stdlib/memory.c"
 
 EXTRA_SOURCES="
   native/encvm/impl/iface.c
-  native/encvm/impl/pointer.c
   native/encvm/impl/strfn_nonascii.c
   native/encvm/impl/uscale.c
   native/encvm/impl/log.c

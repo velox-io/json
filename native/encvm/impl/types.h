@@ -13,7 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define VJ_MAX_DEPTH 24
+#define VJ_MAX_DEPTH 64
 
 /* ================================================================
  *  Debug Trace Ring Buffer
@@ -70,7 +70,8 @@ enum OpType {
 
   /* --- Structural control-flow opcodes (33-46) --- */
   OP_SKIP_IF_ZERO = 33, /* conditional forward jump (omitempty) */
-  /* 34, 35: reserved (formerly OP_STRUCT_BEGIN / OP_STRUCT_END) */
+  /* 34: reserved */
+  OP_RECURSE      = 35, /* intra-Blueprint call: push CALL frame, jump to ops[operand_a] */
   OP_PTR_DEREF    = 36, /* deref pointer, nil→null+jump */
   OP_PTR_END      = 37, /* pop ptr-deref frame, restore base */
   OP_SLICE_BEGIN  = 38, /* slice loop start */
@@ -93,13 +94,11 @@ enum OpType {
 /* Dispatch table size — must cover all opcodes up to OP_FALLBACK (0x40). */
 #define OP_DISPATCH_COUNT 0x41
 
-/* Lower byte = real opcode, stripped before dispatch-table lookup. */
-#define OP_TYPE_MASK      0x00FF
 
 /* ================================================================
  *  ZeroCheckTag — omitempty zero-value check tags
  *
- *  Encoded in the high byte of OP_SKIP_IF_ZERO's op_type field.
+ *  Encoded in OP_SKIP_IF_ZERO's operand_b field.
  *  Values = Go ElemTypeKind (1-based); Go casts directly.
  * ================================================================ */
 
@@ -228,62 +227,74 @@ static inline int vj_is_zero(const uint8_t *ptr, uint16_t zct) {
   }
 }
 
-enum VjError {
-  VJ_OK = 0,
-  VJ_ERR_BUF_FULL = 1,
-  VJ_ERR_GO_FALLBACK = 2,
-  VJ_ERR_STACK_OVERFLOW = 3,
-  VJ_ERR_CYCLE = 4,
-  VJ_ERR_NAN_INF = 5,
+/* VM exit status codes.
+ * NOTE: includes control-flow exits (BUF_FULL) in addition to terminal errors. */
+enum VjExitCode {
+  VJ_EXIT_OK = 0,
+  VJ_EXIT_BUF_FULL = 1,
+  VJ_EXIT_GO_FALLBACK = 2,
+  VJ_EXIT_STACK_OVERFLOW = 3,
+  VJ_EXIT_CYCLE = 4,
+  VJ_EXIT_NAN_INF = 5,
 };
 
 
 /* ================================================================
  *  VMState — packed 64-bit VM state register
  *
- *  Packs depth, first flag, encoding config flags, error code,
- *  and yield reason into a single uint64 register to reduce
- *  register pressure on x86-64.
+ *  Packs depth, top-frame type, first flag, encoding config flags,
+ *  exit code, and yield reason into a single uint64 register to
+ *  reduce register pressure on x86-64.
  *
  *  Layout:
  *    bits [0..7]   = depth        (unified stack depth, max 24)
- *    bits [8..15]  = reserved
+ *    bits [8..9]   = top_frame    (VJ_FRAME_CALL/LOOP/MAP — topmost frame type)
+ *    bits [10..15] = reserved
  *    bit  [16]     = first        (first-field flag: no comma prefix)
  *    bits [17..31] = enc_flags    (encoding config: escape, float fmt)
- *    bits [32..39] = error_code   (VjError value)
- *    bits [40..47] = yield_reason (VjYieldReason value)
+ *    bits [32..39] = exit_code    (VjExitCode value)
+ *    bits [40..47] = yield_reason (VjYieldReason; valid when exit_code=VJ_EXIT_YIELD)
  *    bits [48..63] = reserved
  *
  *  Hot path uses low 32 bits (single-register ops on x86-64).
- *  Cold path (error/yield) in high 32 bits (only on VM exit).
+ *  Cold path (exit/yield) in high 32 bits (only on VM exit).
+ *  'first' is a one-shot comma latch: 0 => write ',' before next item;
+ *  VM_WRITE_KEY test-and-clears this bit on each emitted item.
  * ================================================================ */
 
 /* Low 32 bits: hot-path state */
 #define VJ_ST_DEPTH_SHIFT    0
 #define VJ_ST_DEPTH_MASK     ((uint64_t)0x000000FF)       /* bits [0..7]  */
+#define VJ_ST_TOP_FRAME_SHIFT  8
+#define VJ_ST_TOP_FRAME_MASK   ((uint64_t)0x00000300)     /* bits [8..9]  */
 #define VJ_ST_FIRST_BIT      ((uint64_t)1 << 16)          /* bit  [16]    */
 #define VJ_ST_FLAGS_SHIFT    17
 #define VJ_ST_FLAGS_MASK     ((uint64_t)0xFFFE0000)       /* bits [17..31]*/
 
 /* High 32 bits: cold-path state */
-#define VJ_ST_ERR_SHIFT      32
-#define VJ_ST_ERR_MASK       ((uint64_t)0x000000FF00000000ULL) /* bits [32..39] */
+#define VJ_ST_EXIT_SHIFT      32
+#define VJ_ST_EXIT_MASK       ((uint64_t)0x000000FF00000000ULL) /* bits [32..39] */
 #define VJ_ST_YIELD_SHIFT    40
 #define VJ_ST_YIELD_MASK     ((uint64_t)0x0000FF0000000000ULL) /* bits [40..47] */
 
 /* Access macros — extract fields from vmstate. */
 #define VJ_ST_GET_DEPTH(st)   ((int32_t)((st) & VJ_ST_DEPTH_MASK))
+#define VJ_ST_GET_TOP_FRAME(st) ((int32_t)(((st) & VJ_ST_TOP_FRAME_MASK) >> VJ_ST_TOP_FRAME_SHIFT))
 #define VJ_ST_GET_FIRST(st)   ((int)(((st) & VJ_ST_FIRST_BIT) != 0))
 #define VJ_ST_GET_FLAGS(st)   ((uint32_t)(((st) & VJ_ST_FLAGS_MASK) >> VJ_ST_FLAGS_SHIFT))
-#define VJ_ST_GET_ERR(st)     ((int32_t)(((st) >> VJ_ST_ERR_SHIFT) & 0xFF))
+#define VJ_ST_GET_EXIT(st)     ((int32_t)(((st) >> VJ_ST_EXIT_SHIFT) & 0xFF))
 #define VJ_ST_GET_YIELD(st)   ((uint32_t)(((st) >> VJ_ST_YIELD_SHIFT) & 0xFF))
 
 /* Mutate macros — modify fields within vmstate. */
 
+/* Top-frame-type mutator — stores the topmost frame's type in bits [8..9]. */
+#define VJ_ST_SET_TOP_FRAME(st, v) \
+  ((st) = ((st) & ~VJ_ST_TOP_FRAME_MASK) | (((uint64_t)(v) & 0x3) << VJ_ST_TOP_FRAME_SHIFT))
+
 /* First-flag mutators */
 #define VJ_ST_SET_FIRST_1(st)   ((st) |= VJ_ST_FIRST_BIT)
 #define VJ_ST_SET_FIRST_0(st)   ((st) &= ~VJ_ST_FIRST_BIT)
-#define VJ_ST_SET_ERR(st, v)    ((st) = ((st) & ~VJ_ST_ERR_MASK) | (((uint64_t)(v) & 0xFF) << VJ_ST_ERR_SHIFT))
+#define VJ_ST_SET_EXIT(st, v)    ((st) = ((st) & ~VJ_ST_EXIT_MASK) | (((uint64_t)(v) & 0xFF) << VJ_ST_EXIT_SHIFT))
 #define VJ_ST_SET_YIELD(st, v)  ((st) = ((st) & ~VJ_ST_YIELD_MASK) | (((uint64_t)(v) & 0xFF) << VJ_ST_YIELD_SHIFT))
 
 /* Depth increment/decrement — depth at bits [0..7]: +1/-1 directly.
@@ -328,12 +339,12 @@ enum VjError {
 #define VJ_FLAGS_FLOAT_EXP_AUTO       (1 << 3)
 
 typedef struct VjOpStep {
-  uint16_t op_type;     /*  0: opcode | flags (high byte = ZeroCheckTag for OP_SKIP_IF_ZERO) */
+  uint16_t op_type;     /*  0: opcode | flags */
   uint16_t key_len;     /*  2: pre-encoded key length */
   uint32_t field_off;   /*  4: field offset in struct */
   const char *key_ptr;  /*  8: pointer to pre-encoded key bytes */
   int32_t  operand_a;   /* 16: jump offset / elem_size / field_idx */
-  int32_t  operand_b;   /* 20: body length / reserved */
+  int32_t  operand_b;   /* 20: body length / ZeroCheckTag (OP_SKIP_IF_ZERO) */
 } VjOpStep;
 
 _Static_assert(sizeof(VjOpStep) == 24, "VjOpStep must be 24 bytes");
@@ -343,33 +354,40 @@ _Static_assert(offsetof(VjOpStep, operand_b) == 20, "VjOpStep.operand_b offset")
 
 /*  Unified Stack Frame
  *
- *  Single interleaved stack with a frame_type discriminator:
- *    VJ_FRAME_CALL (0) — ptr_deref, interface/switch_ops
- *    VJ_FRAME_LOOP (1) — slice, array iteration
- *    VJ_FRAME_MAP  (2) — map[string]string C-native iteration
+ *  Single interleaved stack; the topmost frame's type is tracked in
+ *  vmstate bits [8..9] (VJ_FRAME_CALL / VJ_FRAME_LOOP / VJ_FRAME_MAP).
+ *  Instruction pairing (begin/end) guarantees correct pop without
+ *  per-frame type tags.
  *
- *  Stack depth limit:  VJ_MAX_DEPTH (24)
+ *  Stack depth limit:  VJ_MAX_DEPTH
  * */
 
-/* Frame type tags. */
-enum VjFrameType {
-  VJ_FRAME_CALL = 0,  /* ptr deref / interface switch-ops */
-  VJ_FRAME_LOOP = 1,  /* slice / array iteration */
-  VJ_FRAME_MAP  = 2,  /* map[string]string C-native iteration */
-};
+/* Top-of-stack frame type tags — stored in vmstate bits [8..9].
+ * Only the topmost frame's type is tracked (in vmstate), not per-frame.
+ * Instruction pairing guarantees correct push/pop without per-frame tags. */
+#define VJ_FRAME_CALL  0  /* ptr deref / interface switch-ops */
+#define VJ_FRAME_LOOP  1  /* slice / array iteration */
+#define VJ_FRAME_MAP   2  /* map[string]string C-native iteration */
 
 /* VjStackFrame — unified frame pushed by all stack-using ops.
  * 56 bytes.
+ *
+ * NOTE: 'first' lives in vmstate bit 16 (set on object entry,
+ * test-and-clear on key write). Stack frames do not store/restore it.
+ *
+ * The frame type discriminator lives in vmstate bits [8..9] and only
+ * records the topmost frame's type.  Instruction pairing (begin/end)
+ * ensures correct pop semantics without per-frame type tags.
  *
  * body_pc and elem_size for iteration are compile-time constants
  * encoded in the SLICE_END instruction's operands. */
 typedef struct VjStackFrame {
   const VjOpStep *ret_ops;     /*  0: parent ops array base (CALL only) */
   int32_t         ret_pc;      /*  8: return PC (CALL only) */
-  int32_t         frame_type;  /* 12: VJ_FRAME_CALL(0), LOOP(1), MAP(2) */
+  int32_t         _reserved_ft;/* 12: reserved (formerly frame_type) */
   const uint8_t  *ret_base;    /* 16: parent data base */
-  int32_t         first;       /* 24: parent first-field flag (CALL only) */
-  int32_t         _pad0;       /* 28: alignment */
+  int32_t         _reserved0;  /* 24: reserved  */
+  int32_t         _reserved1;  /* 28: reserved */
   union {                      /* 32-55: frame-type-specific */
     struct {
       int64_t _reserved[3];    /* unused for CALL frames */
@@ -392,19 +410,31 @@ typedef struct VjStackFrame {
 _Static_assert(sizeof(VjStackFrame) == 56, "VjStackFrame must be 56 bytes");
 _Static_assert(offsetof(VjStackFrame, ret_ops) == 0, "VjStackFrame.ret_ops offset");
 _Static_assert(offsetof(VjStackFrame, ret_pc) == 8, "VjStackFrame.ret_pc offset");
-_Static_assert(offsetof(VjStackFrame, frame_type) == 12, "VjStackFrame.frame_type offset");
+_Static_assert(offsetof(VjStackFrame, _reserved_ft) == 12, "VjStackFrame._reserved_ft offset");
 _Static_assert(offsetof(VjStackFrame, ret_base) == 16, "VjStackFrame.ret_base offset");
-_Static_assert(offsetof(VjStackFrame, first) == 24, "VjStackFrame.first offset");
+_Static_assert(offsetof(VjStackFrame, _reserved0) == 24, "VjStackFrame._reserved0 offset");
 
 enum {
-  VJ_ERR_YIELD = 6,  /* VM yielded to Go */
+  /* Separate from VJ_EXIT_BUF_FULL:
+   * - VJ_EXIT_BUF_FULL: capacity retry (grow/flush buffer, then re-enter C)
+   * - VJ_EXIT_YIELD: semantic handoff; Go dispatches by VjYieldReason
+   *   before re-entering C, if needed. */
+  VJ_EXIT_YIELD = 6,
 };
 
 enum VjYieldReason {
   VJ_YIELD_FALLBACK   = 1,  /* custom marshaler / unsupported */
   VJ_YIELD_IFACE_MISS = 2,  /* interface cache miss */
-  VJ_YIELD_MAP_NEXT   = 3,  /* map iteration */
+  VJ_YIELD_MAP_HANDOFF = 3,  /* map encoding handoff to Go */
 };
+
+/* FallbackReason — encoded in OP_FALLBACK's operand_b by the Go compiler.
+ * Describes WHY this field was delegated to Go-side encoding.
+ * Only used by debug trace; zero cost in release builds.
+ * Values: 0=unknown, 1=json.Marshaler, 2=encoding.TextMarshaler,
+ *         3=`,string` tag, 4=[]byte, 5=[N]byte, 6=map+omitempty.
+ * Authoritative definition: fbReason* constants in vj_encvm.go.
+ * C trace writes "YIELD(fb:N)"; Go post-processes to human labels. */
 
 /* ================================================================
  *  Interface Cache Entry — 24 bytes
@@ -463,8 +493,7 @@ typedef struct VjExecCtx {
 
   /* Yield metadata (cold: only accessed on yield) */
   const void      *yield_type_ptr;    /*  80: eface.type_ptr on iface miss */
-  int32_t          yield_field_idx;   /*  88: field index for fallback (no first bit) */
-  int32_t          _pad_yield;        /*  92: alignment padding */
+  int32_t          _yield_reserved[2];/*  88: reserved (ABI-stable padding) */
 
   /* ===== Unified Stack (96-1439) ===== */
   VjStackFrame     stack[VJ_MAX_DEPTH]; /*  96: 24 x 56 = 1344 bytes */
@@ -474,7 +503,7 @@ typedef struct VjExecCtx {
   VjTraceBuf      *trace_buf;          /* 1440: Go-allocated trace buffer */
 } VjExecCtx;
 
-_Static_assert(sizeof(VjExecCtx) == 1448, "VjExecCtx must be 1448 bytes");
+_Static_assert(sizeof(VjExecCtx) == 3688, "VjExecCtx must be 1448 bytes");
 _Static_assert(offsetof(VjExecCtx, buf_cur) == 0, "buf_cur offset");
 _Static_assert(offsetof(VjExecCtx, buf_end) == 8, "buf_end offset");
 _Static_assert(offsetof(VjExecCtx, ops_ptr) == 16, "ops_ptr offset");
@@ -493,9 +522,9 @@ _Static_assert(offsetof(VjExecCtx, indent_prefix_len) == 75,
                "indent_prefix_len offset");
 _Static_assert(offsetof(VjExecCtx, yield_type_ptr) == 80,
                "yield_type_ptr offset");
-_Static_assert(offsetof(VjExecCtx, yield_field_idx) == 88,
-               "yield_field_idx offset");
+_Static_assert(offsetof(VjExecCtx, _yield_reserved) == 88,
+               "_yield_reserved offset");
 _Static_assert(offsetof(VjExecCtx, stack) == 96, "stack offset");
-_Static_assert(offsetof(VjExecCtx, trace_buf) == 1440, "trace_buf offset");
+_Static_assert(offsetof(VjExecCtx, trace_buf) == 3680, "trace_buf offset");
 
 #endif /* VJ_ENCVM_TYPES_H */

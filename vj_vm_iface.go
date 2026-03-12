@@ -45,9 +45,9 @@ func (m *Marshaler) handleInterfaceYield(ctx *VjExecCtx, activeBP *Blueprint) er
 	depth := vmstateGetDepth(ctx.VMState)
 	if depth > 0 && ctx.PC > 0 {
 		frame := &ctx.Stack[depth-1]
-		if frame.FrameType == vjFrameLoop &&
+		if vmstateGetTopFrame(ctx.VMState) == vjFrameLoop &&
 			int(ctx.PC-1) < len(activeBP.Ops) &&
-			activeBP.Ops[ctx.PC-1].OpType&opTypeMask == opSliceBegin {
+			activeBP.Ops[ctx.PC-1].OpType == opSliceBegin {
 			// Encode remaining slice elements in Go.
 			// elem_size is in the SLICE_BEGIN instruction's OperandA.
 			elemSize := uintptr(activeBP.Ops[ctx.PC-1].OperandA)

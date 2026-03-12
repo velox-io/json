@@ -416,21 +416,21 @@ for isa in $ISAS; do
         if [ "$GEN_ASM" = true ]; then
             mkdir -p "$OUTPUT_DIR/asm"
             SFILE="$OUTPUT_DIR/asm/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.s"
-            echo "  Generating $(basename "$SFILE")"
+            echo "  Generating asm: "$SFILE""
             $CC -S -O3 -g0 -fno-stack-protector $ARCH_FLAGS -fno-asynchronous-unwind-tables $ISA_FLAGS \
                 $COMMON_DEFS $COMMON_INCLUDES \
                 "$SOURCE_FILE" -o "$SFILE"
 
-            # Remove debug directives (use -i.bak for BSD/GNU sed compatibility)
-            sed -i.bak '/^[[:space:]]*\.file[[:space:]]/d' "$SFILE" && rm -f "${SFILE}.bak"
-            sed -i.bak '/^[[:space:]]*\.loc[[:space:]]/d' "$SFILE" && rm -f "${SFILE}.bak"
-            sed -i.bak '/^[[:space:]]*\.cfi_[[:alpha:]]/d' "$SFILE" && rm -f "${SFILE}.bak"
-            sed -i.bak '/^[[:space:]]*#DEBUG_VALUE/d' "$SFILE" && rm -f "${SFILE}.bak"
-            sed -i.bak '/^[[:space:]]*\.Lfunc_begin/d' "$SFILE" && rm -f "${SFILE}.bak"
-            sed -i.bak '/^[[:space:]]*\.Lfunc_end/d' "$SFILE" && rm -f "${SFILE}.bak"
-            sed -i.bak '/^[[:space:]]*\.Ltmp/d' "$SFILE" && rm -f "${SFILE}.bak"
-            # Remove .size directives that reference removed labels
-            sed -i.bak '/\.size.*\.Lfunc_end/d' "$SFILE" && rm -f "${SFILE}.bak"
+            # # Remove debug directives (use -i.bak for BSD/GNU sed compatibility)
+            # sed -i.bak '/^[[:space:]]*\.file[[:space:]]/d' "$SFILE" && rm -f "${SFILE}.bak"
+            # sed -i.bak '/^[[:space:]]*\.loc[[:space:]]/d' "$SFILE" && rm -f "${SFILE}.bak"
+            # sed -i.bak '/^[[:space:]]*\.cfi_[[:alpha:]]/d' "$SFILE" && rm -f "${SFILE}.bak"
+            # sed -i.bak '/^[[:space:]]*#DEBUG_VALUE/d' "$SFILE" && rm -f "${SFILE}.bak"
+            # sed -i.bak '/^[[:space:]]*\.Lfunc_begin/d' "$SFILE" && rm -f "${SFILE}.bak"
+            # sed -i.bak '/^[[:space:]]*\.Lfunc_end/d' "$SFILE" && rm -f "${SFILE}.bak"
+            # sed -i.bak '/^[[:space:]]*\.Ltmp/d' "$SFILE" && rm -f "${SFILE}.bak"
+            # # Remove .size directives that reference removed labels
+            # sed -i.bak '/\.size.*\.Lfunc_end/d' "$SFILE" && rm -f "${SFILE}.bak"
 
             TMP_ASM=$(mktemp)
             cat > "$TMP_ASM" << HEADER

@@ -1231,3 +1231,229 @@ func TestMarshalIndent_TransitiveSelfRef(t *testing.T) {
 		t.Errorf("indent mismatch:\n  vjson:\n%s\n  stdlib:\n%s", got, std)
 	}
 }
+
+// --- Indirect recursion: Root → A → []B → A ---
+// A is not the root type, and the cycle goes through a different struct B.
+
+type indirectCycleA struct {
+	Name  string           `json:"name"`
+	Items []indirectCycleB `json:"items"`
+}
+
+type indirectCycleB struct {
+	Value int             `json:"value"`
+	Back  *indirectCycleA `json:"back"`
+}
+
+type indirectCycleRoot struct {
+	ID int             `json:"id"`
+	A  *indirectCycleA `json:"a"`
+}
+
+func TestMarshal_IndirectCycle_Nil(t *testing.T) {
+	v := indirectCycleRoot{ID: 1, A: nil}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	std, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("stdlib error: %v", err)
+	}
+	if string(got) != string(std) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, std)
+	}
+}
+
+func TestMarshal_IndirectCycle_TwoLevels(t *testing.T) {
+	v := indirectCycleRoot{
+		ID: 1,
+		A: &indirectCycleA{
+			Name: "top",
+			Items: []indirectCycleB{
+				{Value: 10, Back: &indirectCycleA{
+					Name: "nested",
+					Items: []indirectCycleB{
+						{Value: 20, Back: nil},
+					},
+				}},
+				{Value: 30, Back: nil},
+			},
+		},
+	}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	std, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("stdlib error: %v", err)
+	}
+	if string(got) != string(std) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, std)
+	}
+}
+
+func TestRoundtrip_IndirectCycle(t *testing.T) {
+	orig := indirectCycleRoot{
+		ID: 1,
+		A: &indirectCycleA{
+			Name: "top",
+			Items: []indirectCycleB{
+				{Value: 10, Back: &indirectCycleA{
+					Name:  "nested",
+					Items: nil,
+				}},
+			},
+		},
+	}
+	data, err := Marshal(&orig)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	var got indirectCycleRoot
+	err = Unmarshal(data, &got)
+	if err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	data2, err := Marshal(&got)
+	if err != nil {
+		t.Fatalf("re-Marshal error: %v", err)
+	}
+	if string(data) != string(data2) {
+		t.Errorf("roundtrip mismatch:\n  first:  %s\n  second: %s", data, data2)
+	}
+}
+
+// --- Mutual recursion chain: Root → A → B → C → A ---
+// Three-way cycle where each struct references the next via pointer.
+
+type mutualChainA struct {
+	Name string        `json:"name"`
+	B    *mutualChainB `json:"b"`
+}
+
+type mutualChainB struct {
+	Value int           `json:"value"`
+	C     *mutualChainC `json:"c"`
+}
+
+type mutualChainC struct {
+	Tag string        `json:"tag"`
+	A   *mutualChainA `json:"a"`
+}
+
+type mutualChainRoot struct {
+	ID int           `json:"id"`
+	A  *mutualChainA `json:"a"`
+}
+
+func TestMarshal_MutualChain_Nil(t *testing.T) {
+	v := mutualChainRoot{ID: 1, A: nil}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	std, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("stdlib error: %v", err)
+	}
+	if string(got) != string(std) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, std)
+	}
+}
+
+func TestMarshal_MutualChain_FullLoop(t *testing.T) {
+	v := mutualChainRoot{
+		ID: 1,
+		A: &mutualChainA{
+			Name: "a1",
+			B: &mutualChainB{
+				Value: 42,
+				C: &mutualChainC{
+					Tag: "c1",
+					A: &mutualChainA{
+						Name: "a2",
+						B: &mutualChainB{
+							Value: 99,
+							C:     nil,
+						},
+					},
+				},
+			},
+		},
+	}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	std, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("stdlib error: %v", err)
+	}
+	if string(got) != string(std) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, std)
+	}
+}
+
+func TestMarshal_MutualChain_PartialNil(t *testing.T) {
+	v := mutualChainRoot{
+		ID: 1,
+		A: &mutualChainA{
+			Name: "a1",
+			B: &mutualChainB{
+				Value: 10,
+				C: &mutualChainC{
+					Tag: "leaf",
+					A:   nil,
+				},
+			},
+		},
+	}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	std, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("stdlib error: %v", err)
+	}
+	if string(got) != string(std) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, std)
+	}
+}
+
+func TestRoundtrip_MutualChain(t *testing.T) {
+	orig := mutualChainRoot{
+		ID: 1,
+		A: &mutualChainA{
+			Name: "a1",
+			B: &mutualChainB{
+				Value: 42,
+				C: &mutualChainC{
+					Tag: "c1",
+					A: &mutualChainA{
+						Name: "a2",
+						B:    nil,
+					},
+				},
+			},
+		},
+	}
+	data, err := Marshal(&orig)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	var got mutualChainRoot
+	err = Unmarshal(data, &got)
+	if err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	data2, err := Marshal(&got)
+	if err != nil {
+		t.Fatalf("re-Marshal error: %v", err)
+	}
+	if string(data) != string(data2) {
+		t.Errorf("roundtrip mismatch:\n  first:  %s\n  second: %s", data, data2)
+	}
+}

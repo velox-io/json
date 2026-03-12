@@ -36,6 +36,7 @@ const (
 
 	// Structural control-flow instructions (33-46).
 	opSkipIfZero uint16 = 33 // conditional forward jump (omitempty)
+	opRecurse    uint16 = 35 // intra-Blueprint call: push CALL frame, jump to ops[operand_a]
 	opPtrDeref   uint16 = 36 // deref pointer, nil→null+jump
 	opPtrEnd     uint16 = 37 // pop ptr-deref frame, restore base
 	opSliceBegin uint16 = 38 // slice loop start
@@ -55,10 +56,6 @@ const (
 	opEnd uint16 = 0xFF
 )
 
-// opTypeMask extracts the opcode from OpType, stripping flags and
-// the high byte used by opSkipIfZero to encode the ZeroCheckTag.
-const opTypeMask = uint16(0x00FF)
-
 // kindToOpcode maps an ElemTypeKind to its VM opcode.
 // Panics if k has no single-instruction opcode.
 func kindToOpcode(k ElemTypeKind) uint16 {
@@ -76,13 +73,20 @@ func kindToOpcode(k ElemTypeKind) uint16 {
 	}
 }
 
-// Error codes returned via vmstate (VjError enum).
+// VM exit codes returned via vmstate high bits.
+// Includes both terminal statuses (OK/errors) and control-flow exits.
+//
+// YIELD is intentionally separate from BUF_FULL:
+//   - BUF_FULL: capacity event; Go only needs to grow/flush buffer and retry.
+//   - YIELD: semantic handoff; Go must run a handler based on yield_reason
+//     (iface cache miss, fallback, map handoff, ...) before re-entering C,
+//     if needed.
 const (
-	vjOK           int32 = 0
-	vjErrBufFull   int32 = 1
-	vjErrStackOvfl int32 = 3
-	vjErrNanInf    int32 = 5
-	vjErrYield     int32 = 6 // VM yielded to Go (interface miss, fallback, map iter)
+	vjExitOK        int32 = 0
+	vjExitBufFull   int32 = 1
+	vjExitStackOvfl int32 = 3
+	vjExitNanInf    int32 = 5
+	vjExitYieldToGo int32 = 6 // VM yielded to Go semantic handlers
 )
 
 // Encoding flags — Go-side bit positions (low 4 bits).
@@ -94,38 +98,55 @@ const (
 
 // Yield reason values extracted from vmstate bits [40..47].
 const (
-	yieldFallback  uint32 = 1 // custom marshaler / ,string / unsupported type
-	yieldIfaceMiss uint32 = 2 // interface{} cache miss — need Go compilation
-	yieldMapNext   uint32 = 3 // map iteration — need Go to provide next k/v
+	yieldFallback   uint32 = 1 // custom marshaler / ,string / unsupported type
+	yieldIfaceMiss  uint32 = 2 // interface{} cache miss — need Go compilation
+	yieldMapHandoff uint32 = 3 // map encoding handoff — Go takes over full map field encoding
+)
+
+// FallbackReason constants — stored in VjOpStep.OperandB for OP_FALLBACK.
+// Mirrors enum FallbackReason in native/encvm/impl/types.h.
+// Used by debug trace to display why a field was delegated to Go.
+const (
+	fbReasonUnknown       int32 = 0 // unspecified / unknown kind
+	fbReasonMarshaler     int32 = 1 // implements json.Marshaler
+	fbReasonTextMarshaler int32 = 2 // implements encoding.TextMarshaler
+	fbReasonQuoted        int32 = 3 // field has `,string` struct tag
+	fbReasonByteSlice     int32 = 4 // []byte — base64 encoding
+	fbReasonByteArray     int32 = 5 // [N]byte — base64 encoding
+	fbReasonMapOmitempty  int32 = 6 // map with omitempty (needs Go len check)
 )
 
 // ================================================================
 //  VMState — packed 64-bit VM state register (mirrors C layout)
 //
 //  Layout:
-//    bits [0..7]   = depth        (unified stack depth, max 24)
-//    bits [8..15]  = reserved
-//    bit  [16]     = first        (first-field flag: no comma prefix)
+//    bits [0..7]   = depth        (unified stack depth)
+//    bits [8..9]   = top_frame    (VJ_FRAME_CALL/LOOP/MAP — topmost frame type)
+//    bits [10..15] = reserved
+//    bit  [16]     = first        (comma latch: 0 => write ',' before next item)
 //    bits [17..31] = enc_flags    (encoding config: escape, float fmt)
-//    bits [32..39] = error_code   (VjError value)
-//    bits [40..47] = yield_reason (VjYieldReason value)
+//    bits [32..39] = exit_code    (VM exit status)
+//    bits [40..47] = yield_reason (VjYieldReason, valid when exit_code=YIELD)
 //    bits [48..63] = reserved
 // ================================================================
 
 const (
-	vjStDepthMask  = uint64(0x000000FF)
-	vjStFirstBit   = uint64(1) << 16
-	vjStFlagsShift = 17
-	vjStErrShift   = 32
-	vjStYieldShift = 40
+	vjStDepthMask     = uint64(0x000000FF)
+	vjStTopFrameShift = 8
+	vjStTopFrameMask  = uint64(0x00000300) // bits [8..9]
+	vjStFirstBit      = uint64(1) << 16
+	vjStFlagsShift    = 17
+	vjStExitShift     = 32
+	vjStYieldShift    = 40
 )
 
-// vmstateGetErr extracts the error code from vmstate.
-func vmstateGetErr(st uint64) int32 {
-	return int32((st >> vjStErrShift) & 0xFF)
+// vmstateGetExit extracts the VM exit code from vmstate.
+func vmstateGetExit(st uint64) int32 {
+	return int32((st >> vjStExitShift) & 0xFF)
 }
 
 // vmstateGetYield extracts the yield reason from vmstate.
+// Only meaningful when vmstateGetExit(st) == vjExitYieldToGo.
 func vmstateGetYield(st uint64) uint32 {
 	return uint32((st >> vjStYieldShift) & 0xFF)
 }
@@ -140,9 +161,15 @@ func vmstateGetDepth(st uint64) int32 {
 	return int32(st & vjStDepthMask)
 }
 
+// vmstateGetTopFrame extracts the topmost frame type from vmstate.
+// Only meaningful when vmstateGetDepth(st) > 0.
+func vmstateGetTopFrame(st uint64) int32 {
+	return int32((st & vjStTopFrameMask) >> vjStTopFrameShift)
+}
+
 // vmstateBuildInitial builds the initial vmstate for VM entry.
 // flags contains escape flags (bits 0-2) and vjEncFloatExpAuto (bit 3).
-// The first bit is set. depth=0, err=0, yield=0.
+// The first bit is set. depth=0, exit=0, yield=0.
 func vmstateBuildInitial(flags uint32) uint64 {
 	return vjStFirstBit | (uint64(flags) << vjStFlagsShift)
 }
@@ -162,6 +189,7 @@ var _ [24]byte = [unsafe.Sizeof(VjOpStep{})]byte{}
 // Blueprint holds the compiled instruction stream for a type.
 // It is immutable after construction and safe for concurrent use.
 type Blueprint struct {
+	Name      string          // type name (debug/trace only)
 	Ops       []VjOpStep      // linear instruction stream, terminated by opEnd
 	KeyPool   []byte          // contiguous storage for all pre-encoded keys
 	Fallbacks map[int]*fbInfo // PC index → fallback field info (only for OP_FALLBACK instructions)
@@ -182,28 +210,36 @@ type encvmCache struct {
 	blueprint *Blueprint // compiled Blueprint (flat instruction stream)
 }
 
-// maxDepth matches the C VJ_MAX_DEPTH.
-const maxDepth = 24
+// VJ_MAX_DEPTH matches the C VJ_MAX_DEPTH.
+const VJ_MAX_DEPTH = 64 //nolint
 
 // maxIndentDepth is the combined max nesting for indent template sizing.
-const maxIndentDepth = maxDepth
+const maxIndentDepth = VJ_MAX_DEPTH
 
 // VjStackFrame mirrors the C VjStackFrame (56 bytes).
 // Unified frame for all stack-using ops: ptr_deref, interface/switch_ops,
 // slice_begin, array_begin, map_str_str.
+//
+// The frame type discriminator lives in vmstate bits [8..9] and only
+// records the topmost frame's type.  Instruction pairing (begin/end)
+// ensures correct pop semantics without per-frame type tags.
+//
+// NOTE: 'first' is tracked in VMState bit 16 (set on object entry,
+// test-and-clear when writing a key). Stack frames do not store/restore it.
 type VjStackFrame struct {
-	RetOps    unsafe.Pointer //  0: parent ops array base (CALL only)
-	RetPC     int32          //  8: return PC (CALL only)
-	FrameType int32          // 12: VJ_FRAME_CALL(0), LOOP(1), MAP(2)
-	RetBase   unsafe.Pointer // 16: parent data base
-	First     int32          // 24: parent first-field flag (CALL only)
-	_pad0     int32          // 28: alignment
-	_union    [24]byte       // 32-55: call/loop/map iteration state
+	RetOps      unsafe.Pointer //  0: parent ops array base (CALL only)
+	RetPC       int32          //  8: return PC (CALL only)
+	_reservedFT int32          // 12: reserved (formerly frame_type)
+	RetBase     unsafe.Pointer // 16: parent data base
+	_reserved0  int32          // 24: reserved (legacy first slot)
+	_pad0       int32          // 28: reserved
+	_union      [24]byte       // 32-55: call/loop/map iteration state
 }
 
 var _ [56]byte = [unsafe.Sizeof(VjStackFrame{})]byte{}
 
-// Frame type constants matching C VjFrameType enum.
+// Top-frame type constants matching C VJ_FRAME_* defines.
+// Stored in vmstate bits [8..9], not per-frame.
 const (
 	vjFrameCall = int32(0) // VJ_FRAME_CALL
 	vjFrameLoop = int32(1) // VJ_FRAME_LOOP
@@ -248,15 +284,14 @@ type VjExecCtx struct {
 	IndentPrefixLen uint8          //  75: bytes of prefix before indent
 	_pad1           int32          //  76: alignment padding
 	YieldTypePtr    unsafe.Pointer //  80: interface cache miss: eface.type_ptr
-	YieldFieldIdx   int32          //  88: fallback: field index (no first bit packing)
-	_padYield       int32          //  92: alignment padding
+	_yieldReserved  [2]int32       //  88: reserved (keep C/Go ABI layout stable)
 
 	// Unified stack + debug trace
-	Stack    [maxDepth]VjStackFrame //  96: 24 x 56 = 1344 bytes
-	TraceBuf unsafe.Pointer         // 1440: Go-allocated VjTraceBuf
+	Stack    [VJ_MAX_DEPTH]VjStackFrame //  96: 24 x 56 = 1344 bytes
+	TraceBuf unsafe.Pointer             // 1440: Go-allocated VjTraceBuf
 }
 
-var _ [1448]byte = [unsafe.Sizeof(VjExecCtx{})]byte{}
+var _ [3688]byte = [unsafe.Sizeof(VjExecCtx{})]byte{}
 
 // VjIfaceCacheEntry maps a Go *abi.Type to its compiled Blueprint ops (24 bytes).
 type VjIfaceCacheEntry struct {

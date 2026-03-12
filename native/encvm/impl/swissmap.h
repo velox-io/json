@@ -149,7 +149,6 @@ vj_swiss_map_iterate(uint8_t *buf, const uint8_t *bend,
         frame->map.slot_idx = si;
         frame->map.dir_idx = 0;
         frame->map.group_idx = 0;
-        frame->frame_type = VJ_FRAME_MAP;
         return (VjSwissMapResult){buf, VJ_SWISS_BUF_FULL};
       }
 
@@ -183,7 +182,6 @@ vj_swiss_map_iterate(uint8_t *buf, const uint8_t *bend,
             frame->map.dir_idx = di;
             frame->map.group_idx = gi;
             frame->map.slot_idx = si;
-            frame->frame_type = VJ_FRAME_MAP;
             return (VjSwissMapResult){buf, VJ_SWISS_BUF_FULL};
           }
 
