@@ -409,7 +409,8 @@ func emitDerefBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) {
 			TI:     elemTI,
 			Offset: 0, // base is already the deref'd pointer
 		}
-	}}
+	}
+}
 
 // emitSlice emits SLICE_BEGIN + element body + SLICE_END for a slice field.
 func emitSlice(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fieldOff uintptr, sliceDec *SliceCodec) {
@@ -620,7 +621,7 @@ func emitYield(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fieldOff u
 }
 
 // emitSkipIfZero emits a OP_SKIP_IF_ZERO instruction with a known skip count.
-func emitSkipIfZero(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fieldOff uintptr, skipCount int, kind ElemTypeKind) {
+func emitSkipIfZero(b *blueprintBuilder, fixups *[]keyFixup, _ *TypeInfo, fieldOff uintptr, skipCount int, kind ElemTypeKind) {
 	_ = fixups // no key for skip instructions
 	b.emit(VjOpStep{
 		OpType:   opSkipIfZero | (uint16(kind) << 8), // high byte = ZeroCheckTag (matches ElemTypeKind)
@@ -631,7 +632,7 @@ func emitSkipIfZero(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, field
 
 // emitSkipIfZeroPlaceholder emits a OP_SKIP_IF_ZERO with OperandA=0 (to be patched).
 // Returns the index of the emitted instruction.
-func emitSkipIfZeroPlaceholder(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fieldOff uintptr, kind ElemTypeKind) int {
+func emitSkipIfZeroPlaceholder(b *blueprintBuilder, fixups *[]keyFixup, _ *TypeInfo, fieldOff uintptr, kind ElemTypeKind) int {
 	_ = fixups
 	return b.emit(VjOpStep{
 		OpType:   opSkipIfZero | (uint16(kind) << 8),

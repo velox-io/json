@@ -200,10 +200,10 @@ vj_op_bool: {
   VM_WRITE_KEY();
   uint8_t val = *(const uint8_t *)(base + op->field_off);
   if (val) {
-    vj_memcpy(buf, "true", 4);
+    __builtin_memcpy(buf, "true", 4);
     buf += 4;
   } else {
-    vj_memcpy(buf, "false", 5);
+    __builtin_memcpy(buf, "false", 5);
     buf += 5;
   }
   VM_NEXT();
@@ -291,7 +291,7 @@ vj_op_uint64: {
 
 vj_op_float32: {
   float fval;
-  vj_memcpy(&fval, base + op->field_off, 4);
+  __builtin_memcpy(&fval, base + op->field_off, 4);
   if (__builtin_expect(__builtin_isnan(fval) || __builtin_isinf(fval), 0)) {
     ctx->depth = depth;
     VM_SAVE_AND_RETURN(VJ_ERR_NAN_INF);
@@ -304,7 +304,7 @@ vj_op_float32: {
 
 vj_op_float64: {
   double dval;
-  vj_memcpy(&dval, base + op->field_off, 8);
+  __builtin_memcpy(&dval, base + op->field_off, 8);
   if (__builtin_expect(__builtin_isnan(dval) || __builtin_isinf(dval), 0)) {
     ctx->depth = depth;
     VM_SAVE_AND_RETURN(VJ_ERR_NAN_INF);
@@ -320,7 +320,11 @@ vj_op_string: {
   int64_t max_need = 1 + op->key_len + 2 + (s->len * 6);
   VM_CHECK(max_need);
   VM_WRITE_KEY();
+#ifdef VJ_FAST_STRING_ESCAPE
+  buf += vj_escape_string_fast(buf, (const uint8_t *)s->ptr, s->len);
+#else
   buf += vj_escape_string(buf, (const uint8_t *)s->ptr, s->len, flags);
+#endif
   VM_NEXT();
 }
 
@@ -331,7 +335,7 @@ vj_op_raw_message: {
   if (raw->data == NULL || raw->len == 0) {
     VM_CHECK(op->key_len + 1 + 4);
     VM_WRITE_KEY();
-    vj_memcpy(buf, "null", 4);
+    __builtin_memcpy(buf, "null", 4);
     buf += 4;
   } else {
     VM_CHECK(op->key_len + 1 + raw->len);
@@ -411,7 +415,7 @@ vj_op_ptr_deref: {
     /* nil pointer → write key + "null", jump over deref body */
     VM_CHECK(op->key_len + 1 + 4);
     VM_WRITE_KEY();
-    vj_memcpy(buf, "null", 4);
+    __builtin_memcpy(buf, "null", 4);
     buf += 4;
     VM_JUMP(1 + op->operand_a); /* skip deref body */
   }
@@ -453,7 +457,7 @@ vj_op_slice_begin: {
 
   if (sl->data == NULL) {
     /* nil → "null" */
-    vj_memcpy(buf, "null", 4);
+    __builtin_memcpy(buf, "null", 4);
     buf += 4;
     VM_JUMP(1 + op->operand_b + 1); /* skip body + SLICE_END */
   }
@@ -554,7 +558,7 @@ vj_op_interface: {
   if (type_ptr == NULL) {
     VM_CHECK(op->key_len + 1 + 4);
     VM_WRITE_KEY();
-    vj_memcpy(buf, "null", 4);
+    __builtin_memcpy(buf, "null", 4);
     buf += 4;
     VM_NEXT();
   }

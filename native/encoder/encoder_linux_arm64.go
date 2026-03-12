@@ -4,11 +4,20 @@ package encoder
 
 import "unsafe"
 
+// ---- Default mode ----
+
 //go:noescape
 //go:nosplit
-func vjVMExecNeon(ctx unsafe.Pointer)
+func vjVMExecDefaultNeon(ctx unsafe.Pointer)
+
+// ---- Fast mode ----
+
+//go:noescape
+//go:nosplit
+func vjVMExecFastNeon(ctx unsafe.Pointer)
 
 func init() {
-	vmExec = vjVMExecNeon
+	vmExec = vjVMExecDefaultNeon
+	vmExecFast = vjVMExecFastNeon
 	Available = true
 }

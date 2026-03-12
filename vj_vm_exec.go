@@ -64,6 +64,14 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	ctx.EncFlags = uint32(m.flags)
 	ctx.Depth = 0
 
+	// Select VM mode: fast mode when no string escape flags are active,
+	// default mode otherwise. Fast mode eliminates runtime flag dispatch
+	// for string escaping (compile-time fast path only).
+	vmExec := encoder.VMExecFast
+	if m.flags&escapeStringFlags != 0 {
+		vmExec = encoder.VMExec
+	}
+
 	for {
 		// Ensure sufficient buffer capacity
 		avail := cap(m.buf) - len(m.buf)
@@ -89,7 +97,7 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 		ctx.ErrCode = 0
 
 		// Enter C VM
-		encoder.VMExec(unsafe.Pointer(ctx))
+		vmExec(unsafe.Pointer(ctx))
 
 		written := int(uintptr(ctx.BufCur) - uintptr(bufStart))
 
@@ -141,8 +149,8 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 						m.buf = append(m.buf, keyBytes...)
 					}
 
-				// Encode the current interface{} element.
-				if err := m.encodeAnyIface(ifacePtr); err != nil {
+					// Encode the current interface{} element.
+					if err := m.encodeAnyIface(ifacePtr); err != nil {
 						return err
 					}
 
@@ -421,7 +429,7 @@ func typeFromRTypePtr(p unsafe.Pointer) reflect.Type {
 	eface := (*[2]unsafe.Pointer)(unsafe.Pointer(&dummy))
 	// eface[0] is the itab for reflect.Type — keep it from the dummy
 	// We need a real reflect.Type to get the itab. Use int as donor.
-	donor := reflect.TypeOf(0)
+	donor := reflect.TypeFor[int]()
 	donorEface := (*[2]unsafe.Pointer)(unsafe.Pointer(&donor))
 	eface[0] = donorEface[0] // copy itab
 	eface[1] = p             // set *rtype data word

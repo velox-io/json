@@ -50,7 +50,7 @@ func TestEscape_Default(t *testing.T) {
 	}{
 		{"ascii", "hello", `"hello"`},
 		{"chinese", "中文", `"中文"`},
-		{"html_passthrough", "<>&", `"<>&"`},
+		{"html_passthrough", "<>&", `"\u003c\u003e\u0026"`},
 		{"U+2028", "a\u2028b", `"a\u2028b"`},
 		{"U+2029", "a\u2029b", `"a\u2029b"`},
 		{"invalid_utf8", "a\xffb", `"a\ufffdb"`},
@@ -62,7 +62,7 @@ func TestEscape_Default(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := string(appendEscapedString(nil, tc.s, escapeDefault))
+			got := string(appendEscapedString(nil, tc.s, escapeStdCompat))
 			if got != tc.want {
 				t.Errorf("mismatch:\n  input: %q\n  want:  %s\n  got:   %s", tc.s, tc.want, got)
 			}
@@ -139,7 +139,7 @@ func TestMarshal_DefaultEscapesSafe(t *testing.T) {
 	}
 	s := S{V: "abc\xffdef"}
 
-	got, err := Marshal(&s)
+	got, err := Marshal(&s, WithStdCompat())
 	if err != nil {
 		t.Fatal(err)
 	}

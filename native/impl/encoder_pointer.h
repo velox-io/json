@@ -15,6 +15,7 @@
 
 #include "encoder_types.h"
 #include "encoder_number.h"
+#include "encoder_string.h"
 
 /* ---- Out-of-line pointer-primitive encoder ----
  *
@@ -35,8 +36,8 @@ vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend,
   switch (etype) {
   case OP_BOOL: {
     uint8_t val = *(const uint8_t *)ptr;
-    if (val) { vj_memcpy(buf, "true", 4); buf += 4; }
-    else     { vj_memcpy(buf, "false", 5); buf += 5; }
+    if (val) { __builtin_memcpy(buf, "true", 4); buf += 4; }
+    else     { __builtin_memcpy(buf, "false", 5); buf += 5; }
     break;
   }
   case OP_INT:
@@ -67,7 +68,7 @@ vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend,
     break;
   case OP_FLOAT32: {
     float fval;
-    vj_memcpy(&fval, ptr, 4);
+    __builtin_memcpy(&fval, ptr, 4);
     if (__builtin_expect(__builtin_isnan(fval) || __builtin_isinf(fval), 0)) {
       return (VjPtrEncResult){NULL, VJ_ERR_NAN_INF};
     }
@@ -76,7 +77,7 @@ vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend,
   }
   case OP_FLOAT64: {
     double dval;
-    vj_memcpy(&dval, ptr, 8);
+    __builtin_memcpy(&dval, ptr, 8);
     if (__builtin_expect(__builtin_isnan(dval) || __builtin_isinf(dval), 0)) {
       return (VjPtrEncResult){NULL, VJ_ERR_NAN_INF};
     }
@@ -91,7 +92,11 @@ vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend,
     }
     *buf++ = '"';
     if (s->len > 0) {
+#ifdef VJ_FAST_STRING_ESCAPE
+      buf += escape_string_content_fast(buf, s->ptr, s->len);
+#else
       buf += escape_string_content(buf, s->ptr, s->len, flags);
+#endif
     }
     *buf++ = '"';
     break;
@@ -99,7 +104,7 @@ vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend,
   case OP_RAW_MESSAGE: {
     const GoSlice *raw = (const GoSlice *)ptr;
     if (raw->data == NULL || raw->len == 0) {
-      vj_memcpy(buf, "null", 4);
+      __builtin_memcpy(buf, "null", 4);
       buf += 4;
     } else {
       if (__builtin_expect(buf + raw->len > bend, 0)) {

@@ -61,11 +61,6 @@ const (
 
 	// Sentinel.
 	opEnd uint16 = 0xFF
-
-	// Flag bit OR-ed into OpType to indicate omitempty semantics.
-	// The C engine strips this flag before dispatch-table lookup and
-	// checks vj_is_zero() to skip zero-valued fields.
-	opFlagOmitempty uint16 = 0x8000
 )
 
 // opTypeMask extracts the opcode from OpType, stripping flags and

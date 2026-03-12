@@ -10,6 +10,7 @@ fmt:
 
 test:
 	go test -race .
+	cd benchmark && go test -race .
 
 test-coverage:
 	go test -race -coverprofile=coverage.out .
@@ -17,12 +18,12 @@ test-coverage:
 
 bench:
 	cd benchmark && go test -bench=. -benchmem .
-	go test -bench=. -benchmem .
+	go test -run=^$ -bench=. -benchmem .
 
 # Run benchmarks (count=5) and save baseline (root + ./benchmark)
 bench-baseline:
 	@mkdir -p .benchdata
-	cd benchmark && go test -bench=Velox -benchmem -count=5 . >> ../.benchdata/baseline.txt 2>/dev/null || true
+	cd benchmark && go test -run=^$ -bench=Velox -benchmem -count=5 . >> ../.benchdata/baseline.txt 2>/dev/null || true
 	@echo "Baseline saved to .benchdata/baseline.txt"
 
 # Check for regressions against baseline (default threshold: 10%)
@@ -40,6 +41,9 @@ clean:
 FUZZ_TIME ?= 30s
 
 fuzz:
+	go test -fuzz=FuzzMarshalString -fuzztime=$(FUZZ_TIME) .
+	go test -fuzz=FuzzMarshalStruct -fuzztime=$(FUZZ_TIME) .
+	go test -fuzz=FuzzMarshalNoCrash -fuzztime=$(FUZZ_TIME) .
 	go test -fuzz=FuzzUnmarshalAny -fuzztime=$(FUZZ_TIME) .
 	go test -fuzz=FuzzUnmarshalStruct -fuzztime=$(FUZZ_TIME) .
 	go test -fuzz=FuzzUnmarshalNested -fuzztime=$(FUZZ_TIME) .
@@ -63,6 +67,6 @@ TARGET_ARCH ?= $(_HOST_ARCH)
 gen:
 	@SOURCE_FILE="$(CURDIR)/native/impl/encoder.c" \
 	 TARGET_DIR="$(CURDIR)/native/encoder" \
-	 bash scripts/gen-natives.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
+	 bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) "$(TARGET_OS)" "$(TARGET_ARCH)"
 
 .PHONY: lint lint-ci fmt test test-coverage bench bench-baseline bench-check bench-check-threshold clean fuzz gen

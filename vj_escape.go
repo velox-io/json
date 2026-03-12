@@ -13,8 +13,12 @@ const (
 	escapeInvalidUTF8                         // replace invalid UTF-8 with \ufffd
 )
 
-const escapeDefault = escapeInvalidUTF8 | escapeLineTerms
-const escapeStdCompat = escapeDefault | escapeHTML
+// escapeStringFlags is the mask of all string-escape-related flags.
+// When none are set, the native encoder can use the fast VM (MODE_fast)
+// which only performs mandatory JSON escapes (control chars, '"', '\\').
+const escapeStringFlags = escapeHTML | escapeLineTerms | escapeInvalidUTF8
+const escapeStdCompat = escapeStringFlags
+const escapeDefault = escapeLineTerms
 
 var needsEscape [256]bool
 

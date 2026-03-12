@@ -102,6 +102,7 @@ func TestNativeEncodeStructBridgeAvailable(t *testing.T) {
 		t.Skip("native encoder not available on this platform")
 	}
 }
+
 // ================================================================
 // omitempty tests
 // ================================================================
@@ -279,7 +280,6 @@ func TestNativeEncodeOmitemptyConsistency(t *testing.T) {
 // ================================================================
 // Hot Resume (断点续传) tests
 // ================================================================
-
 
 func TestHotResumeMapFieldMiddle(t *testing.T) {
 	// Map field in the middle: C handles ID, Go handles Tags, C resumes for Name.
@@ -729,14 +729,14 @@ func TestNativePointerConsistencyWithStdlib(t *testing.T) {
 	}
 
 	type S struct {
-		A  *int     `json:"a"`
-		B  *string  `json:"b"`
-		C  *bool    `json:"c"`
-		D  *float64 `json:"d"`
-		E  *Inner   `json:"e"`
-		F  *int     `json:"f,omitempty"`
-		G  *string  `json:"g,omitempty"`
-		H  int      `json:"h"`
+		A *int     `json:"a"`
+		B *string  `json:"b"`
+		C *bool    `json:"c"`
+		D *float64 `json:"d"`
+		E *Inner   `json:"e"`
+		F *int     `json:"f,omitempty"`
+		G *string  `json:"g,omitempty"`
+		H int      `json:"h"`
 	}
 
 	a := 100
@@ -939,8 +939,8 @@ func TestHotResumeNestedImpureStruct(t *testing.T) {
 	}
 
 	type Inner struct {
-		X     int    `json:"x"`
-		Items []int  `json:"items"`
+		X     int   `json:"x"`
+		Items []int `json:"items"`
 	}
 	type Outer struct {
 		ID    int    `json:"id"`
@@ -967,13 +967,13 @@ func TestHotResumeConsistencyWithStdlib(t *testing.T) {
 	}
 
 	type Mixed struct {
-		ID      int               `json:"id"`
-		Tags    map[string]string `json:"tags"`
-		Name    string            `json:"name"`
-		Items   []int             `json:"items"`
-		Score   float64           `json:"score"`
-		Value   any               `json:"value"`
-		Active  bool              `json:"active"`
+		ID     int               `json:"id"`
+		Tags   map[string]string `json:"tags"`
+		Name   string            `json:"name"`
+		Items  []int             `json:"items"`
+		Score  float64           `json:"score"`
+		Value  any               `json:"value"`
+		Active bool              `json:"active"`
 	}
 
 	tests := []struct {

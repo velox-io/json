@@ -3,7 +3,10 @@
 # gen-natives.sh - Expand macros, compile, and generate Go integration files
 #
 # Usage:
-#   ./gen-natives.sh [target_os] [target_arch]
+#   ./gen-natives.sh [--zig] [target_os] [target_arch]
+#
+# Options:
+#   --zig         - Force using zig cc even for native (non-cross) builds.
 #
 # Arguments:
 #   target_os   - Target OS (linux, darwin, windows). Default: host OS.
@@ -28,6 +31,18 @@
 set -e
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# ============================================================
+#  Parse options
+# ============================================================
+
+FORCE_ZIG=false
+while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+        --zig) FORCE_ZIG=true; shift ;;
+        *)     echo "Error: Unknown option: $1"; exit 1 ;;
+    esac
+done
 
 # ============================================================
 #  Configuration (required)
@@ -132,13 +147,23 @@ get_clang_target() {
 }
 
 # Select compiler
-if [ "$NEEDS_CROSS_COMPILE" = true ]; then
+USE_ZIG=false
+if [ "$FORCE_ZIG" = true ] || [ "$NEEDS_CROSS_COMPILE" = true ]; then
     if command -v zig &> /dev/null; then
+        USE_ZIG=true
         ZIG_TARGET=$(get_zig_target "$TARGET_OS" "$TARGET_ARCH")
         CC="zig cc -target $ZIG_TARGET"
-        echo "Cross-compiling with zig cc (target: $ZIG_TARGET)"
+        if [ "$FORCE_ZIG" = true ] && [ "$NEEDS_CROSS_COMPILE" = false ]; then
+            echo "Using zig cc (forced, target: $ZIG_TARGET)"
+        else
+            echo "Cross-compiling with zig cc (target: $ZIG_TARGET)"
+        fi
     else
-        echo "Error: Cross-compilation requires zig."
+        if [ "$FORCE_ZIG" = true ]; then
+            echo "Error: --zig requested but zig is not installed."
+        else
+            echo "Error: Cross-compilation requires zig."
+        fi
         exit 1
     fi
 else
@@ -198,18 +223,29 @@ if [ -z "$ISAS" ]; then
 fi
 
 # Modes
-ALL_MODES="${MODES:-default}"
+ALL_MODES="${MODES:-default fast}"
 
 # ============================================================
 #  ISA-specific compiler flags
 # ============================================================
+
+# -mevex512: required by LLVM ≤20 (including zig cc) to enable 512-bit EVEX
+# encoding; without it, 512-bit AVX-512 intrinsics fail to compile.
+# Clang 21+ (LLVM 21) deprecated this flag — -mavx512f alone is sufficient.
+# Probe the compiler to decide.
+_EVEX512_FLAG=""
+if $CC -mevex512 -xc -c /dev/null -o /dev/null 2>&1 | grep -q 'deprecated'; then
+    : # Clang 21+: flag deprecated, not needed
+else
+    _EVEX512_FLAG="-mevex512"
+fi
 
 get_isa_flags() {
     case "$1" in
         neon)   echo "" ;;
         sse42)  echo "-msse4.2 -mpclmul" ;;
         avx2)   echo "-mavx2 -msse4.2 -mpclmul" ;;
-        avx512) echo "-mavx512f -mavx512bw -mpclmul" ;;
+        avx512) echo "-mavx512f -mavx512bw -mpclmul $_EVEX512_FLAG" ;;
         *)      echo "" ;;
     esac
 }
@@ -263,10 +299,8 @@ for isa in $ISAS; do
         MODE_FLAG=""
         if [ "$mode" = "default" ]; then
             MODE_FLAG="-DMODE_default"
-        #elif [ "$mode" = "minify" ]; then
-        #    MODE_FLAG="-DMODE_minify"
-        #elif [ "$mode" = "container_size" ]; then
-        #    MODE_FLAG="-DMODE_container_size"
+        elif [ "$mode" = "fast" ]; then
+            MODE_FLAG="-DMODE_fast"
         fi
         # full: no MODE_FLAG needed, SJ_MODE defaults to SJ_MODE_FULL
 
@@ -362,8 +396,8 @@ fi
 
 if [ "$NEEDS_PRELINK" != true ]; then
     echo "Create syso without pre-linking..."
-    if [ "$NEEDS_CROSS_COMPILE" = true ]; then
-        # Cross-compile: use zig's bundled lld for relocatable link.
+    if [ "$USE_ZIG" = true ]; then
+        # Use zig's bundled lld for relocatable link.
         # "zig cc -r" on older zig versions produces ET_EXEC instead of ET_REL,
         # so we invoke ld.lld directly which correctly produces ET_REL.
         zig ld.lld -r $ALL_OBJS -o "$SYSO_PATH"

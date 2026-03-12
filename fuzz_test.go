@@ -1,6 +1,7 @@
 package vjson
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"math"
 	"reflect"
@@ -286,6 +287,376 @@ func FuzzNoCrash(f *testing.F) {
 		var ms map[string]string
 		Unmarshal(data, &ms)
 	})
+}
+
+// ---------------------------------------------------------------------------
+// FuzzMarshalString — differential fuzzer for string escaping.
+//
+// Takes an arbitrary string, wraps it in a struct field, and marshals with
+// both vjson (WithStdCompat) and encoding/json. Output must be byte-identical.
+// This exercises all native string escape paths: SIMD (16/32-byte), SWAR
+// (8-byte), byte-by-byte, UTF-8 validation, HTML escaping, line terminators,
+// and surrogate replacement.
+// ---------------------------------------------------------------------------
+
+func FuzzMarshalString(f *testing.F) {
+	seeds := []string{
+		// Plain ASCII
+		"", "hello", "hello world",
+		// Control characters — full range
+		"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",
+		"\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f",
+		// Single 0x1F (previously buggy boundary)
+		"\x1f",
+		// Short escapes
+		"\b\t\n\f\r",
+		// Quotes and backslash
+		`"hello"`, `path\to\file`, `a\"b`,
+		// HTML special chars
+		"<script>", "a>b", "a&b", "<>&",
+		// Line terminators (U+2028, U+2029)
+		"a\u2028b", "a\u2029b", "\u2028\u2029",
+		// Unicode — CJK
+		"中文测试", "日本語", "한국어",
+		// Emoji (4-byte UTF-8)
+		"\U0001F600\U0001F4A9",
+		// Invalid UTF-8
+		"\xff", "abc\xffdef", "\xc0\xaf",
+		"\xe0\x80", "\xf0\x80\x80",
+		// Surrogate byte sequences (3-byte)
+		"\xed\xa0\x80", "\xed\xbf\xbf", "a\xed\xa0\x80b",
+		// Mixed
+		"hello\n\t\"world\"\x00<>&\u2028\xff中文\U0001F600",
+		// Length boundary cases for SIMD
+		"abcdefghijklmno",       // 15 bytes
+		"abcdefghijklmnop",      // 16 bytes — exact SIMD width
+		"abcdefghijklmnopq",     // 17 bytes
+		"abcdefghijklmnopqrstuvwxyz012345", // 31 bytes
+		"abcdefghijklmnopqrstuvwxyz0123456", // 32 bytes — exact AVX2 width
+		// All-escape strings at SIMD boundaries
+		"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",                                 // 15
+		"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10",                              // 16
+		"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11",                          // 17
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+
+	type S struct {
+		V string `json:"v"`
+	}
+
+	f.Fuzz(func(t *testing.T, s string) {
+		v := S{V: s}
+
+		vjOut, vjErr := Marshal(&v, WithStdCompat())
+		stdOut, stdErr := json.Marshal(v)
+
+		if vjErr != nil && stdErr == nil {
+			t.Errorf("vjson error but stdlib ok\ninput: %q\nvjson err: %v", s, vjErr)
+			return
+		}
+		if vjErr == nil && stdErr != nil {
+			t.Errorf("vjson ok but stdlib error\ninput: %q\nstdlib err: %v", s, stdErr)
+			return
+		}
+		if vjErr != nil && stdErr != nil {
+			return // both error — ok
+		}
+		if string(vjOut) != string(stdOut) {
+			t.Errorf("output mismatch\ninput:  %q\nstdlib: %s\nvelox:  %s", s, stdOut, vjOut)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// FuzzMarshalStruct — differential fuzzer for structured types.
+//
+// Builds a struct with diverse field types from fuzzer-provided entropy bytes,
+// then marshals with both vjson (WithStdCompat) and encoding/json. Exercises
+// the native C VM, string escaping, number formatting, bool encoding, slices,
+// maps, pointers, []byte (base64), and omitempty.
+// ---------------------------------------------------------------------------
+
+func FuzzMarshalStruct(f *testing.F) {
+	seeds := [][]byte{
+		{},
+		{0x00},
+		{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF},
+		// enough bytes to fill all fields
+		make([]byte, 128),
+	}
+	// A seed with varied data
+	varied := make([]byte, 128)
+	for i := range varied {
+		varied[i] = byte(i)
+	}
+	seeds = append(seeds, varied)
+
+	for _, s := range seeds {
+		f.Add(s)
+	}
+
+	type Inner struct {
+		X string `json:"x"`
+		Y int    `json:"y"`
+	}
+
+	type FuzzS struct {
+		Name    string            `json:"name"`
+		Age     int64             `json:"age"`
+		Score   float64           `json:"score"`
+		Active  bool              `json:"active"`
+		Tags    []string          `json:"tags"`
+		Meta    map[string]string `json:"meta"`
+		Inner   *Inner            `json:"inner,omitempty"`
+		Data    []byte            `json:"data,omitempty"`
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		r := &fuzzReader{data: data}
+
+		v := FuzzS{
+			Name:   r.readString(),
+			Age:    r.readInt64(),
+			Score:  r.readFloat64Safe(),
+			Active: r.readBool(),
+		}
+
+		// Tags: 0-4 strings
+		nTags := int(r.readByte()) % 5
+		if nTags > 0 {
+			v.Tags = make([]string, nTags)
+			for i := range nTags {
+				v.Tags[i] = r.readString()
+			}
+		}
+
+		// Meta: 0-3 key-value pairs (ASCII keys to avoid UTF-8 collision issues)
+		nMeta := int(r.readByte()) % 4
+		if nMeta > 0 {
+			v.Meta = make(map[string]string, nMeta)
+			for range nMeta {
+				v.Meta[r.readSafeString()] = r.readString()
+			}
+		}
+
+		// Inner: 50% chance of being non-nil
+		if r.readBool() {
+			v.Inner = &Inner{X: r.readString(), Y: int(r.readInt64())}
+		}
+
+		// Data: 50% chance of non-nil []byte
+		if r.readBool() {
+			n := int(r.readByte()) % 64
+			v.Data = r.readBytes(n)
+		}
+
+		vjOut, vjErr := Marshal(&v, WithStdCompat())
+		stdOut, stdErr := json.Marshal(v)
+
+		if vjErr != nil && stdErr == nil {
+			t.Errorf("vjson error but stdlib ok\nvalue: %+v\nvjson err: %v", v, vjErr)
+			return
+		}
+		if vjErr == nil && stdErr != nil {
+			t.Errorf("vjson ok but stdlib error\nvalue: %+v\nstdlib err: %v", v, stdErr)
+			return
+		}
+		if vjErr != nil && stdErr != nil {
+			return
+		}
+		// Semantic comparison: parse both outputs back and compare.
+		// This handles legitimate formatting differences (float representation,
+		// map key ordering) while still catching real value mismatches.
+		var vjParsed, stdParsed any
+		if err := json.Unmarshal(vjOut, &vjParsed); err != nil {
+			t.Errorf("vjson output is not valid JSON\nvalue: %+v\noutput: %s\nparse err: %v", v, vjOut, err)
+			return
+		}
+		if err := json.Unmarshal(stdOut, &stdParsed); err != nil {
+			t.Errorf("stdlib output is not valid JSON (unexpected)\noutput: %s\nparse err: %v", stdOut, err)
+			return
+		}
+		if !deepEqualJSON(vjParsed, stdParsed) {
+			t.Errorf("semantic mismatch\nvalue:  %+v\nstdlib: %s\nvelox:  %s", v, stdOut, vjOut)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// FuzzMarshalNoCrash — pure crash finder for marshal.
+//
+// Constructs values from fuzz bytes and marshals them with every option
+// combination. Only checks that nothing panics or crashes.
+// ---------------------------------------------------------------------------
+
+func FuzzMarshalNoCrash(f *testing.F) {
+	seeds := [][]byte{
+		{},
+		{0x00},
+		{0xFF},
+		make([]byte, 64),
+		make([]byte, 256),
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+
+	type Inner struct {
+		X string `json:"x"`
+	}
+	type S struct {
+		A string            `json:"a"`
+		B int64             `json:"b"`
+		C float64           `json:"c"`
+		D bool              `json:"d"`
+		E []string          `json:"e,omitempty"`
+		F map[string]string `json:"f,omitempty"`
+		G *Inner            `json:"g,omitempty"`
+		H []byte            `json:"h,omitempty"`
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		r := &fuzzReader{data: data}
+
+		v := S{
+			A: r.readString(),
+			B: r.readInt64(),
+			C: r.readFloat64Safe(),
+			D: r.readBool(),
+		}
+		if r.readBool() {
+			n := int(r.readByte()) % 5
+			v.E = make([]string, n)
+			for i := range n {
+				v.E[i] = r.readString()
+			}
+		}
+		if r.readBool() {
+			v.F = map[string]string{r.readString(): r.readString()}
+		}
+		if r.readBool() {
+			v.G = &Inner{X: r.readString()}
+		}
+		if r.readBool() {
+			v.H = r.readBytes(int(r.readByte()) % 32)
+		}
+
+		// Marshal with every option combination — must not panic.
+		Marshal(&v)
+		Marshal(&v, WithStdCompat())
+		Marshal(&v, WithFastEscape())
+		Marshal(&v, WithEscapeHTML())
+		Marshal(&v, WithoutUTF8Correction())
+
+		// Also test bare string marshaling
+		s := v.A
+		Marshal(&s)
+		Marshal(&s, WithStdCompat())
+
+		// Also test MarshalIndent
+		MarshalIndent(&v, "", "  ")
+		MarshalIndent(&v, ">", "\t", WithStdCompat())
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Marshal fuzz helpers
+// ---------------------------------------------------------------------------
+
+// fuzzReader consumes bytes from a fuzz input to deterministically build
+// structured Go values. When bytes are exhausted, returns zero values.
+type fuzzReader struct {
+	data []byte
+	pos  int
+}
+
+func (r *fuzzReader) readByte() byte {
+	if r.pos >= len(r.data) {
+		return 0
+	}
+	b := r.data[r.pos]
+	r.pos++
+	return b
+}
+
+func (r *fuzzReader) readBytes(n int) []byte {
+	if n <= 0 {
+		return nil
+	}
+	if r.pos+n > len(r.data) {
+		n = len(r.data) - r.pos
+	}
+	if n <= 0 {
+		return nil
+	}
+	b := make([]byte, n)
+	copy(b, r.data[r.pos:r.pos+n])
+	r.pos += n
+	return b
+}
+
+func (r *fuzzReader) readBool() bool {
+	return r.readByte()&1 == 1
+}
+
+func (r *fuzzReader) readInt64() int64 {
+	b := r.readBytes(8)
+	if len(b) < 8 {
+		var buf [8]byte
+		copy(buf[:], b)
+		return int64(binary.LittleEndian.Uint64(buf[:]))
+	}
+	return int64(binary.LittleEndian.Uint64(b))
+}
+
+// readFloat64Safe reads a float64 but ensures it is JSON-safe (not NaN/Inf).
+func (r *fuzzReader) readFloat64Safe() float64 {
+	f := math.Float64frombits(binary.LittleEndian.Uint64(func() []byte {
+		b := r.readBytes(8)
+		if len(b) < 8 {
+			var buf [8]byte
+			copy(buf[:], b)
+			return buf[:]
+		}
+		return b
+	}()))
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0
+	}
+	return f
+}
+
+func (r *fuzzReader) readString() string {
+	n := int(r.readByte()) % 64
+	b := r.readBytes(n)
+	if b == nil {
+		return ""
+	}
+	return string(b)
+}
+
+// readSafeString returns an ASCII-only string suitable for map keys.
+// Avoids non-ASCII bytes that could cause UTF-8 replacement collisions
+// (e.g., two different invalid byte sequences both escaping to \ufffd).
+func (r *fuzzReader) readSafeString() string {
+	n := int(r.readByte()) % 32
+	b := r.readBytes(n)
+	if b == nil {
+		return ""
+	}
+	for i, c := range b {
+		// Map to printable ASCII range [0x20, 0x7E], avoiding '"' and '\\'
+		c = c%0x5F + 0x20 // [0x20, 0x7E]
+		if c == '"' {
+			c = 'A'
+		} else if c == '\\' {
+			c = 'B'
+		}
+		b[i] = c
+	}
+	return string(b)
 }
 
 // ---------------------------------------------------------------------------

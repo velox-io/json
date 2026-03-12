@@ -8,25 +8,41 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
-//go:noescape
-//go:nosplit
-func vjVMExecSSE42(ctx unsafe.Pointer)
+// ---- Default mode ----
 
 //go:noescape
 //go:nosplit
-func vjVMExecAVX2(ctx unsafe.Pointer)
+func vjVMExecDefaultSSE42(ctx unsafe.Pointer)
 
 //go:noescape
 //go:nosplit
-func vjVMExecAVX512(ctx unsafe.Pointer)
+func vjVMExecDefaultAVX2(ctx unsafe.Pointer)
+
+//go:noescape
+//go:nosplit
+func vjVMExecDefaultAVX512(ctx unsafe.Pointer)
+
+// ---- Fast mode ----
+
+//go:noescape
+//go:nosplit
+func vjVMExecFastSSE42(ctx unsafe.Pointer)
+
+//go:noescape
+//go:nosplit
+func vjVMExecFastAVX2(ctx unsafe.Pointer)
+
+//go:noescape
+//go:nosplit
+func vjVMExecFastAVX512(ctx unsafe.Pointer)
 
 func init() {
 	if cpu.X86.HasAVX512BW {
-		vmExec = vjVMExecAVX512
-		//} else if cpu.X86.HasAVX2 {
-		//}   vmExec = vjVMExecAVX2
+		vmExec = vjVMExecDefaultAVX512
+		vmExecFast = vjVMExecFastAVX512
 	} else {
-		vmExec = vjVMExecSSE42
+		vmExec = vjVMExecDefaultSSE42
+		vmExecFast = vjVMExecFastSSE42
 	}
 	Available = true
 }

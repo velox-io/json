@@ -14,17 +14,12 @@
 
 // clang-format off
 
-#include <stddef.h>
 #include <stdint.h>
 
-/* SIMD: use SSE intrinsics as the unified API. On ARM64, sse2neon.h
- * translates them to NEON. Same pattern as sjmarker/sj_marker.h. */
-#if defined(__SSE2__) || defined(__aarch64__)
 #ifdef __aarch64__
 #include "sse2neon.h"
 #else
 #include <immintrin.h>
-#endif
 #endif
 
 /* ================================================================
@@ -36,10 +31,7 @@
  *
  *  The actual function bodies live in encoder_memfn.c (compiled once,
  *  without ISA flags) to avoid duplicate symbols when multiple ISA
- *  objects are linked into a single .syso.  This header provides:
- *    - the vj_memcpy macro (maps to __builtin_memcpy)
- *    - extern declarations so each ISA TU can call memcpy/memset
- *    - the implementations, guarded by VJ_IMPLEMENT_MEMFN
+ *  objects are linked into a single .syso.
  * ================================================================ */
 
 /* Platform-specific symbol naming:
@@ -53,11 +45,7 @@
   #define VJ_MEMSET_SYM "memset"
 #endif
 
-/* Use __builtin_memcpy throughout the code. The compiler will inline
- * small known-size copies and call our _memcpy symbol for the rest. */
-#define vj_memcpy __builtin_memcpy
-
-/* Forward declarations — always visible so each ISA TU can link against
+/* Declarations — always visible so each ISA TU can link against
  * the single memcpy/memset compiled from encoder_memfn.c. */
 __attribute__((visibility("hidden"))) void *
 vj_memcpy_impl(void *__restrict dst, const void *__restrict src,
@@ -65,65 +53,6 @@ vj_memcpy_impl(void *__restrict dst, const void *__restrict src,
 
 __attribute__((visibility("hidden"))) void *
 vj_memset_impl(void *dst, int c, size_t n) __asm__(VJ_MEMSET_SYM);
-
-/* Implementation — only compiled when encoder_memfn.c defines the guard. */
-#ifdef VJ_IMPLEMENT_MEMFN
-
-__attribute__((visibility("hidden"))) void *
-vj_memcpy_impl(void *__restrict dst, const void *__restrict src, size_t n) {
-  uint8_t *d = (uint8_t *)dst;
-  const uint8_t *s = (const uint8_t *)src;
-  while (n >= sizeof(uint64_t)) {
-    /* Manual word load/store to avoid __builtin_memcpy which
-     * the compiler may turn into a recursive _memcpy call. */
-    uint64_t w = *(const uint64_t *)s;
-    *(uint64_t *)d = w;
-    d += sizeof(uint64_t);
-    s += sizeof(uint64_t);
-    n -= sizeof(uint64_t);
-  }
-  /* Cascading word tail: 0-7 remaining bytes.
-   * Manual loads/stores only — __builtin_memcpy would recurse. */
-  if (n >= 4) {
-    uint32_t w = *(const uint32_t *)s;
-    *(uint32_t *)d = w;
-    d += 4;
-    s += 4;
-    n -= 4;
-  }
-  if (n >= 2) {
-    uint16_t w = *(const uint16_t *)s;
-    *(uint16_t *)d = w;
-    d += 2;
-    s += 2;
-    n -= 2;
-  }
-  if (n) {
-    *d = *s;
-  }
-  return dst;
-}
-
-__attribute__((visibility("hidden"))) void *
-vj_memset_impl(void *dst, int c, size_t n) {
-  uint8_t *d = (uint8_t *)dst;
-  uint8_t val = (uint8_t)c;
-  while (n >= sizeof(uint64_t)) {
-    uint64_t w = val;
-    w |= w << 8;
-    w |= w << 16;
-    w |= w << 32;
-    *(uint64_t *)d = w;
-    d += sizeof(uint64_t);
-    n -= sizeof(uint64_t);
-  }
-  while (n--) {
-    *d++ = val;
-  }
-  return dst;
-}
-
-#endif /* VJ_IMPLEMENT_MEMFN */
 
 
 /* ================================================================
@@ -159,16 +88,6 @@ copy_small(uint8_t *dst, const uint8_t *src, int n) {
     *dst = *src;
   }
 }
-
-/* ================================================================
- *  Inline copy functions — SIMD-accelerated for common sizes
- *
- *  These replace vj_memcpy (which generates a `bl _memcpy` call)
- *  at hot call sites where the copy size is runtime-determined but
- *  typically small.  The overlapping load/store technique avoids
- *  branch misprediction: for sizes 8-16 we load first 8 + last 8
- *  bytes and store both, regardless of the exact size.
- * ================================================================ */
 
 #if defined(__SSE2__) || defined(__aarch64__)
 
@@ -263,7 +182,7 @@ vj_copy_var(uint8_t *dst, const void *src, size_t n) {
     return;
   }
   /* > 128 bytes: fall through to _memcpy (call overhead negligible) */
-  vj_memcpy(dst, src, n);
+  __builtin_memcpy(dst, src, n);
 }
 
 #else /* No SIMD — scalar fallback */
@@ -293,7 +212,7 @@ vj_copy_var(uint8_t *dst, const void *src, size_t n) {
     return;
   }
   /* Fall through to _memcpy for larger copies */
-  vj_memcpy(dst, src, n);
+  __builtin_memcpy(dst, src, n);
 }
 
 #endif /* SIMD check */

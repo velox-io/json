@@ -31,26 +31,49 @@ var (
 )
 
 const (
+	// marshalBufInitSize is the default capacity for pool-created buffers.
 	marshalBufInitSize = 32 * 1024
-	marshalBufMaxPool  = 1024 * 1024
+	// marshalBufPoolLimit is the maximum buffer capacity kept in the pool.
+	// Buffers that grow beyond this during encoding are discarded (nil-ed)
+	// when the Marshaler is returned to the pool, preventing large one-off
+	// payloads from inflating steady-state pool memory.
+	marshalBufPoolLimit = 1024 * 1024
 )
 
 // MarshalOption configures encoding behavior.
 type MarshalOption func(*Marshaler)
 
-// WithEscapeHTML enables escaping of <, >, & in JSON strings.
+// WithEscapeHTML enables escaping of <, >, & in strings.
 func WithEscapeHTML() MarshalOption {
 	return func(m *Marshaler) { m.flags |= escapeHTML }
 }
 
 // WithNoEscapeHTML disables escaping of <, >, &.
-func WithNoEscapeHTML() MarshalOption {
+func WithoutEscapeHTML() MarshalOption {
 	return func(m *Marshaler) { m.flags &^= escapeHTML }
+}
+
+// WithUTF8Correction enables replacing invalid UTF-8 with \ufffd in strings.
+func WithUTF8Correction() MarshalOption {
+	return func(m *Marshaler) { m.flags |= escapeInvalidUTF8 }
+}
+
+// WithUTF8Correction disables replacing invalid UTF-8 in strings.
+func WithoutUTF8Correction() MarshalOption {
+	return func(m *Marshaler) { m.flags &^= escapeInvalidUTF8 }
 }
 
 // WithStdCompat enables full encoding/json compatibility.
 func WithStdCompat() MarshalOption {
 	return func(m *Marshaler) { m.flags = escapeStdCompat }
+}
+
+// WithFastEscape disables all string-level escape features
+// (UTF-8 validation, line terminator escaping, HTML escaping).
+// Only mandatory JSON escapes (control chars, '"', '\\') are performed.
+// This enables the fastest string encoding path in the native encoder.
+func WithFastEscape() MarshalOption {
+	return func(m *Marshaler) { m.flags &^= escapeHTML | escapeLineTerms | escapeInvalidUTF8 }
 }
 
 // Marshaler is a pooled JSON encoder.
@@ -82,15 +105,16 @@ func getMarshaler() *Marshaler {
 	m.indent = ""
 	m.prefix = ""
 	m.depth = 0
-	m.flags = escapeDefault
+	m.flags = 0
 	initMarshalerVMCtx(m)
 	return m
 }
 
 func putMarshaler(m *Marshaler) {
-	if cap(m.buf) <= marshalBufMaxPool {
-		marshalerPool.Put(m)
+	if cap(m.buf) > marshalBufPoolLimit {
+		m.buf = nil // discard oversized buffer, let GC reclaim
 	}
+	marshalerPool.Put(m) // always recycle the struct (vmCtx is 1248 bytes)
 }
 
 // ---------------------------------------------------------------------------
@@ -507,22 +531,21 @@ func AppendMarshal[T any](dst []byte, v *T, opts ...MarshalOption) ([]byte, erro
 	return m.buf, nil
 }
 
-// finalize returns the encoded JSON as a standalone byte slice.
+// finalize returns the encoded JSON as a standalone byte slice and recycles
+// the Marshaler back to the pool.
 //
-// Poolable buffers (cap <= marshalBufMaxPool) are copied out so the
-// Marshaler's buf can be reused by the pool without aliasing the caller's
-// result. Oversized buffers are detached and given directly to the caller
-// to prevent the pool from accumulating large allocations that inflate
-// steady-state memory usage.
+// The result is always a newly allocated slice (via makeDirtyBytes — no
+// zeroing, since copy overwrites all bytes). The pool buffer is preserved
+// for reuse, keeping its "warmth" — if it grew during encoding, the next
+// Marshal call of a similar type reuses it without re-allocation.
+//
+// For oversized buffers (cap > marshalBufPoolLimit), putMarshaler will
+// discard the buffer to prevent pool memory bloat; the struct is still
+// recycled.
 func (m *Marshaler) finalize() []byte {
-	if cap(m.buf) <= marshalBufMaxPool {
-		result := make([]byte, len(m.buf))
-		copy(result, m.buf)
-		putMarshaler(m)
-		return result
-	}
-	result := m.buf[:len(m.buf):len(m.buf)]
-	m.buf = nil
+	n := len(m.buf)
+	result := makeDirtyBytes(n, n)
+	copy(result, m.buf)
 	putMarshaler(m)
 	return result
 }

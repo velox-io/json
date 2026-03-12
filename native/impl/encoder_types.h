@@ -10,9 +10,6 @@
 
 // clang-format off
 
-/* Memory primitives (memcpy/memset impls, vj_memcpy macro, SIMD headers,
- * copy_small, vj_copy_key, vj_copy_var) — split into its own header for
- * readability; included first since everything below may use vj_memcpy. */
 #include "encoder_memory.h"
 
 /* ================================================================
@@ -80,9 +77,7 @@ enum OpType {
 /* Dispatch table size — must cover all opcodes up to OP_FALLBACK (0x3F). */
 #define OP_DISPATCH_COUNT 0x40
 
-/* omitempty flag: OR-ed into op_type high bits.
- * Lower byte = real opcode, stripped before dispatch-table lookup. */
-#define OP_FLAG_OMITEMPTY 0x8000
+/* Lower byte = real opcode, stripped before dispatch-table lookup. */
 #define OP_TYPE_MASK      0x00FF
 
 /* ================================================================
@@ -166,7 +161,7 @@ static inline int vj_is_zero(const uint8_t *ptr, uint16_t zct) {
     return *(const uint32_t *)ptr == 0;
   case ZCT_FLOAT32: {
     float v;
-    vj_memcpy(&v, ptr, 4);
+    __builtin_memcpy(&v, ptr, 4);
     return v == 0;
   }
   case ZCT_INT:
@@ -177,7 +172,7 @@ static inline int vj_is_zero(const uint8_t *ptr, uint16_t zct) {
     return *(const uint64_t *)ptr == 0;
   case ZCT_FLOAT64: {
     double v;
-    vj_memcpy(&v, ptr, 8);
+    __builtin_memcpy(&v, ptr, 8);
     return v == 0;
   }
   case ZCT_STRING:

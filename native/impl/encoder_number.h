@@ -1,18 +1,11 @@
 /*
- * encoder_number.h — Velox JSON C Engine: Integer Formatting
- *
  * Fast integer-to-ASCII conversion using range-based dispatch with
  * SSE2 parallel digit extraction for large numbers.
  *
- * Algorithm adapted from Sonic (ByteDance, Apache-2.0):
- *   - Small (< 10000): direct digit-pair table lookups
- *   - Medium (< 10^8): divide-by-10000 + table lookups
- *   - Large (< 10^16): SSE2 parallel 8-digit conversion + PSHUFB
- *   - XLarge (>= 10^16): scalar prefix + SSE2 for remaining 16 digits
- *
- * Forward-write only — no temp buffer, no reversal, no final copy.
- *
- * Depends on: encoder_types.h (vj_memcpy, SSE intrinsics).
+ * - Small (< 10000): direct digit-pair table lookups
+ * - Medium (< 10^8): divide-by-10000 + table lookups
+ * - Large (< 10^16): SSE2 parallel 8-digit conversion + PSHUFB
+ * - XLarge (>= 10^16): scalar prefix + SSE2 for remaining 16 digits
  */
 
 #ifndef VJ_ENCODER_NUMBER_H
@@ -138,16 +131,16 @@ vj_u64toa_xlarge_sse2(uint8_t *out, uint64_t val) {
   if (hi < 10) {
     out[n++] = (char)hi + '0';
   } else if (hi < 100) {
-    vj_memcpy(&out[n], &digit_pairs[hi * 2], 2);
+    __builtin_memcpy(&out[n], &digit_pairs[hi * 2], 2);
     n += 2;
   } else if (hi < 1000) {
     out[n++] = (char)(hi / 100) + '0';
-    vj_memcpy(&out[n], &digit_pairs[(hi % 100) * 2], 2);
+    __builtin_memcpy(&out[n], &digit_pairs[(hi % 100) * 2], 2);
     n += 2;
   } else {
-    vj_memcpy(&out[n], &digit_pairs[(hi / 100) * 2], 2);
+    __builtin_memcpy(&out[n], &digit_pairs[(hi / 100) * 2], 2);
     n += 2;
-    vj_memcpy(&out[n], &digit_pairs[(hi % 100) * 2], 2);
+    __builtin_memcpy(&out[n], &digit_pairs[(hi % 100) * 2], 2);
     n += 2;
   }
 
@@ -227,11 +220,11 @@ static inline int write_uint64(uint8_t *buf, uint64_t v) {
       uint32_t r = (uint32_t)(v - q * 100);
       v = q;
       pos -= 2;
-      vj_memcpy(&tmp[pos], &digit_pairs[r * 2], 2);
+      __builtin_memcpy(&tmp[pos], &digit_pairs[r * 2], 2);
     }
     if (v >= 10) {
       pos -= 2;
-      vj_memcpy(&tmp[pos], &digit_pairs[v * 2], 2);
+      __builtin_memcpy(&tmp[pos], &digit_pairs[v * 2], 2);
     } else {
       pos--;
       tmp[pos] = '0' + (uint8_t)v;

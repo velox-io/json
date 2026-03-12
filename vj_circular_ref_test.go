@@ -137,17 +137,17 @@ func TestMarshal_SelfRef_Chain(t *testing.T) {
 // --- Deep cycle: A → B → C → A ---
 
 type cycleTriA struct {
-	Name string    `json:"name"`
+	Name string     `json:"name"`
 	B    *cycleTriB `json:"b"`
 }
 
 type cycleTriB struct {
-	Value int       `json:"value"`
+	Value int        `json:"value"`
 	C     *cycleTriC `json:"c"`
 }
 
 type cycleTriC struct {
-	Tag string    `json:"tag"`
+	Tag string     `json:"tag"`
 	A   *cycleTriA `json:"a"`
 }
 
@@ -414,12 +414,12 @@ func TestRoundtrip_IndirectSelfRef(t *testing.T) {
 // --- Circular with omitempty ---
 
 type circOmitA struct {
-	Name string    `json:"name"`
+	Name string     `json:"name"`
 	B    *circOmitB `json:"b,omitempty"`
 }
 
 type circOmitB struct {
-	Value int       `json:"value"`
+	Value int        `json:"value"`
 	A     *circOmitA `json:"a,omitempty"`
 }
 
@@ -890,8 +890,8 @@ type transInner2 struct {
 }
 
 type transWrapper2 struct {
-	ID    int          `json:"id"`
-	Inner transInner2  `json:"inner"`
+	ID    int         `json:"id"`
+	Inner transInner2 `json:"inner"`
 }
 
 func TestMarshal_TransitiveSelfRef_NamedField(t *testing.T) {
@@ -980,17 +980,17 @@ func TestRoundtrip_TransitiveSelfRef_NamedField(t *testing.T) {
 // None of NodeA, NodeB, *NodeA, *NodeB have been seen before Wrapper.
 
 type transNodeA3 struct {
-	Name string      `json:"name"`
+	Name string       `json:"name"`
 	B    *transNodeB3 `json:"b"`
 }
 
 type transNodeB3 struct {
-	Value int         `json:"value"`
+	Value int          `json:"value"`
 	A     *transNodeA3 `json:"a"`
 }
 
 type transWrapper3 struct {
-	Tag  string     `json:"tag"`
+	Tag  string      `json:"tag"`
 	Node transNodeA3 `json:"node"`
 }
 
@@ -1097,8 +1097,8 @@ func TestRoundtrip_TransitiveMutualRecursion(t *testing.T) {
 // Construction: Wrapper → []Inner → Inner → *Inner (cycle)
 
 type transInner4 struct {
-	ID   int           `json:"id"`
-	Next *transInner4  `json:"next"`
+	ID   int          `json:"id"`
+	Next *transInner4 `json:"next"`
 }
 
 type transWrapper4 struct {

@@ -7,26 +7,53 @@
 //
 // Uses JMP (tail call). The C function returns directly to our Go
 // caller. NOSPLIT $0-8 means no local stack frame.
+//
+// Each ISA has two mode variants: default and fast.
 
 #include "textflag.h"
 
-// func vjVMExecSSE42(ctx unsafe.Pointer)
-// C: void vj_vm_exec_sse42(VjExecCtx* ctx)
-// SysV ABI: ctx=RDI
-TEXT ·vjVMExecSSE42(SB), NOSPLIT, $0-8
-	MOVQ ctx+0(FP), DI
-	JMP  vj_vm_exec_sse42(SB)
+// ---- Default mode ----
 
-// func vjVMExecAVX2(ctx unsafe.Pointer)
-// C: void vj_vm_exec_avx2(VjExecCtx* ctx)
+// func vjVMExecDefaultSSE42(ctx unsafe.Pointer)
+// C: void vj_vm_exec_default_sse42(VjExecCtx* ctx)
 // SysV ABI: ctx=RDI
-TEXT ·vjVMExecAVX2(SB), NOSPLIT, $0-8
+TEXT ·vjVMExecDefaultSSE42(SB), NOSPLIT, $0-8
 	MOVQ ctx+0(FP), DI
-	JMP  vj_vm_exec_avx2(SB)
+	JMP  vj_vm_exec_default_sse42(SB)
 
-// func vjVMExecAVX512(ctx unsafe.Pointer)
-// C: void vj_vm_exec_avx512(VjExecCtx* ctx)
+// func vjVMExecDefaultAVX2(ctx unsafe.Pointer)
+// C: void vj_vm_exec_default_avx2(VjExecCtx* ctx)
 // SysV ABI: ctx=RDI
-TEXT ·vjVMExecAVX512(SB), NOSPLIT, $0-8
+TEXT ·vjVMExecDefaultAVX2(SB), NOSPLIT, $0-8
 	MOVQ ctx+0(FP), DI
-	JMP  vj_vm_exec_avx512(SB)
+	JMP  vj_vm_exec_default_avx2(SB)
+
+// func vjVMExecDefaultAVX512(ctx unsafe.Pointer)
+// C: void vj_vm_exec_default_avx512(VjExecCtx* ctx)
+// SysV ABI: ctx=RDI
+TEXT ·vjVMExecDefaultAVX512(SB), NOSPLIT, $0-8
+	MOVQ ctx+0(FP), DI
+	JMP  vj_vm_exec_default_avx512(SB)
+
+// ---- Fast mode ----
+
+// func vjVMExecFastSSE42(ctx unsafe.Pointer)
+// C: void vj_vm_exec_fast_sse42(VjExecCtx* ctx)
+// SysV ABI: ctx=RDI
+TEXT ·vjVMExecFastSSE42(SB), NOSPLIT, $0-8
+	MOVQ ctx+0(FP), DI
+	JMP  vj_vm_exec_fast_sse42(SB)
+
+// func vjVMExecFastAVX2(ctx unsafe.Pointer)
+// C: void vj_vm_exec_fast_avx2(VjExecCtx* ctx)
+// SysV ABI: ctx=RDI
+TEXT ·vjVMExecFastAVX2(SB), NOSPLIT, $0-8
+	MOVQ ctx+0(FP), DI
+	JMP  vj_vm_exec_fast_avx2(SB)
+
+// func vjVMExecFastAVX512(ctx unsafe.Pointer)
+// C: void vj_vm_exec_fast_avx512(VjExecCtx* ctx)
+// SysV ABI: ctx=RDI
+TEXT ·vjVMExecFastAVX512(SB), NOSPLIT, $0-8
+	MOVQ ctx+0(FP), DI
+	JMP  vj_vm_exec_fast_avx512(SB)

@@ -1,14 +1,13 @@
-/*
- * encoder_string.h — Velox JSON C Engine: String Escape
- *
- * JSON string escaping with SIMD (SSE/NEON) and SWAR fast paths.
- * Mirrors Go appendEscapedString (vj_escape.go) behavior.
- *
- * Depends on: encoder_types.h (VjEncFlags, GoString, vj_memcpy, SIMD headers).
- */
-
 #ifndef VJ_ENCODER_STRING_H
 #define VJ_ENCODER_STRING_H
+
+#include <stdint.h>
+
+#ifdef __aarch64__
+#include "sse2neon.h"
+#else
+#include <immintrin.h>
+#endif
 
 // clang-format off
 
@@ -79,66 +78,6 @@ static inline int write_unicode_escape(uint8_t *buf, uint32_t cp) {
   return 6;
 }
 
-/* Decode a UTF-8 sequence starting at s[0]. Returns codepoint and
- * advances *consumed to the number of bytes consumed.
- * On invalid sequence returns 0xFFFD with consumed=1. */
-static inline uint32_t decode_utf8(const uint8_t *s, int64_t remaining,
-                                   int *consumed) {
-  uint8_t b0 = s[0];
-  if (b0 < 0x80) {
-    *consumed = 1;
-    return b0;
-  }
-  if ((b0 & 0xE0) == 0xC0 && remaining >= 2 && (s[1] & 0xC0) == 0x80) {
-    uint32_t cp = ((uint32_t)(b0 & 0x1F) << 6) | (s[1] & 0x3F);
-    if (cp >= 0x80) {
-      *consumed = 2;
-      return cp;
-    }
-  }
-  if ((b0 & 0xF0) == 0xE0 && remaining >= 3 && (s[1] & 0xC0) == 0x80 &&
-      (s[2] & 0xC0) == 0x80) {
-    uint32_t cp = ((uint32_t)(b0 & 0x0F) << 12) |
-                  ((uint32_t)(s[1] & 0x3F) << 6) | (s[2] & 0x3F);
-    if (cp >= 0x800 && !(cp >= 0xD800 && cp <= 0xDFFF)) {
-      *consumed = 3;
-      return cp;
-    }
-    /* Surrogate codepoint — treat as invalid below. */
-    if (cp >= 0xD800 && cp <= 0xDFFF) {
-      *consumed = 3;
-      return 0xFFFD; /* flagged as surrogate */
-    }
-  }
-  if ((b0 & 0xF8) == 0xF0 && remaining >= 4 && (s[1] & 0xC0) == 0x80 &&
-      (s[2] & 0xC0) == 0x80 && (s[3] & 0xC0) == 0x80) {
-    uint32_t cp = ((uint32_t)(b0 & 0x07) << 18) |
-                  ((uint32_t)(s[1] & 0x3F) << 12) |
-                  ((uint32_t)(s[2] & 0x3F) << 6) | (s[3] & 0x3F);
-    if (cp >= 0x10000 && cp <= 0x10FFFF) {
-      *consumed = 4;
-      return cp;
-    }
-  }
-  *consumed = 1;
-  return 0xFFFD;
-}
-
-/*
- * SIMD helpers: scan 16 bytes, return a bitmask where set bits indicate
- * bytes that need escaping or are non-ASCII (>= 0x80).
- *
- * Uses SSE intrinsics — on ARM64, sse2neon.h translates them to NEON.
- * Same pattern as sjmarker/sj_marker.h.
- *
- * Two branchless variants are generated via VJ_ESCAPE_MASK_FUNC macro:
- *   vj_escape_mask_16      — base: c < 0x20, '"', '\\', c >= 0x80
- *   vj_escape_mask_16_html — adds '<', '>', '&'
- *
- * Callers select the appropriate function pointer once, outside the
- * hot loop, eliminating per-iteration branches.
- */
-
 /*
  * SWAR (SIMD Within A Register) helper: scan 8 bytes packed in a uint64_t,
  * return an 8-bit mask where bit N (N = 0..7, LSB = first byte in memory on
@@ -199,6 +138,18 @@ vj_escape_mask_8(uint64_t word, const int html) {
   return (int)(((bad >> 7) * 0x0102040810204080ULL) >> 56);
 }
 
+/* Fast variant: only detects c < 0x20, '"', '\\'.
+ * Non-ASCII bytes (>= 0x80) are treated as safe — NOT flagged.
+ * No HTML detection. */
+static __attribute__((always_inline)) inline int
+vj_escape_mask_8_fast(uint64_t word) {
+  uint64_t bad = 0;
+  bad |= SWAR_HAS_LESS(word, 0x20);
+  bad |= SWAR_HAS_ZERO(word ^ SWAR_BROADCAST(0x22));
+  bad |= SWAR_HAS_ZERO(word ^ SWAR_BROADCAST(0x5C));
+  return (int)(((bad >> 7) * 0x0102040810204080ULL) >> 56);
+}
+
 #undef SWAR_HAS_LESS
 #undef SWAR_HAS_ZERO
 #undef SWAR_HI_BITS
@@ -214,9 +165,10 @@ static __attribute__((always_inline)) inline int
 vj_escape_mask_16_impl(const uint8_t *src, const int html) {
   __m128i v = _mm_loadu_si128((const __m128i *)src);
 
-  /* c < 0x20: max_epu8(v, 0x1F) != v → cmpeq gives 0 for ctrl chars. */
+  /* c < 0x20: max_epu8(v, 0x20) != v → cmpeq gives 0 for ctrl chars.
+   * (Must use 0x20, not 0x1F, so that byte 0x1F is correctly flagged.) */
   __m128i ctrl_safe =
-      _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x1F)), v);
+      _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x20)), v);
 
   /* c == '"' or c == '\\' */
   __m128i eq_q = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));
@@ -246,6 +198,18 @@ static inline int vj_escape_mask_16_html(const uint8_t *src) {
   return vj_escape_mask_16_impl(src, 1);
 }
 
+/* Fast 16-byte mask: only c < 0x20, '"', '\\'.  No non-ASCII, no HTML. */
+static inline int vj_escape_mask_16_fast(const uint8_t *src) {
+  __m128i v = _mm_loadu_si128((const __m128i *)src);
+  __m128i ctrl_safe =
+      _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x20)), v);
+  __m128i eq_q = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));
+  __m128i eq_bs = _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'));
+  __m128i bad = _mm_or_si128(eq_q, eq_bs);
+  __m128i safe = _mm_andnot_si128(bad, ctrl_safe);
+  return ~_mm_movemask_epi8(safe) & 0xFFFF;
+}
+
 /* ---- AVX2 32-byte escape mask ---- */
 #if defined(__AVX2__)
 
@@ -255,7 +219,7 @@ vj_escape_mask_32_impl(const uint8_t *src, const int html) {
   __m256i v = _mm256_loadu_si256((const __m256i *)src);
 
   __m256i ctrl_safe =
-      _mm256_cmpeq_epi8(_mm256_max_epu8(v, _mm256_set1_epi8(0x1F)), v);
+      _mm256_cmpeq_epi8(_mm256_max_epu8(v, _mm256_set1_epi8(0x20)), v);
 
   __m256i eq_q = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('"'));
   __m256i eq_bs = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('\\'));
@@ -282,72 +246,131 @@ static inline int vj_escape_mask_32_html(const uint8_t *src) {
   return vj_escape_mask_32_impl(src, 1);
 }
 
+/* Fast 32-byte mask: only c < 0x20, '"', '\\'.  No non-ASCII, no HTML. */
+static inline int vj_escape_mask_32_fast(const uint8_t *src) {
+  __m256i v = _mm256_loadu_si256((const __m256i *)src);
+  __m256i ctrl_safe =
+      _mm256_cmpeq_epi8(_mm256_max_epu8(v, _mm256_set1_epi8(0x20)), v);
+  __m256i eq_q = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('"'));
+  __m256i eq_bs = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('\\'));
+  __m256i bad = _mm256_or_si256(eq_q, eq_bs);
+  __m256i safe = _mm256_andnot_si256(bad, ctrl_safe);
+  return ~_mm256_movemask_epi8(safe);
+}
+
 #endif /* __AVX2__ */
 
 #endif /* __SSE2__ || __aarch64__ */
 
-/*
- * escape_string_content — write escaped string content (no quotes) to buf.
- *
- * src: raw string bytes, src_len: length.
- * flags: VjEncFlags bitmask.
- * Returns number of bytes written to buf.
- *
- * Two specializations eliminate the check_html branch from the SIMD loop:
- *   escape_string_content_base — no HTML escaping
- *   escape_string_content_html — with HTML escaping (<, >, &)
- *
- * The top-level escape_string_content() dispatches once based on flags.
- */
 
-/* ---- Batch UTF-8 run handler ----
+/* ---- Line terminator scan (no UTF-8 validation) ----
  *
- * Processes an entire contiguous run of non-ASCII bytes (>= 0x80) starting
- * at src[i].  Uses lazy-flush: scans ahead through all non-ASCII bytes,
- * only flushing + escaping on invalid UTF-8 or line terminators (U+2028/29).
- * Valid UTF-8 bytes are bulk-copied in one memcpy at the end of the run.
+ * Scans a non-ASCII run for U+2028 (E2 80 A8) and U+2029 (E2 80 A9),
+ * escaping them as \u2028 / \u2029.  All other bytes (including invalid
+ * UTF-8) are copied verbatim — no rune-by-rune decoding needed.
  *
- * This replaces the old per-rune vj_escape_one_utf8 which was called once
- * per non-ASCII byte, causing N function calls + N memcpy calls for a run
- * of N runes.  Now it's 1 call + typically 1 memcpy.
- *
- * Returns number of source bytes consumed (the entire non-ASCII run).
- * Writes escaped output to *out_ptr and advances it. */
-static __attribute__((always_inline)) inline int64_t
-vj_escape_utf8_run(uint8_t **out_ptr, const uint8_t *src,
-                   int64_t i, int64_t src_len, uint32_t flags) {
+ * Uses SIMD to scan 16 bytes at a time for the 0xE2 leading byte.
+ * Since U+2028/29 are extremely rare, the fast path (no 0xE2 in the
+ * window) simply bulk-copies via SIMD store. */
+static __attribute__((always_inline)) inline void
+vj_escape_line_terms(uint8_t **out_ptr, const uint8_t *src,
+                     int64_t start, int64_t end) {
   uint8_t *out = *out_ptr;
-  const int check_utf8 = (flags & VJ_ENC_ESCAPE_INVALID_UTF8) != 0;
-  const int check_line_terms = (flags & VJ_ENC_ESCAPE_LINE_TERMS) != 0;
-  const int64_t run_start = i;
+  int64_t i = start;
 
-  /* Fast path: no validation needed — scan to end of non-ASCII run,
-   * bulk copy the entire segment. */
-  if (!check_utf8 && !check_line_terms) {
-    while (i < src_len && src[i] >= 0x80)
-      i++;
-    int64_t run_len = i - run_start;
-    vj_memcpy(out, &src[run_start], run_len);
-    out += run_len;
-    *out_ptr = out;
-    return run_len;
+#if defined(__SSE2__) || defined(__aarch64__)
+  const __m128i ve2 = _mm_set1_epi8((char)0xE2);
+
+  while (i + 16 <= end) {
+    __m128i v = _mm_loadu_si128((const __m128i *)&src[i]);
+    int mask = _mm_movemask_epi8(_mm_cmpeq_epi8(v, ve2));
+    if (mask == 0) {
+      /* No 0xE2 in this 16-byte window — bulk copy. */
+      _mm_storeu_si128((__m128i *)out, v);
+      out += 16;
+      i += 16;
+      continue;
+    }
+    /* Copy safe prefix up to the first 0xE2 byte. */
+    int safe = __builtin_ctz(mask);
+    if (safe > 0) {
+      copy_small(out, &src[i], safe);
+      out += safe;
+      i += safe;
+    }
+    /* Check the two continuation bytes for line terminator:
+     * U+2028 = E2 80 A8,  U+2029 = E2 80 A9. */
+    if (i + 2 < end && src[i + 1] == 0x80 &&
+        (src[i + 2] == 0xA8 || src[i + 2] == 0xA9)) {
+      uint32_t cp = (src[i + 2] == 0xA8) ? 0x2028 : 0x2029;
+      out += write_unicode_escape(out, cp);
+      i += 3;
+    } else {
+      /* 0xE2 but not a line terminator — copy it through. */
+      *out++ = 0xE2;
+      i += 1;
+    }
+  }
+#endif /* __SSE2__ || __aarch64__ */
+
+  /* Scalar tail: fewer than 16 bytes remaining. */
+  int64_t flush_start = i;
+  while (i + 2 < end) {
+    if (src[i] != 0xE2) { i++; continue; }
+    if (src[i + 1] != 0x80)                        { i++; continue; }
+    if (src[i + 2] != 0xA8 && src[i + 2] != 0xA9)  { i++; continue; }
+
+    /* Found U+2028 or U+2029 — flush preceding bytes. */
+    if (i > flush_start) {
+      int64_t n = i - flush_start;
+      __builtin_memcpy(out, &src[flush_start], n);
+      out += n;
+    }
+    uint32_t cp = (src[i + 2] == 0xA8) ? 0x2028 : 0x2029;
+    out += write_unicode_escape(out, cp);
+    i += 3;
+    flush_start = i;
   }
 
-  /* Validation path: scan rune-by-rune but defer memcpy (lazy flush).
-   * `flush_start` marks the beginning of the current un-flushed segment. */
+  /* Flush remaining bytes. */
+  if (end > flush_start) {
+    int64_t n = end - flush_start;
+    __builtin_memcpy(out, &src[flush_start], n);
+    out += n;
+  }
+  *out_ptr = out;
+}
+
+/* ---- UTF-8 validation with lazy-flush ----
+ *
+ * Validates UTF-8 sequences rune-by-rune within src[start..end).
+ * Invalid bytes and surrogate codepoints are replaced with \ufffd.
+ * Valid bytes are bulk-copied via lazy flush.
+ *
+ * Line terminator escaping (check_line_terms) is piggybacked here rather
+ * than run as a separate pass: since we're already decoding rune-by-rune,
+ * intercepting U+2028/2029 costs just one extra byte comparison per rune,
+ * whereas a separate pass would require either a second scan over the
+ * output or an intermediate buffer. */
+static __attribute__((always_inline)) inline void
+vj_validate_utf8_run(uint8_t **out_ptr, const uint8_t *src,
+                     int64_t start, int64_t end,
+                     const int check_line_terms) {
+  uint8_t *out = *out_ptr;
+  int64_t i = start;
   int64_t flush_start = i;
 
-  while (i < src_len && src[i] >= 0x80) {
+  while (i < end) {
     /* --- Line terminator fast check (byte-level) ---
      * U+2028 = E2 80 A8,  U+2029 = E2 80 A9.
      * Only need full decode if first byte is 0xE2. */
     if (check_line_terms && src[i] == 0xE2 &&
-        i + 2 < src_len && src[i + 1] == 0x80 &&
+        i + 2 < end && src[i + 1] == 0x80 &&
         (src[i + 2] == 0xA8 || src[i + 2] == 0xA9)) {
       /* Flush preceding valid bytes */
       if (i > flush_start) {
         int64_t n = i - flush_start;
-        vj_memcpy(out, &src[flush_start], n);
+        __builtin_memcpy(out, &src[flush_start], n);
         out += n;
       }
       uint32_t cp = (src[i + 2] == 0xA8) ? 0x2028 : 0x2029;
@@ -362,7 +385,7 @@ vj_escape_utf8_run(uint8_t **out_ptr, const uint8_t *src,
 
     if ((b0 & 0xE0) == 0xC0) {
       /* 2-byte: 110xxxxx 10xxxxxx */
-      if (i + 2 <= src_len && (src[i + 1] & 0xC0) == 0x80) {
+      if (i + 2 <= end && (src[i + 1] & 0xC0) == 0x80) {
         uint32_t cp = ((uint32_t)(b0 & 0x1F) << 6) | (src[i + 1] & 0x3F);
         if (cp >= 0x80) {
           i += 2;
@@ -373,15 +396,16 @@ vj_escape_utf8_run(uint8_t **out_ptr, const uint8_t *src,
       goto invalid_byte;
     } else if ((b0 & 0xF0) == 0xE0) {
       /* 3-byte: 1110xxxx 10xxxxxx 10xxxxxx */
-      if (i + 3 <= src_len &&
+      if (i + 3 <= end &&
           (src[i + 1] & 0xC0) == 0x80 && (src[i + 2] & 0xC0) == 0x80) {
         uint32_t cp = ((uint32_t)(b0 & 0x0F) << 12) |
                       ((uint32_t)(src[i + 1] & 0x3F) << 6) |
                       (src[i + 2] & 0x3F);
         if (cp >= 0x800) {
-          if (check_utf8 && cp >= 0xD800 && cp <= 0xDFFF) {
-            /* Surrogate codepoint — replace with \ufffd */
-            goto replace_ufffd_3;
+          if (cp >= 0xD800 && cp <= 0xDFFF) {
+            /* Surrogate codepoint — replace byte-by-byte (matching stdlib).
+             * Each of the 3 bytes becomes an individual \ufffd. */
+            goto invalid_byte;
           }
           /* Note: line terminators (0xE2 prefix) already handled above */
           i += 3;
@@ -392,7 +416,7 @@ vj_escape_utf8_run(uint8_t **out_ptr, const uint8_t *src,
       goto invalid_byte;
     } else if ((b0 & 0xF8) == 0xF0) {
       /* 4-byte: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx */
-      if (i + 4 <= src_len &&
+      if (i + 4 <= end &&
           (src[i + 1] & 0xC0) == 0x80 && (src[i + 2] & 0xC0) == 0x80 &&
           (src[i + 3] & 0xC0) == 0x80) {
         uint32_t cp = ((uint32_t)(b0 & 0x07) << 18) |
@@ -411,54 +435,71 @@ vj_escape_utf8_run(uint8_t **out_ptr, const uint8_t *src,
       goto invalid_byte;
     }
 
-    /* --- Surrogate replacement (3-byte sequence) --- */
-  replace_ufffd_3:
-    if (i > flush_start) {
-      int64_t n = i - flush_start;
-      vj_memcpy(out, &src[flush_start], n);
-      out += n;
-    }
-    vj_memcpy(out, "\\ufffd", 6);
-    out += 6;
-    i += 3;
-    flush_start = i;
-    continue;
-
     /* --- Invalid byte handler --- */
   invalid_byte:
-    if (check_utf8) {
-      if (i > flush_start) {
-        int64_t n = i - flush_start;
-        vj_memcpy(out, &src[flush_start], n);
-        out += n;
-      }
-      vj_memcpy(out, "\\ufffd", 6);
-      out += 6;
-      i += 1;
-      flush_start = i;
-    } else {
-      /* No UTF-8 validation — copy invalid byte as-is */
-      i += 1;
+    if (i > flush_start) {
+      int64_t n = i - flush_start;
+      __builtin_memcpy(out, &src[flush_start], n);
+      out += n;
     }
+    __builtin_memcpy(out, "\\ufffd", 6);
+    out += 6;
+    i += 1;
+    flush_start = i;
     continue;
   }
 
   /* Flush remaining valid bytes from this run */
   if (i > flush_start) {
     int64_t n = i - flush_start;
-    vj_memcpy(out, &src[flush_start], n);
+    __builtin_memcpy(out, &src[flush_start], n);
     out += n;
   }
 
   *out_ptr = out;
-  return i - run_start;
+}
+
+/* ---- Non-ASCII run dispatcher ----
+ *
+ * Processes an entire contiguous run of non-ASCII bytes (>= 0x80) starting at src[i].
+ * Dispatches to the appropriate handler based on flags:
+ *   - No validation: bulk copy or line-terminator scan only.
+ *   - Validation: delegates to vj_validate_utf8_run for rune-by-rune checking.
+ *
+ * Returns number of source bytes consumed (the entire non-ASCII run).
+ * Writes escaped output to *out_ptr and advances it. */
+static __attribute__((always_inline)) inline int64_t
+vj_escape_nonascii_run(uint8_t **out_ptr, const uint8_t *src,
+                       int64_t i, int64_t src_len, uint32_t flags) {
+  const int check_utf8 = (flags & VJ_ENC_ESCAPE_INVALID_UTF8) != 0;
+  const int check_line_terms = (flags & VJ_ENC_ESCAPE_LINE_TERMS) != 0;
+
+  /* Find end of non-ASCII run. */
+  int64_t run_end = i;
+  while (run_end < src_len && src[run_end] >= 0x80)
+    run_end++;
+
+  if (!check_utf8) {
+    if (check_line_terms) {
+      vj_escape_line_terms(out_ptr, src, i, run_end);
+    } else {
+      uint8_t *out = *out_ptr;
+      int64_t run_len = run_end - i;
+      __builtin_memcpy(out, &src[i], run_len);
+      *out_ptr = out + run_len;
+    }
+  } else {
+    vj_validate_utf8_run(out_ptr, src, i, run_end, check_line_terms);
+  }
+
+  return run_end - i;
 }
 
 /* ---- Inline ASCII escape macro ----
  *
  * Handles a single byte at src[i] that was flagged by SIMD/SWAR.
  * For ASCII (< 0x80): inlines the escape directly (no function call).
- * For non-ASCII (>= 0x80): delegates to vj_escape_utf8_run which
+ * For non-ASCII (>= 0x80): delegates to vj_escape_nonascii_run which
  * batch-processes the entire contiguous non-ASCII segment.
  *
  * Uses the escape_lut lookup table for branchless escape selection.
@@ -476,22 +517,26 @@ vj_escape_utf8_run(uint8_t **out_ptr, const uint8_t *src,
       }                                                                        \
       i++;                                                                     \
     } else {                                                                   \
-      i += vj_escape_utf8_run(&out, src, i, src_len, flags);                   \
+      i += vj_escape_nonascii_run(&out, src, i, src_len, flags);                   \
     }                                                                          \
   } while (0)
 
-#if defined(__SSE2__) || defined(__aarch64__)
-
 /*
- * SIMD-accelerated escape core.  The `html` parameter must be a compile-time
- * constant (0 or 1); after always_inline expansion the dead branch and the
- * unused mask function are eliminated entirely by the optimiser.
+ * Escape core.  The `html` parameter must be a compile-time constant (0 or 1);
+ * after always_inline expansion the dead branch and the unused mask function
+ * are eliminated entirely by the optimiser.
  *
- * Key optimizations vs the previous implementation:
+ * On platforms with SIMD (SSE2/NEON/AVX2) the function uses wide scans;
+ * on all others it degrades gracefully to SWAR (8 bytes) + byte-by-byte.
+ *
+ * Key optimizations:
  *   1. Inline ASCII escape — no function call for the common case.
  *   2. Lookup table for escape_byte — branchless, no switch.
- *   3. Multi-escape per SIMD window — process ALL flagged bytes in one
- *      pass through the 16-byte mask, avoiding redundant re-scans.
+ *   3. Multi-escape per SIMD/SWAR window — when a window contains multiple
+ *      escape bytes, iterate the bitmask (ctz + shift) to process ALL of
+ *      them before re-scanning.  Avoids redundant SIMD load + mask ops.
+ *      For non-ASCII (>= 0x80) bytes the mask loop breaks out early since
+ *      the non-ASCII run may extend beyond the current window.
  *   4. copy_small for sub-16-byte chunks — avoids memcpy call overhead.
  */
 static __attribute__((always_inline)) inline int
@@ -499,6 +544,13 @@ escape_string_content_impl(uint8_t *buf, const uint8_t *src, int64_t src_len,
                            uint32_t flags, const int html) {
   uint8_t *out = buf;
   int64_t i = 0;
+
+#if defined(__SSE2__) || defined(__aarch64__)
+  /* Short-string optimization: for strings <= 16 bytes, jump directly
+   * to the SIMD tail path which handles the partial-vector case. */
+  if (__builtin_expect(src_len <= 16, 1))
+    goto simd_tail;
+#endif
 
   while (i < src_len) {
 #if defined(__AVX2__)
@@ -514,27 +566,40 @@ escape_string_content_impl(uint8_t *buf, const uint8_t *src, int64_t src_len,
         i += 32;
         continue;
       }
-
-      /* Copy safe prefix before the first escape byte. */
-      int safe = __builtin_ctz(mask);
-      if (safe > 0) {
-        /* Use overlapping 16-byte SIMD copies for the safe prefix. */
-        if (safe <= 16) {
-          copy_small(out, &src[i], safe);
-        } else {
-          _mm_storeu_si128((__m128i *)out,
-                           _mm_loadu_si128((const __m128i *)&src[i]));
-          copy_small(out + 16, &src[i + 16], safe - 16);
+      /* Process ALL escape bytes in this 32-byte window.
+       * For non-ASCII (>= 0x80), delegate to the run handler and
+       * break out — the run may extend beyond this window. */
+      do {
+        int safe = __builtin_ctz(mask);
+        if (safe > 0) {
+          if (safe <= 16) {
+            copy_small(out, &src[i], safe);
+          } else {
+            _mm_storeu_si128((__m128i *)out,
+                             _mm_loadu_si128((const __m128i *)&src[i]));
+            copy_small(out + 16, &src[i + 16], safe - 16);
+          }
+          out += safe;
+          i += safe;
         }
-        out += safe;
-        i += safe;
-      }
-      /* Handle the escape byte inline. */
-      ESCAPE_ONE_INLINE(html);
+        uint8_t _c = src[i];
+        if (__builtin_expect(_c >= 0x80, 0)) {
+          i += vj_escape_nonascii_run(&out, src, i, src_len, flags);
+          break;
+        }
+        if (_c < 0x20 || _c == '"' || _c == '\\') {
+          out += escape_byte(out, _c);
+        } else if ((html) && (_c == '<' || _c == '>' || _c == '&')) {
+          out += write_unicode_escape(out, _c);
+        }
+        i++;
+        mask >>= safe + 1;
+      } while (mask != 0);
       continue;
     }
 #endif /* __AVX2__ */
 
+#if defined(__SSE2__) || defined(__aarch64__)
     /* ---- SIMD: scan 16 bytes at a time ---- */
     if (i + 16 <= src_len) {
       int mask = html ? vj_escape_mask_16_html(&src[i])
@@ -547,37 +612,82 @@ escape_string_content_impl(uint8_t *buf, const uint8_t *src, int64_t src_len,
         i += 16;
         continue;
       }
-
-      /* Copy safe prefix before the first escape byte. */
-      int safe = __builtin_ctz(mask);
-      if (safe > 0) {
-        copy_small(out, &src[i], safe);
-        out += safe;
-        i += safe;
-      }
-      /* Handle the escape byte inline (no function call for ASCII). */
-      ESCAPE_ONE_INLINE(html);
+      /* Process ALL escape bytes in this 16-byte window. */
+      do {
+        int safe = __builtin_ctz(mask);
+        if (safe > 0) {
+          copy_small(out, &src[i], safe);
+          out += safe;
+          i += safe;
+        }
+        uint8_t _c = src[i];
+        if (__builtin_expect(_c >= 0x80, 0)) {
+          i += vj_escape_nonascii_run(&out, src, i, src_len, flags);
+          break;
+        }
+        if (_c < 0x20 || _c == '"' || _c == '\\') {
+          out += escape_byte(out, _c);
+        } else if ((html) && (_c == '<' || _c == '>' || _c == '&')) {
+          out += write_unicode_escape(out, _c);
+        }
+        i++;
+        mask >>= safe + 1;
+      } while (mask != 0);
       continue;
     }
+
+    /* ---- SIMD tail: < 16 bytes remaining (or short string entry) ----
+     * Load a full 16-byte vector (may over-read past src_len, which is
+     * safe for SIMD loads), mask to only the relevant bytes, and if all
+     * are safe, bulk-copy and return immediately. */
+  simd_tail: ;
+    {
+      __m128i v = _mm_loadu_si128((const __m128i *)&src[i]);
+      int mask = html ? vj_escape_mask_16_html(&src[i])
+                      : vj_escape_mask_16(&src[i]);
+      int remaining = (int)(src_len - i);
+      int relevant_mask = mask & ((1 << remaining) - 1);
+      if (__builtin_expect(relevant_mask == 0, 1)) {
+        _mm_storeu_si128((__m128i *)out, v);
+        out += remaining;
+        return (int)(out - buf);
+      }
+      /* Has escapes — fall through to SWAR / byte-by-byte below */
+    }
+#endif /* __SSE2__ || __aarch64__ */
 
     /* ---- SWAR: scan 8 bytes at a time (scalar tail) ---- */
     if (i + 8 <= src_len) {
       uint64_t word;
-      vj_memcpy(&word, &src[i], 8);
+      __builtin_memcpy(&word, &src[i], 8);
       int mask = vj_escape_mask_8(word, html);
       if (mask == 0) {
-        vj_memcpy(out, &src[i], 8);
+        __builtin_memcpy(out, &src[i], 8);
         out += 8;
         i += 8;
         continue;
       }
-      int safe = __builtin_ctz(mask);
-      if (safe > 0) {
-        copy_small(out, &src[i], safe);
-        out += safe;
-        i += safe;
-      }
-      ESCAPE_ONE_INLINE(html);
+      /* Process ALL escape bytes in this 8-byte window. */
+      do {
+        int safe = __builtin_ctz(mask);
+        if (safe > 0) {
+          copy_small(out, &src[i], safe);
+          out += safe;
+          i += safe;
+        }
+        uint8_t _c = src[i];
+        if (__builtin_expect(_c >= 0x80, 0)) {
+          i += vj_escape_nonascii_run(&out, src, i, src_len, flags);
+          break;
+        }
+        if (_c < 0x20 || _c == '"' || _c == '\\') {
+          out += escape_byte(out, _c);
+        } else if ((html) && (_c == '<' || _c == '>' || _c == '&')) {
+          out += write_unicode_escape(out, _c);
+        }
+        i++;
+        mask >>= safe + 1;
+      } while (mask != 0);
       continue;
     }
 
@@ -594,149 +704,193 @@ escape_string_content_impl(uint8_t *buf, const uint8_t *src, int64_t src_len,
   return (int)(out - buf);
 }
 
-/* Two noinline entry points so the compiler generates separate code for each
- * specialisation (different SIMD mask + scalar checks). */
-static __attribute__((noinline)) int
-escape_string_content_base(uint8_t *buf, const uint8_t *src, int64_t src_len,
-                           uint32_t flags) {
-  return escape_string_content_impl(buf, src, src_len, flags, /*html=*/0);
-}
-
-static __attribute__((noinline)) int
-escape_string_content_html(uint8_t *buf, const uint8_t *src, int64_t src_len,
-                           uint32_t flags) {
-  return escape_string_content_impl(buf, src, src_len, flags, /*html=*/1);
-}
-
-#else /* no SIMD */
-
-static __attribute__((noinline)) int
-escape_string_content_base(uint8_t *buf, const uint8_t *src, int64_t src_len,
-                           uint32_t flags) {
-  uint8_t *out = buf;
-  int64_t i = 0;
-  while (i < src_len) {
-    /* SWAR: try to scan 8 bytes at a time. */
-    if (i + 8 <= src_len) {
-      uint64_t word;
-      vj_memcpy(&word, &src[i], 8);
-      int mask = vj_escape_mask_8(word, 0);
-      if (mask == 0) {
-        vj_memcpy(out, &src[i], 8);
-        out += 8;
-        i += 8;
-        continue;
-      }
-      int safe = __builtin_ctz(mask);
-      if (safe > 0) {
-        copy_small(out, &src[i], safe);
-        out += safe;
-        i += safe;
-      }
-      ESCAPE_ONE_INLINE(0);
-      continue;
-    }
-    /* Byte-by-byte tail. */
-    uint8_t c = src[i];
-    if (c >= 0x20 && c < 0x80 && c != '"' && c != '\\') {
-      *out++ = c;
-      i++;
-    } else {
-      ESCAPE_ONE_INLINE(0);
-    }
-  }
-  return (int)(out - buf);
-}
-
-static __attribute__((noinline)) int
-escape_string_content_html(uint8_t *buf, const uint8_t *src, int64_t src_len,
-                           uint32_t flags) {
-  uint8_t *out = buf;
-  int64_t i = 0;
-  while (i < src_len) {
-    /* SWAR: try to scan 8 bytes at a time. */
-    if (i + 8 <= src_len) {
-      uint64_t word;
-      vj_memcpy(&word, &src[i], 8);
-      int mask = vj_escape_mask_8(word, 1);
-      if (mask == 0) {
-        vj_memcpy(out, &src[i], 8);
-        out += 8;
-        i += 8;
-        continue;
-      }
-      int safe = __builtin_ctz(mask);
-      if (safe > 0) {
-        copy_small(out, &src[i], safe);
-        out += safe;
-        i += safe;
-      }
-      ESCAPE_ONE_INLINE(1);
-      continue;
-    }
-    /* Byte-by-byte tail. */
-    uint8_t c = src[i];
-    if (c >= 0x20 && c < 0x80 && c != '"' && c != '\\' && c != '<' &&
-        c != '>' && c != '&') {
-      *out++ = c;
-      i++;
-    } else {
-      ESCAPE_ONE_INLINE(1);
-    }
-  }
-  return (int)(out - buf);
-}
-
-#endif /* SIMD */
-
 #undef ESCAPE_ONE_INLINE
+
+/* ================================================================
+ *  Fast escape: ASCII-only — no non-ASCII detection, no HTML,
+ *  no UTF-8 validation, no line terminator escaping.
+ *
+ *  Only handles: c < 0x20 (control chars), '"', '\\'.
+ *  Non-ASCII bytes (>= 0x80) pass through untouched.
+ * ================================================================ */
+
+#define ESCAPE_ONE_INLINE_FAST                                                 \
+  do {                                                                         \
+    uint8_t _c = src[i];                                                       \
+    if (_c < 0x20 || _c == '"' || _c == '\\') {                                \
+      out += escape_byte(out, _c);                                             \
+    } else {                                                                   \
+      *out++ = _c;                                                             \
+    }                                                                          \
+    i++;                                                                       \
+  } while (0)
+
+static __attribute__((always_inline)) inline
+int escape_string_content_fast(uint8_t *buf, const uint8_t *src, int64_t src_len) {
+  uint8_t *out = buf;
+  int64_t i = 0;
+
+#if defined(__SSE2__) || defined(__aarch64__)
+  /* Short-string optimization: for strings <= 16 bytes, jump directly
+   * to the SIMD tail path which handles the partial-vector case. */
+  if (__builtin_expect(src_len <= 16, 1))
+    goto simd_tail_fast;
+#endif
+
+  while (i < src_len) {
+#if defined(__AVX2__)
+    if (i + 32 <= src_len) {
+      int mask = vj_escape_mask_32_fast(&src[i]);
+      if (mask == 0) {
+        _mm256_storeu_si256((__m256i *)out,
+                            _mm256_loadu_si256((const __m256i *)&src[i]));
+        out += 32;
+        i += 32;
+        continue;
+      }
+      /* Process ALL escape bytes in this 32-byte window. */
+      do {
+        int safe = __builtin_ctz(mask);
+        if (safe > 0) {
+          if (safe <= 16) {
+            copy_small(out, &src[i], safe);
+          } else {
+            _mm_storeu_si128((__m128i *)out,
+                             _mm_loadu_si128((const __m128i *)&src[i]));
+            copy_small(out + 16, &src[i + 16], safe - 16);
+          }
+          out += safe;
+          i += safe;
+        }
+        out += escape_byte(out, src[i]);
+        i++;
+        mask >>= safe + 1;
+      } while (mask != 0);
+      continue;
+    }
+#endif /* __AVX2__ */
+
+#if defined(__SSE2__) || defined(__aarch64__)
+    if (i + 16 <= src_len) {
+      int mask = vj_escape_mask_16_fast(&src[i]);
+      if (mask == 0) {
+        _mm_storeu_si128((__m128i *)out,
+                         _mm_loadu_si128((const __m128i *)&src[i]));
+        out += 16;
+        i += 16;
+        continue;
+      }
+      /* Process ALL escape bytes in this 16-byte window. */
+      do {
+        int safe = __builtin_ctz(mask);
+        if (safe > 0) {
+          copy_small(out, &src[i], safe);
+          out += safe;
+          i += safe;
+        }
+        out += escape_byte(out, src[i]);
+        i++;
+        mask >>= safe + 1;
+      } while (mask != 0);
+      continue;
+    }
+
+    /* ---- SIMD tail: < 16 bytes remaining (or short string entry) ---- */
+  simd_tail_fast: ;
+    {
+      __m128i v = _mm_loadu_si128((const __m128i *)&src[i]);
+      int mask = vj_escape_mask_16_fast(&src[i]);
+      int remaining = (int)(src_len - i);
+      int relevant_mask = mask & ((1 << remaining) - 1);
+      if (__builtin_expect(relevant_mask == 0, 1)) {
+        _mm_storeu_si128((__m128i *)out, v);
+        out += remaining;
+        return (int)(out - buf);
+      }
+      /* Has escapes — fall through to SWAR / byte-by-byte below */
+    }
+#endif /* __SSE2__ || __aarch64__ */
+
+    if (i + 8 <= src_len) {
+      uint64_t word;
+      __builtin_memcpy(&word, &src[i], 8);
+      int mask = vj_escape_mask_8_fast(word);
+      if (mask == 0) {
+        __builtin_memcpy(out, &src[i], 8);
+        out += 8;
+        i += 8;
+        continue;
+      }
+      /* Process ALL escape bytes in this 8-byte window. */
+      do {
+        int safe = __builtin_ctz(mask);
+        if (safe > 0) {
+          copy_small(out, &src[i], safe);
+          out += safe;
+          i += safe;
+        }
+        out += escape_byte(out, src[i]);
+        i++;
+        mask >>= safe + 1;
+      } while (mask != 0);
+      continue;
+    }
+
+    /* Byte-by-byte tail */
+    uint8_t c = src[i];
+    if (c >= 0x20 && c != '"' && c != '\\') {
+      *out++ = c;
+      i++;
+    } else {
+      ESCAPE_ONE_INLINE_FAST;
+    }
+  }
+  return (int)(out - buf);
+}
+
+#undef ESCAPE_ONE_INLINE_FAST
 
 /* Dispatch to the appropriate specialization. */
 static inline int escape_string_content(uint8_t *buf, const uint8_t *src,
                                         int64_t src_len, uint32_t flags) {
   if (flags & VJ_ENC_ESCAPE_HTML)
-    return escape_string_content_html(buf, src, src_len, flags);
-  return escape_string_content_base(buf, src, src_len, flags);
+    return escape_string_content_impl(buf, src, src_len, flags, /*html=*/1);
+  return escape_string_content_impl(buf, src, src_len, flags, /*html=*/0);
 }
 
 /* ================================================================
  *  vj_escape_string — write a complete JSON string (with quotes)
  *
- *  Includes a short-string fast path (SIMD scan for <= 16 bytes):
- *  if all bytes are safe ASCII, copies directly without calling the
- *  noinline escape_string_content function.  This avoids function-call
- *  overhead for the ~65% of strings that are short and clean.
+ *  Returns number of bytes written (including the two quote bytes).
+ *  Caller must ensure buf has room for 2 + src_len * 6 bytes.
+ * ================================================================ */
+static __attribute__((always_inline)) inline
+int vj_escape_string(uint8_t *buf, const uint8_t *src, int64_t src_len, uint32_t flags) {
+  uint8_t *out = buf;
+  *out++ = '"';
+  if (src_len > 0) {
+    out += escape_string_content(out, src, src_len, flags);
+  }
+  *out++ = '"';
+  return (int)(out - buf);
+}
+
+/* ================================================================
+ *  vj_escape_string_fast — fast-path JSON string (with quotes)
+ *
+ *  Only escapes control chars (< 0x20), '"', and '\\'.
+ *  Non-ASCII bytes pass through untouched — no UTF-8 validation,
+ *  no HTML escaping, no line terminator escaping.
  *
  *  Returns number of bytes written (including the two quote bytes).
  *  Caller must ensure buf has room for 2 + src_len * 6 bytes.
  * ================================================================ */
 static __attribute__((always_inline)) inline int
-vj_escape_string(uint8_t *buf, const uint8_t *src, int64_t src_len,
-                 uint32_t flags) {
+vj_escape_string_fast(uint8_t *buf, const uint8_t *src, int64_t src_len) {
   uint8_t *out = buf;
   *out++ = '"';
   if (src_len > 0) {
-#if defined(__SSE2__) || defined(__aarch64__)
-    if (__builtin_expect(src_len <= 16, 1)) {
-      __m128i v = _mm_loadu_si128((const __m128i *)src);
-      int mask;
-      if (flags & VJ_ENC_ESCAPE_HTML) {
-        mask = vj_escape_mask_16_html(src);
-      } else {
-        mask = vj_escape_mask_16(src);
-      }
-      int relevant_mask = mask & ((1 << src_len) - 1);
-      if (__builtin_expect(relevant_mask == 0, 1)) {
-        _mm_storeu_si128((__m128i *)out, v);
-        out += src_len;
-      } else {
-        out += escape_string_content(out, src, src_len, flags);
-      }
-    } else
-#endif
-    {
-      out += escape_string_content(out, src, src_len, flags);
-    }
+    out += escape_string_content_fast(out, src, src_len);
   }
   *out++ = '"';
   return (int)(out - buf);
