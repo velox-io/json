@@ -10,6 +10,11 @@ import (
 // Test Helpers
 // =============================================================================
 
+// lookupField is a test helper that wraps LookupFieldBytes for string input.
+func lookupField(dec *ReflectStructDecoder, key string) *TypeInfo {
+	return dec.LookupFieldBytes([]byte(key))
+}
+
 // makeTestStructDecoder builds a ReflectStructDecoder from a list of field names.
 // This bypasses reflect to create controlled test scenarios.
 func makeTestStructDecoder(names []string) *ReflectStructDecoder {
@@ -84,14 +89,14 @@ func TestBuildLookup_Empty(t *testing.T) {
 	if dec.LookupFn == nil {
 		t.Fatal("LookupFn should not be nil")
 	}
-	if fi := dec.LookupField("anything"); fi != nil {
+	if fi := lookupField(dec, "anything"); fi != nil {
 		t.Error("expected nil for empty struct")
 	}
 }
 
 func TestBuildLookup_SingleField(t *testing.T) {
 	dec := makeTestStructDecoder([]string{"id"})
-	fi := dec.LookupField("id")
+	fi := lookupField(dec, "id")
 	if fi == nil {
 		t.Fatal("expected to find 'id'")
 	}
@@ -110,7 +115,7 @@ func TestBuildLookup_LinearRange(t *testing.T) {
 		dec := makeTestStructDecoder(names)
 
 		for _, name := range names {
-			fi := dec.LookupField(name)
+			fi := lookupField(dec, name)
 			if fi == nil {
 				t.Errorf("n=%d: expected to find %q", n, name)
 			} else if fi.JSONName != name {
@@ -119,7 +124,7 @@ func TestBuildLookup_LinearRange(t *testing.T) {
 		}
 
 		// Unknown key
-		if fi := dec.LookupField("nonexistent"); fi != nil {
+		if fi := lookupField(dec, "nonexistent"); fi != nil {
 			t.Errorf("n=%d: expected nil for unknown key", n)
 		}
 	}
@@ -140,7 +145,7 @@ func TestBuildLookup_PerfectHashRange(t *testing.T) {
 		}
 
 		for _, name := range names {
-			fi := dec.LookupField(name)
+			fi := lookupField(dec, name)
 			if fi == nil {
 				t.Errorf("n=%d: expected to find %q", n, name)
 			} else if fi.JSONName != name {
@@ -148,7 +153,7 @@ func TestBuildLookup_PerfectHashRange(t *testing.T) {
 			}
 		}
 
-		if fi := dec.LookupField("nonexistent"); fi != nil {
+		if fi := lookupField(dec, "nonexistent"); fi != nil {
 			t.Errorf("n=%d: expected nil for unknown key", n)
 		}
 	}
@@ -168,7 +173,7 @@ func TestBuildLookup_MapFallback(t *testing.T) {
 	}
 
 	for _, name := range names {
-		fi := dec.LookupField(name)
+		fi := lookupField(dec, name)
 		if fi == nil {
 			t.Errorf("expected to find %q", name)
 		}
@@ -199,11 +204,11 @@ func TestLookup_CaseInsensitive(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		fi := dec.LookupField(tt.key)
+		fi := lookupField(dec, tt.key)
 		if fi == nil {
-			t.Errorf("LookupField(%q): expected %q, got nil", tt.key, tt.wantName)
+			t.Errorf("lookupField(%q): expected %q, got nil", tt.key, tt.wantName)
 		} else if fi.JSONName != tt.wantName {
-			t.Errorf("LookupField(%q): expected %q, got %q", tt.key, tt.wantName, fi.JSONName)
+			t.Errorf("lookupField(%q): expected %q, got %q", tt.key, tt.wantName, fi.JSONName)
 		}
 	}
 }
@@ -215,24 +220,24 @@ func TestLookup_CaseInsensitive_PerfectHash(t *testing.T) {
 	// Lookup with various casings
 	for _, name := range names {
 		// Original case
-		fi := dec.LookupField(name)
+		fi := lookupField(dec, name)
 		if fi == nil || fi.JSONName != name {
-			t.Errorf("LookupField(%q) failed", name)
+			t.Errorf("lookupField(%q) failed", name)
 		}
 
 		// Uppercase
-		fi = dec.LookupField(toLowerASCII(name)) // already lower, but test the path
+		fi = lookupField(dec, toLowerASCII(name)) // already lower, but test the path
 		if fi == nil || fi.JSONName != name {
-			t.Errorf("LookupField(lower(%q)) failed", name)
+			t.Errorf("lookupField(lower(%q)) failed", name)
 		}
 	}
 
 	// UPPERCASE variants
-	fi := dec.LookupField("ID")
+	fi := lookupField(dec, "ID")
 	if fi == nil || fi.JSONName != "id" {
 		t.Error("expected 'id' for 'ID'")
 	}
-	fi = dec.LookupField("NAME")
+	fi = lookupField(dec, "NAME")
 	if fi == nil || fi.JSONName != "name" {
 		t.Error("expected 'name' for 'NAME'")
 	}
@@ -247,8 +252,8 @@ func TestLookup_UnknownKeys(t *testing.T) {
 
 	unknowns := []string{"", "x", "unknown", "idd", "nam", "emaill", "PHONE2"}
 	for _, key := range unknowns {
-		if fi := dec.LookupField(key); fi != nil {
-			t.Errorf("LookupField(%q): expected nil, got %q", key, fi.JSONName)
+		if fi := lookupField(dec, key); fi != nil {
+			t.Errorf("lookupField(%q): expected nil, got %q", key, fi.JSONName)
 		}
 	}
 }
@@ -262,7 +267,7 @@ func TestLookup_SimilarNames(t *testing.T) {
 	})
 
 	for _, name := range []string{"created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"} {
-		fi := dec.LookupField(name)
+		fi := lookupField(dec, name)
 		if fi == nil {
 			t.Errorf("expected to find %q", name)
 		} else if fi.JSONName != name {
@@ -276,7 +281,7 @@ func TestLookup_DuplicateLengthNames(t *testing.T) {
 	dec := makeTestStructDecoder([]string{"ab", "cd", "ef", "gh", "ij"})
 
 	for _, name := range []string{"ab", "cd", "ef", "gh", "ij"} {
-		fi := dec.LookupField(name)
+		fi := lookupField(dec, name)
 		if fi == nil {
 			t.Errorf("expected to find %q", name)
 		} else if fi.JSONName != name {
@@ -288,9 +293,9 @@ func TestLookup_DuplicateLengthNames(t *testing.T) {
 func TestLookup_SingleCharFields(t *testing.T) {
 	dec := makeTestStructDecoder([]string{"a", "b", "c", "d", "e", "f"})
 	for _, name := range []string{"a", "b", "c", "d", "e", "f"} {
-		fi := dec.LookupField(name)
+		fi := lookupField(dec, name)
 		if fi == nil || fi.JSONName != name {
-			t.Errorf("LookupField(%q) failed", name)
+			t.Errorf("lookupField(%q) failed", name)
 		}
 	}
 }
@@ -298,9 +303,9 @@ func TestLookup_SingleCharFields(t *testing.T) {
 func TestLookup_UnicodeFieldNames(t *testing.T) {
 	dec := makeTestStructDecoder([]string{"名前", "年齢", "メール", "住所", "電話"})
 	for _, name := range []string{"名前", "年齢", "メール", "住所", "電話"} {
-		fi := dec.LookupField(name)
+		fi := lookupField(dec, name)
 		if fi == nil || fi.JSONName != name {
-			t.Errorf("LookupField(%q) failed", name)
+			t.Errorf("lookupField(%q) failed", name)
 		}
 	}
 }
@@ -315,14 +320,14 @@ func TestLookup_RealisticStruct(t *testing.T) {
 	dec := makeTestStructDecoder(names)
 
 	for _, name := range names {
-		fi := dec.LookupField(name)
+		fi := lookupField(dec, name)
 		if fi == nil || fi.JSONName != name {
-			t.Errorf("LookupField(%q) failed", name)
+			t.Errorf("lookupField(%q) failed", name)
 		}
 	}
 
 	// Case-insensitive
-	if fi := dec.LookupField("Created_At"); fi == nil || fi.JSONName != "created_at" {
+	if fi := lookupField(dec, "Created_At"); fi == nil || fi.JSONName != "created_at" {
 		t.Error("case-insensitive lookup for Created_At failed")
 	}
 }
@@ -353,11 +358,11 @@ func TestLookup_ViaReflect(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		fi := dec.LookupField(tt.key)
+		fi := lookupField(dec, tt.key)
 		if fi == nil {
-			t.Errorf("LookupField(%q): expected %q, got nil", tt.key, tt.want)
+			t.Errorf("lookupField(%q): expected %q, got nil", tt.key, tt.want)
 		} else if fi.JSONName != tt.want {
-			t.Errorf("LookupField(%q): expected %q, got %q", tt.key, tt.want, fi.JSONName)
+			t.Errorf("lookupField(%q): expected %q, got %q", tt.key, tt.want, fi.JSONName)
 		}
 	}
 }
@@ -390,7 +395,7 @@ func TestLookup_ViaReflect_LargeStruct(t *testing.T) {
 
 	for i := 1; i <= 16; i++ {
 		name := fmt.Sprintf("f%d", i)
-		fi := dec.LookupField(name)
+		fi := lookupField(dec, name)
 		if fi == nil {
 			t.Errorf("expected to find %q", name)
 		} else if fi.JSONName != name {
@@ -405,7 +410,6 @@ func TestLookup_ViaReflect_LargeStruct(t *testing.T) {
 
 func TestLookupFieldBytes(t *testing.T) {
 	dec := makeTestStructDecoder([]string{"id", "name", "email", "phone", "address"})
-	scratch := make([]byte, 64)
 
 	tests := []struct {
 		key  []byte
@@ -419,7 +423,7 @@ func TestLookupFieldBytes(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		fi := dec.LookupFieldBytes(tt.key, scratch)
+		fi := dec.LookupFieldBytes(tt.key)
 		if tt.want == "" {
 			if fi != nil {
 				t.Errorf("LookupFieldBytes(%q): expected nil, got %q", tt.key, fi.JSONName)
@@ -441,19 +445,19 @@ func TestLookupFieldBytes(t *testing.T) {
 // BenchmarkLookup compares linear, perfect hash, and map lookup across field counts.
 func BenchmarkLookup_Linear_4fields(b *testing.B) {
 	dec := makeTestStructDecoder([]string{"id", "name", "email", "age"})
-	key := "email"
+	key := []byte("email")
 	b.ResetTimer()
 	for range b.N {
-		dec.LookupField(key)
+		dec.LookupFieldBytes(key)
 	}
 }
 
 func BenchmarkLookup_PerfectHash_8fields(b *testing.B) {
 	dec := makeTestStructDecoder([]string{"id", "name", "email", "phone", "address", "city", "state", "zip"})
-	key := "address"
+	key := []byte("address")
 	b.ResetTimer()
 	for range b.N {
-		dec.LookupField(key)
+		dec.LookupFieldBytes(key)
 	}
 }
 
@@ -463,10 +467,10 @@ func BenchmarkLookup_PerfectHash_16fields(b *testing.B) {
 		names[i] = fmt.Sprintf("field_%d", i)
 	}
 	dec := makeTestStructDecoder(names)
-	key := "field_12"
+	key := []byte("field_12")
 	b.ResetTimer()
 	for range b.N {
-		dec.LookupField(key)
+		dec.LookupFieldBytes(key)
 	}
 }
 
@@ -476,19 +480,19 @@ func BenchmarkLookup_Map_40fields(b *testing.B) {
 		names[i] = fmt.Sprintf("field_%d", i)
 	}
 	dec := makeTestStructDecoder(names)
-	key := "field_30"
+	key := []byte("field_30")
 	b.ResetTimer()
 	for range b.N {
-		dec.LookupField(key)
+		dec.LookupFieldBytes(key)
 	}
 }
 
 func BenchmarkLookup_Miss_PerfectHash(b *testing.B) {
 	dec := makeTestStructDecoder([]string{"id", "name", "email", "phone", "address", "city", "state", "zip"})
-	key := "nonexistent"
+	key := []byte("nonexistent")
 	b.ResetTimer()
 	for range b.N {
-		dec.LookupField(key)
+		dec.LookupFieldBytes(key)
 	}
 }
 
@@ -521,31 +525,5 @@ func BenchmarkLookup_RawMap_16fields(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		_ = m[key]
-	}
-}
-
-func BenchmarkLookupFieldBytes_8fields(b *testing.B) {
-	dec := makeTestStructDecoder([]string{"id", "name", "email", "phone", "address", "city", "state", "zip"})
-	key := []byte("address")
-	scratch := make([]byte, 64)
-	b.ResetTimer()
-	for range b.N {
-		dec.LookupFieldBytes(key, scratch)
-	}
-}
-
-func BenchmarkToLowerASCII_NoUpper(b *testing.B) {
-	s := "created_at"
-	b.ResetTimer()
-	for range b.N {
-		toLowerASCII(s)
-	}
-}
-
-func BenchmarkToLowerASCII_WithUpper(b *testing.B) {
-	s := "CreatedAt"
-	b.ResetTimer()
-	for range b.N {
-		toLowerASCII(s)
 	}
 }

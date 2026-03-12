@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Run benchmarks and save/update baseline
 # Usage: ./scripts/bench-save.sh
 #
@@ -32,8 +32,7 @@ cd "$PROJECT_ROOT"
     echo ""
 } > "$BENCHDATA_DIR/baseline.txt"
 
-go test -bench=. -benchmem -count=5 ./... >> "$BENCHDATA_DIR/baseline.txt" 2>/dev/null || true
-cd benchmark && go test -bench=. -benchmem -count=5 . >> "../$BENCHDATA_DIR/baseline.txt" 2>/dev/null || true
+cd benchmark && go test -bench=Velox -benchmem -count=5 . >> "../$BENCHDATA_DIR/baseline.txt" 2>/dev/null || true
 
 echo ""
 echo "Baseline saved to: $BENCHDATA_DIR/baseline.txt"

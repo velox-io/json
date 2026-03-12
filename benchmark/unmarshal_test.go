@@ -7,7 +7,6 @@ import (
 
 	"github.com/bytedance/sonic"
 	vjson "github.com/velox-io/json"
-	"github.com/velox-io/json/prescan"
 )
 
 // =============================================================================
@@ -34,16 +33,6 @@ func Benchmark_Small_Velox(b *testing.B) {
 	}
 }
 
-func Benchmark_Small_Prescan(b *testing.B) {
-	b.ReportAllocs()
-	for b.Loop() {
-		var s Small
-		if err := prescan.Unmarshal(SmallJSON, &s); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // =============================================================================
 // Small Compact: same as Small but with whitespace stripped
 // =============================================================================
@@ -63,16 +52,6 @@ func Benchmark_Small_Compact_Velox(b *testing.B) {
 	for b.Loop() {
 		var v Small
 		if err := vjson.Unmarshal(SmallCompactJSON, &v); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func Benchmark_Small_Compact_Prescan(b *testing.B) {
-	b.ReportAllocs()
-	for b.Loop() {
-		var s Small
-		if err := prescan.Unmarshal(SmallCompactJSON, &s); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -104,17 +83,6 @@ func Benchmark_EscapeHeavy_Velox(b *testing.B) {
 	}
 }
 
-func Benchmark_EscapeHeavy_Prescan(b *testing.B) {
-	b.SetBytes(int64(len(EscapeHeavyJSON)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var p EscapeHeavyPayload
-		if err := prescan.Unmarshal(EscapeHeavyJSON, &p); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // =============================================================================
 // EscapeHeavy Compact: same as EscapeHeavy but with whitespace stripped
 // =============================================================================
@@ -136,17 +104,6 @@ func Benchmark_EscapeHeavy_Compact_Velox(b *testing.B) {
 	for b.Loop() {
 		var p EscapeHeavyPayload
 		if err := vjson.Unmarshal(EscapeHeavyCompactJSON, &p); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func Benchmark_EscapeHeavy_Compact_Prescan(b *testing.B) {
-	b.SetBytes(int64(len(EscapeHeavyCompactJSON)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var p EscapeHeavyPayload
-		if err := prescan.Unmarshal(EscapeHeavyCompactJSON, &p); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -178,17 +135,6 @@ func Benchmark_KubePods_Velox(b *testing.B) {
 	}
 }
 
-func Benchmark_KubePods_Prescan(b *testing.B) {
-	b.SetBytes(int64(len(PodsJSON)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var pl KubePodList
-		if err := prescan.Unmarshal(PodsJSON, &pl); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // =============================================================================
 // KubePods Compact: same as KubePods but with whitespace stripped
 // =============================================================================
@@ -210,17 +156,6 @@ func Benchmark_KubePods_Compact_Velox(b *testing.B) {
 	for b.Loop() {
 		var pl KubePodList
 		if err := vjson.Unmarshal(PodsCompactJSON, &pl); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func Benchmark_KubePods_Compact_Prescan(b *testing.B) {
-	b.SetBytes(int64(len(PodsCompactJSON)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var pl KubePodList
-		if err := prescan.Unmarshal(PodsCompactJSON, &pl); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -252,17 +187,6 @@ func Benchmark_Twitter_Velox(b *testing.B) {
 	}
 }
 
-func Benchmark_Twitter_Prescan(b *testing.B) {
-	b.SetBytes(int64(len(TwitterJSON)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var t twitter.TwitterStruct
-		if err := prescan.Unmarshal(TwitterJSON, &t); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // =============================================================================
 // Twitter Compact: same as Twitter but with whitespace stripped
 // =============================================================================
@@ -289,13 +213,3 @@ func Benchmark_Twitter_Compact_Velox(b *testing.B) {
 	}
 }
 
-func Benchmark_Twitter_Compact_Prescan(b *testing.B) {
-	b.SetBytes(int64(len(TwitterCompactJSON)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var t twitter.TwitterStruct
-		if err := prescan.Unmarshal(TwitterCompactJSON, &t); err != nil {
-			b.Fatal(err)
-		}
-	}
-}

@@ -81,7 +81,9 @@ func appendEscapedString(buf []byte, s string, flags escapeFlags) []byte {
 		if needRuneScan && w&hi64 != 0 {
 			nonASCIIoff := firstMarkedByteIndex(w & hi64)
 
-			// Handle ASCII special char before the non-ASCII byte if present.
+			// If an ASCII special char (quote, backslash, control, or HTML) appears
+			// before the first non-ASCII byte in this 8-byte window, handle it first
+			// so we don't accidentally include it in the rune-decoding loop below.
 			if mask != 0 {
 				asciiOff := firstMarkedByteIndex(mask)
 				if asciiOff < nonASCIIoff {

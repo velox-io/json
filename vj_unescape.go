@@ -108,22 +108,11 @@ func unescapeSequence(data []byte, n int, i int, dst []byte, pos int) (int, int,
 	return i, pos, fmt.Errorf("vjson: invalid escape '\\%c' in string at offset %d", next, i)
 }
 
-// unescapeSinglePass performs single-pass scanning and unescaping of a JSON string.
-// It scans src starting from firstEscIdx for the closing '"', unescaping escape
-// sequences as it goes. src[start:firstEscIdx] is the prefix before the first
-// backslash (copied verbatim).
-//
+// unescapeSinglePass scans src from firstEscIdx for the closing '"', unescaping
+// escape sequences as it goes. src[start:firstEscIdx] is the prefix before the
+// first backslash (copied verbatim).
 // Returns (endIdx past closing quote, decoded []byte, error).
-// The returned []byte is backed by arena, scratch, or heap.
-//
-// Buffer strategy:
-//   - If arena has >= scratchBufSize free: decode directly into arena (zero copy)
-//   - Otherwise: decode into Parser's scratch buffer
-//   - On overflow: double the buffer and continue (amortized O(n))
-//   - On completion: small results (<= arenaInlineMax) go to arena, large results get exact heap alloc
-//
-// scratchBufSize bounds reusable temp storage; arenaInlineMax keeps large strings
-// out of the arena to reduce retained memory.
+// The returned []byte is backed by arena, scratch, or heap — see done: label.
 func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, []byte, error) {
 	n := len(src)
 
@@ -187,7 +176,9 @@ func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, [
 		combined := mq | mb | mc
 
 		if combined == 0 {
-			// No quote, backslash, or control char — copy 8 bytes directly
+			// No special char — copy 8 bytes directly.
+			// Unaligned store is safe on amd64/arm64 (all SWAR accesses in this
+			// codebase assume unaligned read/write support from the target arch).
 			*(*uint64)(unsafe.Pointer(&buf[pos])) = w
 			pos += 8
 			i += 8

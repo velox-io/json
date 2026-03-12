@@ -28,7 +28,7 @@ jobs:
 
     - name: Run benchmarks
       run: |
-        cd benchmark && go test -bench=".*Velox" -benchmem -count=5 . > bench-current.txt
+        cd benchmark && go test -bench="Velox" -benchmem -count=5 . | tee bench-current.txt
 
     - name: Restore baseline
       uses: actions/cache/restore@v4

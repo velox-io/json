@@ -2,7 +2,10 @@ package vjson
 
 import "unsafe"
 
-const ptrBatchSize = 4
+// ptrBatchSize is intentionally small: most JSON objects have few pointer fields,
+// and each batch keeps the entire array alive until the Parser is returned to
+// the pool. A large batch would retain excessive unused memory per type.
+const ptrBatchSize = 2
 
 // rtypeAllocator provides batched allocation for a single element type.
 // It uses unsafe_NewArray to allocate ptrBatchSize elements at once, then

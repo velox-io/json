@@ -11,7 +11,7 @@ const (
 	// 32-bit little-endian representations for literal validation.
 	litU32True = uint32(0x65757274) // "true"
 	litU32Null = uint32(0x6c6c756e) // "null"
-	// "a" + "l" + "se" suffix for f@lse literal
+	// "a" + "l" + "se" suffix for false literal
 	litU32Alse = uint32(0x65736c61)
 )
 
@@ -24,6 +24,9 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 	}
 	switch src[idx] {
 	case '"':
+		if ti.Kind == KindSlice {
+			return sc.scanStringToSlice(src, idx, ti, ptr)
+		}
 		return sc.scanStringValue(src, idx, ti, ptr)
 	case '{':
 		return sc.scanObjectValue(src, idx, ti, ptr)
@@ -44,10 +47,9 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 }
 
 // --- String Scanning ---
-// Hot-path string scanners inline findQuoteOrBackslash because the compiler won't inline it (cost 143 > budget 80).
 
-// scanStringValue is an optimized string scanner that finds the closing quote
-// in a single pass and performs in-place unescaping without intermediate allocations.
+// scanStringValue scans a JSON string and assigns it to a typed field.
+// Fast path: no escapes → zero-copy via unsafe.String. Escapes → delegate to processEscapedString.
 func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
 	start := idx + 1
 	n := len(src)
@@ -139,10 +141,10 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 	return n, errUnexpectedEOF
 }
 
-// scanStringBytes scans a JSON string starting at idx (pointing to the opening '"').
-// Returns (newIdx, rawBytes, error). rawBytes is the decoded string content.
+// scanStringKey scans a JSON object key starting at idx (pointing to the opening '"').
+// Returns (newIdx, rawBytes, error). rawBytes is the decoded key content.
 // Fast path (no escapes): zero-copy slice into src.
-func (sc *Parser) scanStringBytes(src []byte, idx int) (int, []byte, error) {
+func (sc *Parser) scanStringKey(src []byte, idx int) (int, []byte, error) {
 	start := idx + 1
 	n := len(src)
 
@@ -185,9 +187,9 @@ func (sc *Parser) scanStringBytes(src []byte, idx int) (int, []byte, error) {
 	return n, nil, errUnexpectedEOF
 }
 
-// scanStringAny scans a JSON string and returns it as a Go string.
+// scanString scans a JSON string and returns it as a Go string.
 // Fast path: zero-copy via unsafe.String. Slow path: allocate + unescape.
-func (sc *Parser) scanStringAny(src []byte, idx int) (int, string, error) {
+func (sc *Parser) scanString(src []byte, idx int) (int, string, error) {
 	start := idx + 1
 	n := len(src)
 
@@ -240,14 +242,7 @@ func (sc *Parser) scanStringAny(src []byte, idx int) (int, string, error) {
 
 // --- Number Scanning ---
 
-// scanNumberSpan finds the end of a JSON number starting at idx,
-// validating the format per RFC 8259 §6:
-//
-//	number = [ "-" ] int [ frac ] [ exp ]
-//	int    = "0" / ( digit1-9 *DIGIT )
-//	frac   = "." 1*DIGIT
-//	exp    = ( "e" / "E" ) [ "+" / "-" ] 1*DIGIT
-//
+// scanNumberSpan finds the end of a JSON number starting at idx.
 // Returns (endIdx, isFloat, error).
 func scanNumberSpan(src []byte, idx int) (int, bool, error) {
 	i := idx
@@ -345,20 +340,12 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 		}
 		*(*float64)(ptr) = v
 	case KindAny:
-		if isFloat {
-			v, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 64)
-			if err != nil {
-				return end, fmt.Errorf("vjson: invalid number %q: %w", src[idx:end], err)
-			}
-			*(*any)(ptr) = v
-		} else {
-			// encoding/json compatible: all numbers → float64 for interface{}
-			v, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 64)
-			if err != nil {
-				return end, fmt.Errorf("vjson: invalid number %q: %w", src[idx:end], err)
-			}
-			*(*any)(ptr) = v
+		// encoding/json compatible: all numbers → float64 for interface{}
+		v, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 64)
+		if err != nil {
+			return end, fmt.Errorf("vjson: invalid number %q: %w", src[idx:end], err)
 		}
+		*(*any)(ptr) = v
 	default:
 		return end, fmt.Errorf("vjson: cannot assign number to %v field", ti.Kind)
 	}
@@ -419,7 +406,7 @@ func (sc *Parser) scanFalse(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 	if idx+5 > len(src) {
 		return idx, errUnexpectedEOF
 	}
-	if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // f@lse suffix
+	if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "else" suffix; 'f' already matched by caller's switch
 		return idx, fmt.Errorf("vjson: invalid literal at offset %d", idx)
 	}
 	switch ti.Kind {
@@ -508,7 +495,7 @@ func (sc *Parser) scanObject(src []byte, idx int, dec *ReflectStructDecoder, bas
 		}
 		var keyBytes []byte
 		var err error
-		idx, keyBytes, err = sc.scanStringBytes(src, idx)
+		idx, keyBytes, err = sc.scanStringKey(src, idx)
 		if err != nil {
 			return idx, err
 		}
@@ -522,7 +509,7 @@ func (sc *Parser) scanObject(src []byte, idx int, dec *ReflectStructDecoder, bas
 		idx = skipWS(src, idx)
 
 		// Value — lookup field
-		fi := dec.LookupFieldBytes(keyBytes, sc.scratch[:])
+		fi := dec.LookupFieldBytes(keyBytes)
 		if fi == nil {
 			// Unknown field — skip value
 			idx, err = skipValue(src, idx)
@@ -577,13 +564,13 @@ func (sc *Parser) scanObjectToMap(src []byte, idx int, mDec *ReflectMapDecoder, 
 	}
 
 	for {
-		// Key
+		// Key (need string for map key, not []byte)
 		if idx >= len(src) || src[idx] != '"' {
 			return idx, errSyntax
 		}
 		var key string
 		var err error
-		idx, key, err = sc.scanStringAny(src, idx)
+		idx, key, err = sc.scanString(src, idx)
 		if err != nil {
 			return idx, err
 		}
@@ -642,13 +629,13 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 	}
 
 	for {
-		// Key
+		// Key (need string for map key, not []byte)
 		if idx >= len(src) || src[idx] != '"' {
 			return idx, errSyntax
 		}
 		var key string
 		var err error
-		idx, key, err = sc.scanStringAny(src, idx)
+		idx, key, err = sc.scanString(src, idx)
 		if err != nil {
 			return idx, err
 		}
@@ -663,7 +650,7 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 
 		// Value - zero-copy string scan
 		var val string
-		idx, val, err = sc.scanStringAny(src, idx)
+		idx, val, err = sc.scanString(src, idx)
 		if err != nil {
 			return idx, err
 		}
@@ -705,7 +692,7 @@ func (sc *Parser) scanObjectAny(src []byte, idx int) (int, map[string]any, error
 		}
 		var key string
 		var err error
-		idx, key, err = sc.scanStringAny(src, idx)
+		idx, key, err = sc.scanString(src, idx)
 		if err != nil {
 			return idx, nil, err
 		}
@@ -773,29 +760,22 @@ func (sc *Parser) scanArray(src []byte, idx int, sDec *ReflectSliceDecoder, ptr 
 		return idx + 1, nil
 	}
 
-	// Build slice with initial capacity of 2 (same as Sonic) to minimize over-allocation.
-	const initCap = 2
+	// Determine initial slice capacity using adaptive EMA of previously
+	// observed array lengths.
+	sliceCap := max(int(sDec.capHint.Load()), 2)
 	elemSize := sDec.ElemSize
-	sliceCap := initCap
 	sliceLen := 0
 
-	// Two allocation strategies based on whether elements contain GC-managed pointers:
-	//
-	// Pointer-free elements (e.g. int, float64, [4]byte):
-	//   Use make([]byte) for zero-reflection allocation. Safe because GC doesn't
-	//   need to scan inside these elements — no pointers to track.
-	//
-	// Pointer-containing elements (e.g. string, *T, struct with string fields):
-	//   Use unsafe_NewArray (runtime.mallocgc via go:linkname) to allocate with
-	//   correct type metadata, so GC can scan pointer fields correctly.
-	//   Growth copies use typedslicecopy to trigger write barriers.
+	// Pointer-free elements (int, float64, etc.): allocate via make([]byte), no type
+	// metadata needed since GC won't scan inside. Pointer-containing elements (string,
+	// *T, etc.): allocate via unsafe_NewArray with correct rtype so GC can scan pointers.
 	var base unsafe.Pointer
 	var backingBytes []byte // kept alive for pointer-free path
 
 	if sDec.ElemHasPtr {
-		base = unsafe_NewArray(sDec.ElemRType, initCap)
+		base = unsafe_NewArray(sDec.ElemRType, sliceCap)
 	} else {
-		backingBytes = make([]byte, initCap*int(elemSize))
+		backingBytes = make([]byte, sliceCap*int(elemSize))
 		base = unsafe.Pointer(&backingBytes[0])
 	}
 
@@ -805,8 +785,6 @@ func (sc *Parser) scanArray(src []byte, idx int, sDec *ReflectSliceDecoder, ptr 
 			newCap := sliceCap * 2
 			if sDec.ElemHasPtr {
 				newBase := unsafe_NewArray(sDec.ElemRType, newCap)
-				// typedslicecopy triggers write barriers, ensuring GC
-				// correctly tracks pointer fields during concurrent marking.
 				typedslicecopy(sDec.ElemRType, newBase, newCap, base, sliceLen)
 				base = newBase
 			} else {
@@ -837,6 +815,14 @@ func (sc *Parser) scanArray(src []byte, idx int, sDec *ReflectSliceDecoder, ptr 
 			continue
 		}
 		if src[idx] == ']' {
+			// Update adaptive capacity hint: EMA = (old + observed) / 2.
+			// Relaxed store is fine — a stale read just means one sub-optimal alloc.
+			old := int(sDec.capHint.Load())
+			if old == 0 {
+				sDec.capHint.Store(int32(sliceLen))
+			} else {
+				sDec.capHint.Store(int32((old + sliceLen) / 2))
+			}
 			sh := (*SliceHeader)(ptr)
 			sh.Data = base
 			sh.Len = sliceLen
@@ -858,7 +844,8 @@ func (sc *Parser) scanArrayAny(src []byte, idx int) (int, []any, error) {
 		return idx + 1, []any{}, nil
 	}
 
-	var arr []any
+	arrayCap := 2
+	arr := make([]any, 0, arrayCap)
 	for {
 		var val any
 		var err error
@@ -892,7 +879,10 @@ func (sc *Parser) scanPointer(src []byte, idx int, ti *TypeInfo, ptr unsafe.Poin
 		return idx, errUnexpectedEOF
 	}
 
-	// null → set pointer to nil
+	// null → set pointer to nil.
+	// Only checks leading 'n' here; full literal validation is not performed
+	// because invalid input (e.g. "nope") will be caught by scanValue downstream
+	// or by trailing-data check in unmarshalInto.
 	if src[idx] == 'n' {
 		if idx+4 > len(src) {
 			return idx, errUnexpectedEOF
@@ -945,7 +935,7 @@ func (sc *Parser) scanAnyValue(src []byte, idx int) (int, any, error) {
 	}
 	switch src[idx] {
 	case '"':
-		newIdx, s, err := sc.scanStringAny(src, idx)
+		newIdx, s, err := sc.scanString(src, idx)
 		return newIdx, s, err
 	case '{':
 		newIdx, m, err := sc.scanObjectAny(src, idx)
@@ -965,7 +955,7 @@ func (sc *Parser) scanAnyValue(src []byte, idx int) (int, any, error) {
 		if idx+5 > len(src) {
 			return idx, nil, errUnexpectedEOF
 		}
-		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // f@lse suffix
+		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "else" suffix; 'f' already matched by caller's switch
 			return idx, nil, fmt.Errorf("vjson: invalid literal at offset %d", idx)
 		}
 		return idx + 5, false, nil
@@ -1006,7 +996,7 @@ func skipValue(src []byte, idx int) (int, error) {
 		if idx+5 > len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // f@lse suffix
+		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "else" suffix; 'f' already matched by caller's switch
 			return idx, fmt.Errorf("vjson: invalid literal at offset %d", idx)
 		}
 		return idx + 5, nil
@@ -1119,8 +1109,6 @@ func skipString(src []byte, idx int) (int, error) {
 }
 
 // skipContainer skips a JSON object or array using depth counting.
-// findStructuralChar is manually inlined here because the Go compiler
-// does not inline it (cost 185 > budget 80).
 func skipContainer(src []byte, idx int) (int, error) {
 	depth := 1
 	i := idx + 1

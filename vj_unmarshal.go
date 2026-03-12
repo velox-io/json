@@ -36,9 +36,8 @@ func (p *parserPool) Put(sc *Parser) {
 	// (via unsafe.String from unescape). We must not reset arenaOff to 0,
 	// as that would let the next Unmarshal overwrite live string data.
 	//
-	// If more than half the arena block remains free, keep it and continue
-	// appending after the current offset — old data stays intact.
-	// Otherwise, release the block so the next parse gets a fresh one.
+	// Threshold is arenaBlockSize/2: low enough to reclaim mostly-used blocks,
+	// high enough that a kept block still has useful free space for the next parse.
 	if sc.arenaOff > arenaBlockSize/2 {
 		sc.arenaData = nil
 		sc.arenaOff = 0
@@ -51,6 +50,8 @@ func (p *parserPool) Put(sc *Parser) {
 
 func newParser() *Parser {
 	return &Parser{
+		// Start with half-size arena so the first Put() keeps it (arenaOff <=
+		// arenaBlockSize/2), avoiding an immediate reallocation on second use.
 		arenaData: make([]byte, arenaBlockSize/2),
 		ptrAllocs: make(map[unsafe.Pointer]*rtypeAllocator, 8),
 	}
@@ -59,6 +60,9 @@ func newParser() *Parser {
 // Unmarshal parses JSON data into v using the single-pass scanner.
 // v must be a non-nil pointer. Strings in v may reference the data buffer
 // directly (zero-copy); the caller must not modify data after calling Unmarshal.
+//
+// Array capacities are determined by adaptive heuristics (EMA of past
+// observations) — no pre-scanning is needed.
 func Unmarshal[T any](data []byte, v *T) error {
 	sc := defaultPool.Get()
 	defer defaultPool.Put(sc)
@@ -95,9 +99,8 @@ func unmarshalInto(sc *Parser, data []byte, v any) error {
 
 // Parser is a reusable single-pass JSON scanner.
 type Parser struct {
-	scratch   [128]byte                          // for LookupFieldBytes lowercase
-	buf       [scratchBufSize]byte               // reusable scratch for single-pass decoding
-	arenaData []byte                             // current arena block
+	buf       [scratchBufSize]byte               // reusable scratch for decoding
+	arenaData []byte                             // current arena block for string
 	arenaOff  int                                // next free offset in arenaData
 	ptrAllocs map[unsafe.Pointer]*rtypeAllocator // per-type batch allocators for pointer fields
 }

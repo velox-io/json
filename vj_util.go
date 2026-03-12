@@ -13,11 +13,7 @@ func init() {
 	wsLUT['\r'] = 1
 }
 
-// skipWS skips whitespace bytes starting at idx.
-// Returns index of the next non-whitespace byte (or len(src)).
-//
-// Used at call sites where whitespace is typically short (0-1 bytes):
-// after ':', after value (before ',' / '}' / ']'), and scanPointer entry.
+// skipWS skips JSON whitespace (SP, TAB, LF, CR) starting at idx.
 func skipWS(src []byte, idx int) int {
 	for idx < len(src) && wsLUT[src[idx]] != 0 {
 		idx++
@@ -25,15 +21,8 @@ func skipWS(src []byte, idx int) int {
 	return idx
 }
 
-// skipWSLong skips whitespace bytes starting at idx, optimized for runs
-// that are typically 8+ bytes (newline + indentation).
-//
-// Used where whitespace is usually long in pretty-printed JSON:
-// after '{' / '[' and after ','.
-//
-// Strategy: skip a leading newline/CR if present, then SWAR scan 8 bytes at a time
-// checking for all-spaces (0x20). Falls back to byte-at-a-time for other
-// whitespace characters and the tail.
+// skipWSLong skips JSON whitespace, optimized for long runs (newline + indentation
+// in pretty-printed JSON). SWAR scans 8 bytes at a time for all-spaces (0x20).
 func skipWSLong(src []byte, idx int) int {
 	n := len(src)
 	// Quick bail: no whitespace at all (compact JSON fast path)
@@ -93,14 +82,14 @@ func parseInt64(src []byte, start, end int) int64 {
 }
 
 // parseEightDigitsSWAR converts exactly 8 ASCII digit bytes into a uint32
-// using SWAR reduction.
+// using SWAR reduction (based on simdjson's parse_eight_digits_unrolled).
 // Caller must ensure src[i:i+8] are ASCII digits and i+8 <= len(src).
-// Requires little-endian byte order (true on amd64/arm64).
 //
-// Based on simdjson's parse_eight_digits_unrolled:
-//   - *2561 (=256*10+1) merges adjacent digits into 2-digit values
-//   - *6553601 (=65536*100+1) merges 2-digit pairs into 4-digit values
-//   - *42949672960001 (=2^32*10000+1) merges the two 4-digit halves
+// Steps (little-endian):
+//  1. & 0x0F… strips ASCII high nibble, converting '0'-'9' → 0-9
+//  2. *2561 (=256*10+1) merges adjacent digits into 2-digit values
+//  3. *6553601 (=65536*100+1) merges 2-digit pairs into 4-digit values
+//  4. *42949672960001 (=2^32*10000+1) merges the two 4-digit halves
 func parseEightDigitsSWAR(src []byte, i int) uint32 {
 	val := *(*uint64)(unsafe.Pointer(&src[i]))
 	val = (val & 0x0F0F0F0F0F0F0F0F) * 2561 >> 8

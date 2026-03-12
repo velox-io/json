@@ -20,6 +20,7 @@ mem.out
 *.test
 coverage.out
 coverage.html
+coverage_*.html
 
 # Benchmark data (local only)
 .benchdata/

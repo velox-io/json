@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Performance Regression Test Script
 # Usage: ./scripts/benchcheck.sh [baseline_file] [threshold_percent]
 #
@@ -18,7 +18,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BENCHDATA_DIR="$PROJECT_ROOT/.benchdata"
 BASELINE_FILE="${1:-$BENCHDATA_DIR/baseline.txt}"
 THRESHOLD="${2:-10}"  # Default 10% threshold
-COUNT="${BENCH_COUNT:-3}"
+COUNT="${BENCH_COUNT:-6}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -74,8 +74,7 @@ TEMP_FILE=$(mktemp)
 trap "rm -f $TEMP_FILE" EXIT
 
 cd "$PROJECT_ROOT"
-go test -bench=. -benchmem -count=$COUNT ./... > "$TEMP_FILE" 2>/dev/null || true
-cd benchmark && go test -bench=. -benchmem -count=$COUNT . >> "$TEMP_FILE" 2>/dev/null || true
+cd benchmark && go test -bench=Velox -benchmem -count=$COUNT . | tee -a "$TEMP_FILE" 2>/dev/null || true
 
 # Check if we have a baseline to compare
 if [ ! -f "$BASELINE_FILE" ]; then
@@ -91,9 +90,19 @@ if [ ! -f "$BASELINE_FILE" ]; then
 fi
 
 # Compare with baseline
+# Use short names for better readability in benchstat output
+TEMP_BASENAME=$(basename "$TEMP_FILE")
+BASELINE_BASENAME=$(basename "$BASELINE_FILE")
+
+# Create a temp dir with symlinks to both files using short names
+COMPARE_DIR=$(mktemp -d)
+trap "rm -f $TEMP_FILE; rm -rf $COMPARE_DIR" EXIT
+ln -s "$BASELINE_FILE" "$COMPARE_DIR/$BASELINE_BASENAME"
+ln -s "$TEMP_FILE" "$COMPARE_DIR/$TEMP_BASENAME"
+
 echo ""
 echo "=== Comparison Results ==="
-benchstat "$BASELINE_FILE" "$TEMP_FILE"
+cd "$COMPARE_DIR" && benchstat "$BASELINE_BASENAME" "$TEMP_BASENAME"
 
 # Check for regressions
 REGRESSIONS=()
@@ -109,7 +118,7 @@ while IFS= read -r line; do
     if echo "$line" | grep -qE '\+[0-9]+\.[0-9]+%'; then
         # Extract the benchmark name and percentage
         bench_name=$(echo "$line" | awk '{print $1}')
-        percent=$(echo "$line" | grep -oE '\+[0-9]+\.[0-9]+%' | tr -d '+%')
+        percent=$(echo "$line" | grep -oE '\+[0-9]+\.[0-9]+%' | sed 's/[+%]//g')
 
         if [ ! -z "$percent" ]; then
             is_regression=$(echo "$percent > $THRESHOLD" | bc -l)
@@ -119,7 +128,7 @@ while IFS= read -r line; do
         fi
     elif echo "$line" | grep -qE '\-[0-9]+\.[0-9]+%'; then
         bench_name=$(echo "$line" | awk '{print $1}')
-        percent=$(echo "$line" | grep -oE '\-[0-9]+\.[0-9]+%' | tr -d '-%')
+        percent=$(echo "$line" | grep -oE '\-[0-9]+\.[0-9]+%' | sed 's/[-%]//g')
         if [ ! -z "$percent" ]; then
             is_improvement=$(echo "$percent > $THRESHOLD" | bc -l)
             if [ "$is_improvement" -eq 1 ]; then
@@ -127,7 +136,7 @@ while IFS= read -r line; do
             fi
         fi
     fi
-done < <(benchstat "$BASELINE_FILE" "$TEMP_FILE" 2>/dev/null)
+done < <(cd "$COMPARE_DIR" && benchstat "$BASELINE_BASENAME" "$TEMP_BASENAME" 2>/dev/null)
 
 # Report results
 echo ""

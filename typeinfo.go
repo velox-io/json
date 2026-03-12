@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -47,6 +48,10 @@ type TypeInfo struct {
 	IsZeroFn       func(ptr unsafe.Pointer) bool
 }
 
+// decoderCache maps reflect.Type → *TypeInfo (steady-state) or
+// *decoderEntry (transient, during construction).
+// After construction completes the entry is promoted to *TypeInfo
+// so the hot path is a single atomic load with no synchronization.
 var decoderCache sync.Map
 
 type decoderEntry struct {
@@ -107,9 +112,13 @@ func KindForType(t reflect.Type) ElemTypeKind {
 // Thread-safe; blocks until the decoder is fully initialized.
 func GetDecoder(t reflect.Type) *TypeInfo {
 	if v, ok := decoderCache.Load(t); ok {
-		e := v.(*decoderEntry)
-		<-e.done
-		return e.ti
+		switch e := v.(type) {
+		case *TypeInfo:
+			return e // hot path: no synchronization
+		case *decoderEntry:
+			<-e.done
+			return e.ti
+		}
 	}
 	return getDecoderSlow(t, true)
 }
@@ -117,8 +126,12 @@ func GetDecoder(t reflect.Type) *TypeInfo {
 // getDecoderForCycle returns *TypeInfo without waiting, breaking recursive cycles.
 func getDecoderForCycle(t reflect.Type) *TypeInfo {
 	if v, ok := decoderCache.Load(t); ok {
-		e := v.(*decoderEntry)
-		return e.ti
+		switch e := v.(type) {
+		case *TypeInfo:
+			return e
+		case *decoderEntry:
+			return e.ti
+		}
 	}
 	return getDecoderSlow(t, false)
 }
@@ -131,11 +144,15 @@ func getDecoderSlow(t reflect.Type, wait bool) *TypeInfo {
 
 	actual, loaded := decoderCache.LoadOrStore(t, e)
 	if loaded {
-		existing := actual.(*decoderEntry)
-		if wait {
-			<-existing.done
+		switch existing := actual.(type) {
+		case *TypeInfo:
+			return existing
+		case *decoderEntry:
+			if wait {
+				<-existing.done
+			}
+			return existing.ti
 		}
-		return existing.ti
 	}
 
 	// Won the race — build the decoder.
@@ -151,6 +168,9 @@ func getDecoderSlow(t reflect.Type, wait bool) *TypeInfo {
 	}
 
 	close(e.done)
+	// Promote: replace the transient *decoderEntry with the final *TypeInfo
+	// so subsequent loads hit the fast path (no channel recv).
+	decoderCache.Store(t, e.ti)
 	return e.ti
 }
 
@@ -241,11 +261,12 @@ type ReflectStructDecoder struct {
 	Fields []TypeInfo
 
 	// Tiered lookup — set by buildLookup at construction time.
-	LookupFn  func(dec *ReflectStructDecoder, key string) *TypeInfo
-	HashSeed  uint64
-	HashShift uint8
-	HashTable []uint8              // indices into Fields[]; 0xFF = empty
-	FieldMap  map[string]*TypeInfo // fallback for 33+ fields
+	LookupFn     func(dec *ReflectStructDecoder, key string) *TypeInfo
+	HashSeed     uint64
+	HashShift    uint8
+	HashTable    []uint8              // indices into Fields[]; 0xFF = empty
+	FieldMap     map[string]*TypeInfo // fallback for 33+ fields
+	HasMixedCase bool                 // true if any JSONName differs from JSONNameLower
 }
 
 func BuildStructDecoder(t reflect.Type) *ReflectStructDecoder {
@@ -264,6 +285,7 @@ type ReflectSliceDecoder struct {
 	EmptySliceData unsafe.Pointer
 	ElemHasPtr     bool
 	ElemRType      unsafe.Pointer
+	capHint        atomic.Int32 // adaptive: EMA of observed array lengths
 }
 
 func BuildSliceDecoder(t reflect.Type) *ReflectSliceDecoder {

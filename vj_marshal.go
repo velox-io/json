@@ -253,6 +253,9 @@ func AppendMarshal[T any](dst []byte, v *T, opts ...MarshalOption) ([]byte, erro
 	return m.buf, nil
 }
 
+// finalize returns the encoded JSON as a standalone byte slice.
+// For poolable buffers, it copies the data out so the Marshaler's buf can be
+// reused by the pool without the caller's reference aliasing it.
 func (m *Marshaler) finalize() []byte {
 	if cap(m.buf) <= marshalBufMaxPool {
 		result := make([]byte, len(m.buf))

@@ -1,7 +1,9 @@
 package vjson
 
 import (
+	"strings"
 	"testing"
+	"unsafe"
 )
 
 // testUnescape is a test helper that wraps unescapeSinglePass.
@@ -182,6 +184,266 @@ func TestEscapeTable(t *testing.T) {
 			t.Errorf("escapeTable[%q] = %q, want 0", ch, got)
 		}
 	}
+}
+
+// TestUnescapeSequenceDirect tests unescapeSequence directly for paths
+// not reached through unescapeSinglePass (which inlines common escapes).
+func TestUnescapeSequenceDirect(t *testing.T) {
+	t.Run("trailing backslash", func(t *testing.T) {
+		// data has backslash at end, i+1 >= n
+		data := []byte(`\`)
+		dst := make([]byte, 10)
+		_, _, err := unescapeSequence(data, len(data), 0, dst, 0)
+		if err == nil {
+			t.Fatal("expected error for trailing backslash")
+		}
+		if !strings.Contains(err.Error(), "trailing backslash") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("common escape via unescapeSequence", func(t *testing.T) {
+		// Feed a non-'u' escape directly to unescapeSequence (covers escapeTable lookup)
+		data := []byte(`\n`)
+		dst := make([]byte, 10)
+		newI, newPos, err := unescapeSequence(data, len(data), 0, dst, 0)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if newI != 2 {
+			t.Errorf("newI = %d, want 2", newI)
+		}
+		if newPos != 1 || dst[0] != '\n' {
+			t.Errorf("got dst[0]=%q pos=%d, want '\\n' pos=1", dst[0], newPos)
+		}
+	})
+
+	t.Run("unknown escape via unescapeSequence", func(t *testing.T) {
+		// Unknown escape character 'X' should return error
+		data := []byte(`\X`)
+		dst := make([]byte, 10)
+		_, _, err := unescapeSequence(data, len(data), 0, dst, 0)
+		if err == nil {
+			t.Fatal("expected error for unknown escape")
+		}
+		if !strings.Contains(err.Error(), "invalid escape") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+}
+
+// TestUnescapeSWAR8ByteCopy tests the SWAR fast path where 8 consecutive
+// bytes have no special characters (combined == 0).
+func TestUnescapeSWAR8ByteCopy(t *testing.T) {
+	// Build a string longer than 8 bytes with an escape early so that
+	// firstEscIdx is set, then after the escape put 8+ plain bytes to
+	// trigger the SWAR 8-byte direct copy path.
+	// Input: \n + 16 plain bytes => after processing \n, the loop sees 16 plain bytes.
+	plain := "ABCDEFGHIJKLMNOP" // 16 bytes, all > 0x20, no quote/backslash
+	input := `\n` + plain
+	got, gotLen, err := testUnescape(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "\n" + plain
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if gotLen != len(want) {
+		t.Errorf("gotLen = %d, want %d", gotLen, len(want))
+	}
+}
+
+// TestUnescapeControlCharInSWARLoop tests control character detection in the
+// SWAR loop (the fast path for strings >= 8 bytes remaining).
+func TestUnescapeControlCharInSWARLoop(t *testing.T) {
+	// We need the escape to come first so firstEscIdx < len(input),
+	// then after the escape a control char appears within an 8-byte window.
+	// Build: \n + padding so total remaining >= 8, with a control char embedded.
+	// 5 plain bytes + control char + 2 more plain bytes = 8 bytes after \n
+	input := `\n` + "ABCDE" + "\x01" + "GH"
+	_, _, err := testUnescape(input)
+	if err == nil {
+		t.Fatal("expected error for control character in SWAR loop")
+	}
+	if !strings.Contains(err.Error(), "control character") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestUnescapeControlCharInTailLoop tests control character detection in the
+// byte-by-byte tail loop (< 8 bytes remaining).
+func TestUnescapeControlCharInTailLoop(t *testing.T) {
+	// To hit the tail loop (i+8 > n), we need < 8 bytes remaining after the
+	// SWAR loop has consumed earlier bytes. Use unescapeSinglePass directly
+	// with a carefully sized input.
+	// Build src so firstEscIdx = 0 and after processing the escape,
+	// there are < 8 bytes left including a control char.
+	// src: \n + "AB" + \x01 + "C" + '"' = 2+2+1+1+1 = 7 raw bytes after firstEsc
+	// SWAR loop needs i+8 <= n, first iteration: i=0, n=7 => 0+8=8 > 7, skip SWAR.
+	// Goes directly to tail loop which processes byte-by-byte.
+	sc := &Parser{}
+	src := []byte("\\nAB\x01C\"")
+	_, _, err := sc.unescapeSinglePass(src, 0, 0)
+	if err == nil {
+		t.Fatal("expected error for control character in tail loop")
+	}
+	if !strings.Contains(err.Error(), "control character") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestUnescapeTrailingBackslashInSWARLoop tests trailing backslash detection
+// within the SWAR fast-path loop.
+func TestUnescapeTrailingBackslashInSWARLoop(t *testing.T) {
+	// We need the SWAR loop to encounter a backslash at the very end of src
+	// (i+1 >= n). Build a string where the backslash is the last byte.
+	// Use unescapeSinglePass directly: src has no closing quote, backslash at end.
+	// We need >= 8 bytes remaining so the SWAR loop runs, and the backslash at the end.
+	// src = "XXXXXXX\" (8 bytes), no closing quote.
+	// firstEscIdx = 7 (the backslash position), start = 0
+	src := []byte("XXXXXXX\\") // 8 bytes
+	sc := &Parser{}
+	_, _, err := sc.unescapeSinglePass(src, 0, 7)
+	if err == nil {
+		t.Fatal("expected error for trailing backslash in SWAR loop")
+	}
+	if !strings.Contains(err.Error(), "trailing backslash") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestUnescapePrefixExceedsBuffer tests the path where the prefix before the
+// first escape exceeds the buffer size, triggering the initial grow.
+func TestUnescapePrefixExceedsBuffer(t *testing.T) {
+	// Use a Parser with no arena (arenaRemaining < scratchBufSize),
+	// so buf = sc.buf[:] which is scratchBufSize (2048).
+	// Then make the prefix > 2048 bytes.
+	sc := &Parser{} // no arenaData => arenaRemaining = 0, uses sc.buf
+	prefixLen := scratchBufSize + 100
+	prefix := strings.Repeat("A", prefixLen)
+	// src = prefix + `\n` + closing quote
+	src := []byte(prefix + `\n` + `"`)
+	_, result, err := sc.unescapeSinglePass(src, 0, prefixLen)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := prefix + "\n"
+	if string(result) != want {
+		t.Errorf("result length = %d, want %d", len(result), len(want))
+	}
+}
+
+// TestUnescapeGrowInSWARLoop tests the grow() path when the buffer is nearly
+// full during the SWAR loop (pos+8 > len(buf)).
+func TestUnescapeGrowInSWARLoop(t *testing.T) {
+	// Use a Parser with no arena so it uses the scratch buffer (2048 bytes).
+	// Fill almost the entire buffer via a long prefix, then have plain bytes
+	// after an escape so the SWAR loop tries to write 8 bytes but pos+8 > len(buf).
+	sc := &Parser{}
+	prefixLen := scratchBufSize - 4 // leave only 4 bytes free
+	prefix := strings.Repeat("B", prefixLen)
+	// After the prefix, an escape \n followed by enough plain bytes to trigger SWAR 8-byte copy
+	src := []byte(prefix + `\n` + "CDCDCDCD" + `"`)
+	_, result, err := sc.unescapeSinglePass(src, 0, prefixLen)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := prefix + "\n" + "CDCDCDCD"
+	if string(result) != want {
+		t.Errorf("result length = %d, want %d", len(result), len(want))
+	}
+}
+
+// TestUnescapeDoneLargeResultFromScratch tests the finalization path where the
+// result is decoded in the scratch buffer, hasn't overflowed, but exceeds
+// arenaInlineMax, requiring a heap allocation.
+func TestUnescapeDoneLargeResultFromScratch(t *testing.T) {
+	// Use a Parser with no arena (uses scratch buf), and produce a result
+	// larger than arenaInlineMax (1024) but not overflowing scratch (2048).
+	sc := &Parser{}
+	contentLen := arenaInlineMax + 100 // 1124 bytes, fits in scratch (2048)
+	content := strings.Repeat("X", contentLen)
+	// No escapes, firstEscIdx = contentLen (at the closing quote position)
+	src := []byte(content + `"`)
+	_, result, err := sc.unescapeSinglePass(src, 0, contentLen)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(result) != content {
+		t.Errorf("result = %q, want %q", string(result), content)
+	}
+	if len(result) != contentLen {
+		t.Errorf("result len = %d, want %d", len(result), contentLen)
+	}
+}
+
+// TestUnescapeDoneOverflowedHeapBuffer tests the finalization path where the
+// buffer has overflowed (grew via heap allocation) and the result is used directly.
+func TestUnescapeDoneOverflowedHeapBuffer(t *testing.T) {
+	// Use a Parser with no arena so it uses scratch buf (2048 bytes).
+	// Create input that overflows the scratch buffer: prefix > scratchBufSize.
+	sc := &Parser{}
+	contentLen := scratchBufSize + 500 // 2548, exceeds scratch
+	content := strings.Repeat("Z", contentLen)
+	src := []byte(content + `"`)
+	_, result, err := sc.unescapeSinglePass(src, 0, contentLen)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(result) != content {
+		t.Errorf("result length = %d, want %d", len(result), contentLen)
+	}
+}
+
+// TestProcessEscapedStringKinds tests processEscapedString for different TypeInfo kinds.
+func TestProcessEscapedStringKinds(t *testing.T) {
+	sc := &Parser{}
+	src := []byte(`hello\nworld"`)
+
+	t.Run("KindString", func(t *testing.T) {
+		ti := &TypeInfo{Kind: KindString}
+		var s string
+		endIdx, err := sc.processEscapedString(src, 0, 5, ti, unsafe.Pointer(&s))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if s != "hello\nworld" {
+			t.Errorf("got %q, want %q", s, "hello\nworld")
+		}
+		_ = endIdx
+	})
+
+	t.Run("KindAny", func(t *testing.T) {
+		sc.arenaOff = 0
+		ti := &TypeInfo{Kind: KindAny}
+		var a any
+		endIdx, err := sc.processEscapedString(src, 0, 5, ti, unsafe.Pointer(&a))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		s, ok := a.(string)
+		if !ok {
+			t.Fatalf("expected string, got %T", a)
+		}
+		if s != "hello\nworld" {
+			t.Errorf("got %q, want %q", s, "hello\nworld")
+		}
+		_ = endIdx
+	})
+
+	t.Run("KindInt returns error", func(t *testing.T) {
+		sc.arenaOff = 0
+		ti := &TypeInfo{Kind: KindInt}
+		var dummy int
+		_, err := sc.processEscapedString(src, 0, 5, ti, unsafe.Pointer(&dummy))
+		if err == nil {
+			t.Fatal("expected error for KindInt")
+		}
+		if !strings.Contains(err.Error(), "cannot assign string") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
 }
 
 // Benchmark

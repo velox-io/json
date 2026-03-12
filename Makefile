@@ -9,10 +9,10 @@ fmt:
 	goimports -w .
 
 test:
-	go test -race -cover ./...
+	go test -race -cover .
 
 test-coverage:
-	go test -race -coverprofile=coverage.out ./...
+	go test -race -coverprofile=coverage.out .
 	go tool cover -html=coverage.out -o coverage.html
 
 bench:
@@ -22,8 +22,7 @@ bench:
 # Run benchmarks (count=5) and save baseline (root + ./benchmark)
 bench-baseline:
 	@mkdir -p .benchdata
-	go test -bench=. -benchmem -count=5 ./... > .benchdata/baseline.txt 2>/dev/null || true
-	cd benchmark && go test -bench=. -benchmem -count=5 . >> ../.benchdata/baseline.txt 2>/dev/null || true
+	cd benchmark && go test -bench=Velox -benchmem -count=5 . >> ../.benchdata/baseline.txt 2>/dev/null || true
 	@echo "Baseline saved to .benchdata/baseline.txt"
 
 # Check for regressions against baseline (default threshold: 10%)
@@ -38,4 +37,12 @@ clean:
 	go clean
 	rm -f coverage.out coverage.html cpu.out mem.out
 
-.PHONY: lint lint-ci fmt test test-coverage bench bench-baseline bench-check bench-check-threshold clean
+FUZZ_TIME ?= 30s
+
+fuzz:
+	go test -fuzz=FuzzUnmarshalAny -fuzztime=$(FUZZ_TIME) .
+	go test -fuzz=FuzzUnmarshalStruct -fuzztime=$(FUZZ_TIME) .
+	go test -fuzz=FuzzUnmarshalNested -fuzztime=$(FUZZ_TIME) .
+	go test -fuzz=FuzzNoCrash -fuzztime=$(FUZZ_TIME) .
+
+.PHONY: lint lint-ci fmt test test-coverage bench bench-baseline bench-check bench-check-threshold clean fuzz
