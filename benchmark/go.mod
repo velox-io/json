@@ -4,8 +4,8 @@ go 1.25
 
 require (
 	github.com/bytedance/sonic v1.15.0
+	github.com/penglei/veloxjson v0.0.0
 	github.com/urfave/cli/v3 v3.6.2
-	github.com/velox-io/json v0.0.0
 )
 
 require (
@@ -18,4 +18,4 @@ require (
 	golang.org/x/sys v0.22.0 // indirect
 )
 
-replace github.com/velox-io/json => ..
+replace github.com/penglei/veloxjson => ..

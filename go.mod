@@ -1,3 +1,3 @@
-module github.com/velox-io/json
+module github.com/penglei/veloxjson
 
 go 1.25

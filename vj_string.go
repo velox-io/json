@@ -27,11 +27,11 @@ func findStructuralChar(src []byte, idx int) (int, byte) {
 	for idx+8 <= n {
 		w := *(*uint64)(unsafe.Pointer(&src[idx]))
 
-		m1 := hasZeroByte(w ^ (lo64 * '{')) // 0x7B
-		m2 := hasZeroByte(w ^ (lo64 * '}')) // 0x7D
-		m3 := hasZeroByte(w ^ (lo64 * '[')) // 0x5B
-		m4 := hasZeroByte(w ^ (lo64 * ']')) // 0x5D
-		m5 := hasZeroByte(w ^ (lo64 * '"')) // 0x22
+		m1 := hasZeroByte(w ^ (lo64 * '{'))  // 0x7B
+		m2 := hasZeroByte(w ^ (lo64 * '}'))  // 0x7D
+		m3 := hasZeroByte(w ^ (lo64 * '['))  // 0x5B
+		m4 := hasZeroByte(w ^ (lo64 * ']'))  // 0x5D
+		m5 := hasZeroByte(w ^ (lo64 * '"'))  // 0x22
 
 		combined := m1 | m2 | m3 | m4 | m5
 		if combined != 0 {

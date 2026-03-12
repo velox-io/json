@@ -6,8 +6,8 @@ import (
 	"dev.local/benchmark/twitter"
 
 	"github.com/bytedance/sonic"
-	"github.com/velox-io/json"
-	"github.com/velox-io/json/prescan"
+	"github.com/penglei/veloxjson"
+	"github.com/penglei/veloxjson/prescan"
 )
 
 // =============================================================================

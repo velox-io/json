@@ -82,8 +82,8 @@ func TestUnescape(t *testing.T) {
 
 		// Edge cases
 		{"double backslash at end", `hello\\`, `hello\`, 6},
-		{"incomplete unicode", `\u041`, `\u041`, 5},    // not enough hex digits
-		{"invalid unicode hex", `\uXXXX`, `\uXXXX`, 6}, // non-hex chars preserved
+		{"incomplete unicode", `\u041`, `\u041`, 5},      // not enough hex digits
+		{"invalid unicode hex", `\uXXXX`, `\uXXXX`, 6},   // non-hex chars preserved
 
 		// Unknown escapes (should preserve)
 		{"unknown escape", `hello\Xworld`, `hello\Xworld`, 12},

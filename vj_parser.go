@@ -505,7 +505,7 @@ func (sc *Parser) scanObject(src []byte, idx int, dec *ReflectStructDecoder, bas
 func (sc *Parser) scanObjectToMap(src []byte, idx int, mDec *ReflectMapDecoder, ptr unsafe.Pointer) (int, error) {
 	// Fast path for map[string]string - zero reflection
 	if mDec.ValIsString {
-		return sc.scanMapStringString(src, idx, ptr)
+		return sc.scanMapStringString(src, idx, mDec, ptr)
 	}
 
 	idx++ // consume '{'
@@ -568,7 +568,7 @@ func (sc *Parser) scanObjectToMap(src []byte, idx int, mDec *ReflectMapDecoder, 
 }
 
 // scanMapStringString is a zero-reflection fast path for map[string]string.
-func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (int, error) {
+func (sc *Parser) scanMapStringString(src []byte, idx int, mDec *ReflectMapDecoder, ptr unsafe.Pointer) (int, error) {
 	idx++ // consume '{'
 	idx = skipWSLong(src, idx)
 
@@ -735,7 +735,7 @@ func (sc *Parser) scanArray(src []byte, idx int, sDec *ReflectSliceDecoder, ptr 
 			cap_ = newCap
 		}
 
-		elemPtr := unsafe.Add(base, uintptr(len_)*elemSize)
+		elemPtr := unsafe.Pointer(uintptr(base) + uintptr(len_)*elemSize)
 		len_++
 
 		var err error

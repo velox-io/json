@@ -235,11 +235,11 @@ func BuildStructDecoder(t reflect.Type) *ReflectStructDecoder {
 
 // ReflectSliceDecoder handles slice decoding for any element type
 type ReflectSliceDecoder struct {
-	SliceType      reflect.Type // the slice type itself, e.g., []int64
+	SliceType      reflect.Type    // the slice type itself, e.g., []int64
 	ElemType       reflect.Type
-	ElemSize       uintptr        // size of one element (for unsafe pointer arithmetic)
-	ElemTI         *TypeInfo      // cached TypeInfo for element (pointer for cycle safety)
-	EmptySliceData unsafe.Pointer // pre-created empty slice backing, avoids reflect.MakeSlice per empty []
+	ElemSize       uintptr         // size of one element (for unsafe pointer arithmetic)
+	ElemTI         *TypeInfo       // cached TypeInfo for element (pointer for cycle safety)
+	EmptySliceData unsafe.Pointer  // pre-created empty slice backing, avoids reflect.MakeSlice per empty []
 }
 
 func BuildSliceDecoder(t reflect.Type) *ReflectSliceDecoder {
@@ -270,11 +270,11 @@ type ReflectMapDecoder struct {
 func BuildMapDecoder(t reflect.Type) *ReflectMapDecoder {
 	valTI := GetDecoder(t.Elem())
 	return &ReflectMapDecoder{
-		MapType:     t,
-		KeyType:     t.Key(),
-		ValType:     t.Elem(),
-		ValSize:     t.Elem().Size(),
-		ValTI:       valTI,
+		MapType:    t,
+		KeyType:    t.Key(),
+		ValType:    t.Elem(),
+		ValSize:    t.Elem().Size(),
+		ValTI:      valTI,
 		ValIsString: valTI.Kind == KindString,
 	}
 }
@@ -283,7 +283,7 @@ type ReflectPointerDecoder struct {
 	PtrType  reflect.Type // the pointer type itself, e.g., *Foo
 	ElemType reflect.Type
 	ElemTI   *TypeInfo // cached TypeInfo for the pointed-to element (pointer for cycle safety)
-	ElemSize uintptr   // size of the element type for allocation
+	ElemSize uintptr    // size of the element type for allocation
 }
 
 func BuildPointerDecoder(t reflect.Type) *ReflectPointerDecoder {
