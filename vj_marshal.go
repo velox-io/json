@@ -710,8 +710,13 @@ func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
 	// Native C engine fast path: compact mode only, eligible structs only.
 	// The C engine handles the complete struct encoding (including braces),
 	// writing directly into m.buf's unused capacity for zero-copy output.
-	if ops, ok := dec.getNativeOps(); ok {
-		return m.encodeStructNative(ops, base)
+	// For mixed structs (some fields unsupported by C), the hot resume
+	// loop lets C encode what it can and Go handles the rest.
+	if ops, mode := dec.getNativeOps(); mode != nativeNone {
+		if mode == nativeFull {
+			return m.encodeStructNativeFast(ops, base)
+		}
+		return m.encodeStructNative(dec, ops, base)
 	}
 
 	// Go fallback: structs with omitempty/,string/custom marshalers,
@@ -719,10 +724,10 @@ func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
 	return m.encodeStructGo(dec, base)
 }
 
-// encodeStructNative encodes a struct using the native C engine.
-// It writes directly into m.buf's unused capacity and retries with
-// a larger buffer when the C engine reports buffer-full.
-func (m *Marshaler) encodeStructNative(ops []COpStep, base unsafe.Pointer) error {
+// encodeStructNativeFast is the lean path for fully-native structs.
+// C handles the complete struct encoding in one pass (no hot resume).
+// Only handles vjOK, vjErrBufFull, and fatal errors.
+func (m *Marshaler) encodeStructNativeFast(ops []COpStep, base unsafe.Pointer) error {
 	flags := uint32(m.flags)
 
 	for {
@@ -735,7 +740,7 @@ func (m *Marshaler) encodeStructNative(ops []COpStep, base unsafe.Pointer) error
 		}
 
 		workBuf := m.buf[len(m.buf):cap(m.buf)]
-		written, errCode := nativeEncodeStruct(workBuf, base, ops, flags)
+		written, errCode := nativeEncodeStructFast(workBuf, base, ops, flags)
 
 		switch errCode {
 		case vjOK:
@@ -749,8 +754,119 @@ func (m *Marshaler) encodeStructNative(ops []COpStep, base unsafe.Pointer) error
 			// retry
 		case vjErrStackOvfl:
 			return fmt.Errorf("vjson: struct nesting depth exceeds %d levels", vjMaxDepth)
+		case vjErrNanInf:
+			return &UnsupportedValueError{Str: "NaN or Inf float value"}
 		default:
 			return fmt.Errorf("vjson: native encoder error %d", errCode)
+		}
+	}
+}
+
+// encodeStructNative encodes a struct using the native C engine.
+// For pure-native structs, C handles everything in one pass.
+// For mixed structs (hot resume), the loop alternates between C and Go:
+//
+//	C encodes fields until it hits an unsupported type → Go handles that field → C resumes
+//
+// The opening '{' is written by C on the first call. On resume calls,
+// the VJ_ENC_RESUME flag tells C to skip '{'.
+func (m *Marshaler) encodeStructNative(dec *StructCodec, ops []COpStep, base unsafe.Pointer) error {
+	flags := uint32(m.flags)
+	startIdx := 0
+	isFirst := true // tracks whether the next field needs a comma prefix
+	nFields := len(ops) - 1 // ops length minus the END sentinel
+
+	for {
+		avail := cap(m.buf) - len(m.buf)
+		if avail < 64 {
+			newCap := max(cap(m.buf)*2, 4096)
+			newBuf := make([]byte, len(m.buf), newCap)
+			copy(newBuf, m.buf)
+			m.buf = newBuf
+		}
+
+		workBuf := m.buf[len(m.buf):cap(m.buf)]
+		r := nativeEncodeStruct(workBuf, base, ops, startIdx, flags)
+
+		switch r.errCode {
+		case vjOK:
+			m.buf = m.buf[:len(m.buf)+r.written]
+			return nil
+
+		case vjErrBufFull:
+			newCap := max(cap(m.buf)*2, len(m.buf)+4096)
+			newBuf := make([]byte, len(m.buf), newCap)
+			copy(newBuf, m.buf)
+			m.buf = newBuf
+			// retry with same startIdx and flags
+
+		case vjErrGoFallback:
+			// Hot resume: C encoded fields [startIdx..escOpIdx-1],
+			// then hit an unsupported field at escOpIdx.
+
+			// Safety check: only support top-level fallback (depth == 0).
+			// Nested fallback (depth > 0) should not occur because
+			// compileStructOps marks non-native sub-structs as fallback ops.
+			// If it happens anyway, fall back to pure Go.
+			if r.depth != 0 {
+				// Discard partial output and redo with pure Go.
+				return m.encodeStructGo(dec, base)
+			}
+
+			// Absorb partial C output into m.buf.
+			m.buf = m.buf[:len(m.buf)+r.written]
+
+			// Update isFirst based on C's state at fallback.
+			isFirst = r.cFirst
+
+			// Encode the fallback field using Go.
+			fi := &dec.Fields[r.escOpIdx]
+			fieldPtr := unsafe.Add(base, fi.Offset)
+
+			// Handle omitempty: skip if zero-valued.
+			skipped := false
+			if fi.Flags&tiFlagOmitEmpty != 0 && fi.Ext.IsZeroFn != nil && fi.Ext.IsZeroFn(fieldPtr) {
+				skipped = true
+			}
+
+			if !skipped {
+				if !isFirst {
+					m.buf = append(m.buf, ',')
+				}
+				m.buf = append(m.buf, fi.Ext.KeyBytes...)
+				if fi.Flags&tiFlagQuoted != 0 {
+					if err := m.encodeValueQuoted(fi, fieldPtr); err != nil {
+						return err
+					}
+				} else {
+					if err := m.encodeValue(fi, fieldPtr); err != nil {
+						return err
+					}
+				}
+				isFirst = false
+			}
+
+			// Advance past the fallback field for the next C call.
+			startIdx = r.escOpIdx + 1
+
+			// If no more fields remain (only END sentinel), write '}' and done.
+			if startIdx >= nFields {
+				m.buf = append(m.buf, '}')
+				return nil
+			}
+
+			// Set resume flags for the next C call.
+			flags = uint32(m.flags) | vjEncResume
+			if isFirst {
+				flags |= vjEncResumeFirst
+			}
+
+		case vjErrStackOvfl:
+			return fmt.Errorf("vjson: struct nesting depth exceeds %d levels", vjMaxDepth)
+		case vjErrNanInf:
+			return &UnsupportedValueError{Str: "NaN or Inf float value"}
+		default:
+			return fmt.Errorf("vjson: native encoder error %d", r.errCode)
 		}
 	}
 }
@@ -829,6 +945,15 @@ func (m *Marshaler) encodeSlice(dec *SliceCodec, ptr unsafe.Pointer) error {
 		return nil
 	}
 
+	// Native fast path: []NativeStruct — encode all elements in C.
+	// Only for compact mode (no indent) with fully-native struct elements.
+	if m.indent == "" && dec.ElemTI.Kind == KindStruct {
+		elemDec := dec.ElemTI.Codec.(*StructCodec)
+		if ops, mode := elemDec.getNativeOps(); mode == nativeFull {
+			return m.encodeSliceNative(sh, dec.ElemSize, ops)
+		}
+	}
+
 	m.buf = append(m.buf, '[')
 	elemSize := dec.ElemSize
 
@@ -868,6 +993,52 @@ func (m *Marshaler) encodeByteSlice(sh *SliceHeader) error {
 	base64.StdEncoding.Encode(m.buf[start:], data)
 	m.buf = append(m.buf, '"')
 	return nil
+}
+
+// encodeSliceNative batch-encodes a []NativeStruct slice using the C engine.
+// The C engine loops over all elements in a single call, writing comma
+// separators between them. Go handles '[', ']', and buffer growth.
+func (m *Marshaler) encodeSliceNative(sh *SliceHeader, elemSize uintptr, ops []COpStep) error {
+	m.buf = append(m.buf, '[')
+	startIdx := 0
+	flags := uint32(m.flags)
+
+	for {
+		avail := cap(m.buf) - len(m.buf)
+		if avail < 64 {
+			newCap := max(cap(m.buf)*2, len(m.buf)+4096)
+			newBuf := make([]byte, len(m.buf), newCap)
+			copy(newBuf, m.buf)
+			m.buf = newBuf
+		}
+
+		workBuf := m.buf[len(m.buf):cap(m.buf)]
+		written, errCode, arrIdx := nativeEncodeArray(
+			workBuf, sh.Data, sh.Len, elemSize, ops, flags, startIdx)
+
+		switch errCode {
+		case vjOK:
+			m.buf = m.buf[:len(m.buf)+written]
+			m.buf = append(m.buf, ']')
+			return nil
+
+		case vjErrBufFull:
+			m.buf = m.buf[:len(m.buf)+written]
+			// Grow buffer and resume from where we left off.
+			newCap := max(cap(m.buf)*2, len(m.buf)+4096)
+			newBuf := make([]byte, len(m.buf), newCap)
+			copy(newBuf, m.buf)
+			m.buf = newBuf
+			startIdx = arrIdx
+
+		case vjErrStackOvfl:
+			return fmt.Errorf("vjson: struct nesting depth exceeds %d levels", vjMaxDepth)
+		case vjErrNanInf:
+			return &UnsupportedValueError{Str: "NaN or Inf float value"}
+		default:
+			return fmt.Errorf("vjson: native array encoder error %d", errCode)
+		}
+	}
 }
 
 func (m *Marshaler) encodePointer(dec *PointerCodec, ptr unsafe.Pointer) error {

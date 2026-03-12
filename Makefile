@@ -61,7 +61,7 @@ TARGET_OS ?= $(_HOST_OS)
 TARGET_ARCH ?= $(_HOST_ARCH)
 
 gen:
-	@SOURCE_FILE="$(CURDIR)/native/vj_encoder.c" \
+	@SOURCE_FILE="$(CURDIR)/native/impl/encoder.c" \
 	 TARGET_DIR="$(CURDIR)/native/encoder" \
 	 bash scripts/gen-natives.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 

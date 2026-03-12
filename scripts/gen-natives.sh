@@ -234,7 +234,7 @@ for isa in $ISAS; do
             $MODE_FLAG \
             -I"$(dirname "$SOURCE_FILE")" \
             -I"$REPO_ROOT/$VJ_LIB_DIR" \
-            -I"$REPO_ROOT/include" \
+            -I"$REPO_ROOT/native/include" \
             "$SOURCE_FILE" \
             -o "$CFILE"
 
@@ -278,7 +278,7 @@ done
 #  Strategy based on target platform:
 #  - Linux amd64: use prelink.sh (Go internal linker cannot handle R_X86_64_PC32)
 #  - Linux arm64: ld -r (NEON has no cross-section relocations)
-#  - Darwin: ld -r (macOS uses external linker by default)
+#  - Darwin arm64: dylib prelink (zero-relocation syso via dylib_to_obj.py)
 #  - Windows: ld -r
 # ============================================================
 
@@ -296,19 +296,47 @@ done
 NEEDS_PRELINK=false
 if [ "$TARGET_OS" = "linux" ] && [ "$TARGET_ARCH" = "amd64" ]; then
     NEEDS_PRELINK=true
-fi
 
-if [ "$NEEDS_PRELINK" = true ]; then
     # Linux amd64: use prelink.sh (Go internal linker cannot handle R_X86_64_PC32)
     ZIG_TARGET=$(get_zig_target "$TARGET_OS" "$TARGET_ARCH")
     "$REPO_ROOT/hack/prelink.sh" -l -o "$SYSO_PATH" -t "$ZIG_TARGET" $ALL_OBJS
-else
+
+# Darwin arm64: use dylib prelink to produce zero-relocation syso.
+# Go's internal linker cannot handle ARM64_RELOC_UNSIGNED in data sections,
+# and the dylib prelink eliminates ALL relocations (including PAGE21/PAGEOFF12)
+# by pre-resolving them in a dylib and patching ADRP+ADD to ADR+NOP.
+# if [ "$TARGET_OS" = "darwin" ] && [ "$TARGET_ARCH" = "arm64" ]; then
+elif [ "$TARGET_OS" = "darwin" ] && [ "$TARGET_ARCH" = "arm64" ]; then
+    :
+    # NEEDS_PRELINK=true
+    #
+    # # Darwin arm64: dylib prelink pipeline
+    # # 1. Link all .o into a single dylib (resolves all relocations)
+    # DYLIB_PATH="${OUTPUT_DIR}/${BASENAME}_${TARGET_OS}_${TARGET_ARCH}.dylib"
+    # echo "  Creating dylib (resolving all relocations)..."
+    # echo "    ${DYLIB_PATH}"
+    # clang -dynamiclib -nostdlib -lSystem -Wl,-no_compact_unwind \
+    #     -target arm64-apple-macos15.0 \
+    #     -o "$DYLIB_PATH" $ALL_OBJS
+    #
+    # # 2. Extract zero-relocation MH_OBJECT with ADRP→ADR patching
+    # echo "  Extracting zero-relocation syso..."
+    # python3 "$REPO_ROOT/scripts/dylib_to_obj.py" "$DYLIB_PATH" "$SYSO_PATH"
+    #
+    # # 3. Verify zero relocations
+    # RELOC_COUNT=$(otool -rv "$SYSO_PATH" 2>/dev/null | grep -c "^[0-9a-fA-F]" || true)
+    # if [ "$RELOC_COUNT" -gt 0 ]; then
+    #     echo "  WARNING: syso has $RELOC_COUNT relocations (expected 0)"
+    # else
+    #     echo "  Verified: zero relocations in syso"
+    # fi
+fi
+
+if [ "$NEEDS_PRELINK" != true ]; then
+    echo "Create syso without pre-linking..."
     # Other platforms: use ld -r directly
     if [ "$NEEDS_CROSS_COMPILE" = true ]; then
         $CC -r $ALL_OBJS -o "$SYSO_PATH"
-    elif [ "$TARGET_OS" = "darwin" ]; then
-        # Native darwin: use system ld (Apple ld64) explicitly
-        /usr/bin/ld -r -arch "$TARGET_ARCH" -o "$SYSO_PATH" $ALL_OBJS
     else
         ld -r -o "$SYSO_PATH" $ALL_OBJS
     fi

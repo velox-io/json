@@ -17,3 +17,10 @@
 TEXT ·vjEncodeStruct(SB), NOSPLIT, $0-8
 	MOVD ctx+0(FP), R0
 	B    vj_encode_struct(SB)
+
+// func vjEncodeArray(ctx unsafe.Pointer)
+// C: void vj_encode_array(VjArrayCtx* actx)
+// C ABI: actx=X0
+TEXT ·vjEncodeArray(SB), NOSPLIT, $0-8
+	MOVD ctx+0(FP), R0
+	B    vj_encode_array(SB)

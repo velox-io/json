@@ -12,3 +12,8 @@ const Available = false
 func Encode(_ unsafe.Pointer) {
 	panic("vjson: native encoder not available on this platform")
 }
+
+// EncodeArray is a no-op stub for platforms without a native encoder .syso.
+func EncodeArray(_ unsafe.Pointer) {
+	panic("vjson: native encoder not available on this platform")
+}
