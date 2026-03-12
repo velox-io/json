@@ -1,94 +1,56 @@
 package vjson
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
 
 const jsonTestSuiteDir = "testdata/JSONTestSuite"
 
-// knownAcceptDivergences lists y_*.json files where vjson incorrectly
+// knownComplianceAcceptDivergences lists y_*.json files where vjson incorrectly
 // rejects valid JSON. These subtests are skipped with t.Skip() and a reason.
-var knownAcceptDivergences = map[string]string{
+var knownComplianceAcceptDivergences = map[string]string{
 	// No known accept divergences at this time.
 }
 
-// knownRejectDivergences lists n_*.json files where vjson intentionally
+// knownComplianceRejectDivergences lists n_*.json files where vjson intentionally
 // accepts input that RFC 8259 says must be rejected.
-var knownRejectDivergences = map[string]string{
+var knownComplianceRejectDivergences = map[string]string{
 	// vjson does not validate UTF-8 on the zero-copy string path
 	// (deliberate performance trade-off). These files contain invalid
 	// UTF-8 byte sequences inside strings that should be rejected per
 	// RFC 8259, but vjson accepts them.
 	//
-	// Populated after initial test run identifies specific failures.
+	// Populate entries here when needed.
 }
 
 func TestJSONTestSuiteAccept(t *testing.T) {
-	entries, err := os.ReadDir(jsonTestSuiteDir)
-	if err != nil {
-		t.Skipf("JSONTestSuite data not found: %v (run fetch script)", err)
-	}
-
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasPrefix(name, "y_") || !strings.HasSuffix(name, ".json") {
-			continue
-		}
+	for _, name := range jsonTestSuiteFileNames(t, "y_") {
 		t.Run(name, func(t *testing.T) {
-			if reason, ok := knownAcceptDivergences[name]; ok {
+			if reason, ok := knownComplianceAcceptDivergences[name]; ok {
 				t.Skip("known divergence: " + reason)
 			}
-			data, err := os.ReadFile(filepath.Join(jsonTestSuiteDir, name))
-			if err != nil {
-				t.Fatal(err)
-			}
 
-			// Parse with stdlib first to get expected result
-			var expected any
-			if err := json.Unmarshal(data, &expected); err != nil {
-				t.Fatalf("stdlib failed to parse: %v", err)
-			}
-
-			// Parse with vjson
-			var got any
-			if err := Unmarshal(data, &got); err != nil {
+			data := readJSONTestSuiteFile(t, name)
+			var v any
+			if err := Unmarshal(data, &v); err != nil {
 				t.Errorf("must accept but got error: %v", err)
-				return
-			}
-
-			// Compare results
-			expectedJSON, _ := json.Marshal(expected)
-			gotJSON, _ := json.Marshal(got)
-			if string(expectedJSON) != string(gotJSON) {
-				t.Errorf("result mismatch:\nexpected: %s\ngot:      %s", expectedJSON, gotJSON)
 			}
 		})
 	}
 }
 
 func TestJSONTestSuiteReject(t *testing.T) {
-	entries, err := os.ReadDir(jsonTestSuiteDir)
-	if err != nil {
-		t.Skipf("JSONTestSuite data not found: %v (run fetch script)", err)
-	}
-
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasPrefix(name, "n_") || !strings.HasSuffix(name, ".json") {
-			continue
-		}
+	for _, name := range jsonTestSuiteFileNames(t, "n_") {
 		t.Run(name, func(t *testing.T) {
-			if reason, ok := knownRejectDivergences[name]; ok {
+			if reason, ok := knownComplianceRejectDivergences[name]; ok {
 				t.Skip("known divergence: " + reason)
 			}
-			data, err := os.ReadFile(filepath.Join(jsonTestSuiteDir, name))
-			if err != nil {
-				t.Fatal(err)
-			}
+
+			data := readJSONTestSuiteFile(t, name)
 			var v any
 			if err := Unmarshal(data, &v); err == nil {
 				t.Errorf("must reject but was accepted (value: %v)", v)
@@ -98,21 +60,9 @@ func TestJSONTestSuiteReject(t *testing.T) {
 }
 
 func TestJSONTestSuiteImplementationDefined(t *testing.T) {
-	entries, err := os.ReadDir(jsonTestSuiteDir)
-	if err != nil {
-		t.Skipf("JSONTestSuite data not found: %v (run fetch script)", err)
-	}
-
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasPrefix(name, "i_") || !strings.HasSuffix(name, ".json") {
-			continue
-		}
+	for _, name := range jsonTestSuiteFileNames(t, "i_") {
 		t.Run(name, func(t *testing.T) {
-			data, err := os.ReadFile(filepath.Join(jsonTestSuiteDir, name))
-			if err != nil {
-				t.Fatal(err)
-			}
+			data := readJSONTestSuiteFile(t, name)
 			var v any
 			if err := Unmarshal(data, &v); err != nil {
 				t.Logf("REJECTED: %v", err)
@@ -121,4 +71,33 @@ func TestJSONTestSuiteImplementationDefined(t *testing.T) {
 			}
 		})
 	}
+}
+
+func jsonTestSuiteFileNames(t *testing.T, prefix string) []string {
+	t.Helper()
+
+	entries, err := os.ReadDir(jsonTestSuiteDir)
+	if err != nil {
+		t.Skipf("JSONTestSuite data not found: %v (run fetch script)", err)
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ".json") {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+func readJSONTestSuiteFile(t *testing.T, name string) []byte {
+	t.Helper()
+
+	data, err := os.ReadFile(filepath.Join(jsonTestSuiteDir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }

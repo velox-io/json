@@ -247,6 +247,12 @@ func makeEncodeSlice(dec *SliceCodec) func(m *Marshaler, ptr unsafe.Pointer) err
 	}
 }
 
+func makeEncodeArray(dec *ArrayCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
+	return func(m *Marshaler, ptr unsafe.Pointer) error {
+		return m.encodeArray(dec, ptr)
+	}
+}
+
 func makeEncodePointer(dec *PointerCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
 	return func(m *Marshaler, ptr unsafe.Pointer) error {
 		return m.encodePointer(dec, ptr)
@@ -339,6 +345,11 @@ func bindEncodeFn(ti *TypeInfo) {
 			return
 		}
 		ti.EncodeFn = makeEncodeSlice(ti.Codec.(*SliceCodec))
+	case KindArray:
+		if ti.Codec == nil {
+			return
+		}
+		ti.EncodeFn = makeEncodeArray(ti.Codec.(*ArrayCodec))
 	case KindPointer:
 		if ti.Codec == nil {
 			return
@@ -704,6 +715,8 @@ func (m *Marshaler) encodeValueSlow(ti *TypeInfo, ptr unsafe.Pointer) error {
 		return m.encodeStruct(ti.resolveCodec().(*StructCodec), ptr)
 	case KindSlice:
 		return m.encodeSlice(ti.resolveCodec().(*SliceCodec), ptr)
+	case KindArray:
+		return m.encodeArray(ti.resolveCodec().(*ArrayCodec), ptr)
 	case KindPointer:
 		return m.encodePointer(ti.resolveCodec().(*PointerCodec), ptr)
 	case KindMap:
@@ -987,6 +1000,19 @@ func (m *Marshaler) encodeSlice(dec *SliceCodec, ptr unsafe.Pointer) error {
 		return m.encodeByteSlice(sh)
 	}
 
+	if !m.inVM && encvm.Available {
+		if m.indent == "" || isSimpleIndent(m.prefix, m.indent) > 0 {
+			return m.encodeSliceNative(dec, ptr)
+		}
+	}
+
+	return m.encodeSliceGo(dec, ptr)
+}
+
+// encodeSliceGo is the pure-Go fallback for slice encoding.
+func (m *Marshaler) encodeSliceGo(dec *SliceCodec, ptr unsafe.Pointer) error {
+	sh := (*SliceHeader)(ptr)
+
 	if sh.Len == 0 {
 		m.buf = append(m.buf, litArr...)
 		return nil
@@ -1024,6 +1050,70 @@ func (m *Marshaler) encodeSlice(dec *SliceCodec, ptr unsafe.Pointer) error {
 
 func (m *Marshaler) encodeByteSlice(sh *SliceHeader) error {
 	data := unsafe.Slice((*byte)(sh.Data), sh.Len)
+	m.buf = append(m.buf, '"')
+	encodedLen := base64.StdEncoding.EncodedLen(len(data))
+	start := len(m.buf)
+	m.buf = append(m.buf, make([]byte, encodedLen)...)
+	base64.StdEncoding.Encode(m.buf[start:], data)
+	m.buf = append(m.buf, '"')
+	return nil
+}
+
+func (m *Marshaler) encodeArray(dec *ArrayCodec, ptr unsafe.Pointer) error {
+	// [N]byte → base64
+	if dec.ElemTI.Kind == KindUint8 && dec.ElemSize == 1 {
+		return m.encodeByteArray(dec, ptr)
+	}
+
+	if !m.inVM && encvm.Available {
+		if m.indent == "" || isSimpleIndent(m.prefix, m.indent) > 0 {
+			return m.encodeArrayNative(dec, ptr)
+		}
+	}
+
+	return m.encodeArrayGo(dec, ptr)
+}
+
+// encodeArrayGo is the pure-Go fallback for fixed-size array encoding.
+func (m *Marshaler) encodeArrayGo(dec *ArrayCodec, ptr unsafe.Pointer) error {
+	if dec.ArrayLen == 0 {
+		m.buf = append(m.buf, litArr...)
+		return nil
+	}
+
+	m.buf = append(m.buf, '[')
+	elemSize := dec.ElemSize
+
+	if m.indent != "" {
+		m.depth++
+	}
+
+	for i := range dec.ArrayLen {
+		if i > 0 {
+			m.buf = append(m.buf, ',')
+		}
+		if m.indent != "" {
+			m.appendNewlineIndent()
+		}
+
+		elemPtr := unsafe.Add(ptr, uintptr(i)*elemSize)
+		if err := m.encodeValue(dec.ElemTI, elemPtr); err != nil {
+			return err
+		}
+	}
+
+	if m.indent != "" {
+		m.depth--
+		m.appendNewlineIndent()
+	}
+
+	m.buf = append(m.buf, ']')
+	return nil
+}
+
+// encodeByteArray encodes [N]byte as a base64 JSON string.
+func (m *Marshaler) encodeByteArray(dec *ArrayCodec, ptr unsafe.Pointer) error {
+	data := unsafe.Slice((*byte)(ptr), dec.ArrayLen)
 	m.buf = append(m.buf, '"')
 	encodedLen := base64.StdEncoding.EncodedLen(len(data))
 	start := len(m.buf)

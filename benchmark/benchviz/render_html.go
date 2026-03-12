@@ -138,8 +138,7 @@ func buildMetric(val, maxVal, minVal float64, formatted string, showRatio bool) 
 	isFastest := minVal > 0 && val <= minVal*1.03
 	ratio := ""
 	if showRatio && !isFastest && minVal > 0 {
-		// Efficiency relative to fastest: minVal/val (1.0 = fastest, <1.0 = slower)
-		ratio = fmt.Sprintf("%.2fx", minVal/val)
+		ratio = fmt.Sprintf("%.2fx", val/minVal)
 	}
 	// For non-ratio columns, mark lowest with star if there's meaningful difference.
 	if !showRatio && minVal >= 0 && val <= minVal*1.005 && maxVal > minVal*1.01 {

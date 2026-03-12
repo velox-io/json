@@ -1,7 +1,6 @@
 package benchmark
 
 import (
-	"bytes"
 	"encoding/json"
 	"testing"
 
@@ -11,8 +10,9 @@ import (
 )
 
 // =============================================================================
-// Helpers: discardWriter avoids io.Discard which is just an int and doesn't
-// exercise real Write paths. countWriter tracks total bytes for b.SetBytes.
+// Helpers: countWriter counts bytes written without buffering, simulating a
+// real IO sink (net.Conn, bufio.Writer, etc.) where the destination does not
+// need to grow a contiguous buffer.
 // =============================================================================
 
 // countWriter counts bytes written without buffering.
@@ -24,13 +24,13 @@ func (w *countWriter) Write(p []byte) (int, error) {
 }
 
 // =============================================================================
-// KubePods: Kubernetes Pod List (~4.6KB, deeply nested, 3 pods)
-// Encode 50 copies as NDJSON stream.
+// KubePodsStream: Kubernetes Pod List (~4.6KB, deeply nested, 3 pods)
+// Encode 50 copies as NDJSON stream, reusing one Encoder per iteration.
 // =============================================================================
 
 const kubePodsEncodeCount = 50
 
-func Benchmark_Encoder_KubePods_StdJSON(b *testing.B) {
+func Benchmark_Encoder_KubePodsStream_StdJSON(b *testing.B) {
 	v := loadPodsValue()
 	var cw countWriter
 	enc := json.NewEncoder(&cw)
@@ -41,8 +41,7 @@ func Benchmark_Encoder_KubePods_StdJSON(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		var buf bytes.Buffer
-		enc := json.NewEncoder(&buf)
+		enc := json.NewEncoder(&countWriter{})
 		for range kubePodsEncodeCount {
 			if err := enc.Encode(v); err != nil {
 				b.Fatal(err)
@@ -51,7 +50,7 @@ func Benchmark_Encoder_KubePods_StdJSON(b *testing.B) {
 	}
 }
 
-func Benchmark_Encoder_KubePods_Sonic(b *testing.B) {
+func Benchmark_Encoder_KubePodsStream_Sonic(b *testing.B) {
 	v := loadPodsValue()
 	var cw countWriter
 	enc := sonic.ConfigDefault.NewEncoder(&cw)
@@ -62,8 +61,7 @@ func Benchmark_Encoder_KubePods_Sonic(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		var buf bytes.Buffer
-		enc := sonic.ConfigDefault.NewEncoder(&buf)
+		enc := sonic.ConfigDefault.NewEncoder(&countWriter{})
 		for range kubePodsEncodeCount {
 			if err := enc.Encode(v); err != nil {
 				b.Fatal(err)
@@ -72,7 +70,7 @@ func Benchmark_Encoder_KubePods_Sonic(b *testing.B) {
 	}
 }
 
-func Benchmark_Encoder_KubePods_GoJSON(b *testing.B) {
+func Benchmark_Encoder_KubePodsStream_GoJSON(b *testing.B) {
 	v := loadPodsValue()
 	var cw countWriter
 	enc := gojson.NewEncoder(&cw)
@@ -83,8 +81,7 @@ func Benchmark_Encoder_KubePods_GoJSON(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		var buf bytes.Buffer
-		enc := gojson.NewEncoder(&buf)
+		enc := gojson.NewEncoder(&countWriter{})
 		for range kubePodsEncodeCount {
 			if err := enc.Encode(v); err != nil {
 				b.Fatal(err)
@@ -93,7 +90,7 @@ func Benchmark_Encoder_KubePods_GoJSON(b *testing.B) {
 	}
 }
 
-func Benchmark_Encoder_KubePods_Velox(b *testing.B) {
+func Benchmark_Encoder_KubePodsStream_Velox(b *testing.B) {
 	v := loadPodsValue()
 	var cw countWriter
 	enc := vjson.NewEncoder(&cw)
@@ -104,8 +101,7 @@ func Benchmark_Encoder_KubePods_Velox(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		var buf bytes.Buffer
-		enc := vjson.NewEncoder(&buf)
+		enc := vjson.NewEncoder(&countWriter{})
 		for range kubePodsEncodeCount {
 			if err := enc.Encode(v); err != nil {
 				b.Fatal(err)
@@ -115,13 +111,13 @@ func Benchmark_Encoder_KubePods_Velox(b *testing.B) {
 }
 
 // =============================================================================
-// Twitter: Twitter search API response (~617KB, deeply nested, many fields)
-// Encode 10 copies as NDJSON stream.
+// TwitterStream: Twitter search API response (~617KB, deeply nested, many fields)
+// Encode 10 copies as NDJSON stream, reusing one Encoder per iteration.
 // =============================================================================
 
 const twitterEncodeCount = 10
 
-func Benchmark_Encoder_Twitter_StdJSON(b *testing.B) {
+func Benchmark_Encoder_TwitterStream_StdJSON(b *testing.B) {
 	v := loadTwitterValue()
 	var cw countWriter
 	enc := json.NewEncoder(&cw)
@@ -132,8 +128,7 @@ func Benchmark_Encoder_Twitter_StdJSON(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		var buf bytes.Buffer
-		enc := json.NewEncoder(&buf)
+		enc := json.NewEncoder(&countWriter{})
 		for range twitterEncodeCount {
 			if err := enc.Encode(v); err != nil {
 				b.Fatal(err)
@@ -142,7 +137,7 @@ func Benchmark_Encoder_Twitter_StdJSON(b *testing.B) {
 	}
 }
 
-func Benchmark_Encoder_Twitter_Sonic(b *testing.B) {
+func Benchmark_Encoder_TwitterStream_Sonic(b *testing.B) {
 	v := loadTwitterValue()
 	var cw countWriter
 	enc := sonic.ConfigDefault.NewEncoder(&cw)
@@ -153,8 +148,7 @@ func Benchmark_Encoder_Twitter_Sonic(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		var buf bytes.Buffer
-		enc := sonic.ConfigDefault.NewEncoder(&buf)
+		enc := sonic.ConfigDefault.NewEncoder(&countWriter{})
 		for range twitterEncodeCount {
 			if err := enc.Encode(v); err != nil {
 				b.Fatal(err)
@@ -163,7 +157,7 @@ func Benchmark_Encoder_Twitter_Sonic(b *testing.B) {
 	}
 }
 
-func Benchmark_Encoder_Twitter_GoJSON(b *testing.B) {
+func Benchmark_Encoder_TwitterStream_GoJSON(b *testing.B) {
 	v := loadTwitterValue()
 	var cw countWriter
 	enc := gojson.NewEncoder(&cw)
@@ -174,8 +168,7 @@ func Benchmark_Encoder_Twitter_GoJSON(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		var buf bytes.Buffer
-		enc := gojson.NewEncoder(&buf)
+		enc := gojson.NewEncoder(&countWriter{})
 		for range twitterEncodeCount {
 			if err := enc.Encode(v); err != nil {
 				b.Fatal(err)
@@ -184,7 +177,7 @@ func Benchmark_Encoder_Twitter_GoJSON(b *testing.B) {
 	}
 }
 
-func Benchmark_Encoder_Twitter_Velox(b *testing.B) {
+func Benchmark_Encoder_TwitterStream_Velox(b *testing.B) {
 	v := loadTwitterValue()
 	var cw countWriter
 	enc := vjson.NewEncoder(&cw)
@@ -195,8 +188,7 @@ func Benchmark_Encoder_Twitter_Velox(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		var buf bytes.Buffer
-		enc := vjson.NewEncoder(&buf)
+		enc := vjson.NewEncoder(&countWriter{})
 		for range twitterEncodeCount {
 			if err := enc.Encode(v); err != nil {
 				b.Fatal(err)
@@ -206,10 +198,11 @@ func Benchmark_Encoder_Twitter_Velox(b *testing.B) {
 }
 
 // =============================================================================
-// SingleLarge: encode one large Twitter value to measure per-call overhead.
+// TwitterSingle: encode one Twitter value per iteration to measure per-call
+// overhead (vs TwitterStream which encodes 10 copies reusing one Encoder).
 // =============================================================================
 
-func Benchmark_Encoder_SingleLarge_StdJSON(b *testing.B) {
+func Benchmark_Encoder_TwitterSingle_StdJSON(b *testing.B) {
 	v := loadTwitterValue()
 	var cw countWriter
 	_ = json.NewEncoder(&cw).Encode(v)
@@ -217,14 +210,13 @@ func Benchmark_Encoder_SingleLarge_StdJSON(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		var buf bytes.Buffer
-		if err := json.NewEncoder(&buf).Encode(v); err != nil {
+		if err := json.NewEncoder(&countWriter{}).Encode(v); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func Benchmark_Encoder_SingleLarge_Sonic(b *testing.B) {
+func Benchmark_Encoder_TwitterSingle_Sonic(b *testing.B) {
 	v := loadTwitterValue()
 	var cw countWriter
 	_ = sonic.ConfigDefault.NewEncoder(&cw).Encode(v)
@@ -232,14 +224,13 @@ func Benchmark_Encoder_SingleLarge_Sonic(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		var buf bytes.Buffer
-		if err := sonic.ConfigDefault.NewEncoder(&buf).Encode(v); err != nil {
+		if err := sonic.ConfigDefault.NewEncoder(&countWriter{}).Encode(v); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func Benchmark_Encoder_SingleLarge_GoJSON(b *testing.B) {
+func Benchmark_Encoder_TwitterSingle_GoJSON(b *testing.B) {
 	v := loadTwitterValue()
 	var cw countWriter
 	_ = gojson.NewEncoder(&cw).Encode(v)
@@ -247,14 +238,13 @@ func Benchmark_Encoder_SingleLarge_GoJSON(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		var buf bytes.Buffer
-		if err := gojson.NewEncoder(&buf).Encode(v); err != nil {
+		if err := gojson.NewEncoder(&countWriter{}).Encode(v); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func Benchmark_Encoder_SingleLarge_Velox(b *testing.B) {
+func Benchmark_Encoder_TwitterSingle_Velox(b *testing.B) {
 	v := loadTwitterValue()
 	var cw countWriter
 	_ = vjson.NewEncoder(&cw).Encode(v)
@@ -262,124 +252,8 @@ func Benchmark_Encoder_SingleLarge_Velox(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		var buf bytes.Buffer
-		if err := vjson.NewEncoder(&buf).Encode(v); err != nil {
+		if err := vjson.NewEncoder(&countWriter{}).Encode(v); err != nil {
 			b.Fatal(err)
-		}
-	}
-}
-
-// =============================================================================
-// Discard: encode to a no-op writer to isolate encoding speed from
-// buffer allocation / memory copy overhead.
-// =============================================================================
-
-func Benchmark_EncoderDiscard_KubePods_StdJSON(b *testing.B) {
-	v := loadPodsValue()
-	var cw countWriter
-	_ = json.NewEncoder(&cw).Encode(v)
-	b.SetBytes(cw.n * kubePodsEncodeCount)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		enc := json.NewEncoder(&countWriter{})
-		for range kubePodsEncodeCount {
-			if err := enc.Encode(v); err != nil {
-				b.Fatal(err)
-			}
-		}
-	}
-}
-
-func Benchmark_EncoderDiscard_KubePods_Velox(b *testing.B) {
-	v := loadPodsValue()
-	var cw countWriter
-	_ = vjson.NewEncoder(&cw).Encode(v)
-	b.SetBytes(cw.n * kubePodsEncodeCount)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		enc := vjson.NewEncoder(&countWriter{})
-		for range kubePodsEncodeCount {
-			if err := enc.Encode(v); err != nil {
-				b.Fatal(err)
-			}
-		}
-	}
-}
-
-func Benchmark_EncoderDiscard_Twitter_StdJSON(b *testing.B) {
-	v := loadTwitterValue()
-	var cw countWriter
-	_ = json.NewEncoder(&cw).Encode(v)
-	b.SetBytes(cw.n * twitterEncodeCount)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		enc := json.NewEncoder(&countWriter{})
-		for range twitterEncodeCount {
-			if err := enc.Encode(v); err != nil {
-				b.Fatal(err)
-			}
-		}
-	}
-}
-
-func Benchmark_EncoderDiscard_Twitter_Velox(b *testing.B) {
-	v := loadTwitterValue()
-	var cw countWriter
-	_ = vjson.NewEncoder(&cw).Encode(v)
-	b.SetBytes(cw.n * twitterEncodeCount)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		enc := vjson.NewEncoder(&countWriter{})
-		for range twitterEncodeCount {
-			if err := enc.Encode(v); err != nil {
-				b.Fatal(err)
-			}
-		}
-	}
-}
-
-// =============================================================================
-// EncodeValue (generic) benchmark — measures the zero-alloc typed path.
-// =============================================================================
-
-func Benchmark_EncodeValue_KubePods_Velox(b *testing.B) {
-	v := loadPodsValue()
-	var cw countWriter
-	enc := vjson.NewEncoder(&cw)
-	_ = vjson.EncodeValue(enc, v)
-	b.SetBytes(cw.n * kubePodsEncodeCount)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		var buf bytes.Buffer
-		enc := vjson.NewEncoder(&buf)
-		for range kubePodsEncodeCount {
-			if err := vjson.EncodeValue(enc, v); err != nil {
-				b.Fatal(err)
-			}
-		}
-	}
-}
-
-func Benchmark_EncodeValue_Twitter_Velox(b *testing.B) {
-	v := loadTwitterValue()
-	var cw countWriter
-	enc := vjson.NewEncoder(&cw)
-	_ = vjson.EncodeValue(enc, v)
-	b.SetBytes(cw.n * twitterEncodeCount)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		var buf bytes.Buffer
-		enc := vjson.NewEncoder(&buf)
-		for range twitterEncodeCount {
-			if err := vjson.EncodeValue(enc, v); err != nil {
-				b.Fatal(err)
-			}
 		}
 	}
 }

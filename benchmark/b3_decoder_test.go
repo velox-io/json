@@ -251,10 +251,10 @@ func Benchmark_Decoder_EscapeHeavy_Velox(b *testing.B) {
 }
 
 // =============================================================================
-// KubePods NDJSON Stream (50 copies)
+// KubePodsStream NDJSON Stream (50 copies)
 // =============================================================================
 
-func Benchmark_Decoder_KubePods_StdJSON(b *testing.B) {
+func Benchmark_Decoder_KubePodsStream_StdJSON(b *testing.B) {
 	data := loadKubePodsNDJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
@@ -272,7 +272,7 @@ func Benchmark_Decoder_KubePods_StdJSON(b *testing.B) {
 	}
 }
 
-func Benchmark_Decoder_KubePods_Sonic(b *testing.B) {
+func Benchmark_Decoder_KubePodsStream_Sonic(b *testing.B) {
 	data := loadKubePodsNDJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
@@ -290,7 +290,7 @@ func Benchmark_Decoder_KubePods_Sonic(b *testing.B) {
 	}
 }
 
-func Benchmark_Decoder_KubePods_Velox(b *testing.B) {
+func Benchmark_Decoder_KubePodsStream_Velox(b *testing.B) {
 	data := loadKubePodsNDJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
@@ -309,10 +309,10 @@ func Benchmark_Decoder_KubePods_Velox(b *testing.B) {
 }
 
 // =============================================================================
-// Twitter NDJSON Stream (10 copies — large payload ~617KB each)
+// TwitterStream NDJSON Stream (10 copies — large payload ~617KB each)
 // =============================================================================
 
-func Benchmark_Decoder_Twitter_StdJSON(b *testing.B) {
+func Benchmark_Decoder_TwitterStream_StdJSON(b *testing.B) {
 	data := loadTwitterNDJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
@@ -330,7 +330,7 @@ func Benchmark_Decoder_Twitter_StdJSON(b *testing.B) {
 	}
 }
 
-func Benchmark_Decoder_Twitter_Sonic(b *testing.B) {
+func Benchmark_Decoder_TwitterStream_Sonic(b *testing.B) {
 	data := loadTwitterNDJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
@@ -348,7 +348,7 @@ func Benchmark_Decoder_Twitter_Sonic(b *testing.B) {
 	}
 }
 
-func Benchmark_Decoder_Twitter_Velox(b *testing.B) {
+func Benchmark_Decoder_TwitterStream_Velox(b *testing.B) {
 	data := loadTwitterNDJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
@@ -367,10 +367,11 @@ func Benchmark_Decoder_Twitter_Velox(b *testing.B) {
 }
 
 // =============================================================================
-// Single Large Value (Twitter — tests stream overhead for a single decode)
+// TwitterSingle: decode one Twitter value to measure per-call overhead
+// (vs TwitterStream which decodes 10 copies from an NDJSON stream).
 // =============================================================================
 
-func Benchmark_Decoder_SingleLarge_StdJSON(b *testing.B) {
+func Benchmark_Decoder_TwitterSingle_StdJSON(b *testing.B) {
 	data := LoadTwitterCompactJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
@@ -383,7 +384,7 @@ func Benchmark_Decoder_SingleLarge_StdJSON(b *testing.B) {
 	}
 }
 
-func Benchmark_Decoder_SingleLarge_Sonic(b *testing.B) {
+func Benchmark_Decoder_TwitterSingle_Sonic(b *testing.B) {
 	data := LoadTwitterCompactJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
@@ -396,7 +397,7 @@ func Benchmark_Decoder_SingleLarge_Sonic(b *testing.B) {
 	}
 }
 
-func Benchmark_Decoder_SingleLarge_Velox(b *testing.B) {
+func Benchmark_Decoder_TwitterSingle_Velox(b *testing.B) {
 	data := LoadTwitterCompactJSON()
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()

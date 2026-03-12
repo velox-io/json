@@ -96,15 +96,15 @@ func TestEmbedRule1_Depth1OverDepth2(t *testing.T) {
 // ============================================================
 
 type cancelA struct {
-	X string `json:"x"`
+	X string // JSON key "X" — no tag, relies on field name
 }
 type cancelB struct {
-	X string `json:"x"`
+	X string // JSON key "X" — same key as cancelA.X to trigger cancellation
 }
 type cancelOuter struct {
 	cancelA
-	cancelB        //nolint:govet // intentional: testing same-depth field cancellation
-	Y       string `json:"y"`
+	cancelB
+	Y string `json:"y"`
 }
 
 func TestEmbedRule2_SameDepthCancels(t *testing.T) {
@@ -130,8 +130,8 @@ func TestEmbedRule2_SameDepthCancels(t *testing.T) {
 		t.Errorf("Rule 2 marshal: vjson=%s, stdlib=%s", vjOut, stdOut)
 	}
 
-	// Unmarshal: "x" should be ignored (no target), "y" should work.
-	input := `{"x":"ignored","y":"present"}`
+	// Unmarshal: "X" should be ignored (no target), "y" should work.
+	input := `{"X":"ignored","y":"present"}`
 
 	var stdVal cancelOuter
 	if err := json.Unmarshal([]byte(input), &stdVal); err != nil {
@@ -162,7 +162,7 @@ type cancelC struct {
 }
 type cancelTriple struct {
 	cancelA
-	cancelB //nolint:govet // intentional: testing same-depth field cancellation
+	cancelB
 	cancelC
 }
 

@@ -80,11 +80,21 @@ func loadTwitterValue() *twitter.TwitterStruct {
 	return &twitterValue
 }
 
+// marshalSize returns the JSON output size for SetBytes throughput reporting.
+func marshalSize(v any) int64 {
+	data, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return int64(len(data))
+}
+
 // =============================================================================
 // Tiny: flat struct, 5 basic-type fields
 // =============================================================================
 
 func Benchmark_Marshal_Tiny_StdJSON(b *testing.B) {
+	b.SetBytes(marshalSize(loadTinyValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := json.Marshal(loadTinyValue()); err != nil {
@@ -94,6 +104,7 @@ func Benchmark_Marshal_Tiny_StdJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_Tiny_Sonic(b *testing.B) {
+	b.SetBytes(marshalSize(loadTinyValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := sonic.Marshal(loadTinyValue()); err != nil {
@@ -103,6 +114,7 @@ func Benchmark_Marshal_Tiny_Sonic(b *testing.B) {
 }
 
 func Benchmark_Marshal_Tiny_GoJSON(b *testing.B) {
+	b.SetBytes(marshalSize(loadTinyValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := gojson.Marshal(loadTinyValue()); err != nil {
@@ -112,6 +124,7 @@ func Benchmark_Marshal_Tiny_GoJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_Tiny_EasyJSON(b *testing.B) {
+	b.SetBytes(int64(len(LoadTinyCompactJSON())))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := easyjson.MarshalTiny(LoadTinyCompactJSON()); err != nil {
@@ -121,6 +134,7 @@ func Benchmark_Marshal_Tiny_EasyJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_Tiny_Velox(b *testing.B) {
+	b.SetBytes(marshalSize(loadTinyValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := vjson.Marshal(loadTinyValue()); err != nil {
@@ -134,6 +148,7 @@ func Benchmark_Marshal_Tiny_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_Marshal_Small_StdJSON(b *testing.B) {
+	b.SetBytes(marshalSize(loadSmallValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := json.Marshal(loadSmallValue()); err != nil {
@@ -143,6 +158,7 @@ func Benchmark_Marshal_Small_StdJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_Small_Sonic(b *testing.B) {
+	b.SetBytes(marshalSize(loadSmallValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := sonic.Marshal(loadSmallValue()); err != nil {
@@ -152,6 +168,7 @@ func Benchmark_Marshal_Small_Sonic(b *testing.B) {
 }
 
 func Benchmark_Marshal_Small_GoJSON(b *testing.B) {
+	b.SetBytes(marshalSize(loadSmallValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := gojson.Marshal(loadSmallValue()); err != nil {
@@ -161,6 +178,7 @@ func Benchmark_Marshal_Small_GoJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_Small_EasyJSON(b *testing.B) {
+	b.SetBytes(int64(len(LoadSmallCompactJSON())))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := easyjson.MarshalSmall(LoadSmallCompactJSON()); err != nil {
@@ -170,6 +188,7 @@ func Benchmark_Marshal_Small_EasyJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_Small_Velox(b *testing.B) {
+	b.SetBytes(marshalSize(loadSmallValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := vjson.Marshal(loadSmallValue()); err != nil {
@@ -183,6 +202,7 @@ func Benchmark_Marshal_Small_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_Marshal_EscapeHeavy_StdJSON(b *testing.B) {
+	b.SetBytes(marshalSize(loadEscapeHeavyValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := json.Marshal(loadEscapeHeavyValue()); err != nil {
@@ -192,6 +212,7 @@ func Benchmark_Marshal_EscapeHeavy_StdJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_EscapeHeavy_Sonic(b *testing.B) {
+	b.SetBytes(marshalSize(loadEscapeHeavyValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := sonic.Marshal(loadEscapeHeavyValue()); err != nil {
@@ -201,6 +222,7 @@ func Benchmark_Marshal_EscapeHeavy_Sonic(b *testing.B) {
 }
 
 func Benchmark_Marshal_EscapeHeavy_GoJSON(b *testing.B) {
+	b.SetBytes(marshalSize(loadEscapeHeavyValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := gojson.Marshal(loadEscapeHeavyValue()); err != nil {
@@ -210,6 +232,7 @@ func Benchmark_Marshal_EscapeHeavy_GoJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_EscapeHeavy_EasyJSON(b *testing.B) {
+	b.SetBytes(int64(len(LoadEscapeHeavyCompactJSON())))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := easyjson.MarshalEscapeHeavy(LoadEscapeHeavyCompactJSON()); err != nil {
@@ -219,6 +242,7 @@ func Benchmark_Marshal_EscapeHeavy_EasyJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_EscapeHeavy_Velox(b *testing.B) {
+	b.SetBytes(marshalSize(loadEscapeHeavyValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := vjson.Marshal(loadEscapeHeavyValue()); err != nil {
@@ -232,6 +256,7 @@ func Benchmark_Marshal_EscapeHeavy_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_Marshal_KubePods_StdJSON(b *testing.B) {
+	b.SetBytes(marshalSize(loadPodsValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := json.Marshal(loadPodsValue()); err != nil {
@@ -241,6 +266,7 @@ func Benchmark_Marshal_KubePods_StdJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_KubePods_Sonic(b *testing.B) {
+	b.SetBytes(marshalSize(loadPodsValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := sonic.Marshal(loadPodsValue()); err != nil {
@@ -250,6 +276,7 @@ func Benchmark_Marshal_KubePods_Sonic(b *testing.B) {
 }
 
 func Benchmark_Marshal_KubePods_GoJSON(b *testing.B) {
+	b.SetBytes(marshalSize(loadPodsValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := gojson.Marshal(loadPodsValue()); err != nil {
@@ -259,6 +286,7 @@ func Benchmark_Marshal_KubePods_GoJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_KubePods_EasyJSON(b *testing.B) {
+	b.SetBytes(int64(len(LoadPodsCompactJSON())))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := easyjson.MarshalKubePods(LoadPodsCompactJSON()); err != nil {
@@ -268,6 +296,7 @@ func Benchmark_Marshal_KubePods_EasyJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_KubePods_Velox(b *testing.B) {
+	b.SetBytes(marshalSize(loadPodsValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := vjson.Marshal(loadPodsValue()); err != nil {
@@ -281,6 +310,7 @@ func Benchmark_Marshal_KubePods_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_Marshal_Twitter_StdJSON(b *testing.B) {
+	b.SetBytes(marshalSize(loadTwitterValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := json.Marshal(loadTwitterValue()); err != nil {
@@ -290,6 +320,7 @@ func Benchmark_Marshal_Twitter_StdJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_Twitter_Sonic(b *testing.B) {
+	b.SetBytes(marshalSize(loadTwitterValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := sonic.Marshal(loadTwitterValue()); err != nil {
@@ -299,6 +330,7 @@ func Benchmark_Marshal_Twitter_Sonic(b *testing.B) {
 }
 
 func Benchmark_Marshal_Twitter_GoJSON(b *testing.B) {
+	b.SetBytes(marshalSize(loadTwitterValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := gojson.Marshal(loadTwitterValue()); err != nil {
@@ -308,6 +340,7 @@ func Benchmark_Marshal_Twitter_GoJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_Twitter_EasyJSON(b *testing.B) {
+	b.SetBytes(int64(len(LoadTwitterCompactJSON())))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := easyjson.MarshalTwitter(LoadTwitterCompactJSON()); err != nil {
@@ -317,6 +350,7 @@ func Benchmark_Marshal_Twitter_EasyJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_Twitter_Velox(b *testing.B) {
+	b.SetBytes(marshalSize(loadTwitterValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := vjson.Marshal(loadTwitterValue()); err != nil {
@@ -345,6 +379,7 @@ func loadTwitterTypedValue() *twitter_typed.TwitterStruct {
 }
 
 func Benchmark_Marshal_TwitterTyped_StdJSON(b *testing.B) {
+	b.SetBytes(marshalSize(loadTwitterTypedValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := json.Marshal(loadTwitterTypedValue()); err != nil {
@@ -354,6 +389,7 @@ func Benchmark_Marshal_TwitterTyped_StdJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_TwitterTyped_Sonic(b *testing.B) {
+	b.SetBytes(marshalSize(loadTwitterTypedValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := sonic.Marshal(loadTwitterTypedValue()); err != nil {
@@ -363,6 +399,7 @@ func Benchmark_Marshal_TwitterTyped_Sonic(b *testing.B) {
 }
 
 func Benchmark_Marshal_TwitterTyped_GoJSON(b *testing.B) {
+	b.SetBytes(marshalSize(loadTwitterTypedValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := gojson.Marshal(loadTwitterTypedValue()); err != nil {
@@ -372,6 +409,7 @@ func Benchmark_Marshal_TwitterTyped_GoJSON(b *testing.B) {
 }
 
 func Benchmark_Marshal_TwitterTyped_Velox(b *testing.B) {
+	b.SetBytes(marshalSize(loadTwitterTypedValue()))
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := vjson.Marshal(loadTwitterTypedValue()); err != nil {
@@ -401,6 +439,7 @@ func loadMapAnyValue() *map[string]any {
 
 func Benchmark_Marshal_MapAny_StdJSON(b *testing.B) {
 	v := loadMapAnyValue()
+	b.SetBytes(marshalSize(v))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
@@ -412,6 +451,7 @@ func Benchmark_Marshal_MapAny_StdJSON(b *testing.B) {
 
 func Benchmark_Marshal_MapAny_Sonic(b *testing.B) {
 	v := loadMapAnyValue()
+	b.SetBytes(marshalSize(v))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
@@ -423,6 +463,7 @@ func Benchmark_Marshal_MapAny_Sonic(b *testing.B) {
 
 func Benchmark_Marshal_MapAny_GoJSON(b *testing.B) {
 	v := loadMapAnyValue()
+	b.SetBytes(marshalSize(v))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
@@ -434,6 +475,7 @@ func Benchmark_Marshal_MapAny_GoJSON(b *testing.B) {
 
 func Benchmark_Marshal_MapAny_Velox(b *testing.B) {
 	v := loadMapAnyValue()
+	b.SetBytes(marshalSize(v))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {

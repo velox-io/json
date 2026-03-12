@@ -58,6 +58,9 @@ func (sc *Parser) scanValueSpecial(src []byte, idx int, ti *TypeInfo, ptr unsafe
 		if ti.Kind == KindSlice {
 			return sc.scanStringToSlice(src, idx, ti, ptr)
 		}
+		if ti.Kind == KindArray {
+			return sc.scanStringToArray(src, idx, ti, ptr)
+		}
 		return sc.scanStringValue(src, idx, ti, ptr)
 	case '{':
 		return sc.scanObjectValue(src, idx, ti, ptr)
@@ -108,7 +111,7 @@ func (sc *Parser) scanQuotedValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 		if !intFitsKind(v, ti.Kind) {
 			return newIdx, newUnmarshalTypeError("number "+inner, ti.Ext.Type, newIdx)
 		}
-		WriteIntValue(ptr, ti.Kind, v)
+		writeIntValue(ptr, ti.Kind, v)
 
 	case KindUint, KindUint8, KindUint16, KindUint32, KindUint64:
 		if len(inner) > 0 && inner[0] == '-' {
@@ -121,7 +124,7 @@ func (sc *Parser) scanQuotedValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 		if !uintFitsKind(v, ti.Kind) {
 			return newIdx, newUnmarshalTypeError("number "+inner, ti.Ext.Type, newIdx)
 		}
-		WriteUintValue(ptr, ti.Kind, v)
+		writeUintValue(ptr, ti.Kind, v)
 
 	case KindFloat32:
 		v, parseErr := strconv.ParseFloat(inner, 32)

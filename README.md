@@ -188,7 +188,6 @@ Velox is already usable in performance-sensitive services, but it is still evolv
 We now maintain a public roadmap in [ROADMAP.md](./ROADMAP.md), and current high-priority contribution areas are:
 
 - Windows native backend support (`native/encvm`)
-- native support for `MarshalIndent`
 - `map[string]T` marshal optimization
 
 If you run Velox on real workloads, benchmark reports, edge-case JSON samples, and focused PRs are highly valuable.

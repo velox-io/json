@@ -47,10 +47,14 @@
 
 /* Save VM state to context and return with an error code.
  * Saves PC as an int32 index (op - ops).
+ * Saves ops_ptr so Go can resume into the correct ops array
+ * (may differ from the initial ops_ptr after OP_INTERFACE switches
+ * to a cached Blueprint's ops).
  * Packs the 'first' flag into enc_flags so Go can restore it on resume. */
 #define VM_SAVE_AND_RETURN(err)                                                \
   do {                                                                         \
     ctx->buf_cur = buf;                                                        \
+    ctx->ops_ptr = ops;                                                        \
     ctx->pc = (int32_t)(op - ops);                                             \
     ctx->cur_base = base;                                                      \
     ctx->depth = depth;                                                        \
@@ -163,6 +167,7 @@ VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
       [OP_MAP_END] = DT_ENTRY(vj_op_map_end),
       [OP_OBJ_OPEN] = DT_ENTRY(vj_op_obj_open),
       [OP_OBJ_CLOSE] = DT_ENTRY(vj_op_obj_close),
+      [OP_ARRAY_BEGIN] = DT_ENTRY(vj_op_array_begin),
 
       /* Go-only fallback (0x3F) */
       [OP_FALLBACK] = DT_ENTRY(vj_op_yield),
@@ -607,6 +612,48 @@ vj_op_obj_close: {
   VM_NEXT();
 }
 
+vj_op_array_begin: {
+  /* Fixed-size array: data is inline at base + field_off.
+   * operand_a packs elem_size (low 16) | array_len (high 16).
+   * operand_b = body length (same as SLICE_BEGIN).
+   * Reuses VJ_FRAME_SLICE for the loop frame and opSliceEnd for back-edge. */
+  int32_t packed = op->operand_a;
+  int32_t elem_size = packed & 0xFFFF;
+  int32_t array_len = (uint32_t)packed >> 16;
+  const uint8_t *arr_data = base + op->field_off;
+
+  VM_CHECK(op->key_len + 1 + 2 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE + VM_INDENT_PAD(indent_depth + 1));
+  VM_WRITE_KEY();
+
+  if (array_len == 0) {
+    *buf++ = '[';
+    *buf++ = ']';
+    VM_JUMP(1 + op->operand_b + 1); /* skip body + SLICE_END */
+  }
+
+  *buf++ = '[';
+  VM_INDENT_INC();
+  VM_WRITE_INDENT();
+
+  if (__builtin_expect(depth >= VJ_MAX_DEPTH, 0)) {
+    VM_SAVE_AND_RETURN(VJ_ERR_STACK_OVERFLOW);
+  }
+  VjStackFrame *frame = &ctx->stack[depth];
+  frame->slice.iter_data = arr_data;
+  frame->slice.iter_count = array_len;
+  frame->slice.iter_idx = 0;
+  frame->slice.elem_size = elem_size;
+  frame->slice.loop_pc_op = op + 1;
+  frame->ret_base = base;
+  frame->first = first;
+  frame->frame_type = VJ_FRAME_SLICE; /* reuse slice frame */
+  depth++;
+
+  base = arr_data;
+  first = 1;
+  VM_NEXT();
+}
+
 vj_op_map_begin: {
   /* Map iteration is Go-driven. Yield to Go, which will:
    * - Initialize map iterator
@@ -666,24 +713,18 @@ vj_op_interface: {
     ctx->yield_info = VJ_YIELD_IFACE_MISS;
     VM_SAVE_AND_RETURN(VJ_ERR_YIELD);
   case VJ_IFACE_SWITCH_OPS:
-    /* Key was written; push interface frame and switch to cached Blueprint */
-    if (__builtin_expect(depth >= VJ_MAX_DEPTH, 0)) {
-      VM_SAVE_AND_RETURN(VJ_ERR_STACK_OVERFLOW);
-    }
-    {
-      VjStackFrame *frame = &ctx->stack[depth];
-      frame->iface.ret_op = op + 1;
-      frame->ret_base = base;
-      frame->first = first;
-      frame->frame_type = VJ_FRAME_IFACE;
-      frame->iface.ret_ops = ops;
-      depth++;
-    }
-    ops = iface_r.cached_ops;
-    op = &ops[0];
-    base = iface_r.data_ptr; /* set base to struct data inside interface */
-    first = 1;               /* interface value context: no leading comma */
-    VM_DISPATCH();           /* execute cached Blueprint ops */
+    /* Cached Blueprint found — yield to Go for encoding.
+     * Undo the speculative key write; Go will re-write key+value
+     * through its normal fallback path.
+     *
+     * We cannot inline the cached Blueprint's ops here because yields
+     * (fallback, map iteration, buffer full) inside the cached ops
+     * would confuse the Go-side handler which uses the parent Blueprint's
+     * Fallbacks map.  Yielding lets Go encode the interface value
+     * through its normal path, which correctly handles nested fallbacks. */
+    buf = iface_saved_buf;
+    first = iface_saved_first;
+    goto vj_op_yield;
   case VJ_IFACE_BUF_FULL:
     VM_SAVE_AND_RETURN(VJ_ERR_BUF_FULL);
   case VJ_IFACE_NAN_INF:

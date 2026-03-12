@@ -1,7 +1,9 @@
 lint:
+	go vet ./...
 	golangci-lint run --fix
 
 lint-ci:
+	go vet ./...
 	golangci-lint run --timeout 10m
 
 fmt:

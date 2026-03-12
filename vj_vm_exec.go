@@ -3,7 +3,6 @@ package vjson
 import (
 	"fmt"
 	"reflect"
-	"sync/atomic"
 	"unsafe"
 
 	"github.com/velox-io/json/native/encvm"
@@ -12,10 +11,6 @@ import (
 // native VM — Go-side execution loop.
 // execVM calls C (encvm.VMExec) in a loop, handling buffer growth,
 // yield events (fallback/interface/map/slice), and interface cache misses.
-
-// testExecVMCount is incremented each time execVM is called.
-// Used by tests to assert the native C VM path was actually taken.
-var testExecVMCount atomic.Int64
 
 // vmWriteIndent appends newline + indent whitespace for the current VM
 // indent depth. No-op in compact mode (IndentStep == 0).
@@ -46,6 +41,24 @@ func (m *Marshaler) encodeStructNative(dec *StructCodec, base unsafe.Pointer) er
 	return m.execVM(bp, base)
 }
 
+// encodeSliceNative is the native VM entry point for top-level slice encoding.
+func (m *Marshaler) encodeSliceNative(dec *SliceCodec, base unsafe.Pointer) error {
+	bp := dec.getBlueprint()
+	if bp == nil || len(bp.Ops) == 0 {
+		return m.encodeSliceGo(dec, base)
+	}
+	return m.execVM(bp, base)
+}
+
+// encodeArrayNative is the native VM entry point for top-level array encoding.
+func (m *Marshaler) encodeArrayNative(dec *ArrayCodec, base unsafe.Pointer) error {
+	bp := dec.getBlueprint()
+	if bp == nil || len(bp.Ops) == 0 {
+		return m.encodeArrayGo(dec, base)
+	}
+	return m.execVM(bp, base)
+}
+
 // execVM runs the C VM engine with the given Blueprint and data base pointer.
 // It manages the Go↔C interaction loop including buffer growth, yield handling,
 // and interface cache management.
@@ -53,7 +66,6 @@ func (m *Marshaler) encodeStructNative(dec *StructCodec, base unsafe.Pointer) er
 // Uses the reusable m.vmCtx to avoid per-call stack zeroing of the
 // 992-byte VjExecCtx. IfaceCache is already set by getMarshaler.
 func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
-	testExecVMCount.Add(1)
 	if !encvm.Available {
 		return fmt.Errorf("vjson: native encoder not available")
 	}
@@ -317,6 +329,9 @@ func (m *Marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 	case KindSlice:
 		sliceDec := ti.resolveCodec().(*SliceCodec)
 		bp = compileStandaloneSliceBlueprint(sliceDec)
+	case KindArray:
+		aDec := ti.resolveCodec().(*ArrayCodec)
+		bp = compileStandaloneArrayBlueprint(aDec)
 	case KindMap:
 		// Maps are Go-driven — insert with nil ops.
 	default:

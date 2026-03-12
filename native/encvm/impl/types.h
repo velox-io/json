@@ -63,6 +63,7 @@ enum OpType {
   OP_MAP_END      = 40, /* map iteration end */
   OP_OBJ_OPEN     = 41, /* write key + '{', set first=1 (no frame) */
   OP_OBJ_CLOSE    = 42, /* write '}', set first=0 (no frame) */
+  OP_ARRAY_BEGIN  = 43, /* array loop start (inline data, fixed length) */
 
   /* --- Go-only fallback --- */
   OP_FALLBACK    = 0x3F, /* custom marshalers, ,string, complex structs */

@@ -325,34 +325,84 @@ func scanNumberSpan(src []byte, idx int) (int, bool, error) {
 }
 
 func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
-	end, isFloat, numErr := scanNumberSpan(src, idx)
-	if numErr != nil {
-		return end, numErr
-	}
-
 	switch ti.Kind {
 	case KindInt, KindInt8, KindInt16, KindInt32, KindInt64:
+		end, v, isFloat, ok := scanInt64SinglePass(src, idx)
 		if isFloat {
-			return end, newUnmarshalTypeError("number", ti.Ext.Type, end)
+			// scanInt64SinglePass stopped at '.' or 'e/E'; need to scan
+			// through the full float to report correct end position.
+			numEnd, _, numErr := scanNumberSpan(src, idx)
+			if numErr != nil {
+				return numEnd, numErr
+			}
+			return numEnd, newUnmarshalTypeError("number", ti.Ext.Type, numEnd)
 		}
-		v, ok := parseInt64Checked(src, idx, end)
-		if !ok || !intFitsKind(v, ti.Kind) {
+		if !ok {
+			// Syntax error or overflow — distinguish by checking if we
+			// actually scanned any digits.
+			if end == idx || (end == idx+1 && src[idx] == '-') {
+				return end, newSyntaxError(fmt.Sprintf("vjson: invalid number at offset %d", idx), idx)
+			}
 			return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
 		}
-		WriteIntValue(ptr, ti.Kind, v)
+		if !intFitsKind(v, ti.Kind) {
+			return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
+		}
+		writeIntValue(ptr, ti.Kind, v)
+		return end, nil
+
 	case KindUint, KindUint8, KindUint16, KindUint32, KindUint64:
+		end, v, isFloat, ok := scanUint64SinglePass(src, idx)
 		if isFloat {
-			return end, newUnmarshalTypeError("number", ti.Ext.Type, end)
+			numEnd, _, numErr := scanNumberSpan(src, idx)
+			if numErr != nil {
+				return numEnd, numErr
+			}
+			return numEnd, newUnmarshalTypeError("number", ti.Ext.Type, numEnd)
 		}
-		// Negative numbers cannot be assigned to unsigned types.
-		if src[idx] == '-' {
+		if !ok {
+			if end == idx {
+				return end, newSyntaxError(fmt.Sprintf("vjson: invalid number at offset %d", idx), idx)
+			}
 			return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
 		}
-		v, ok := parseUint64Checked(src, idx, end)
-		if !ok || !uintFitsKind(v, ti.Kind) {
+		if !uintFitsKind(v, ti.Kind) {
 			return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
 		}
-		WriteUintValue(ptr, ti.Kind, v)
+		writeUintValue(ptr, ti.Kind, v)
+		return end, nil
+
+	case KindFloat64:
+		end, v, usedFast, scanErr := scanFloat64Fast(src, idx)
+		if scanErr != nil {
+			return end, scanErr
+		}
+		if usedFast {
+			*(*float64)(ptr) = v
+			return end, nil
+		}
+		// Fall back to strconv for complex numbers
+		fv, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 64)
+		if err != nil {
+			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
+		}
+		*(*float64)(ptr) = fv
+		return end, nil
+
+	default:
+		// Float32, Any, and other types: use existing two-pass approach
+		end, isFloat, numErr := scanNumberSpan(src, idx)
+		if numErr != nil {
+			return end, numErr
+		}
+		return sc.scanNumberTyped(src, idx, end, isFloat, ti, ptr)
+	}
+}
+
+// scanNumberTyped handles assigning a scanned number (src[idx:end]) to a typed field.
+// Extracted from the original scanNumber to be shared by the fallback float/any paths.
+func (sc *Parser) scanNumberTyped(src []byte, idx, end int, isFloat bool, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
+	switch ti.Kind {
 	case KindFloat32:
 		v, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 32)
 		if err != nil {
@@ -943,6 +993,8 @@ func (sc *Parser) scanArrayValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.P
 	switch ti.Kind {
 	case KindSlice:
 		return sc.scanArray(src, idx, ti.resolveCodec().(*SliceCodec), ptr)
+	case KindArray:
+		return sc.scanArrayFixed(src, idx, ti.resolveCodec().(*ArrayCodec), ptr)
 	case KindAny:
 		newIdx, arr, err := sc.scanArrayAny(src, idx)
 		if err != nil {
@@ -1039,6 +1091,139 @@ func (sc *Parser) scanArray(src []byte, idx int, sDec *SliceCodec, ptr unsafe.Po
 			sh.Data = base
 			sh.Len = sliceLen
 			sh.Cap = sliceCap
+			return idx + 1, nil
+		}
+		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in array, got %q", src[idx]), idx)
+	}
+}
+
+// scanArrayFixed decodes a JSON array into a Go fixed-size array [N]T.
+func (sc *Parser) scanArrayFixed(src []byte, idx int, aDec *ArrayCodec, ptr unsafe.Pointer) (int, error) {
+	if aDec.ElemTI.Kind == KindFloat64 {
+		return sc.scanArrayFixedFloat64(src, idx, aDec.ArrayLen, aDec.ElemSize, ptr)
+	}
+
+	idx++
+	idx = skipWSLong(src, idx)
+
+	if idx >= len(src) {
+		return idx, errUnexpectedEOF
+	}
+	if src[idx] == ']' {
+		zeroArrayElements(ptr, aDec.ElemSize, 0, aDec.ArrayLen)
+		return idx + 1, nil
+	}
+
+	elemSize := aDec.ElemSize
+	arrayLen := aDec.ArrayLen
+	count := 0
+
+	for {
+		if count < arrayLen {
+			elemPtr := unsafe.Add(ptr, uintptr(count)*elemSize)
+			var err error
+			idx, err = sc.scanValue(src, idx, aDec.ElemTI, elemPtr)
+			if err != nil {
+				return idx, err
+			}
+		} else {
+			var err error
+			idx, err = skipValue(src, idx)
+			if err != nil {
+				return idx, err
+			}
+		}
+		count++
+
+		idx = skipWS(src, idx)
+		if idx >= len(src) {
+			return idx, errUnexpectedEOF
+		}
+		if src[idx] == ',' {
+			idx++
+			idx = skipWSLong(src, idx)
+			continue
+		}
+		if src[idx] == ']' {
+			if count < arrayLen {
+				zeroArrayElements(ptr, elemSize, count, arrayLen)
+			}
+			return idx + 1, nil
+		}
+		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in array, got %q", src[idx]), idx)
+	}
+}
+
+// zeroArrayElements zeroes array elements from index 'from' to 'to' (exclusive).
+func zeroArrayElements(base unsafe.Pointer, elemSize uintptr, from, to int) {
+	start := unsafe.Add(base, uintptr(from)*elemSize)
+	n := uintptr(to-from) * elemSize
+	b := unsafe.Slice((*byte)(start), n)
+	clear(b)
+}
+
+// scanArrayFixedFloat64 is a specialized path for [N]float64 arrays.
+// Calls scanFloat64Fast directly and uses inline whitespace checks.
+func (sc *Parser) scanArrayFixedFloat64(src []byte, idx int, arrayLen int, elemSize uintptr, ptr unsafe.Pointer) (int, error) {
+	n := len(src)
+	idx++
+
+	if idx < n && src[idx] <= ' ' {
+		idx = skipWSLong(src, idx)
+	}
+
+	if idx >= n {
+		return idx, errUnexpectedEOF
+	}
+	if src[idx] == ']' {
+		zeroArrayElements(ptr, elemSize, 0, arrayLen)
+		return idx + 1, nil
+	}
+
+	count := 0
+	for {
+		if count < arrayLen {
+			elemPtr := unsafe.Add(ptr, uintptr(count)*elemSize)
+			end, v, usedFast, scanErr := scanFloat64Fast(src, idx)
+			if scanErr != nil {
+				return end, scanErr
+			}
+			if usedFast {
+				*(*float64)(elemPtr) = v
+			} else {
+				fv, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 64)
+				if err != nil {
+					return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
+				}
+				*(*float64)(elemPtr) = fv
+			}
+			idx = end
+		} else {
+			var err error
+			idx, err = skipValue(src, idx)
+			if err != nil {
+				return idx, err
+			}
+		}
+		count++
+
+		if idx < n && src[idx] <= ' ' {
+			idx = skipWS(src, idx)
+		}
+		if idx >= n {
+			return idx, errUnexpectedEOF
+		}
+		if src[idx] == ',' {
+			idx++
+			if idx < n && src[idx] <= ' ' {
+				idx = skipWSLong(src, idx)
+			}
+			continue
+		}
+		if src[idx] == ']' {
+			if count < arrayLen {
+				zeroArrayElements(ptr, elemSize, count, arrayLen)
+			}
 			return idx + 1, nil
 		}
 		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in array, got %q", src[idx]), idx)

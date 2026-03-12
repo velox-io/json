@@ -311,20 +311,16 @@ func renderMetricBar(b *strings.Builder, x, y, maxW int, val, maxVal, minVal flo
 	labelX := x + bw + 5
 
 	if showRatio && minVal > 0 && val > 0 {
-		// Efficiency = fastest / current (1.0 = fastest, <1.0 = slower than fastest)
-		efficiency := minVal / val
-		
+		ratio := val / minVal
+
 		fmt.Fprintf(b, `  <text x="%d" y="%d" class="bar-val">%s </text>`+"\n", labelX, textY, esc(label))
-		
-		// Show efficiency badge with appropriate styling
-		if efficiency >= 0.98 {
-			// Within 2% of fastest - mark as fastest
+
+		if ratio <= 1.02 {
 			fmt.Fprintf(b, `  <text x="%d" y="%d" class="badge-fast">★ 1.00x</text>`+"\n",
 				labelX+len(label)*7+3, textY)
 		} else {
-			// Slower than fastest - show relative efficiency
 			fmt.Fprintf(b, `  <text x="%d" y="%d" class="badge-ratio">%.2fx</text>`+"\n",
-				labelX+len(label)*7+3, textY, efficiency)
+				labelX+len(label)*7+3, textY, ratio)
 		}
 		return
 	}

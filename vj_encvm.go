@@ -47,6 +47,7 @@ const (
 	opMapEnd      uint16 = 40 // map iteration end (yield)
 	opObjOpen     uint16 = 41 // write key + '{', set first=1 (no frame push)
 	opObjClose    uint16 = 42 // write '}', set first=0 (no frame pop)
+	opArrayBegin  uint16 = 43 // array loop start (inline data, fixed length)
 
 	// Go-only fallback (0x3F).
 	opFallback uint16 = 0x3F // custom marshalers, ,string, complex structs

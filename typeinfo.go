@@ -38,6 +38,7 @@ const (
 	KindMap        // map type - Decoder field holds *MapCodec
 	KindRawMessage // json.RawMessage — raw JSON bytes, skip parse
 	KindNumber     // json.Number — raw number string, skip float64 conversion
+	KindArray      // fixed-size array [N]T — Decoder field holds *ArrayCodec
 )
 
 // tiFlag is a bitmask for hot-path checks in scanValue / encodeValue.
@@ -171,6 +172,8 @@ func KindForType(t reflect.Type) ElemTypeKind {
 		panic("vjson: non-empty interface types not supported: " + t.String())
 	case reflect.Map:
 		return KindMap
+	case reflect.Array:
+		return KindArray
 	default:
 		panic("vjson: unsupported type: " + t.String())
 	}
@@ -246,6 +249,8 @@ func getCodecSlow(t reflect.Type, wait bool) *TypeInfo {
 		e.ti.Codec = BuildPointerCodec(t)
 	case reflect.Map:
 		e.ti.Codec = BuildMapCodec(t)
+	case reflect.Array:
+		e.ti.Codec = BuildArrayCodec(t)
 	}
 
 	// json.RawMessage: override Kind to KindRawMessage and set the flag
@@ -604,6 +609,19 @@ type SliceCodec struct {
 	ElemRType      unsafe.Pointer
 	capHint        atomic.Int32 // adaptive: EMA of observed array lengths
 	emaAlpha       int32        // EMA smoothing denominator; 0 means default (2)
+
+	vm atomic.Pointer[encvmCache]
+}
+
+func (d *SliceCodec) vmCache() *encvmCache {
+	if p := d.vm.Load(); p != nil {
+		return p
+	}
+	p := &encvmCache{}
+	if d.vm.CompareAndSwap(nil, p) {
+		return p
+	}
+	return d.vm.Load()
 }
 
 // SetEMAAlpha sets the EMA smoothing denominator for adaptive array capacity.
@@ -627,6 +645,43 @@ func BuildSliceCodec(t reflect.Type) *SliceCodec {
 		ElemHasPtr:     typeContainsPointer(t.Elem()),
 		ElemRType:      rtypePtr(t.Elem()),
 		emaAlpha:       2,
+	}
+}
+
+// ArrayCodec holds pre-computed metadata for encoding/decoding [N]T arrays.
+type ArrayCodec struct {
+	ArrayType  reflect.Type
+	ElemType   reflect.Type
+	ElemSize   uintptr
+	ArrayLen   int // compile-time fixed N
+	ElemTI     *TypeInfo
+	ElemHasPtr bool
+	ElemRType  unsafe.Pointer
+
+	vm atomic.Pointer[encvmCache]
+}
+
+func (d *ArrayCodec) vmCache() *encvmCache {
+	if p := d.vm.Load(); p != nil {
+		return p
+	}
+	p := &encvmCache{}
+	if d.vm.CompareAndSwap(nil, p) {
+		return p
+	}
+	return d.vm.Load()
+}
+
+func BuildArrayCodec(t reflect.Type) *ArrayCodec {
+	elemTI := getCodecForCycle(t.Elem())
+	return &ArrayCodec{
+		ArrayType:  t,
+		ElemType:   t.Elem(),
+		ElemSize:   t.Elem().Size(),
+		ArrayLen:   t.Len(),
+		ElemTI:     elemTI,
+		ElemHasPtr: typeContainsPointer(t.Elem()),
+		ElemRType:  rtypePtr(t.Elem()),
 	}
 }
 

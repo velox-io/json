@@ -19,6 +19,7 @@ import (
 // =============================================================================
 
 func Benchmark_Unmarshal_Tiny_StdJSON(b *testing.B) {
+	b.SetBytes(int64(len(TinyJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Tiny
@@ -29,6 +30,7 @@ func Benchmark_Unmarshal_Tiny_StdJSON(b *testing.B) {
 }
 
 func Benchmark_Unmarshal_Tiny_Sonic(b *testing.B) {
+	b.SetBytes(int64(len(TinyJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Tiny
@@ -39,6 +41,7 @@ func Benchmark_Unmarshal_Tiny_Sonic(b *testing.B) {
 }
 
 func Benchmark_Unmarshal_Tiny_Segmentio(b *testing.B) {
+	b.SetBytes(int64(len(TinyJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Tiny
@@ -49,6 +52,7 @@ func Benchmark_Unmarshal_Tiny_Segmentio(b *testing.B) {
 }
 
 func Benchmark_Unmarshal_Tiny_GoJSON(b *testing.B) {
+	b.SetBytes(int64(len(TinyJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Tiny
@@ -59,6 +63,7 @@ func Benchmark_Unmarshal_Tiny_GoJSON(b *testing.B) {
 }
 
 func Benchmark_Unmarshal_Tiny_EasyJSON(b *testing.B) {
+	b.SetBytes(int64(len(TinyJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		if err := easyjson.UnmarshalTiny(TinyJSON); err != nil {
@@ -68,6 +73,7 @@ func Benchmark_Unmarshal_Tiny_EasyJSON(b *testing.B) {
 }
 
 func Benchmark_Unmarshal_Tiny_Velox(b *testing.B) {
+	b.SetBytes(int64(len(TinyJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var v Tiny
@@ -83,6 +89,7 @@ func Benchmark_Unmarshal_Tiny_Velox(b *testing.B) {
 
 func Benchmark_Unmarshal_TinyCompact_StdJSON(b *testing.B) {
 	data := LoadTinyCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Tiny
@@ -94,6 +101,7 @@ func Benchmark_Unmarshal_TinyCompact_StdJSON(b *testing.B) {
 
 func Benchmark_Unmarshal_TinyCompact_Sonic(b *testing.B) {
 	data := LoadTinyCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Tiny
@@ -105,6 +113,7 @@ func Benchmark_Unmarshal_TinyCompact_Sonic(b *testing.B) {
 
 func Benchmark_Unmarshal_TinyCompact_Segmentio(b *testing.B) {
 	data := LoadTinyCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Tiny
@@ -116,6 +125,7 @@ func Benchmark_Unmarshal_TinyCompact_Segmentio(b *testing.B) {
 
 func Benchmark_Unmarshal_TinyCompact_GoJSON(b *testing.B) {
 	data := LoadTinyCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Tiny
@@ -127,6 +137,7 @@ func Benchmark_Unmarshal_TinyCompact_GoJSON(b *testing.B) {
 
 func Benchmark_Unmarshal_TinyCompact_EasyJSON(b *testing.B) {
 	data := LoadTinyCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		if err := easyjson.UnmarshalTiny(data); err != nil {
@@ -137,6 +148,7 @@ func Benchmark_Unmarshal_TinyCompact_EasyJSON(b *testing.B) {
 
 func Benchmark_Unmarshal_TinyCompact_Velox(b *testing.B) {
 	data := LoadTinyCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var v Tiny
@@ -151,6 +163,7 @@ func Benchmark_Unmarshal_TinyCompact_Velox(b *testing.B) {
 // =============================================================================
 
 func Benchmark_Unmarshal_Small_StdJSON(b *testing.B) {
+	b.SetBytes(int64(len(SmallJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Book
@@ -161,6 +174,7 @@ func Benchmark_Unmarshal_Small_StdJSON(b *testing.B) {
 }
 
 func Benchmark_Unmarshal_Small_Sonic(b *testing.B) {
+	b.SetBytes(int64(len(SmallJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Book
@@ -171,6 +185,7 @@ func Benchmark_Unmarshal_Small_Sonic(b *testing.B) {
 }
 
 func Benchmark_Unmarshal_Small_Segmentio(b *testing.B) {
+	b.SetBytes(int64(len(SmallJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Book
@@ -181,6 +196,7 @@ func Benchmark_Unmarshal_Small_Segmentio(b *testing.B) {
 }
 
 func Benchmark_Unmarshal_Small_GoJSON(b *testing.B) {
+	b.SetBytes(int64(len(SmallJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Book
@@ -191,6 +207,7 @@ func Benchmark_Unmarshal_Small_GoJSON(b *testing.B) {
 }
 
 func Benchmark_Unmarshal_Small_EasyJSON(b *testing.B) {
+	b.SetBytes(int64(len(SmallJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		if err := easyjson.UnmarshalSmall(SmallJSON); err != nil {
@@ -200,6 +217,7 @@ func Benchmark_Unmarshal_Small_EasyJSON(b *testing.B) {
 }
 
 func Benchmark_Unmarshal_Small_Velox(b *testing.B) {
+	b.SetBytes(int64(len(SmallJSON)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var v Book
@@ -215,6 +233,7 @@ func Benchmark_Unmarshal_Small_Velox(b *testing.B) {
 
 func Benchmark_Unmarshal_SmallCompact_StdJSON(b *testing.B) {
 	data := LoadSmallCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Book
@@ -226,6 +245,7 @@ func Benchmark_Unmarshal_SmallCompact_StdJSON(b *testing.B) {
 
 func Benchmark_Unmarshal_SmallCompact_Sonic(b *testing.B) {
 	data := LoadSmallCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Book
@@ -237,6 +257,7 @@ func Benchmark_Unmarshal_SmallCompact_Sonic(b *testing.B) {
 
 func Benchmark_Unmarshal_SmallCompact_Segmentio(b *testing.B) {
 	data := LoadSmallCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Book
@@ -248,6 +269,7 @@ func Benchmark_Unmarshal_SmallCompact_Segmentio(b *testing.B) {
 
 func Benchmark_Unmarshal_SmallCompact_GoJSON(b *testing.B) {
 	data := LoadSmallCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var s Book
@@ -259,6 +281,7 @@ func Benchmark_Unmarshal_SmallCompact_GoJSON(b *testing.B) {
 
 func Benchmark_Unmarshal_SmallCompact_EasyJSON(b *testing.B) {
 	data := LoadSmallCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		if err := easyjson.UnmarshalSmall(data); err != nil {
@@ -269,6 +292,7 @@ func Benchmark_Unmarshal_SmallCompact_EasyJSON(b *testing.B) {
 
 func Benchmark_Unmarshal_SmallCompact_Velox(b *testing.B) {
 	data := LoadSmallCompactJSON()
+	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 	for b.Loop() {
 		var v Book

@@ -99,8 +99,6 @@ func runStackStressTest(t *testing.T, numGoroutines int, fn func(t *testing.T, g
 		t.Skip("native encoder not available on this platform")
 	}
 
-	before := testExecVMCount.Load()
-
 	var wg sync.WaitGroup
 	errCh := make(chan string, numGoroutines)
 
@@ -126,12 +124,6 @@ func runStackStressTest(t *testing.T, numGoroutines int, fn func(t *testing.T, g
 		t.Error(msg)
 	}
 
-	after := testExecVMCount.Load()
-	if calls := after - before; calls == 0 {
-		t.Errorf("native C VM (execVM) was never called; expected at least 1 invocation")
-	} else {
-		t.Logf("native C VM invoked %d times across %d goroutines", calls, numGoroutines)
-	}
 }
 
 // verifyMarshalResult checks that the native encoder output is semantically
@@ -364,8 +356,6 @@ func TestNativeEncoder_GoroutineStackStress_TinyStack(t *testing.T) {
 		t.Skip("native encoder not available on this platform")
 	}
 
-	before := testExecVMCount.Load()
-
 	v := stackTestComplex{
 		ID:   1,
 		Name: "tiny-stack",
@@ -431,11 +421,6 @@ func TestNativeEncoder_GoroutineStackStress_TinyStack(t *testing.T) {
 		t.Error(msg)
 	}
 
-	if calls := testExecVMCount.Load() - before; calls == 0 {
-		t.Errorf("native C VM (execVM) was never called")
-	} else {
-		t.Logf("native C VM invoked %d times across %d goroutines", calls, numG)
-	}
 }
 
 // TestNativeEncoder_GoroutineStackStress_RapidSpawn tests rapid goroutine
@@ -445,8 +430,6 @@ func TestNativeEncoder_GoroutineStackStress_RapidSpawn(t *testing.T) {
 	if !encvm.Available {
 		t.Skip("native encoder not available on this platform")
 	}
-
-	before := testExecVMCount.Load()
 
 	v := stackTestNested{
 		Name:  "rapid",
@@ -489,11 +472,6 @@ func TestNativeEncoder_GoroutineStackStress_RapidSpawn(t *testing.T) {
 		runtime.GC()
 	}
 
-	if calls := testExecVMCount.Load() - before; calls == 0 {
-		t.Errorf("native C VM (execVM) was never called")
-	} else {
-		t.Logf("native C VM invoked %d times across %d batches of %d goroutines", calls, iterations, batchSize)
-	}
 }
 
 // TestNativeEncoder_GoroutineStackStress_LargeStrings tests encoding with

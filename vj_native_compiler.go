@@ -194,6 +194,16 @@ func emitStructBody(b *blueprintBuilder, fixups *[]keyFixup, dec *StructCodec, b
 				emitSlice(b, fixups, fi, fieldOff, sliceDec)
 			}
 
+		case KindArray:
+			aDec := fi.resolveCodec().(*ArrayCodec)
+			// [N]byte needs base64 encoding — yield to Go.
+			if aDec.ElemTI.Kind == KindUint8 && aDec.ElemSize == 1 {
+				emitYield(b, fixups, fi, fieldOff, i)
+				continue
+			}
+			// Arrays can't be nil; omitempty is not meaningful.
+			emitArray(b, fixups, fi, fieldOff, aDec)
+
 		case KindMap:
 			mapDec := fi.resolveCodec().(*MapCodec)
 			if needsOmitempty {
@@ -355,6 +365,10 @@ func emitDerefBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) {
 		sliceDec := elemTI.resolveCodec().(*SliceCodec)
 		emitSliceInner(b, fixups, 0, sliceDec)
 
+	case KindArray:
+		aDec := elemTI.resolveCodec().(*ArrayCodec)
+		emitArrayInner(b, fixups, 0, aDec)
+
 	case KindMap:
 		mapDec := elemTI.resolveCodec().(*MapCodec)
 		emitMapInner(b, fixups, 0, elemTI, mapDec)
@@ -436,6 +450,75 @@ func emitSliceInner(b *blueprintBuilder, fixups *[]keyFixup, fieldOff uintptr, s
 	b.ops[beginIdx].OperandB = int32(bodyLen)
 }
 
+// emitArray emits ARRAY_BEGIN + element body + SLICE_END for an array field.
+func emitArray(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fieldOff uintptr, aDec *ArrayCodec) {
+	poolOff, keyLen := b.addKey(fi.Ext.KeyBytes)
+
+	// Pack elem_size (low 16) | array_len (high 16) into operand_a.
+	packed := int32(aDec.ElemSize&0xFFFF) | int32(aDec.ArrayLen&0xFFFF)<<16
+
+	beginIdx := b.emit(VjOpStep{
+		OpType:   opArrayBegin,
+		KeyLen:   keyLen,
+		FieldOff: uint32(fieldOff),
+		OperandA: packed,
+		// OperandB will be patched to body_len
+	})
+	if keyLen > 0 {
+		*fixups = append(*fixups, keyFixup{opIdx: beginIdx, poolOffset: poolOff})
+	}
+
+	bodyStart := b.pc()
+
+	// Emit element body (offset=0, base points to elem[i])
+	emitElementBody(b, fixups, aDec.ElemTI)
+
+	// Reuse SLICE_END for loop back-edge
+	b.emit(VjOpStep{
+		OpType: opSliceEnd,
+	})
+
+	bodyLen := b.pc() - bodyStart - 1
+	b.ops[beginIdx].OperandB = int32(bodyLen)
+}
+
+// emitArrayInner is like emitArray but without key bytes (for deref'd pointers / top-level).
+func emitArrayInner(b *blueprintBuilder, fixups *[]keyFixup, fieldOff uintptr, aDec *ArrayCodec) {
+	packed := int32(aDec.ElemSize&0xFFFF) | int32(aDec.ArrayLen&0xFFFF)<<16
+
+	beginIdx := b.emit(VjOpStep{
+		OpType:   opArrayBegin,
+		FieldOff: uint32(fieldOff),
+		OperandA: packed,
+	})
+
+	bodyStart := b.pc()
+	emitElementBody(b, fixups, aDec.ElemTI)
+	b.emit(VjOpStep{OpType: opSliceEnd})
+
+	bodyLen := b.pc() - bodyStart - 1
+	b.ops[beginIdx].OperandB = int32(bodyLen)
+}
+
+// compileStandaloneArrayBlueprint builds a Blueprint for encoding a fixed-size array
+// whose type was discovered at runtime (e.g. inside an interface{}).
+func compileStandaloneArrayBlueprint(dec *ArrayCodec) *Blueprint {
+	var b blueprintBuilder
+	b.fallbacks = make(map[int]*fbInfo)
+	b.visiting = make(map[reflect.Type]bool)
+	var fixups []keyFixup
+
+	emitArrayInner(&b, &fixups, 0, dec)
+	b.emit(VjOpStep{OpType: opEnd})
+
+	applyKeyFixups(&b, fixups)
+	return &Blueprint{
+		Ops:       b.ops,
+		KeyPool:   b.keyPool,
+		Fallbacks: b.fallbacks,
+	}
+}
+
 // emitElementBody emits the instructions for encoding a single element
 // (used in slice loops). base points to the element.
 func emitElementBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) {
@@ -496,6 +579,10 @@ func emitElementBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) 
 	case KindSlice:
 		sliceDec := elemTI.resolveCodec().(*SliceCodec)
 		emitSliceInner(b, fixups, 0, sliceDec)
+
+	case KindArray:
+		aDec := elemTI.resolveCodec().(*ArrayCodec)
+		emitArrayInner(b, fixups, 0, aDec)
 
 	case KindMap:
 		mapDec := elemTI.resolveCodec().(*MapCodec)
@@ -623,6 +710,22 @@ func (dec *StructCodec) getBlueprint() *Blueprint {
 	cache := dec.vmCache()
 	cache.once.Do(func() {
 		cache.blueprint = compileBlueprint(dec)
+	})
+	return cache.blueprint
+}
+
+func (d *SliceCodec) getBlueprint() *Blueprint {
+	cache := d.vmCache()
+	cache.once.Do(func() {
+		cache.blueprint = compileStandaloneSliceBlueprint(d)
+	})
+	return cache.blueprint
+}
+
+func (d *ArrayCodec) getBlueprint() *Blueprint {
+	cache := d.vmCache()
+	cache.once.Do(func() {
+		cache.blueprint = compileStandaloneArrayBlueprint(d)
 	})
 	return cache.blueprint
 }

@@ -33,8 +33,7 @@ func (p *parserPool) Get() *Parser {
 }
 
 func (p *parserPool) Put(sc *Parser) {
-	// Arena may still be referenced by zero-copy strings; keep the
-	// block if < half-full, else release it for a fresh allocation.
+	// Keep lightly-used arena blocks; drop heavily-used ones.
 	if sc.arenaOff > arenaBlockSize/2 {
 		sc.arenaData = nil
 		sc.arenaOff = 0
@@ -50,7 +49,7 @@ func (p *parserPool) Put(sc *Parser) {
 
 func newParser() *Parser {
 	return &Parser{
-		// Start with half-size arena so first Put() keeps it.
+		// Start smaller so the first pooled return is retained.
 		arenaData: make([]byte, arenaBlockSize/2),
 		ptrAllocs: make(map[unsafe.Pointer]*rtypeAllocator, 8),
 	}
@@ -76,26 +75,22 @@ func WithCopyString() UnmarshalOption {
 // v must be a non-nil pointer. Strings may reference data (zero-copy);
 // the caller must not modify data after this call.
 func Unmarshal[T any](data []byte, v *T, opts ...UnmarshalOption) error {
-	sc := parsers.Get()
-	defer parsers.Put(sc)
-	for _, o := range opts {
-		o(sc)
-	}
-	return unmarshalInto(sc, data, v)
-}
-
-func unmarshalInto(sc *Parser, data []byte, v any) error {
-	rv := reflect.ValueOf(v)
-	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		return &InvalidUnmarshalError{Type: reflect.TypeOf(v)}
+	if v == nil {
+		return &InvalidUnmarshalError{Type: reflect.TypeFor[*T]()}
 	}
 	if len(data) == 0 {
 		return newSyntaxError("vjson: unexpected end of JSON input", 0)
 	}
 
-	elemType := rv.Elem().Type()
-	ti := GetCodec(elemType)
-	ptr := rv.UnsafePointer()
+	sc := parsers.Get()
+	defer parsers.Put(sc)
+	for _, o := range opts {
+		o(sc)
+	}
+
+	// Fast path: avoid interface boxing and reflect.ValueOf.
+	ti := GetCodec(reflect.TypeFor[T]())
+	ptr := unsafe.Pointer(v)
 
 	idx := skipWS(data, 0)
 	newIdx, err := sc.scanValue(data, idx, ti, ptr)
