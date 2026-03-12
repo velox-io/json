@@ -34,7 +34,7 @@ func TestCVjStackFrameSize(t *testing.T) {
 }
 
 func TestCVjEncodingCtxSize(t *testing.T) {
-	const want = 432 // 48 header + 16 * 24 stack
+	const want = 448 // 64 header + 16 * 24 stack
 	got := unsafe.Sizeof(CVjEncodingCtx{})
 	if got != want {
 		t.Fatalf("sizeof(CVjEncodingCtx) = %d, want %d", got, want)
@@ -58,7 +58,9 @@ func TestCVjEncodingCtxFieldOffsets(t *testing.T) {
 		{"ErrorCode", unsafe.Pointer(&ctx.ErrorCode), 36},
 		{"EncFlags", unsafe.Pointer(&ctx.EncFlags), 40},
 		{"EscOpIdx", unsafe.Pointer(&ctx.EscOpIdx), 44},
-		{"Stack", unsafe.Pointer(&ctx.Stack), 48},
+		{"IfaceTypeTable", unsafe.Pointer(&ctx.IfaceTypeTable), 48},
+		{"IfaceTypeCount", unsafe.Pointer(&ctx.IfaceTypeCount), 56},
+		{"Stack", unsafe.Pointer(&ctx.Stack), 64},
 	}
 
 	for _, c := range checks {

@@ -1,6 +1,8 @@
 package vjson
 
 import (
+	"reflect"
+	"sort"
 	"sync"
 	"unsafe"
 
@@ -42,20 +44,23 @@ type CVjStackFrame struct {
 	_pad    int32          // alignment padding
 }
 
-// CVjEncodingCtx mirrors C VjEncodingCtx (encoder.h Section 6).
+// CVjEncodingCtx mirrors C VjEncodingCtx (encoder_types.h Section 6).
 //
 // This is the sole state passed between Go and the C engine.
-// Total: 48 bytes header + 16 * 24 bytes stack = 432 bytes.
+// Total: 64 bytes header + 16 * 24 bytes stack = 448 bytes.
 type CVjEncodingCtx struct {
-	BufCur    unsafe.Pointer // current write position
-	BufEnd    unsafe.Pointer // one past last writable byte
-	CurOp     unsafe.Pointer // *COpStep — current instruction
-	CurBase   unsafe.Pointer // current struct base address
-	Depth     int32          // stack depth (0 = top-level)
-	ErrorCode int32          // VjError enum value
-	EncFlags  uint32         // VjEncFlags bitmask
-	EscOpIdx  uint32         // index of op needing Go fallback
-	Stack     [vjMaxDepth]CVjStackFrame
+	BufCur         unsafe.Pointer // current write position
+	BufEnd         unsafe.Pointer // one past last writable byte
+	CurOp          unsafe.Pointer // *COpStep — current instruction
+	CurBase        unsafe.Pointer // current struct base address
+	Depth          int32          // stack depth (0 = top-level)
+	ErrorCode      int32          // VjError enum value
+	EncFlags       uint32         // VjEncFlags bitmask
+	EscOpIdx       uint32         // index of op needing Go fallback
+	IfaceTypeTable unsafe.Pointer // *CIfaceTypeEntry sorted type tag table
+	IfaceTypeCount int32          // number of entries in type tag table
+	_pad2          int32          // alignment padding
+	Stack          [vjMaxDepth]CVjStackFrame
 }
 
 // ================================================================
@@ -64,7 +69,8 @@ type CVjEncodingCtx struct {
 
 var _ [24]byte = [unsafe.Sizeof(COpStep{})]byte{}
 var _ [24]byte = [unsafe.Sizeof(CVjStackFrame{})]byte{}
-var _ [432]byte = [unsafe.Sizeof(CVjEncodingCtx{})]byte{}
+var _ [448]byte = [unsafe.Sizeof(CVjEncodingCtx{})]byte{}
+var _ [16]byte = [unsafe.Sizeof(CIfaceTypeEntry{})]byte{}
 
 // CVjArrayCtx mirrors C VjArrayCtx (encoder.h Section 11).
 //
@@ -72,16 +78,78 @@ var _ [432]byte = [unsafe.Sizeof(CVjEncodingCtx{})]byte{}
 // can loop over elements entirely in C.
 type CVjArrayCtx struct {
 	Enc      CVjEncodingCtx // offset 0
-	ArrData  unsafe.Pointer // offset 432 — array base pointer
-	ArrCount int64          // offset 440 — total element count
-	ArrIdx   int64          // offset 448 — current element index (for resume)
-	ElemSize int64          // offset 456 — sizeof(element)
-	ElemOps  unsafe.Pointer // offset 464 — *COpStep for each element
+	ArrData  unsafe.Pointer // offset 448 — array base pointer
+	ArrCount int64          // offset 456 — total element count
+	ArrIdx   int64          // offset 464 — current element index (for resume)
+	ElemSize int64          // offset 472 — sizeof(element)
+	ElemOps  unsafe.Pointer // offset 480 — *COpStep for each element
 }
 
 // Compile-time size assertion for CVjArrayCtx.
-// 432 (VjEncodingCtx) + 8 + 8 + 8 + 8 + 8 = 472 bytes.
-var _ [472]byte = [unsafe.Sizeof(CVjArrayCtx{})]byte{}
+// 448 (VjEncodingCtx) + 8 + 8 + 8 + 8 + 8 = 488 bytes.
+var _ [488]byte = [unsafe.Sizeof(CVjArrayCtx{})]byte{}
+
+// CIfaceTypeEntry mirrors C VjIfaceTypeEntry (encoder_types.h).
+//
+// Maps a Go *abi.Type pointer to a primitive opcode tag for inline
+// interface{} encoding in the C engine.  16 bytes with padding.
+type CIfaceTypeEntry struct {
+	TypePtr unsafe.Pointer // *abi.Type (address-comparable)
+	Tag     uint8          // OP_BOOL..OP_STRING, or 0 = unknown
+	_pad    [7]byte        // alignment padding
+}
+
+// ifaceTypeTable is a global sorted array of primitive type→tag mappings.
+// Built once at first use, then reused for all C engine calls.
+// Sorted by TypePtr (ascending) for binary search in C.
+var (
+	ifaceTypeTable     []CIfaceTypeEntry
+	ifaceTypeTableOnce sync.Once
+)
+
+func getIfaceTypeTable() []CIfaceTypeEntry {
+	ifaceTypeTableOnce.Do(func() {
+		entries := []struct {
+			t   reflect.Type
+			tag uint8
+		}{
+			{reflect.TypeOf(false), uint8(opBool)},
+			{reflect.TypeOf(int(0)), uint8(opInt)},
+			{reflect.TypeOf(int8(0)), uint8(opInt8)},
+			{reflect.TypeOf(int16(0)), uint8(opInt16)},
+			{reflect.TypeOf(int32(0)), uint8(opInt32)},
+			{reflect.TypeOf(int64(0)), uint8(opInt64)},
+			{reflect.TypeOf(uint(0)), uint8(opUint)},
+			{reflect.TypeOf(uint8(0)), uint8(opUint8)},
+			{reflect.TypeOf(uint16(0)), uint8(opUint16)},
+			{reflect.TypeOf(uint32(0)), uint8(opUint32)},
+			{reflect.TypeOf(uint64(0)), uint8(opUint64)},
+			{reflect.TypeOf(float32(0)), uint8(opFloat32)},
+			{reflect.TypeOf(float64(0)), uint8(opFloat64)},
+			{reflect.TypeOf(""), uint8(opString)},
+		}
+		table := make([]CIfaceTypeEntry, len(entries))
+		for i, e := range entries {
+			table[i] = CIfaceTypeEntry{
+				TypePtr: rtypePtr(e.t),
+				Tag:     e.tag,
+			}
+		}
+		// Sort by TypePtr for binary search in C.
+		sort.Slice(table, func(i, j int) bool {
+			return uintptr(table[i].TypePtr) < uintptr(table[j].TypePtr)
+		})
+		ifaceTypeTable = table
+	})
+	return ifaceTypeTable
+}
+
+// setIfaceTypeTable populates the interface type tag table in a VjEncodingCtx.
+func setIfaceTypeTable(ctx *CVjEncodingCtx) {
+	table := getIfaceTypeTable()
+	ctx.IfaceTypeTable = unsafe.Pointer(&table[0])
+	ctx.IfaceTypeCount = int32(len(table))
+}
 
 // ================================================================
 // C engine constants — mirror native/impl/encoder.h enums
@@ -112,6 +180,7 @@ const (
 	opRawMessage uint16 = 19
 	opNumber     uint16 = 20
 	opByteSlice  uint16 = 21
+	opFallback   uint16 = 22 // Go-only fallback (marshalers, complex structs)
 	opEnd        uint16 = 0xFF
 
 	// Flag bit OR-ed into OpType to indicate omitempty semantics.
@@ -181,13 +250,15 @@ func compileStructOps(dec *StructCodec) compiledOps {
 		}
 
 		// Fields with custom marshalers or ,string tag need Go encoding.
-		// Mark them as opInterface to trigger vj_op_fallback in C.
+		// Mark them as opFallback to trigger vj_op_fallback in C.
+		// Note: opInterface (17) is reserved for actual interface{} fields
+		// where the C engine can attempt inline encoding of primitive values.
 		if fi.Flags&(tiFlagHasMarshalFn|tiFlagHasTextMarshalFn|tiFlagQuoted) != 0 {
-			op.OpType = opInterface
+			op.OpType = opFallback
 		}
 
 		// Set omitempty flag so the C engine skips zero-valued fields.
-		// For opInterface fields, vj_is_zero returns 0 (never skip),
+		// For opInterface/opFallback fields, vj_is_zero returns 0 (never skip),
 		// so the Go-side fallback handler checks omitempty instead.
 		if fi.Flags&tiFlagOmitEmpty != 0 {
 			op.OpType |= opFlagOmitempty
@@ -202,7 +273,7 @@ func compileStructOps(dec *StructCodec) compiledOps {
 
 		// Nested struct: recursively compile sub-instructions only if
 		// the sub-struct is fully native-encodable. If not, mark this
-		// field as a fallback op (opInterface) so the C engine triggers
+		// field as a fallback op (opFallback) so the C engine triggers
 		// a top-level fallback — Go handles the entire nested struct.
 		// This ensures fallback always occurs at depth=0, keeping the
 		// hot resume logic simple (no nested stack reconstruction).
@@ -224,15 +295,15 @@ func compileStructOps(dec *StructCodec) compiledOps {
 				)
 				keyRefs = append(keyRefs, subOpsBytes)
 			} else {
-				// Sub-struct has unsupported fields — use opInterface
+				// Sub-struct has unsupported fields — use opFallback
 				// to route to vj_op_fallback in the C engine.
-				op.OpType = opInterface
+				op.OpType = opFallback
 			}
 		}
 
 		// Pointer field: compile sub-ops describing the element type.
 		// Only proceed if op.OpType is still opPointer (not overridden
-		// by marshalers/quoted check above which sets opInterface).
+		// by marshalers/quoted check above which sets opFallback).
 		if fi.Kind == KindPointer && op.OpType&opTypeMask == opPointer {
 			keyRefs = compilePointerSubOps(&op, fi, keyRefs)
 		}
@@ -295,7 +366,7 @@ func compilePointerSubOps(op *COpStep, fi *TypeInfo, keyRefs [][]byte) [][]byte 
 	elemTI := pDec.ElemTI
 
 	if !canNativeEncodePointerElem(elemTI) {
-		op.OpType = opInterface
+		op.OpType = opFallback
 		return keyRefs
 	}
 
@@ -534,6 +605,7 @@ func nativeEncodeStruct(buf []byte, base unsafe.Pointer, ops []COpStep, startIdx
 	ctx.CurOp = unsafe.Pointer(&ops[startIdx])
 	ctx.CurBase = base
 	ctx.EncFlags = flags
+	setIfaceTypeTable(&ctx)
 
 	encoder.Encode(unsafe.Pointer(&ctx))
 
@@ -574,6 +646,7 @@ func nativeEncodeStructFast(buf []byte, base unsafe.Pointer, ops []COpStep, flag
 	ctx.CurOp = unsafe.Pointer(&ops[0])
 	ctx.CurBase = base
 	ctx.EncFlags = flags
+	setIfaceTypeTable(&ctx)
 
 	encoder.Encode(unsafe.Pointer(&ctx))
 
@@ -604,6 +677,7 @@ func nativeEncodeArray(buf []byte, data unsafe.Pointer, count int,
 	actx.Enc.BufCur = bufStart
 	actx.Enc.BufEnd = unsafe.Add(bufStart, len(buf))
 	actx.Enc.EncFlags = flags
+	setIfaceTypeTable(&actx.Enc)
 	actx.ArrData = data
 	actx.ArrCount = int64(count)
 	actx.ArrIdx = int64(startIdx)
