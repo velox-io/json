@@ -13,7 +13,24 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define VJ_MAX_DEPTH 16
+#define VJ_MAX_DEPTH 24
+
+/* ================================================================
+ *  Debug Trace Ring Buffer
+ *
+ *  When VJ_ENCVM_DEBUG is defined, VjExecCtx gains a pointer to
+ *  an external VjTraceBuf.  C writes trace entries via VM_TRACE();
+ *  Go reads/prints them on each buffer exit.
+ *  Size must be a power of 2 for fast modular indexing.
+ * ================================================================ */
+
+#define VJ_TRACE_BUF_SIZE 16384  /* 16KB */
+
+typedef struct VjTraceBuf {
+  uint32_t head;                      /* write position (wraps via & mask) */
+  uint32_t total;                     /* total bytes ever written (overflow detect) */
+  uint8_t  data[VJ_TRACE_BUF_SIZE];  /* ring buffer */
+} VjTraceBuf;
 
 /* ================================================================
  *  OpType — VM instruction opcodes
@@ -64,6 +81,8 @@ enum OpType {
   OP_OBJ_OPEN     = 41, /* write key + '{', set first=1 (no frame) */
   OP_OBJ_CLOSE    = 42, /* write '}', set first=0 (no frame) */
   OP_ARRAY_BEGIN  = 43, /* array loop start (inline data, fixed length) */
+  OP_MAP_STR_KV   = 44, /* encode one map[string]string entry (key + value, both escaped) */
+  OP_MAP_STR_STR  = 45, /* C-native Swiss Map iteration for map[string]string */
 
   /* --- Go-only fallback --- */
   OP_FALLBACK    = 0x3F, /* custom marshalers, ,string, complex structs */
@@ -270,45 +289,64 @@ _Static_assert(offsetof(VjOpStep, operand_b) == 20, "VjOpStep.operand_b offset")
 
 /* ================================================================
  *  Stack Frame Types & Layout
+ *
+ *  Unified call/loop stack.  Every frame stores a full "return
+ *  address" (ret_ops, ret_pc, ret_base) so the VM can switch
+ *  between multiple ops arrays (needed for future OP_CALL/OP_RET
+ *  and ops-based JIT).
+ *
+ *  VJ_FRAME_CALL — struct, ptr, interface, future call frames.
+ *  VJ_FRAME_LOOP — slice / array iteration (needs extra state).
  * ================================================================ */
 
 enum VjFrameType {
-  VJ_FRAME_STRUCT = 0,
-  VJ_FRAME_SLICE  = 1,
-  VJ_FRAME_IFACE  = 2,
+  VJ_FRAME_CALL = 0,  /* generic call frame (struct, ptr, iface) */
+  VJ_FRAME_LOOP = 1,  /* loop iteration frame (slice, array) */
+  VJ_FRAME_MAP  = 2,  /* map[string]string C-native iteration */
 };
 
 typedef struct VjStackFrame {
-  /* Common (all frame types) */
-  const uint8_t  *ret_base;    /*  0: parent struct/elem base address */
-  int32_t         first;       /*  8: parent first-field flag */
-  int32_t         frame_type;  /* 12: VJ_FRAME_STRUCT / SLICE / IFACE */
+  /* ---- Common fields (0-31): return address ---- */
+  const VjOpStep *ret_ops;     /*  0: parent ops array base */
+  int32_t         ret_pc;      /*  8: return PC (index into ret_ops) */
+  int32_t         frame_type;  /* 12: VJ_FRAME_CALL or VJ_FRAME_LOOP */
+  const uint8_t  *ret_base;    /* 16: parent data base address */
+  int32_t         first;       /* 24: parent first-field flag */
+  int32_t         elem_size;   /* 28: element size (LOOP only, 0 for CALL) */
 
+  /* ---- Frame-type-specific (32-55) ---- */
   union {
-    /* STRUCT / PTR */
+    /* VJ_FRAME_CALL: no extra data; ret_ops/ret_pc/ret_base suffice. */
     struct {
-      const VjOpStep *ret_op;    /* 16: return instruction pointer */
-    } ctrl;  /* 8 bytes */
+      int64_t _reserved[3];  /* 24 bytes reserved */
+    } call;
 
-    /* IFACE */
+    /* VJ_FRAME_LOOP: slice/array iteration state */
     struct {
-      const VjOpStep *ret_op;    /* 16: return instruction pointer */
-      const VjOpStep *ret_ops;   /* 24: parent ops base address */
-    } iface;  /* 16 bytes */
+      const uint8_t  *iter_data;   /* 32: data start pointer */
+      int64_t         iter_count;  /* 40: total element count */
+      int64_t         iter_idx;    /* 48: current index (0-based) */
+    } loop;  /* 24 bytes */
 
-    /* SLICE */
+    /* VJ_FRAME_MAP: Swiss Map (map[string]string) iteration state */
     struct {
-      const uint8_t  *iter_data;   /* 16: slice data start */
-      int64_t         iter_count;  /* 24: total elements */
-      int64_t         iter_idx;    /* 32: current index */
-      const VjOpStep *loop_pc_op;  /* 40: loop body first instruction */
-      int32_t         elem_size;   /* 48: element size in bytes */
-      int32_t         _pad;        /* 52: alignment */
-    } slice;  /* 40 bytes */
+      const void *map_ptr;       /* 32: GoSwissMap* */
+      int32_t     dir_idx;       /* 40: directory index (large map) */
+      int32_t     group_idx;     /* 44: group index within current table */
+      int32_t     slot_idx;      /* 48: slot index within current group (0-7) */
+      int32_t     remaining;     /* 52: entries left to encode */
+    } map;  /* 24 bytes */
   };
 } VjStackFrame;
 
 _Static_assert(sizeof(VjStackFrame) == 56, "VjStackFrame must be 56 bytes");
+_Static_assert(sizeof(((VjStackFrame *)0)->map) == 24, "VjStackFrame.map must be 24 bytes");
+_Static_assert(offsetof(VjStackFrame, ret_ops) == 0, "ret_ops offset");
+_Static_assert(offsetof(VjStackFrame, ret_pc) == 8, "ret_pc offset");
+_Static_assert(offsetof(VjStackFrame, frame_type) == 12, "frame_type offset");
+_Static_assert(offsetof(VjStackFrame, ret_base) == 16, "ret_base offset");
+_Static_assert(offsetof(VjStackFrame, first) == 24, "first offset");
+_Static_assert(offsetof(VjStackFrame, elem_size) == 28, "elem_size offset");
 
 /* ================================================================
  *  YieldCodes
@@ -339,69 +377,143 @@ _Static_assert(sizeof(VjIfaceCacheEntry) == 24,
                "VjIfaceCacheEntry must be 24 bytes");
 
 /* ================================================================
- *  ExecCtx — per-Marshal runtime context (992 bytes)
+ *  ExecCtx — per-Marshal runtime context (1448 bytes)
+ *
+ *  Layout optimized for cache locality:
+ *    Cache line 0 (0-63):  hot VM registers (buf, ops, pc, base, flags)
+ *    Cache line 1 (64-95): indent state, yield metadata
+ *    96+:                  stack frames + debug trace
  * ================================================================ */
 
 typedef struct VjExecCtx {
+  /* ===== Cache Line 0: Hot VM Registers (0-63) ===== */
+
   /* Output buffer */
   uint8_t         *buf_cur;           /*   0: current write position */
   uintptr_t        buf_end;           /*   8: one past last byte (not a GC ptr) */
 
-  /* Instruction pointer */
-  int32_t          pc;                /*  16: current instruction index */
-  int16_t          indent_depth;      /*  20: logical nesting depth for indent */
-  uint8_t          indent_step;       /*  22: bytes per indent level (0 = compact) */
-  uint8_t          indent_prefix_len; /*  23: bytes of prefix before indent */
+  /* Program counter (ops_ptr + pc form the "instruction pointer") */
+  const VjOpStep  *ops_ptr;           /*  16: &Blueprint.Ops[0] (current ops array) */
+  int32_t          pc;                /*  24: current instruction index */
+  int32_t          depth;             /*  28: stack depth (0 = top-level) */
 
   /* Data source */
-  const uint8_t   *cur_base;         /*  24: current struct/elem base */
+  const uint8_t   *cur_base;          /*  32: current struct/elem base */
 
-  /* State */
-  int32_t          depth;             /*  32: stack depth */
-  int32_t          error_code;        /*  36: VjError value */
+  /* State flags */
   uint32_t         enc_flags;         /*  40: VjEncFlags bitmask */
-  uint32_t         yield_info;        /*  44: VjYieldReason */
+  int32_t          error_code;        /*  44: VjError value */
 
-  /* Instruction reference (read-only) */
-  const VjOpStep  *ops_ptr;          /*  48: &Blueprint.Ops[0] */
-  const uint8_t   *indent_tpl;       /*  56: precomputed "\n" + indent×depth template */
+  /* Interface cache (hot: checked on every interface{} field) */
+  const VjIfaceCacheEntry *iface_cache_ptr;  /*  48: sorted array */
+  int32_t          iface_cache_count;        /*  56: entry count */
+  uint32_t         yield_info;               /*  60: VjYieldReason */
 
-  /* Interface cache */
-  const VjIfaceCacheEntry *iface_cache_ptr;  /*  64: sorted array */
-  int32_t          iface_cache_count;        /*  72: count */
-  int32_t          _pad2;                    /*  76: alignment */
+  /* ===== Cache Line 1: Less-Hot State (64-95) ===== */
 
-  /* Yield metadata */
-  const void      *yield_type_ptr;   /*  80: eface.type_ptr on iface miss */
+  /* Indent state (cold in compact mode, warm in indent mode) */
+  const uint8_t   *indent_tpl;        /*  64: precomputed indent template */
+  int16_t          indent_depth;      /*  72: logical nesting depth */
+  uint8_t          indent_step;       /*  74: bytes per indent level (0 = compact) */
+  uint8_t          indent_prefix_len; /*  75: bytes of prefix before indent */
+  int32_t          _pad1;             /*  76: alignment padding */
+
+  /* Yield metadata (cold: only accessed on yield) */
+  const void      *yield_type_ptr;    /*  80: eface.type_ptr on iface miss */
   int32_t          yield_field_idx;   /*  88: field index for fallback */
-  int32_t          _pad3;             /*  92: alignment */
+  int32_t          _pad2;             /*  92: alignment padding */
 
-  /* Stack */
-  VjStackFrame     stack[VJ_MAX_DEPTH]; /*  96: stack frames */
+  /* ===== Stack (96-1439) ===== */
+  VjStackFrame     stack[VJ_MAX_DEPTH]; /*  96: 24 frames × 56 bytes = 1344 */
+
+  /* Debug trace (always present for layout stability; only written when
+   * VJ_ENCVM_DEBUG is defined and the pointer is non-NULL). */
+  VjTraceBuf      *trace_buf;          /* 1440: Go-allocated trace buffer */
 } VjExecCtx;
 
-_Static_assert(sizeof(VjExecCtx) == 992, "VjExecCtx must be 992 bytes");
+_Static_assert(sizeof(VjExecCtx) == 1448, "VjExecCtx must be 1448 bytes");
 _Static_assert(offsetof(VjExecCtx, buf_cur) == 0, "buf_cur offset");
 _Static_assert(offsetof(VjExecCtx, buf_end) == 8, "buf_end offset");
-_Static_assert(offsetof(VjExecCtx, pc) == 16, "pc offset");
-_Static_assert(offsetof(VjExecCtx, indent_depth) == 20, "indent_depth offset");
-_Static_assert(offsetof(VjExecCtx, indent_step) == 22, "indent_step offset");
-_Static_assert(offsetof(VjExecCtx, indent_prefix_len) == 23, "indent_prefix_len offset");
-_Static_assert(offsetof(VjExecCtx, cur_base) == 24, "cur_base offset");
-_Static_assert(offsetof(VjExecCtx, depth) == 32, "depth offset");
-_Static_assert(offsetof(VjExecCtx, error_code) == 36, "error_code offset");
+_Static_assert(offsetof(VjExecCtx, ops_ptr) == 16, "ops_ptr offset");
+_Static_assert(offsetof(VjExecCtx, pc) == 24, "pc offset");
+_Static_assert(offsetof(VjExecCtx, depth) == 28, "depth offset");
+_Static_assert(offsetof(VjExecCtx, cur_base) == 32, "cur_base offset");
 _Static_assert(offsetof(VjExecCtx, enc_flags) == 40, "enc_flags offset");
-_Static_assert(offsetof(VjExecCtx, yield_info) == 44, "yield_info offset");
-_Static_assert(offsetof(VjExecCtx, ops_ptr) == 48, "ops_ptr offset");
-_Static_assert(offsetof(VjExecCtx, indent_tpl) == 56, "indent_tpl offset");
-_Static_assert(offsetof(VjExecCtx, iface_cache_ptr) == 64,
+_Static_assert(offsetof(VjExecCtx, error_code) == 44, "error_code offset");
+_Static_assert(offsetof(VjExecCtx, iface_cache_ptr) == 48,
                "iface_cache_ptr offset");
-_Static_assert(offsetof(VjExecCtx, iface_cache_count) == 72,
+_Static_assert(offsetof(VjExecCtx, iface_cache_count) == 56,
                "iface_cache_count offset");
+_Static_assert(offsetof(VjExecCtx, yield_info) == 60, "yield_info offset");
+_Static_assert(offsetof(VjExecCtx, indent_tpl) == 64, "indent_tpl offset");
+_Static_assert(offsetof(VjExecCtx, indent_depth) == 72,
+               "indent_depth offset");
+_Static_assert(offsetof(VjExecCtx, indent_step) == 74, "indent_step offset");
+_Static_assert(offsetof(VjExecCtx, indent_prefix_len) == 75,
+               "indent_prefix_len offset");
 _Static_assert(offsetof(VjExecCtx, yield_type_ptr) == 80,
                "yield_type_ptr offset");
 _Static_assert(offsetof(VjExecCtx, yield_field_idx) == 88,
                "yield_field_idx offset");
 _Static_assert(offsetof(VjExecCtx, stack) == 96, "stack offset");
+_Static_assert(offsetof(VjExecCtx, trace_buf) == 1440, "trace_buf offset");
+
+/* ================================================================
+ *  Swiss Map Structs — map[string]string only
+ *
+ *  These mirror the Go runtime's internal/runtime/maps layout.
+ *  Offsets verified at Go init time (rt_internal.go).
+ *  Only used for readonly iteration — C never writes to these.
+ * ================================================================ */
+
+/* Constants for map[string]string (strings < 128 bytes → inline slots) */
+#define SWISS_GROUP_SLOTS     8
+#define SWISS_CTRL_SIZE       8      /* sizeof(ctrlGroup) = uint64 */
+#define SWISS_SLOT_SIZE       32     /* sizeof(GoString key) + sizeof(GoString elem) */
+#define SWISS_ELEM_OFF        16     /* elem starts at key + 16 */
+#define SWISS_GROUP_SIZE      264    /* CTRL_SIZE + GROUP_SLOTS * SLOT_SIZE */
+#define SWISS_CTRL_EMPTY      0x80   /* bit 7 set = empty or deleted */
+
+/* GoSwissMap mirrors internal/runtime/maps.Map (48 bytes). */
+typedef struct GoSwissMap {
+  uint64_t  used;           /*  0: element count */
+  uintptr_t seed;           /*  8: hash seed (unused by us) */
+  void     *dir_ptr;        /* 16: → group (small) or → *table[] (large) */
+  int64_t   dir_len;        /* 24: 0 = small map, else 1<<globalDepth */
+  uint8_t   global_depth;   /* 32 */
+  uint8_t   global_shift;   /* 33 */
+  uint8_t   writing;        /* 34 (unused by us) */
+  uint8_t   _pad_tombstone; /* 35: tombstonePossible (unused by us) */
+  uint32_t  _pad36;         /* 36: alignment padding */
+  uint64_t  clear_seq;      /* 40 (unused by us) */
+} GoSwissMap;
+
+_Static_assert(sizeof(GoSwissMap) == 48, "GoSwissMap must be 48 bytes");
+_Static_assert(offsetof(GoSwissMap, used) == 0, "GoSwissMap.used offset");
+_Static_assert(offsetof(GoSwissMap, dir_ptr) == 16, "GoSwissMap.dir_ptr offset");
+_Static_assert(offsetof(GoSwissMap, dir_len) == 24, "GoSwissMap.dir_len offset");
+_Static_assert(offsetof(GoSwissMap, global_depth) == 32, "GoSwissMap.global_depth offset");
+_Static_assert(offsetof(GoSwissMap, clear_seq) == 40, "GoSwissMap.clear_seq offset");
+
+/* GoSwissTable mirrors internal/runtime/maps.table (32 bytes).
+ * The groups field is a groupsReference {data unsafe.Pointer, lengthMask uint64}. */
+typedef struct GoSwissTable {
+  uint16_t  used;           /*  0: entries in this table */
+  uint16_t  capacity;       /*  2: total capacity */
+  uint16_t  growth_left;    /*  4 */
+  uint8_t   local_depth;    /*  6 */
+  uint8_t   _pad7;          /*  7: alignment */
+  int64_t   index;          /*  8: -1 = stale */
+  /* groupsReference: */
+  void     *groups_data;    /* 16: → first group */
+  uint64_t  groups_mask;    /* 24: num_groups - 1 */
+} GoSwissTable;
+
+_Static_assert(sizeof(GoSwissTable) == 32, "GoSwissTable must be 32 bytes");
+_Static_assert(offsetof(GoSwissTable, used) == 0, "GoSwissTable.used offset");
+_Static_assert(offsetof(GoSwissTable, local_depth) == 6, "GoSwissTable.local_depth offset");
+_Static_assert(offsetof(GoSwissTable, index) == 8, "GoSwissTable.index offset");
+_Static_assert(offsetof(GoSwissTable, groups_data) == 16, "GoSwissTable.groups_data offset");
+_Static_assert(offsetof(GoSwissTable, groups_mask) == 24, "GoSwissTable.groups_mask offset");
 
 #endif /* VJ_ENCVM_TYPES_H */

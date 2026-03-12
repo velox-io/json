@@ -13,6 +13,8 @@ import (
 
 var rawMessageType = reflect.TypeFor[json.RawMessage]()
 var numberType = reflect.TypeFor[json.Number]()
+var intType = reflect.TypeFor[int]()
+var int64Type = reflect.TypeFor[int64]()
 
 type ElemTypeKind uint8
 
@@ -56,9 +58,6 @@ const (
 	tiFlagCopyString                            // `,copy` tag
 )
 
-// TypeInfo holds pre-computed metadata for a type.
-// Hot-path fields (accessed per-field during scan/encode) live here;
-// cold fields (marshal key bytes, custom marshal/unmarshal funcs) live in Ext.
 type TypeInfo struct {
 	Kind          ElemTypeKind
 	Flags         tiFlag
@@ -69,8 +68,16 @@ type TypeInfo struct {
 	EncodeFn      func(m *Marshaler, ptr unsafe.Pointer) error // pre-bound encode dispatch
 	HintBytes     int                                          // static size hint for pre-allocating marshal buffer
 	Codec         any
-	Ext           *TypeInfoExt // cold marshal/unmarshal metadata (nil when not needed)
+	Ext           *TypeInfoExt        // cold marshal/unmarshal metadata (nil when not needed)
+	ScanArrayFn   ArraySpecialScanner // specialized array element scanner (nil = generic path)
 }
+
+// TypeInfo holds pre-computed metadata for a type.
+// Hot-path fields (accessed per-field during scan/encode) live here;
+// cold fields (marshal key bytes, custom marshal/unmarshal funcs) live in Ext.
+// ArraySpecialScanner is a specialized array scanner that bypasses scanValue/scanNumber
+// dispatch for known element types (int*, uint*, float64).
+type ArraySpecialScanner func(src []byte, idx int, arrayLen int, elemSize uintptr, ptr unsafe.Pointer) (int, error)
 
 // TypeInfoExt holds infrequently-accessed per-field metadata.
 type TypeInfoExt struct {
@@ -340,6 +347,8 @@ func getCodecSlow(t reflect.Type, wait bool) *TypeInfo {
 			e.ti.Flags |= tiFlagHasTextUnmarshalFn
 		}
 	}
+
+	bindScanArrayFn(e.ti)
 
 	bindEncodeFn(e.ti)
 	bindStructFieldEncodeFns(e.ti)
@@ -720,21 +729,34 @@ type MapCodec struct {
 	ValTI   *TypeInfo
 	KeyTI   *TypeInfo // key type info (for TextMarshaler on non-string keys)
 
-	ValIsString bool // true for map[string]string fast path
+	ValIsString bool // true for map[string]string fast path (encoder)
+	ScanMapFn   func(sc *Parser, src []byte, idx int, ptr unsafe.Pointer) (int, error)
 }
 
 func BuildMapCodec(t reflect.Type) *MapCodec {
 	valTI := getCodecForCycle(t.Elem())
 	keyTI := getCodecForCycle(t.Key())
-	return &MapCodec{
+	isStringKey := t.Key().Kind() == reflect.String
+	mc := &MapCodec{
 		MapType:     t,
 		KeyType:     t.Key(),
 		ValType:     t.Elem(),
 		ValSize:     t.Elem().Size(),
 		ValTI:       valTI,
 		KeyTI:       keyTI,
-		ValIsString: valTI.Kind == KindString && t.Key().Kind() == reflect.String,
+		ValIsString: valTI.Kind == KindString && isStringKey,
 	}
+	if isStringKey {
+		switch valTI.Kind {
+		case KindString:
+			mc.ScanMapFn = (*Parser).scanMapStringString
+		case KindInt:
+			mc.ScanMapFn = (*Parser).scanMapStringInt
+		case KindInt64:
+			mc.ScanMapFn = (*Parser).scanMapStringInt64
+		}
+	}
+	return mc
 }
 
 type PointerCodec struct {

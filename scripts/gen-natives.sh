@@ -395,7 +395,7 @@ for isa in $ISAS; do
         # Use ISA_XXX macro instead of ISA=xxx to avoid preprocessor identifier comparison issues
         ISA_UPPER=$(printf '%s' "$isa" | tr '[:lower:]' '[:upper:]')
         ISA_MACRO="-DISA_${ISA_UPPER}"
-        COMMON_DEFS="$ISA_MACRO $MODE_FLAG -DOS=${TARGET_OS} -DARCH=${TARGET_ARCH}"
+        COMMON_DEFS="$ISA_MACRO $MODE_FLAG -DOS=${TARGET_OS} -DARCH=${TARGET_ARCH} ${EXTRA_CFLAGS:-}"
         COMMON_INCLUDES="-I$(dirname "$SOURCE_FILE") -I$VJ_LIB_DIR -I$REPO_ROOT/native/include -I$REPO_ROOT/native"
 
         # Step 1: Compile to object (with LTO when supported, for cross-TU inlining)

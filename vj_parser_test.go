@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -2220,6 +2221,157 @@ func TestRoundtrip_MapNetIPKey(t *testing.T) {
 		}
 	}
 	_ = m // silence unused
+}
+
+// ---------- scanArray: [N]any (fixed-size array of interface{}) ----------
+
+func TestUnmarshal_FixedArrayAny_MixedTypes(t *testing.T) {
+	// [N]any should decode a JSON array with mixed types into a fixed-size Go array.
+	var arr [5]any
+	err := Unmarshal([]byte(`["hello", 42, true, null, {"k": "v"}]`), &arr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if arr[0] != "hello" {
+		t.Errorf("arr[0]: got %v (%T), want \"hello\"", arr[0], arr[0])
+	}
+	// Numbers decode as float64 by default (same as encoding/json).
+	if arr[1] != float64(42) {
+		t.Errorf("arr[1]: got %v (%T), want float64(42)", arr[1], arr[1])
+	}
+	if arr[2] != true {
+		t.Errorf("arr[2]: got %v (%T), want true", arr[2], arr[2])
+	}
+	if arr[3] != nil {
+		t.Errorf("arr[3]: got %v (%T), want nil", arr[3], arr[3])
+	}
+	wantMap := map[string]any{"k": "v"}
+	if !reflect.DeepEqual(arr[4], wantMap) {
+		t.Errorf("arr[4]: got %v (%T), want %v", arr[4], arr[4], wantMap)
+	}
+}
+
+func TestUnmarshal_FixedArrayAny_NestedArray(t *testing.T) {
+	// Nested arrays inside [N]any should produce []any elements.
+	var arr [2]any
+	err := Unmarshal([]byte(`[[1, 2], ["a", "b"]]`), &arr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want0 := []any{float64(1), float64(2)}
+	want1 := []any{"a", "b"}
+	if !reflect.DeepEqual(arr[0], want0) {
+		t.Errorf("arr[0]: got %v, want %v", arr[0], want0)
+	}
+	if !reflect.DeepEqual(arr[1], want1) {
+		t.Errorf("arr[1]: got %v, want %v", arr[1], want1)
+	}
+}
+
+func TestUnmarshal_FixedArrayAny_FewerElements(t *testing.T) {
+	// JSON array shorter than [N]: trailing elements should be nil (zero value of any).
+	var arr [4]any
+	err := Unmarshal([]byte(`["only", "two"]`), &arr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if arr[0] != "only" {
+		t.Errorf("arr[0]: got %v, want \"only\"", arr[0])
+	}
+	if arr[1] != "two" {
+		t.Errorf("arr[1]: got %v, want \"two\"", arr[1])
+	}
+	if arr[2] != nil {
+		t.Errorf("arr[2]: got %v, want nil", arr[2])
+	}
+	if arr[3] != nil {
+		t.Errorf("arr[3]: got %v, want nil", arr[3])
+	}
+}
+
+func TestUnmarshal_FixedArrayAny_MoreElements(t *testing.T) {
+	// JSON array longer than [N]: extra elements should be silently discarded.
+	var arr [2]any
+	err := Unmarshal([]byte(`[1, 2, 3, 4, 5]`), &arr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if arr[0] != float64(1) {
+		t.Errorf("arr[0]: got %v, want float64(1)", arr[0])
+	}
+	if arr[1] != float64(2) {
+		t.Errorf("arr[1]: got %v, want float64(2)", arr[1])
+	}
+}
+
+func TestUnmarshal_FixedArrayAny_Empty(t *testing.T) {
+	// Empty JSON array: all elements should be nil.
+	var arr [3]any
+	err := Unmarshal([]byte(`[]`), &arr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for i, v := range arr {
+		if v != nil {
+			t.Errorf("arr[%d]: got %v, want nil", i, v)
+		}
+	}
+}
+
+func TestUnmarshal_FixedArrayAny_InStruct(t *testing.T) {
+	// [N]any as a struct field.
+	type S struct {
+		Items [3]any `json:"items"`
+		Name  string `json:"name"`
+	}
+	var s S
+	err := Unmarshal([]byte(`{"name": "test", "items": [1, "two", false]}`), &s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if s.Name != "test" {
+		t.Errorf("Name: got %q, want %q", s.Name, "test")
+	}
+	if s.Items[0] != float64(1) {
+		t.Errorf("Items[0]: got %v (%T), want float64(1)", s.Items[0], s.Items[0])
+	}
+	if s.Items[1] != "two" {
+		t.Errorf("Items[1]: got %v, want \"two\"", s.Items[1])
+	}
+	if s.Items[2] != false {
+		t.Errorf("Items[2]: got %v, want false", s.Items[2])
+	}
+}
+
+func TestUnmarshal_FixedArrayAny_StdlibCompat(t *testing.T) {
+	// Results should match encoding/json behavior.
+	inputs := []string{
+		`[1, "two", true, null, {"k": 3}]`,
+		`[]`,
+		`[1, 2, 3, 4, 5, 6]`,
+		`[[1], [2]]`,
+	}
+	for _, input := range inputs {
+		var vjArr [3]any
+		var stdArr [3]any
+
+		vjErr := Unmarshal([]byte(input), &vjArr)
+		stdErr := json.Unmarshal([]byte(input), &stdArr)
+
+		if (vjErr == nil) != (stdErr == nil) {
+			t.Errorf("input %s: vjson err=%v, stdlib err=%v", input, vjErr, stdErr)
+			continue
+		}
+		if !reflect.DeepEqual(vjArr, stdArr) {
+			t.Errorf("input %s:\n  vjson:  %v\n  stdlib: %v", input, vjArr, stdArr)
+		}
+	}
 }
 
 // ---------- stdlib types: time.Time roundtrip vs stdlib ----------

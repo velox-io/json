@@ -106,13 +106,18 @@ type Marshaler struct {
 	depth    int
 	flags    escapeFlags
 	encFlags uint32    // extra VjEncFlags bits (float format, etc.) ORed with flags for VM
-	vmCtx    VjExecCtx // reusable C VM context (avoids per-call stack zeroing of 992 bytes)
+	vmCtx    VjExecCtx // reusable C VM context (avoids per-call stack zeroing of 1448 bytes)
 	inVM     bool      // true while execVM is active; prevents re-entrant VM calls
 
 	// indentTpl holds the precomputed "\n" + prefix + indent×MAX_DEPTH template
 	// for the C VM indent path. Only used when isSimpleIndent returns true.
 	// Pointer to pool-allocated array; nil in compact mode (zero overhead).
 	indentTpl *[1 + 255 + maxStackDepth*8]byte
+
+	// Dynamic instruction expansion buffers for map[string]string VM encoding.
+	// Reused across calls to avoid per-map allocation.
+	dynOps  []VjOpStep      // dynamic instruction buffer
+	dynData []mapStrStrPair // contiguous k-v pair data for opMapStrKV
 
 	// flushFn enables streaming mode: flush accumulated data through
 	// this callback instead of growing the buffer indefinitely.
@@ -144,6 +149,7 @@ func getMarshaler() *Marshaler {
 	m.encFlags = 0
 	m.flushFn = nil
 	initMarshalerVMCtx(m)
+	m.setupVMTrace()
 	return m
 }
 
@@ -156,7 +162,7 @@ func putMarshaler(m *Marshaler) {
 		m.indentTpl = nil
 	}
 	m.flushFn = nil      // clear closure reference before pooling
-	marshalerPool.Put(m) // always recycle the struct (vmCtx is 992 bytes)
+	marshalerPool.Put(m) // always recycle the struct (vmCtx is 1448 bytes)
 }
 
 // flush writes all buffered data through flushFn and resets the buffer.

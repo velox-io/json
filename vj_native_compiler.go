@@ -210,6 +210,9 @@ func emitStructBody(b *blueprintBuilder, fixups *[]keyFixup, dec *StructCodec, b
 				// Map omitempty needs Go-side len check (C only checks nil).
 				// Emit as fallback so Go handles omitempty + full map encoding.
 				emitYield(b, fixups, fi, fieldOff, i)
+			} else if mapDec.ValIsString && mapDec.KeyType.Kind() == reflect.String {
+				// map[string]string: single C opcode with native Swiss Map iteration.
+				emitMapStrStr(b, fixups, fi, fieldOff)
 			} else {
 				emitMap(b, fixups, fi, fieldOff, mapDec)
 			}
@@ -371,7 +374,11 @@ func emitDerefBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) {
 
 	case KindMap:
 		mapDec := elemTI.resolveCodec().(*MapCodec)
-		emitMapInner(b, fixups, 0, elemTI, mapDec)
+		if mapDec.ValIsString && mapDec.KeyType.Kind() == reflect.String {
+			emitMapStrStrInner(b, 0)
+		} else {
+			emitMapInner(b, fixups, 0, elemTI, mapDec)
+		}
 
 	case KindAny:
 		b.emit(VjOpStep{
@@ -586,7 +593,11 @@ func emitElementBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) 
 
 	case KindMap:
 		mapDec := elemTI.resolveCodec().(*MapCodec)
-		emitMapInner(b, fixups, 0, elemTI, mapDec)
+		if mapDec.ValIsString && mapDec.KeyType.Kind() == reflect.String {
+			emitMapStrStrInner(b, 0)
+		} else {
+			emitMapInner(b, fixups, 0, elemTI, mapDec)
+		}
 
 	case KindAny:
 		b.emit(VjOpStep{
@@ -651,6 +662,28 @@ func emitMapInner(b *blueprintBuilder, fixups *[]keyFixup, fieldOff uintptr, ele
 
 	endIdx := b.emit(VjOpStep{OpType: opMapEnd})
 	b.ops[beginIdx].OperandA = int32(endIdx - beginIdx)
+}
+
+// emitMapStrStr emits a single OP_MAP_STR_STR instruction for map[string]string.
+// C handles the entire iteration natively — no MAP_END, no fallback entry needed.
+func emitMapStrStr(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fieldOff uintptr) {
+	poolOff, keyLen := b.addKey(fi.Ext.KeyBytes)
+	idx := b.emit(VjOpStep{
+		OpType:   opMapStrStr,
+		KeyLen:   keyLen,
+		FieldOff: uint32(fieldOff),
+	})
+	if keyLen > 0 {
+		*fixups = append(*fixups, keyFixup{opIdx: idx, poolOffset: poolOff})
+	}
+}
+
+// emitMapStrStrInner emits a keyless OP_MAP_STR_STR (for deref/element body contexts).
+func emitMapStrStrInner(b *blueprintBuilder, fieldOff uintptr) {
+	b.emit(VjOpStep{
+		OpType:   opMapStrStr,
+		FieldOff: uint32(fieldOff),
+	})
 }
 
 // emitInterface emits a single OP_INTERFACE instruction.

@@ -48,6 +48,8 @@ const (
 	opObjOpen     uint16 = 41 // write key + '{', set first=1 (no frame push)
 	opObjClose    uint16 = 42 // write '}', set first=0 (no frame pop)
 	opArrayBegin  uint16 = 43 // array loop start (inline data, fixed length)
+	opMapStrKV    uint16 = 44 // encode one map[string]string entry (key + value)
+	opMapStrStr   uint16 = 45 // map[string]string: C-native Swiss Map iteration
 
 	// Go-only fallback (0x3F).
 	opFallback uint16 = 0x3F // custom marshalers, ,string, complex structs
@@ -144,39 +146,33 @@ type encvmCache struct {
 }
 
 // maxStackDepth matches the C VJ_MAX_DEPTH.
-const maxStackDepth = 16
+const maxStackDepth = 24
 
 // VjStackFrame mirrors the C VjStackFrame (56 bytes).
-// The union portion is represented as [40]byte with accessor helpers.
+// Redesigned as a unified call/loop frame:
+//
+//	Common fields (0-31): ret_ops, ret_pc, frame_type, ret_base, first, elem_size
+//	Union (32-55):        loop iteration state (for VJ_FRAME_LOOP)
 type VjStackFrame struct {
-	RetBase   unsafe.Pointer //  0: all frames — parent base address
-	First     int32          //  8: all frames
-	FrameType int32          // 12: all frames
-	_union    [40]byte       // 16-55: per-frame-type fields (see helpers)
+	RetOps    unsafe.Pointer //  0: parent ops array base
+	RetPC     int32          //  8: return PC (index into ret_ops)
+	FrameType int32          // 12: VJ_FRAME_CALL(0) or VJ_FRAME_LOOP(1)
+	RetBase   unsafe.Pointer // 16: parent data base address
+	First     int32          // 24: parent first-field flag
+	ElemSize  int32          // 28: element size (LOOP only, 0 for CALL)
+	_union    [24]byte       // 32-55: loop iteration state
 }
 
 var _ [56]byte = [unsafe.Sizeof(VjStackFrame{})]byte{}
 
-// --- STRUCT/PTR frame helpers (ctrl) ---
+// Frame type constants matching C VjFrameType enum.
+const (
+	vjFrameCall = int32(0) // VJ_FRAME_CALL
+	vjFrameLoop = int32(1) // VJ_FRAME_LOOP
+	vjFrameMap  = int32(2) // VJ_FRAME_MAP — C-native Swiss Map iteration
+)
 
-func (f *VjStackFrame) retOp() unsafe.Pointer { //nolint:unused
-	return *(*unsafe.Pointer)(unsafe.Pointer(&f._union[0]))
-}
-func (f *VjStackFrame) setRetOp(p unsafe.Pointer) { //nolint:unused
-	*(*unsafe.Pointer)(unsafe.Pointer(&f._union[0])) = p
-}
-
-// --- IFACE frame helpers ---
-// retOp/setRetOp shared with ctrl (same offset)
-
-func (f *VjStackFrame) retOps() unsafe.Pointer { //nolint:unused
-	return *(*unsafe.Pointer)(unsafe.Pointer(&f._union[8]))
-}
-func (f *VjStackFrame) setRetOps(p unsafe.Pointer) { //nolint:unused
-	*(*unsafe.Pointer)(unsafe.Pointer(&f._union[8])) = p
-}
-
-// --- SLICE frame helpers ---
+// --- LOOP frame helpers (read-only from Go side) ---
 
 func (f *VjStackFrame) iterData() unsafe.Pointer {
 	return *(*unsafe.Pointer)(unsafe.Pointer(&f._union[0]))
@@ -187,39 +183,43 @@ func (f *VjStackFrame) iterCount() int64 {
 func (f *VjStackFrame) iterIdx() int64 {
 	return *(*int64)(unsafe.Pointer(&f._union[16]))
 }
-func (f *VjStackFrame) elemSize() int32 {
-	return *(*int32)(unsafe.Pointer(&f._union[32]))
-}
 
-// VjExecCtx mirrors the C VjExecCtx (96-byte header + 16×56 stack = 992 bytes).
+// VjExecCtx mirrors the C VjExecCtx (1448 bytes).
+// Layout optimized for cache locality:
+//
+//	Cache line 0 (0-63):  hot VM registers (buf, ops, pc, base, flags)
+//	Cache line 1 (64-95): indent state, yield metadata
+//	96+:                  stack frames + debug trace
 type VjExecCtx struct {
-	BufCur          unsafe.Pointer // current write position
-	BufEnd          uintptr        // one past last writable byte (NOT GC-traced)
-	PC              int32          // current instruction index (relative to OpsPtr)
-	IndentDepth     int16          // logical nesting depth for indent
-	IndentStep      uint8          // bytes per indent level (0 = compact)
-	IndentPrefixLen uint8          // bytes of prefix before indent repetitions
-	CurBase         unsafe.Pointer // current struct/elem base address
-	Depth           int32          // stack depth (0 = top-level)
-	ErrCode         int32          // VjError enum value
-	EncFlags        uint32         // VjEncFlags bitmask
-	YieldInfo       uint32         // yield reason (yieldFallback, yieldIfaceMiss, etc.)
+	// Cache line 0: hot VM registers
+	BufCur          unsafe.Pointer //   0: current write position
+	BufEnd          uintptr        //   8: one past last writable byte (NOT GC-traced)
+	OpsPtr          unsafe.Pointer //  16: &Blueprint.Ops[0] (current active ops)
+	PC              int32          //  24: current instruction index
+	Depth           int32          //  28: stack depth (0 = top-level)
+	CurBase         unsafe.Pointer //  32: current struct/elem base address
+	EncFlags        uint32         //  40: VjEncFlags bitmask
+	ErrCode         int32          //  44: VjError enum value
+	IfaceCachePtr   unsafe.Pointer //  48: *VjIfaceCacheEntry sorted array
+	IfaceCacheCount int32          //  56: number of entries
+	YieldInfo       uint32         //  60: yield reason (yieldFallback, yieldIfaceMiss, etc.)
 
-	OpsPtr    unsafe.Pointer // &Blueprint.Ops[0] (current active instruction stream)
-	IndentTpl unsafe.Pointer // precomputed "\n" + indent×depth template
+	// Cache line 1: less-hot state
+	IndentTpl       unsafe.Pointer //  64: precomputed indent template
+	IndentDepth     int16          //  72: logical nesting depth
+	IndentStep      uint8          //  74: bytes per indent level (0 = compact)
+	IndentPrefixLen uint8          //  75: bytes of prefix before indent
+	_pad1           int32          //  76: alignment padding
+	YieldTypePtr    unsafe.Pointer //  80: interface cache miss: eface.type_ptr
+	YieldFieldIdx   int32          //  88: fallback: field index for Go to handle
+	_pad2           int32          //  92: alignment padding
 
-	IfaceCachePtr   unsafe.Pointer // *VjIfaceCacheEntry sorted array
-	IfaceCacheCount int32          // number of entries
-	_pad2           int32
-
-	YieldTypePtr  unsafe.Pointer // interface cache miss: eface.type_ptr
-	YieldFieldIdx int32          // fallback: field index for Go to handle
-	_pad3         int32
-
-	Stack [maxStackDepth]VjStackFrame
+	// Stack + debug trace
+	Stack    [maxStackDepth]VjStackFrame //  96: 24 × 56 = 1344 bytes
+	TraceBuf unsafe.Pointer              // 1440: Go-allocated VjTraceBuf
 }
 
-var _ [992]byte = [unsafe.Sizeof(VjExecCtx{})]byte{}
+var _ [1448]byte = [unsafe.Sizeof(VjExecCtx{})]byte{}
 
 // VjIfaceCacheEntry maps a Go *abi.Type to its compiled Blueprint ops (24 bytes).
 // Tag = opcode+1 for primitives (0 = none); C subtracts 1 before dispatch.
@@ -275,6 +275,46 @@ func loadIfaceCacheSnapshot() *ifaceCacheSnapshot {
 	return globalIfaceCache.current.Load()
 }
 
+// blueprintRegistry maps ops base pointer → *Blueprint for interface SWITCH_OPS.
+// When the C VM switches to a cached Blueprint's ops, Go yield handlers use
+// this registry to resolve the active Blueprint (for Fallbacks/KeyPool lookup).
+//
+// Read via atomic.Load (lock-free); write under globalIfaceCache.mu.
+// Immutable after publish (COW), same lifetime as ifaceCacheSnapshot.
+var blueprintRegistry atomic.Pointer[map[unsafe.Pointer]*Blueprint]
+
+func init() {
+	empty := make(map[unsafe.Pointer]*Blueprint)
+	blueprintRegistry.Store(&empty)
+}
+
+// registerBlueprintOps records the mapping from &bp.Ops[0] → bp so that
+// activeBlueprint can resolve the correct Blueprint after a SWITCH_OPS.
+// Must be called under globalIfaceCache.mu.
+func registerBlueprintOps(bp *Blueprint) {
+	if bp == nil || len(bp.Ops) == 0 {
+		return
+	}
+	key := unsafe.Pointer(&bp.Ops[0])
+	cur := blueprintRegistry.Load()
+	if _, ok := (*cur)[key]; ok {
+		return // already registered
+	}
+	// COW: copy + insert
+	newMap := make(map[unsafe.Pointer]*Blueprint, len(*cur)+1)
+	for k, v := range *cur {
+		newMap[k] = v
+	}
+	newMap[key] = bp
+	blueprintRegistry.Store(&newMap)
+}
+
+// lookupBlueprintByOps returns the Blueprint whose Ops[0] is at opsPtr.
+func lookupBlueprintByOps(opsPtr unsafe.Pointer) *Blueprint {
+	m := blueprintRegistry.Load()
+	return (*m)[opsPtr]
+}
+
 // insertIfaceCache adds a new type→blueprint mapping to the global cache.
 // Thread-safe via mutex; uses COW to avoid interfering with concurrent readers.
 func insertIfaceCache(typePtr unsafe.Pointer, bp *Blueprint, tag uint8) {
@@ -302,6 +342,11 @@ func insertIfaceCache(typePtr unsafe.Pointer, bp *Blueprint, tag uint8) {
 	sort.Slice(newEntries, func(i, j int) bool {
 		return uintptr(newEntries[i].TypePtr) < uintptr(newEntries[j].TypePtr)
 	})
+
+	// Register Blueprint in the ops→Blueprint registry BEFORE publishing
+	// the cache snapshot, so that SWITCH_OPS yield handlers can always
+	// resolve the active Blueprint.
+	registerBlueprintOps(bp)
 
 	globalIfaceCache.current.Store(&ifaceCacheSnapshot{entries: newEntries})
 }

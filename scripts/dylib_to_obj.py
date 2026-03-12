@@ -193,26 +193,33 @@ def decode_adrp(inst):
 
 
 def patch_adrp_to_adr(blob, extent):
-    """Patch ADRP+ADD and ADRP+LDR pairs within the code section.
+    """Patch ADRP instructions whose targets lie within the section.
 
     Go's linker does not guarantee page-aligned placement of syso sections.
     ADRP computes page(PC) + page_offset, which breaks when the section
     isn't page-aligned.
 
-    We handle two patterns:
+    We handle three patterns:
 
-    1. ADRP+ADD → ADR+NOP
+    1. ADRP+ADD (consecutive) → ADR+NOP
        ADRP Xd, #page_delta; ADD Xd, Xd, #imm12
-       → ADR Xd, target; NOP
+       → ADR Xd, exact_target; NOP
 
-    2. ADRP+LDR → ADR+LDR[offset=0]
+    2. ADRP+LDR (consecutive) → ADR+LDR[offset=0]
        ADRP Xd, #page_delta; LDR Rt, [Xd, #imm]
-       → ADR Xd, target; LDR Rt, [Xd]
-       (Works for all LDR variants: Xt, Dt, Qt, St, etc.)
+       → ADR Xd, exact_target; LDR Rt, [Xd]
+
+    3. ADRP (split — non-adjacent consumers) → ADR
+       ADRP Xd, #page_delta; <unrelated inst>; ...; LDR/ADD [Xd, ...]
+       → ADR Xd, page_base; <consumers unchanged>
+       The ADR computes the same page-base address as the original ADRP,
+       so all downstream LDR [Xd, #imm] / ADD Xd, Xd, #imm continue to
+       produce correct final addresses.
     """
     blob = bytearray(blob)
     patches_add = 0
     patches_ldr = 0
+    patches_split = 0
 
     NOP = 0xD503201F
 
@@ -225,90 +232,133 @@ def patch_adrp_to_adr(blob, extent):
 
         rd, page_delta = adrp
         adrp_pc_page = (off >> 12) << 12  # page(PC of ADRP)
+        target_page = adrp_pc_page + page_delta
+
+        # Skip ADRP whose target is outside the section (not our data).
+        if target_page < 0 or target_page >= extent + 0x1000:
+            continue
 
         if off + 4 >= extent:
             continue
         next_inst = struct.unpack_from('<I', blob, off + 4)[0]
 
-        # --- Pattern 1: ADRP+ADD ---
+        # --- Pattern 1: ADRP+ADD (consecutive) ---
         # ADD (immediate, 64-bit): [31]=1 [30:29]=00 [28:24]=10001
         if (next_inst >> 24) & 0xFF == 0x91:
             add_rd = next_inst & 0x1F
             add_rn = (next_inst >> 5) & 0x1F
-            if add_rd != rd or add_rn != rd:
+            if add_rd == rd and add_rn == rd:
+                add_imm12 = (next_inst >> 10) & 0xFFF
+                add_shift = (next_inst >> 22) & 0x3
+                if add_shift == 1:
+                    add_imm12 <<= 12
+
+                target_va = target_page + add_imm12
+                adr_offset = target_va - off
+
+                if adr_offset < -(1 << 20) or adr_offset >= (1 << 20):
+                    print(f"  WARNING: ADRP+ADD at 0x{off:X} target 0x{target_va:X} "
+                          f"out of ADR range ({adr_offset}), skipping")
+                    continue
+
+                struct.pack_into('<I', blob, off, encode_adr(rd, adr_offset))
+                struct.pack_into('<I', blob, off + 4, NOP)
+                patches_add += 1
+                print(f"  Patched ADRP+ADD at 0x{off:X}: target VA 0x{target_va:X} "
+                      f"-> ADR x{rd}, {adr_offset} + NOP")
                 continue
-            add_imm12 = (next_inst >> 10) & 0xFFF
-            add_shift = (next_inst >> 22) & 0x3
-            if add_shift == 1:
-                add_imm12 <<= 12
 
-            target_va = adrp_pc_page + page_delta + add_imm12
-            adr_offset = target_va - off
-
-            if adr_offset < -(1 << 20) or adr_offset >= (1 << 20):
-                print(f"  WARNING: ADRP+ADD at 0x{off:X} target 0x{target_va:X} "
-                      f"out of ADR range ({adr_offset}), skipping")
-                continue
-
-            struct.pack_into('<I', blob, off, encode_adr(rd, adr_offset))
-            struct.pack_into('<I', blob, off + 4, NOP)
-            patches_add += 1
-            print(f"  Patched ADRP+ADD at 0x{off:X}: target VA 0x{target_va:X} "
-                  f"-> ADR x{rd}, {adr_offset} + NOP")
-            continue
-
-        # --- Pattern 2: ADRP+LDR (unsigned offset) ---
+        # --- Pattern 2: ADRP+LDR (consecutive, unsigned offset) ---
         # LDR (unsigned offset): [31:30]=size [29:27]=111 [26]=V [25:24]=01
         # Matches: LDR Xt, LDR Dt, LDR Qt, LDR St, LDR Wt, etc.
         if (next_inst >> 24) & 0x3F in (0xF9, 0xFD, 0x3D, 0xB9, 0xBD, 0x79, 0x39):
-            # All unsigned-offset LDR variants share:
-            #   [21:10]=imm12 (scaled by access size)
-            #   [9:5]=Rn  [4:0]=Rt
             ldr_rn = (next_inst >> 5) & 0x1F
-            if ldr_rn != rd:
-                continue
+            if ldr_rn == rd:
+                # Determine access size for scaling
+                opc_hi = (next_inst >> 24) & 0xFF
+                scale = None
+                if opc_hi == 0xF9:    scale = 8   # LDR Xt
+                elif opc_hi == 0xFD:  scale = 8   # LDR Dt (64-bit SIMD)
+                elif opc_hi == 0x3D:
+                    opc = (next_inst >> 22) & 0x3
+                    if opc == 0x3:    scale = 16  # LDR Qt (128-bit SIMD)
+                    elif opc == 0x1:  scale = 4   # LDR St (32-bit SIMD)
+                elif opc_hi == 0xB9:  scale = 4   # LDR Wt
+                elif opc_hi == 0xBD:  scale = 4   # LDR St
+                elif opc_hi == 0x79:  scale = 2   # LDRH Wt
+                elif opc_hi == 0x39:  scale = 1   # LDRB Wt
 
-            # Determine access size for scaling
-            opc_hi = (next_inst >> 24) & 0xFF
-            if opc_hi == 0xF9:    scale = 8   # LDR Xt
-            elif opc_hi == 0xFD:  scale = 8   # LDR Dt (64-bit SIMD)
-            elif opc_hi == 0x3D:
-                opc = (next_inst >> 22) & 0x3
-                if opc == 0x3:    scale = 16  # LDR Qt (128-bit SIMD)
-                elif opc == 0x1:  scale = 4   # LDR St (32-bit SIMD)
-                else:             continue
-            elif opc_hi == 0xB9:  scale = 4   # LDR Wt
-            elif opc_hi == 0xBD:  scale = 4   # LDR St
-            elif opc_hi == 0x79:  scale = 2   # LDRH Wt
-            elif opc_hi == 0x39:  scale = 1   # LDRB Wt
-            else:                 continue
+                if scale is not None:
+                    imm12 = (next_inst >> 10) & 0xFFF
+                    byte_offset = imm12 * scale
 
-            imm12 = (next_inst >> 10) & 0xFFF
-            byte_offset = imm12 * scale
+                    target_va = target_page + byte_offset
+                    adr_offset = target_va - off
 
-            target_va = adrp_pc_page + page_delta + byte_offset
-            adr_offset = target_va - off
+                    if adr_offset < -(1 << 20) or adr_offset >= (1 << 20):
+                        print(f"  WARNING: ADRP+LDR at 0x{off:X} target 0x{target_va:X} "
+                              f"out of ADR range ({adr_offset}), skipping")
+                        continue
 
-            if adr_offset < -(1 << 20) or adr_offset >= (1 << 20):
-                print(f"  WARNING: ADRP+LDR at 0x{off:X} target 0x{target_va:X} "
-                      f"out of ADR range ({adr_offset}), skipping")
-                continue
+                    # Patch ADRP → ADR (pointing to exact target)
+                    struct.pack_into('<I', blob, off, encode_adr(rd, adr_offset))
+                    # Patch LDR: zero out the imm12 field (offset now in ADR)
+                    ldr_zeroed = next_inst & ~(0xFFF << 10)
+                    struct.pack_into('<I', blob, off + 4, ldr_zeroed)
+                    patches_ldr += 1
+                    print(f"  Patched ADRP+LDR at 0x{off:X}: target VA 0x{target_va:X} "
+                          f"-> ADR x{rd}, {adr_offset} + LDR [x{rd}]")
+                    continue
 
-            # Patch ADRP → ADR (pointing to exact target)
-            struct.pack_into('<I', blob, off, encode_adr(rd, adr_offset))
-            # Patch LDR: zero out the imm12 field (offset now in ADR)
-            ldr_zeroed = next_inst & ~(0xFFF << 10)
-            struct.pack_into('<I', blob, off + 4, ldr_zeroed)
-            patches_ldr += 1
-            print(f"  Patched ADRP+LDR at 0x{off:X}: target VA 0x{target_va:X} "
-                  f"-> ADR x{rd}, {adr_offset} + LDR [x{rd}]")
-            continue
+        # --- Pattern 3: ADRP with non-adjacent consumer (split pair) ---
+        # The compiler scheduled other instructions between ADRP and its
+        # ADD/LDR consumer.  We simply replace ADRP with ADR pointing to
+        # the same page-base address.  Downstream consumers use
+        # [Xd, #offset] so the final target = page_base + offset is correct.
+        adr_offset = target_page - off
+        if adr_offset < -(1 << 20) or adr_offset >= (1 << 20):
+            print(f"  ERROR: split ADRP at 0x{off:X} target page 0x{target_page:X} "
+                  f"out of ADR range ({adr_offset}), CANNOT patch",
+                  file=sys.stderr)
+            sys.exit(1)
 
-    total = patches_add + patches_ldr
+        struct.pack_into('<I', blob, off, encode_adr(rd, adr_offset))
+        patches_split += 1
+        print(f"  Patched ADRP (split) at 0x{off:X}: page 0x{target_page:X} "
+              f"-> ADR x{rd}, {adr_offset}")
+
+    total = patches_add + patches_ldr + patches_split
     if total:
-        print(f"  Total ADRP patches: {total} ({patches_add} ADD, {patches_ldr} LDR)")
+        parts = []
+        if patches_add:
+            parts.append(f"{patches_add} ADD")
+        if patches_ldr:
+            parts.append(f"{patches_ldr} LDR")
+        if patches_split:
+            parts.append(f"{patches_split} split")
+        print(f"  Total ADRP patches: {total} ({', '.join(parts)})")
     else:
         print(f"  No ADRP pairs found to patch")
+
+    # --- Verification: no ADRP referencing within the section should remain ---
+    remaining = []
+    for off in range(0, extent - 4, 4):
+        inst = struct.unpack_from('<I', blob, off)[0]
+        adrp = decode_adrp(inst)
+        if adrp is None:
+            continue
+        rd, page_delta = adrp
+        target_page = ((off >> 12) << 12) + page_delta
+        if 0 <= target_page < extent + 0x1000:
+            remaining.append((off, rd, target_page))
+
+    if remaining:
+        print(f"\n  ERROR: {len(remaining)} ADRP instruction(s) still reference "
+              f"within the section after patching:", file=sys.stderr)
+        for off, rd, tp in remaining:
+            print(f"    0x{off:X}: ADRP x{rd}, target page 0x{tp:X}",
+                  file=sys.stderr)
+        sys.exit(1)
 
     return bytes(blob)
 

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"reflect"
+	"strconv"
 	"unsafe"
 )
 
@@ -80,6 +82,36 @@ func uintFitsKind(v uint64, kind ElemTypeKind) bool {
 		return v <= math.MaxUint32
 	default: // KindUint, KindUint64
 		return true
+	}
+}
+
+func writeIntValue(ptr unsafe.Pointer, kind ElemTypeKind, v int64) {
+	switch kind {
+	case KindInt:
+		*(*int)(ptr) = int(v)
+	case KindInt8:
+		*(*int8)(ptr) = int8(v)
+	case KindInt16:
+		*(*int16)(ptr) = int16(v)
+	case KindInt32:
+		*(*int32)(ptr) = int32(v)
+	case KindInt64:
+		*(*int64)(ptr) = v
+	}
+}
+
+func writeUintValue(ptr unsafe.Pointer, kind ElemTypeKind, v uint64) {
+	switch kind {
+	case KindUint:
+		*(*uint)(ptr) = uint(v)
+	case KindUint8:
+		*(*uint8)(ptr) = uint8(v)
+	case KindUint16:
+		*(*uint16)(ptr) = uint16(v)
+	case KindUint32:
+		*(*uint32)(ptr) = uint32(v)
+	case KindUint64:
+		*(*uint64)(ptr) = v
 	}
 }
 
@@ -220,10 +252,7 @@ func scanUint64SinglePass(src []byte, idx int) (end int, value uint64, isFloat b
 	i++
 
 	// Accumulate up to 19 total digits
-	fastLimit := i + 18
-	if fastLimit > n {
-		fastLimit = n
-	}
+	fastLimit := min(i+18, n)
 	for i < fastLimit {
 		c := src[i]
 		if c < '0' || c > '9' {
@@ -504,32 +533,216 @@ func eiselLemire64(man uint64, exp10 int, neg bool) (float64, bool) {
 	}
 	return math.Float64frombits(retBits), true
 }
-func writeIntValue(ptr unsafe.Pointer, kind ElemTypeKind, v int64) {
-	switch kind {
-	case KindInt:
-		*(*int)(ptr) = int(v)
-	case KindInt8:
-		*(*int8)(ptr) = int8(v)
-	case KindInt16:
-		*(*int16)(ptr) = int16(v)
-	case KindInt32:
-		*(*int32)(ptr) = int32(v)
-	case KindInt64:
-		*(*int64)(ptr) = v
+
+// scanArrayInt is a specialized path for [N]intX arrays (int, int8, int16, int32, int64).
+// It calls scanInt64SinglePass directly, bypassing scanValue/scanNumber dispatch.
+func scanArrayInt(src []byte, idx int, arrayLen int, elemSize uintptr, elemKind ElemTypeKind, elemType reflect.Type, ptr unsafe.Pointer) (int, error) {
+	n := len(src)
+	idx++
+
+	if idx < n && src[idx] <= ' ' {
+		idx = skipWSLong(src, idx)
+	}
+
+	if idx >= n {
+		return idx, errUnexpectedEOF
+	}
+	if src[idx] == ']' {
+		zeroArrayElements(ptr, elemSize, 0, arrayLen)
+		return idx + 1, nil
+	}
+
+	count := 0
+	for {
+		if count < arrayLen {
+			elemPtr := unsafe.Add(ptr, uintptr(count)*elemSize)
+			end, v, isFloat, ok := scanInt64SinglePass(src, idx)
+			if isFloat {
+				numEnd, _, numErr := scanNumberSpan(src, idx)
+				if numErr != nil {
+					return numEnd, numErr
+				}
+				return numEnd, newUnmarshalTypeError("number", elemType, numEnd)
+			}
+			if !ok {
+				if end == idx || (end == idx+1 && src[idx] == '-') {
+					return end, newSyntaxError(fmt.Sprintf("vjson: invalid number at offset %d", idx), idx)
+				}
+				return end, newUnmarshalTypeError("number "+string(src[idx:end]), elemType, end)
+			}
+			if !intFitsKind(v, elemKind) {
+				return end, newUnmarshalTypeError("number "+string(src[idx:end]), elemType, end)
+			}
+			writeIntValue(elemPtr, elemKind, v)
+			idx = end
+		} else {
+			var err error
+			idx, err = skipValue(src, idx)
+			if err != nil {
+				return idx, err
+			}
+		}
+		count++
+
+		if idx < n && src[idx] <= ' ' {
+			idx = skipWS(src, idx)
+		}
+		if idx >= n {
+			return idx, errUnexpectedEOF
+		}
+		if src[idx] == ',' {
+			idx++
+			if idx < n && src[idx] <= ' ' {
+				idx = skipWSLong(src, idx)
+			}
+			continue
+		}
+		if src[idx] == ']' {
+			if count < arrayLen {
+				zeroArrayElements(ptr, elemSize, count, arrayLen)
+			}
+			return idx + 1, nil
+		}
+		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in array, got %q", src[idx]), idx)
 	}
 }
 
-func writeUintValue(ptr unsafe.Pointer, kind ElemTypeKind, v uint64) {
-	switch kind {
-	case KindUint:
-		*(*uint)(ptr) = uint(v)
-	case KindUint8:
-		*(*uint8)(ptr) = uint8(v)
-	case KindUint16:
-		*(*uint16)(ptr) = uint16(v)
-	case KindUint32:
-		*(*uint32)(ptr) = uint32(v)
-	case KindUint64:
-		*(*uint64)(ptr) = v
+// scanArrayUint is a specialized path for [N]uintX arrays (uint, uint8, uint16, uint32, uint64).
+// It calls scanUint64SinglePass directly, bypassing scanValue/scanNumber dispatch.
+func scanArrayUint(src []byte, idx int, arrayLen int, elemSize uintptr, elemKind ElemTypeKind, elemType reflect.Type, ptr unsafe.Pointer) (int, error) {
+	n := len(src)
+	idx++
+
+	if idx < n && src[idx] <= ' ' {
+		idx = skipWSLong(src, idx)
+	}
+
+	if idx >= n {
+		return idx, errUnexpectedEOF
+	}
+	if src[idx] == ']' {
+		zeroArrayElements(ptr, elemSize, 0, arrayLen)
+		return idx + 1, nil
+	}
+
+	count := 0
+	for {
+		if count < arrayLen {
+			elemPtr := unsafe.Add(ptr, uintptr(count)*elemSize)
+			end, v, isFloat, ok := scanUint64SinglePass(src, idx)
+			if isFloat {
+				numEnd, _, numErr := scanNumberSpan(src, idx)
+				if numErr != nil {
+					return numEnd, numErr
+				}
+				return numEnd, newUnmarshalTypeError("number", elemType, numEnd)
+			}
+			if !ok {
+				if end == idx {
+					return end, newSyntaxError(fmt.Sprintf("vjson: invalid number at offset %d", idx), idx)
+				}
+				return end, newUnmarshalTypeError("number "+string(src[idx:end]), elemType, end)
+			}
+			if !uintFitsKind(v, elemKind) {
+				return end, newUnmarshalTypeError("number "+string(src[idx:end]), elemType, end)
+			}
+			writeUintValue(elemPtr, elemKind, v)
+			idx = end
+		} else {
+			var err error
+			idx, err = skipValue(src, idx)
+			if err != nil {
+				return idx, err
+			}
+		}
+		count++
+
+		if idx < n && src[idx] <= ' ' {
+			idx = skipWS(src, idx)
+		}
+		if idx >= n {
+			return idx, errUnexpectedEOF
+		}
+		if src[idx] == ',' {
+			idx++
+			if idx < n && src[idx] <= ' ' {
+				idx = skipWSLong(src, idx)
+			}
+			continue
+		}
+		if src[idx] == ']' {
+			if count < arrayLen {
+				zeroArrayElements(ptr, elemSize, count, arrayLen)
+			}
+			return idx + 1, nil
+		}
+		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in array, got %q", src[idx]), idx)
+	}
+}
+
+// scanArrayFloat64 is a specialized path for [N]float64 arrays.
+func scanArrayFloat64(src []byte, idx int, arrayLen int, elemSize uintptr, ptr unsafe.Pointer) (int, error) {
+	n := len(src)
+	idx++
+
+	if idx < n && src[idx] <= ' ' {
+		idx = skipWSLong(src, idx)
+	}
+
+	if idx >= n {
+		return idx, errUnexpectedEOF
+	}
+	if src[idx] == ']' {
+		zeroArrayElements(ptr, elemSize, 0, arrayLen)
+		return idx + 1, nil
+	}
+
+	count := 0
+	for {
+		if count < arrayLen {
+			elemPtr := unsafe.Add(ptr, uintptr(count)*elemSize)
+			end, v, usedFast, scanErr := scanFloat64Fast(src, idx)
+			if scanErr != nil {
+				return end, scanErr
+			}
+			if usedFast {
+				*(*float64)(elemPtr) = v
+			} else {
+				fv, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 64)
+				if err != nil {
+					return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
+				}
+				*(*float64)(elemPtr) = fv
+			}
+			idx = end
+		} else {
+			var err error
+			idx, err = skipValue(src, idx)
+			if err != nil {
+				return idx, err
+			}
+		}
+		count++
+
+		if idx < n && src[idx] <= ' ' {
+			idx = skipWS(src, idx)
+		}
+		if idx >= n {
+			return idx, errUnexpectedEOF
+		}
+		if src[idx] == ',' {
+			idx++
+			if idx < n && src[idx] <= ' ' {
+				idx = skipWSLong(src, idx)
+			}
+			continue
+		}
+		if src[idx] == ']' {
+			if count < arrayLen {
+				zeroArrayElements(ptr, elemSize, count, arrayLen)
+			}
+			return idx + 1, nil
+		}
+		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in array, got %q", src[idx]), idx)
 	}
 }

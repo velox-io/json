@@ -17,6 +17,19 @@ const (
 	litU32Alse = uint32(0x65736c61)
 )
 
+func invalidLiteralError(idx int) error {
+	return newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
+}
+
+func unmarshalBoolTypeError(ti *TypeInfo, offset int) error {
+	return newUnmarshalTypeError("bool", ti.Ext.Type, offset)
+}
+
+func nullifyMap(ti *TypeInfo, ptr unsafe.Pointer) {
+	mapDec := ti.resolveCodec().(*MapCodec)
+	reflect.NewAt(mapDec.MapType, ptr).Elem().Set(reflect.Zero(mapDec.MapType))
+}
+
 func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
 	if ti.Kind == KindPointer {
 		return sc.scanPointer(src, idx, ti, ptr)
@@ -34,19 +47,281 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 		}
 		return sc.scanStringValue(src, idx, ti, ptr)
 	case '{':
-		return sc.scanObjectValue(src, idx, ti, ptr)
-	case '[':
-		return sc.scanArrayValue(src, idx, ti, ptr)
-	case 't':
-		return sc.scanTrue(src, idx, ti, ptr)
-	case 'f':
-		return sc.scanFalse(src, idx, ti, ptr)
-	case 'n':
-		return sc.scanNull(src, idx, ti, ptr)
-	default:
-		if (src[idx] >= '0' && src[idx] <= '9') || src[idx] == '-' {
-			return sc.scanNumber(src, idx, ti, ptr)
+		switch ti.Kind {
+		case KindStruct:
+			//return sc.scanStruct(src, idx, ti.resolveCodec().(*StructCodec), ptr)
+			{
+				dec := ti.resolveCodec().(*StructCodec)
+				base := ptr
+				// inline struct decoding to avoid method-call overhead on the hot path
+				idx++
+				idx = skipWSLong(src, idx)
+				if idx >= len(src) {
+					return idx, errUnexpectedEOF
+				}
+				if src[idx] == '}' {
+					return idx + 1, nil
+				}
+
+				var firstErr error
+
+				for {
+					if idx >= len(src) {
+						return idx, errUnexpectedEOF
+					}
+					if src[idx] != '"' {
+						return idx, newSyntaxError("vjson: syntax error", idx)
+					}
+					var keyBytes []byte
+					var err error
+
+					//idx, keyBytes, err = sc.scanStringKey(src, idx)
+					//{
+					{
+						start := idx + 1
+						n := len(src)
+
+						// SWAR scan 8 bytes at a time for '"', '\\', or control chars (< 0x20)
+						pos := start
+						for pos+8 <= n {
+							w := *(*uint64)(unsafe.Pointer(&src[pos]))
+							mq := hasZeroByte(w ^ (lo64 * 0x22)) // '"'
+							mb := hasZeroByte(w ^ (lo64 * 0x5C)) // '\\'
+							mc := (w - lo64*0x20) & ^w & hi64    // < 0x20
+							combined := mq | mb | mc
+							if combined != 0 {
+								off := firstMarkedByteIndex(combined)
+								foundIdx := pos + off
+								c := src[foundIdx]
+								if c == '"' {
+									idx, keyBytes, err = foundIdx+1, src[start:foundIdx], nil
+									goto out
+								}
+								if c == '\\' {
+									idx, keyBytes, err = sc.unescapeSinglePass(src, start, foundIdx)
+									goto out
+								}
+								idx, keyBytes, err = foundIdx, nil, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", foundIdx), foundIdx)
+								goto out
+							}
+							pos += 8
+						}
+
+						for pos < n {
+							c := src[pos]
+							if c == '"' {
+								idx, keyBytes, err = pos+1, src[start:pos], nil
+								goto out
+							}
+							if c == '\\' {
+								idx, keyBytes, err = sc.unescapeSinglePass(src, start, pos)
+								goto out
+							}
+							if c < 0x20 {
+								idx, keyBytes, err = pos, nil, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", pos), pos)
+								goto out
+							}
+							pos++
+						}
+						idx, keyBytes, err = n, nil, errUnexpectedEOF
+					out:
+					}
+					//}
+					if err != nil {
+						return idx, err
+					}
+
+					idx = skipWS(src, idx)
+					if idx >= len(src) {
+						return idx, errUnexpectedEOF
+					}
+					if src[idx] != ':' {
+						return idx, newSyntaxError("vjson: syntax error", idx)
+					}
+					idx++
+					idx = skipWS(src, idx)
+
+					fi := dec.LookupFieldBytes(keyBytes)
+					if fi == nil {
+						// Unknown field — skip value
+						idx, err = skipValue(src, idx)
+						if err != nil {
+							return idx, err
+						}
+					} else {
+						savedIdx := idx
+						fieldPtr := unsafe.Add(base, fi.Offset)
+
+						if idx < len(src) && src[idx] == '"' && fi.Flags == 0 && fi.Kind != KindPointer {
+							//fast path
+							if fi.Kind == KindSlice {
+								idx, err = sc.scanStringToSlice(src, idx, fi, fieldPtr)
+							} else {
+								idx, err = sc.scanStringValue(src, idx, fi, fieldPtr)
+							}
+						} else {
+							idx, err = sc.scanValue(src, idx, fi, fieldPtr)
+						}
+
+						if err != nil {
+							var ute *UnmarshalTypeError
+							if !errors.As(err, &ute) {
+								return idx, err // syntax error → abort
+							}
+							// Type mismatch: skip the value and continue.
+							if idx == savedIdx {
+								// Object/array mismatch: scanValue didn't consume the value.
+								idx, err = skipValue(src, idx)
+								if err != nil {
+									return idx, err
+								}
+							}
+							if firstErr == nil {
+								firstErr = ute
+							}
+						}
+					}
+
+					if idx >= len(src) {
+						return idx, errUnexpectedEOF
+					}
+					c := src[idx]
+					if c == ',' {
+						idx++
+						if idx >= len(src) {
+							return idx, errUnexpectedEOF
+						}
+						if src[idx] == '"' {
+							continue
+						}
+						idx = skipWSLong(src, idx)
+						if idx >= len(src) {
+							return idx, errUnexpectedEOF
+						}
+						if src[idx] != '"' {
+							return idx, newSyntaxError("vjson: syntax error", idx)
+						}
+						continue
+					}
+					if c == '}' {
+						return idx + 1, firstErr
+					}
+					if wsLUT[c] != 0 {
+						idx = skipWSLong(src, idx)
+						if idx >= len(src) {
+							return idx, errUnexpectedEOF
+						}
+						c = src[idx]
+						if c == ',' {
+							idx++
+							if idx >= len(src) {
+								return idx, errUnexpectedEOF
+							}
+							if src[idx] == '"' {
+								continue
+							}
+							idx = skipWSLong(src, idx)
+							if idx >= len(src) {
+								return idx, errUnexpectedEOF
+							}
+							if src[idx] != '"' {
+								return idx, newSyntaxError("vjson: syntax error", idx)
+							}
+							continue
+						}
+						if c == '}' {
+							return idx + 1, firstErr
+						}
+					}
+					return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in object, got %q", src[idx]), idx)
+				}
+			} //inline scanStruct end
+		case KindMap:
+			return sc.scanMap(src, idx, ti.resolveCodec().(*MapCodec), ptr)
+		case KindAny:
+			newIdx, m, err := sc.scanMapAny(src, idx)
+			if err != nil {
+				return newIdx, err
+			}
+			*(*any)(ptr) = m
+			return newIdx, nil
+		default:
+			return idx, newUnmarshalTypeError("object", ti.Ext.Type, idx)
 		}
+	case '[':
+		switch ti.Kind {
+		case KindSlice:
+			return sc.scanSlice(src, idx, ti.resolveCodec().(*SliceCodec), ptr)
+		case KindArray:
+			return sc.scanArray(src, idx, ti.resolveCodec().(*ArrayCodec), ptr)
+		case KindAny:
+			newIdx, arr, err := sc.scanSliceAny(src, idx)
+			if err != nil {
+				return newIdx, err
+			}
+			*(*any)(ptr) = arr
+			return newIdx, nil
+		default:
+			return idx, newUnmarshalTypeError("array", ti.Ext.Type, idx)
+		}
+	case 't':
+		if idx+4 > len(src) {
+			return idx, errUnexpectedEOF
+		}
+		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32True {
+			return idx, invalidLiteralError(idx)
+		}
+		switch ti.Kind {
+		case KindBool:
+			*(*bool)(ptr) = true
+		case KindAny:
+			*(*any)(ptr) = true
+		default:
+			return idx + 4, unmarshalBoolTypeError(ti, idx+4)
+		}
+		return idx + 4, nil
+	case 'f':
+		if idx+5 > len(src) {
+			return idx, errUnexpectedEOF
+		}
+		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse {
+			return idx, invalidLiteralError(idx)
+		}
+		switch ti.Kind {
+		case KindBool:
+			*(*bool)(ptr) = false
+		case KindAny:
+			*(*any)(ptr) = false
+		default:
+			return idx + 5, unmarshalBoolTypeError(ti, idx+5)
+		}
+		return idx + 5, nil
+	case 'n':
+		if idx+4 > len(src) {
+			return idx, errUnexpectedEOF
+		}
+		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null {
+			return idx, invalidLiteralError(idx)
+		}
+		switch ti.Kind {
+		case KindPointer:
+			*(*unsafe.Pointer)(ptr) = nil
+		case KindSlice:
+			*(*SliceHeader)(ptr) = SliceHeader{}
+		case KindMap:
+			nullifyMap(ti, ptr)
+		case KindAny:
+			*(*any)(ptr) = nil
+		default:
+			// Primitive value types (string, bool, int, uint, float) and structs:
+			// null leaves the existing value unchanged, matching encoding/json.
+		}
+		return idx + 4, nil
+	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-':
+		// if (src[idx] >= '0' && src[idx] <= '9') || src[idx] == '-' {
+		return sc.scanNumber(src, idx, ti, ptr)
+		// }
+	default:
 		return idx, newSyntaxError(fmt.Sprintf("vjson: unexpected character %q at offset %d", src[idx], idx), idx)
 	}
 }
@@ -326,6 +601,36 @@ func scanNumberSpan(src []byte, idx int) (int, bool, error) {
 
 func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
 	switch ti.Kind {
+
+	case KindFloat64:
+		end, v, usedFast, scanErr := scanFloat64Fast(src, idx)
+		if scanErr != nil {
+			return end, scanErr
+		}
+		if usedFast {
+			*(*float64)(ptr) = v
+			return end, nil
+		}
+		// Fall back to strconv for complex numbers
+		fv, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 64)
+		if err != nil {
+			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
+		}
+		*(*float64)(ptr) = fv
+		return end, nil
+
+	case KindFloat32:
+		end, _, numErr := scanNumberSpan(src, idx)
+		if numErr != nil {
+			return end, numErr
+		}
+		v, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 32)
+		if err != nil {
+			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
+		}
+		*(*float32)(ptr) = float32(v)
+		return end, nil
+
 	case KindInt, KindInt8, KindInt16, KindInt32, KindInt64:
 		end, v, isFloat, ok := scanInt64SinglePass(src, idx)
 		if isFloat {
@@ -372,50 +677,11 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 		writeUintValue(ptr, ti.Kind, v)
 		return end, nil
 
-	case KindFloat64:
-		end, v, usedFast, scanErr := scanFloat64Fast(src, idx)
-		if scanErr != nil {
-			return end, scanErr
-		}
-		if usedFast {
-			*(*float64)(ptr) = v
-			return end, nil
-		}
-		// Fall back to strconv for complex numbers
-		fv, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 64)
-		if err != nil {
-			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
-		}
-		*(*float64)(ptr) = fv
-		return end, nil
-
-	default:
-		// Float32, Any, and other types: use existing two-pass approach
-		end, isFloat, numErr := scanNumberSpan(src, idx)
+	case KindAny:
+		end, _, numErr := scanNumberSpan(src, idx)
 		if numErr != nil {
 			return end, numErr
 		}
-		return sc.scanNumberTyped(src, idx, end, isFloat, ti, ptr)
-	}
-}
-
-// scanNumberTyped handles assigning a scanned number (src[idx:end]) to a typed field.
-// Extracted from the original scanNumber to be shared by the fallback float/any paths.
-func (sc *Parser) scanNumberTyped(src []byte, idx, end int, isFloat bool, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
-	switch ti.Kind {
-	case KindFloat32:
-		v, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 32)
-		if err != nil {
-			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
-		}
-		*(*float32)(ptr) = float32(v)
-	case KindFloat64:
-		v, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 64)
-		if err != nil {
-			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
-		}
-		*(*float64)(ptr) = v
-	case KindAny:
 		// UseNumber: preserve raw text as json.Number.
 		if sc.useNumber {
 			*(*any)(ptr) = json.Number(string(src[idx:end]))
@@ -427,10 +693,11 @@ func (sc *Parser) scanNumberTyped(src []byte, idx, end int, isFloat bool, ti *Ty
 			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid number %q: %v", src[idx:end], err), end, err)
 		}
 		*(*any)(ptr) = v
+		return end, nil
+
 	default:
-		return end, newUnmarshalTypeError("number", ti.Ext.Type, end)
+		return idx, newUnmarshalTypeError("number", ti.Ext.Type, idx)
 	}
-	return end, nil
 }
 
 // scanNumberAny parses a number for interface{} context.
@@ -469,86 +736,6 @@ func (sc *Parser) scanNumberAny(src []byte, idx int) (int, any, error) {
 		return end, nil, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid number %q: %v", span, err), end, err)
 	}
 	return end, v, nil
-}
-
-func (sc *Parser) scanTrue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
-	if idx+4 > len(src) {
-		return idx, errUnexpectedEOF
-	}
-	if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32True {
-		return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
-	}
-	switch ti.Kind {
-	case KindBool:
-		*(*bool)(ptr) = true
-	case KindAny:
-		*(*any)(ptr) = true
-	default:
-		return idx + 4, newUnmarshalTypeError("bool", ti.Ext.Type, idx+4)
-	}
-	return idx + 4, nil
-}
-
-func (sc *Parser) scanFalse(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
-	if idx+5 > len(src) {
-		return idx, errUnexpectedEOF
-	}
-	if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "else" suffix; 'f' already matched by caller
-		return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
-	}
-	switch ti.Kind {
-	case KindBool:
-		*(*bool)(ptr) = false
-	case KindAny:
-		*(*any)(ptr) = false
-	default:
-		return idx + 5, newUnmarshalTypeError("bool", ti.Ext.Type, idx+5)
-	}
-	return idx + 5, nil
-}
-
-func (sc *Parser) scanNull(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
-	if idx+4 > len(src) {
-		return idx, errUnexpectedEOF
-	}
-	if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null {
-		return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
-	}
-	newIdx := idx + 4
-
-	switch ti.Kind {
-	case KindPointer:
-		*(*unsafe.Pointer)(ptr) = nil
-	case KindSlice:
-		*(*SliceHeader)(ptr) = SliceHeader{}
-	case KindMap:
-		mapDec := ti.resolveCodec().(*MapCodec)
-		reflect.NewAt(mapDec.MapType, ptr).Elem().Set(reflect.Zero(mapDec.MapType))
-	case KindAny:
-		*(*any)(ptr) = nil
-	default:
-		// Primitive value types (string, bool, int, uint, float) and structs:
-		// null leaves the existing value unchanged, matching encoding/json.
-	}
-	return newIdx, nil
-}
-
-func (sc *Parser) scanObjectValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
-	switch ti.Kind {
-	case KindStruct:
-		return sc.scanStruct(src, idx, ti.resolveCodec().(*StructCodec), ptr)
-	case KindMap:
-		return sc.scanMap(src, idx, ti.resolveCodec().(*MapCodec), ptr)
-	case KindAny:
-		newIdx, m, err := sc.scanMapAny(src, idx)
-		if err != nil {
-			return newIdx, err
-		}
-		*(*any)(ptr) = m
-		return newIdx, nil
-	default:
-		return idx, newUnmarshalTypeError("object", ti.Ext.Type, idx)
-	}
 }
 
 func (sc *Parser) scanStruct(src []byte, idx int, dec *StructCodec, base unsafe.Pointer) (int, error) {
@@ -673,9 +860,9 @@ func (sc *Parser) scanStruct(src []byte, idx int, dec *StructCodec, base unsafe.
 }
 
 func (sc *Parser) scanMap(src []byte, idx int, mDec *MapCodec, ptr unsafe.Pointer) (int, error) {
-	// Fast path for map[string]string - zero reflection
-	if mDec.ValIsString {
-		return sc.scanMapStringString(src, idx, ptr)
+	// Fast path for map[string]V with known V — zero reflection
+	if mDec.ScanMapFn != nil {
+		return mDec.ScanMapFn(sc, src, idx, ptr)
 	}
 
 	idx++
@@ -730,110 +917,6 @@ func (sc *Parser) scanMap(src []byte, idx int, mDec *MapCodec, ptr unsafe.Pointe
 			return idx, err
 		}
 		mapVal.SetMapIndex(keyRV, valRV.Elem())
-
-		if idx >= len(src) {
-			return idx, errUnexpectedEOF
-		}
-		c := src[idx]
-		if c == ',' {
-			idx++
-			if idx >= len(src) {
-				return idx, errUnexpectedEOF
-			}
-			if src[idx] == '"' {
-				continue
-			}
-			idx = skipWSLong(src, idx)
-			if idx >= len(src) {
-				return idx, errUnexpectedEOF
-			}
-			if src[idx] != '"' {
-				return idx, newSyntaxError("vjson: syntax error", idx)
-			}
-			continue
-		}
-		if c == '}' {
-			return idx + 1, nil
-		}
-		if wsLUT[c] != 0 {
-			idx = skipWSLong(src, idx)
-			if idx >= len(src) {
-				return idx, errUnexpectedEOF
-			}
-			c = src[idx]
-			if c == ',' {
-				idx++
-				if idx >= len(src) {
-					return idx, errUnexpectedEOF
-				}
-				if src[idx] == '"' {
-					continue
-				}
-				idx = skipWSLong(src, idx)
-				if idx >= len(src) {
-					return idx, errUnexpectedEOF
-				}
-				if src[idx] != '"' {
-					return idx, newSyntaxError("vjson: syntax error", idx)
-				}
-				continue
-			}
-			if c == '}' {
-				return idx + 1, nil
-			}
-		}
-		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in map, got %q", src[idx]), idx)
-	}
-}
-
-// scanMapStringString is a zero-reflection fast path for map[string]string.
-func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (int, error) {
-	idx++
-	idx = skipWSLong(src, idx)
-
-	m := *(*map[string]string)(ptr)
-	if m == nil {
-		m = make(map[string]string)
-		*(*map[string]string)(ptr) = m
-	}
-
-	if idx >= len(src) {
-		return idx, errUnexpectedEOF
-	}
-	if src[idx] == '}' {
-		return idx + 1, nil
-	}
-
-	for {
-		if idx >= len(src) {
-			return idx, errUnexpectedEOF
-		}
-		if src[idx] != '"' {
-			return idx, newSyntaxError("vjson: syntax error", idx)
-		}
-		var key string
-		var err error
-		idx, key, err = sc.scanString(src, idx)
-		if err != nil {
-			return idx, err
-		}
-
-		idx = skipWS(src, idx)
-		if idx >= len(src) {
-			return idx, errUnexpectedEOF
-		}
-		if src[idx] != ':' {
-			return idx, newSyntaxError("vjson: syntax error", idx)
-		}
-		idx++
-		idx = skipWS(src, idx)
-
-		var val string
-		idx, val, err = sc.scanString(src, idx)
-		if err != nil {
-			return idx, err
-		}
-		m[key] = val
 
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
@@ -989,25 +1072,15 @@ func (sc *Parser) scanMapAny(src []byte, idx int) (int, map[string]any, error) {
 	}
 }
 
-func (sc *Parser) scanArrayValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
-	switch ti.Kind {
-	case KindSlice:
-		return sc.scanArray(src, idx, ti.resolveCodec().(*SliceCodec), ptr)
-	case KindArray:
-		return sc.scanArrayFixed(src, idx, ti.resolveCodec().(*ArrayCodec), ptr)
-	case KindAny:
-		newIdx, arr, err := sc.scanArrayAny(src, idx)
-		if err != nil {
-			return newIdx, err
-		}
-		*(*any)(ptr) = arr
-		return newIdx, nil
-	default:
-		return idx, newUnmarshalTypeError("array", ti.Ext.Type, idx)
-	}
+// zeroArrayElements zeroes array elements from index 'from' to 'to' (exclusive).
+func zeroArrayElements(base unsafe.Pointer, elemSize uintptr, from, to int) {
+	start := unsafe.Add(base, uintptr(from)*elemSize)
+	n := uintptr(to-from) * elemSize
+	b := unsafe.Slice((*byte)(start), n)
+	clear(b)
 }
 
-func (sc *Parser) scanArray(src []byte, idx int, sDec *SliceCodec, ptr unsafe.Pointer) (int, error) {
+func (sc *Parser) scanSlice(src []byte, idx int, sDec *SliceCodec, ptr unsafe.Pointer) (int, error) {
 	idx++
 	idx = skipWSLong(src, idx)
 
@@ -1097,10 +1170,48 @@ func (sc *Parser) scanArray(src []byte, idx int, sDec *SliceCodec, ptr unsafe.Po
 	}
 }
 
+func (sc *Parser) scanSliceAny(src []byte, idx int) (int, []any, error) {
+	idx++
+	idx = skipWSLong(src, idx)
+
+	if idx >= len(src) {
+		return idx, nil, errUnexpectedEOF
+	}
+	if src[idx] == ']' {
+		return idx + 1, []any{}, nil
+	}
+
+	arrayCap := 2
+	arr := make([]any, 0, arrayCap)
+	for {
+		var val any
+		var err error
+		idx, val, err = sc.scanValueAny(src, idx)
+		if err != nil {
+			return idx, nil, err
+		}
+		arr = append(arr, val)
+
+		idx = skipWS(src, idx)
+		if idx >= len(src) {
+			return idx, nil, errUnexpectedEOF
+		}
+		if src[idx] == ',' {
+			idx++
+			idx = skipWSLong(src, idx)
+			continue
+		}
+		if src[idx] == ']' {
+			return idx + 1, arr, nil
+		}
+		return idx, nil, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in any array, got %q", src[idx]), idx)
+	}
+}
+
 // scanArrayFixed decodes a JSON array into a Go fixed-size array [N]T.
-func (sc *Parser) scanArrayFixed(src []byte, idx int, aDec *ArrayCodec, ptr unsafe.Pointer) (int, error) {
-	if aDec.ElemTI.Kind == KindFloat64 {
-		return sc.scanArrayFixedFloat64(src, idx, aDec.ArrayLen, aDec.ElemSize, ptr)
+func (sc *Parser) scanArray(src []byte, idx int, aDec *ArrayCodec, ptr unsafe.Pointer) (int, error) {
+	if fn := aDec.ElemTI.ScanArrayFn; fn != nil {
+		return fn(src, idx, aDec.ArrayLen, aDec.ElemSize, ptr)
 	}
 
 	idx++
@@ -1151,120 +1262,6 @@ func (sc *Parser) scanArrayFixed(src []byte, idx int, aDec *ArrayCodec, ptr unsa
 			return idx + 1, nil
 		}
 		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in array, got %q", src[idx]), idx)
-	}
-}
-
-// zeroArrayElements zeroes array elements from index 'from' to 'to' (exclusive).
-func zeroArrayElements(base unsafe.Pointer, elemSize uintptr, from, to int) {
-	start := unsafe.Add(base, uintptr(from)*elemSize)
-	n := uintptr(to-from) * elemSize
-	b := unsafe.Slice((*byte)(start), n)
-	clear(b)
-}
-
-// scanArrayFixedFloat64 is a specialized path for [N]float64 arrays.
-// Calls scanFloat64Fast directly and uses inline whitespace checks.
-func (sc *Parser) scanArrayFixedFloat64(src []byte, idx int, arrayLen int, elemSize uintptr, ptr unsafe.Pointer) (int, error) {
-	n := len(src)
-	idx++
-
-	if idx < n && src[idx] <= ' ' {
-		idx = skipWSLong(src, idx)
-	}
-
-	if idx >= n {
-		return idx, errUnexpectedEOF
-	}
-	if src[idx] == ']' {
-		zeroArrayElements(ptr, elemSize, 0, arrayLen)
-		return idx + 1, nil
-	}
-
-	count := 0
-	for {
-		if count < arrayLen {
-			elemPtr := unsafe.Add(ptr, uintptr(count)*elemSize)
-			end, v, usedFast, scanErr := scanFloat64Fast(src, idx)
-			if scanErr != nil {
-				return end, scanErr
-			}
-			if usedFast {
-				*(*float64)(elemPtr) = v
-			} else {
-				fv, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 64)
-				if err != nil {
-					return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
-				}
-				*(*float64)(elemPtr) = fv
-			}
-			idx = end
-		} else {
-			var err error
-			idx, err = skipValue(src, idx)
-			if err != nil {
-				return idx, err
-			}
-		}
-		count++
-
-		if idx < n && src[idx] <= ' ' {
-			idx = skipWS(src, idx)
-		}
-		if idx >= n {
-			return idx, errUnexpectedEOF
-		}
-		if src[idx] == ',' {
-			idx++
-			if idx < n && src[idx] <= ' ' {
-				idx = skipWSLong(src, idx)
-			}
-			continue
-		}
-		if src[idx] == ']' {
-			if count < arrayLen {
-				zeroArrayElements(ptr, elemSize, count, arrayLen)
-			}
-			return idx + 1, nil
-		}
-		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in array, got %q", src[idx]), idx)
-	}
-}
-
-func (sc *Parser) scanArrayAny(src []byte, idx int) (int, []any, error) {
-	idx++
-	idx = skipWSLong(src, idx)
-
-	if idx >= len(src) {
-		return idx, nil, errUnexpectedEOF
-	}
-	if src[idx] == ']' {
-		return idx + 1, []any{}, nil
-	}
-
-	arrayCap := 2
-	arr := make([]any, 0, arrayCap)
-	for {
-		var val any
-		var err error
-		idx, val, err = sc.scanValueAny(src, idx)
-		if err != nil {
-			return idx, nil, err
-		}
-		arr = append(arr, val)
-
-		idx = skipWS(src, idx)
-		if idx >= len(src) {
-			return idx, nil, errUnexpectedEOF
-		}
-		if src[idx] == ',' {
-			idx++
-			idx = skipWSLong(src, idx)
-			continue
-		}
-		if src[idx] == ']' {
-			return idx + 1, arr, nil
-		}
-		return idx, nil, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in any array, got %q", src[idx]), idx)
 	}
 }
 
@@ -1342,7 +1339,7 @@ func (sc *Parser) scanValueAny(src []byte, idx int) (int, any, error) {
 		newIdx, m, err := sc.scanMapAny(src, idx)
 		return newIdx, m, err
 	case '[':
-		newIdx, arr, err := sc.scanArrayAny(src, idx)
+		newIdx, arr, err := sc.scanSliceAny(src, idx)
 		return newIdx, arr, err
 	case 't':
 		if idx+4 > len(src) {

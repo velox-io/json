@@ -78,6 +78,12 @@ gen:
 	@bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) $(if $(ASM),--asm) \
 		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
+# Generate native artifacts with debug trace support.
+# Use with: go test -tags vjdebug -run TestFoo -v
+gen-debug:
+	@EXTRA_CFLAGS="-DVJ_ENCVM_DEBUG" bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) $(if $(ASM),--asm) \
+		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
+
 # Generate benchmark visualization SVG
 # Usage: make benchviz
 #        make benchviz BENCH_FILTER="Benchmark_Marshal.*" BENCH_TITLE="Marshal Performance"
@@ -92,4 +98,4 @@ benchviz:
 	(cd benchmark && go run ./benchviz/ -title '$(BENCH_TITLE)' -format html < '../$(BENCH_OUTPUT)' > '../$(basename $(BENCH_OUTPUT)).html');
 	(cd benchmark && go run ./benchviz/ -title '$(BENCH_TITLE)' -format svg < '../$(BENCH_OUTPUT)' > '../$(basename $(BENCH_OUTPUT)).svg');
 
-.PHONY: lint lint-ci fmt test test-coverage bench bench-baseline bench-check bench-check-threshold clean fuzz fuzz-parallel fuzz-concurrent gen benchviz
+.PHONY: lint lint-ci fmt test test-coverage bench bench-baseline bench-check bench-check-threshold clean fuzz fuzz-parallel fuzz-concurrent gen gen-debug benchviz

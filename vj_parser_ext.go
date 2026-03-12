@@ -15,6 +15,28 @@ import (
 	"unsafe"
 )
 
+// bindScanArrayFn sets TypeInfo.ScanArrayFn for element types that have
+// specialized array-scan paths (int*, uint*, float64), bypassing the
+// generic scanValue/scanNumber dispatch per element.
+func bindScanArrayFn(ti *TypeInfo) {
+	switch ti.Kind {
+	case KindInt, KindInt8, KindInt16, KindInt32, KindInt64:
+		elemKind := ti.Kind
+		elemType := ti.Ext.Type
+		ti.ScanArrayFn = func(src []byte, idx int, arrayLen int, elemSize uintptr, ptr unsafe.Pointer) (int, error) {
+			return scanArrayInt(src, idx, arrayLen, elemSize, elemKind, elemType, ptr)
+		}
+	case KindUint, KindUint8, KindUint16, KindUint32, KindUint64:
+		elemKind := ti.Kind
+		elemType := ti.Ext.Type
+		ti.ScanArrayFn = func(src []byte, idx int, arrayLen int, elemSize uintptr, ptr unsafe.Pointer) (int, error) {
+			return scanArrayUint(src, idx, arrayLen, elemSize, elemKind, elemType, ptr)
+		}
+	case KindFloat64:
+		ti.ScanArrayFn = scanArrayFloat64
+	}
+}
+
 // scanValueSpecial handles fields with non-zero Flags (Quoted, UnmarshalFn,
 // TextUnmarshalFn). Called only when ti.Flags != 0, keeping scanValue lean.
 func (sc *Parser) scanValueSpecial(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
@@ -63,15 +85,90 @@ func (sc *Parser) scanValueSpecial(src []byte, idx int, ti *TypeInfo, ptr unsafe
 		}
 		return sc.scanStringValue(src, idx, ti, ptr)
 	case '{':
-		return sc.scanObjectValue(src, idx, ti, ptr)
+		switch ti.Kind {
+		case KindStruct:
+			return sc.scanStruct(src, idx, ti.resolveCodec().(*StructCodec), ptr)
+		case KindMap:
+			return sc.scanMap(src, idx, ti.resolveCodec().(*MapCodec), ptr)
+		case KindAny:
+			newIdx, m, err := sc.scanMapAny(src, idx)
+			if err != nil {
+				return newIdx, err
+			}
+			*(*any)(ptr) = m
+			return newIdx, nil
+		default:
+			return idx, newUnmarshalTypeError("object", ti.Ext.Type, idx)
+		}
 	case '[':
-		return sc.scanArrayValue(src, idx, ti, ptr)
+		switch ti.Kind {
+		case KindSlice:
+			return sc.scanSlice(src, idx, ti.resolveCodec().(*SliceCodec), ptr)
+		case KindArray:
+			return sc.scanArray(src, idx, ti.resolveCodec().(*ArrayCodec), ptr)
+		case KindAny:
+			newIdx, arr, err := sc.scanSliceAny(src, idx)
+			if err != nil {
+				return newIdx, err
+			}
+			*(*any)(ptr) = arr
+			return newIdx, nil
+		default:
+			return idx, newUnmarshalTypeError("array", ti.Ext.Type, idx)
+		}
 	case 't':
-		return sc.scanTrue(src, idx, ti, ptr)
+		if idx+4 > len(src) {
+			return idx, errUnexpectedEOF
+		}
+		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32True {
+			return idx, invalidLiteralError(idx)
+		}
+		switch ti.Kind {
+		case KindBool:
+			*(*bool)(ptr) = true
+		case KindAny:
+			*(*any)(ptr) = true
+		default:
+			return idx + 4, unmarshalBoolTypeError(ti, idx+4)
+		}
+		return idx + 4, nil
 	case 'f':
-		return sc.scanFalse(src, idx, ti, ptr)
+		if idx+5 > len(src) {
+			return idx, errUnexpectedEOF
+		}
+		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse {
+			return idx, invalidLiteralError(idx)
+		}
+		switch ti.Kind {
+		case KindBool:
+			*(*bool)(ptr) = false
+		case KindAny:
+			*(*any)(ptr) = false
+		default:
+			return idx + 5, unmarshalBoolTypeError(ti, idx+5)
+		}
+		return idx + 5, nil
 	case 'n':
-		return sc.scanNull(src, idx, ti, ptr)
+		if idx+4 > len(src) {
+			return idx, errUnexpectedEOF
+		}
+		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null {
+			return idx, invalidLiteralError(idx)
+		}
+		switch ti.Kind {
+		case KindPointer:
+			*(*unsafe.Pointer)(ptr) = nil
+		case KindSlice:
+			*(*SliceHeader)(ptr) = SliceHeader{}
+		case KindMap:
+			nullifyMap(ti, ptr)
+		case KindAny:
+			*(*any)(ptr) = nil
+		default:
+			// Primitive value types (string, bool, int, uint, float) and structs:
+			// null leaves the existing value unchanged, matching encoding/json.
+		}
+		return idx + 4, nil
 	default:
 		if (src[idx] >= '0' && src[idx] <= '9') || src[idx] == '-' {
 			return sc.scanNumber(src, idx, ti, ptr)

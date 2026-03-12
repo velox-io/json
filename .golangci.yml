@@ -3,83 +3,84 @@ run:
   tests: true
 linters:
   enable:
-    - gosec
-    - misspell
-    - revive
+  - gosec
+  - misspell
+  - revive
   settings:
     errcheck:
       check-type-assertions: false
       check-blank: false
     gosec:
       excludes:
-        - G104
-        - G304
-        - G115
+      - G104
+      - G304
+      - G115
     govet:
       disable:
-        - fieldalignment
+      - fieldalignment
       enable-all: true
     misspell:
       locale: US
     revive:
       rules:
-        - name: blank-imports
-        - name: context-as-argument
-        - name: context-keys-type
-        - name: dot-imports
-        - name: error-return
-        - name: error-strings
-        - name: error-naming
-        - name: exported
-        - name: if-return
-        - name: increment-decrement
-        - name: var-naming
-        - name: var-declaration
-        - name: package-comments
-        - name: range
-        - name: receiver-naming
-        - name: time-naming
-        - name: unexported-return
-        - name: indent-error-flow
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+      - name: var-declaration
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
   exclusions:
     generated: lax
     presets:
-      - comments
-      - common-false-positives
-      - legacy
-      - std-error-handling
+    - comments
+    - common-false-positives
+    - legacy
+    - std-error-handling
     rules:
-      - linters:
-          - errcheck
-          - gosec
-        path: _test\.go
-      - linters:
-          - gosec
-        path: benchmark/
-      - linters:
-          - gosec
-        text: 'G103:'
-      - linters:
-          - errcheck
-        text: type assertion
-      - linters:
-          - staticcheck
-        text: 'SA5008:.*(unknown JSON option "copy"|unknown `copy` tag option)'
+    - linters:
+      - errcheck
+      - gosec
+      path: _test\.go
+    - linters:
+      - gosec
+      path: benchmark/
+    - linters:
+      - gosec
+      text: 'G103:'
+    - linters:
+      - errcheck
+      text: type assertion
+    - linters:
+      - staticcheck
+      text: 'SA5008:.*(unknown JSON option "copy"|unknown `copy` tag option)'
     paths:
-      - third_party$
-      - builtin$
-      - examples$
+    - third_party$
+    - builtin$
+    - examples$
+    - local
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
   new: false
 formatters:
   enable:
-    - gofmt
-    - goimports
+  - gofmt
+  - goimports
   exclusions:
     generated: lax
     paths:
-      - third_party$
-      - builtin$
-      - examples$
+    - third_party$
+    - builtin$
+    - examples$
