@@ -33,16 +33,14 @@ typedef struct VjTraceBuf {
 } VjTraceBuf;
 
 /* ================================================================
- *  OpType — VM instruction opcodes
+ *  OpType — VM instruction opcodes (compact, contiguous numbering)
  *
- *  1-14:  Primitives (= ElemTypeKind)
- *  17-20: Non-primitive data ops
- *  33-46: Structural control-flow
- *  0x40:  Go-only fallback
- *  0xFF:  End sentinel
+ *  1-14:  Primitives (= ElemTypeKind, must not change)
+ *  15-18: Non-primitive data ops
+ *  19-31: Structural control-flow
+ *  32:    Go-only fallback
  *
- *  Sparse layout — gaps allow future expansion.
- *  Dispatch table is 0x41 entries; unused slots caught by bounds check.
+ *  Compact layout — no gaps; dispatch table = 33 entries (2 cache lines).
  * ================================================================ */
 
 enum OpType {
@@ -62,35 +60,38 @@ enum OpType {
   OP_FLOAT64 = 13,
   OP_STRING  = 14, /* Go string {ptr, len} */
 
-  /* --- Non-primitive data ops (17-20) --- */
-  OP_INTERFACE   = 17, /* interface{} — noinline C encoder or yield */
-  OP_RAW_MESSAGE = 18, /* json.RawMessage — direct byte copy */
-  OP_NUMBER      = 19, /* json.Number — direct string copy */
-  OP_BYTE_SLICE  = 20, /* []byte — base64 encode, yield to Go */
+  /* --- Non-primitive data ops (15-18) --- */
+  OP_INTERFACE   = 15, /* interface{} — noinline C encoder or yield */
+  OP_RAW_MESSAGE = 16, /* json.RawMessage — direct byte copy */
+  OP_NUMBER      = 17, /* json.Number — direct string copy */
+  OP_BYTE_SLICE  = 18, /* []byte — base64 encode, yield to Go */
 
-  /* --- Structural control-flow opcodes (33-46) --- */
-  OP_SKIP_IF_ZERO = 33, /* conditional forward jump (omitempty) */
-  /* 34: reserved */
-  OP_CALL         = 35, /* subroutine call: push CALL frame, jump to ops[operand_a] */
-  OP_PTR_DEREF    = 36, /* deref pointer, nil→null+jump */
-  OP_PTR_END      = 37, /* pop ptr-deref frame, restore base */
-  OP_SLICE_BEGIN  = 38, /* slice loop start */
-  OP_SLICE_END    = 39, /* slice loop end / back-edge */
-  OP_MAP_BEGIN    = 40, /* map iteration start (yield-driven) */
-  OP_MAP_END      = 41, /* map iteration end */
-  OP_OBJ_OPEN     = 42, /* write key + '{', set first=1 (no frame) */
-  OP_OBJ_CLOSE    = 43, /* write '}', set first=0 (no frame) */
-  OP_ARRAY_BEGIN  = 44, /* array loop start (inline data, fixed length) */
-  /* 45: reserved (formerly OP_MAP_STR_KV) */
-  OP_MAP_STR_STR  = 46, /* C-native Swiss Map iteration for map[string]string */
-  OP_RET          = 47, /* subroutine return: pop CALL frame, restore ops/pc/base */
+  /* --- Structural control-flow opcodes (19-31) --- */
+  OP_SKIP_IF_ZERO = 19, /* conditional forward jump (omitempty) */
+  OP_CALL         = 20, /* subroutine call: push CALL frame, jump to ops[operand_a] */
+  OP_PTR_DEREF    = 21, /* deref pointer, nil→null+jump */
+  OP_PTR_END      = 22, /* pop ptr-deref frame, restore base */
+  OP_SLICE_BEGIN  = 23, /* slice loop start */
+  OP_SLICE_END    = 24, /* slice loop end / back-edge */
+  OP_MAP_BEGIN    = 25, /* map iteration start (yield-driven) */
+  OP_MAP_END      = 26, /* map iteration end */
+  OP_OBJ_OPEN     = 27, /* write key + '{', set first=1 (no frame) */
+  OP_OBJ_CLOSE    = 28, /* write '}', set first=0 (no frame) */
+  OP_ARRAY_BEGIN  = 29, /* array loop start (inline data, fixed length) */
+  OP_MAP_STR_STR  = 30, /* C-native Swiss Map iteration for map[string]string */
+  OP_RET          = 31, /* subroutine return: pop CALL frame, restore ops/pc/base */
 
   /* --- Go-only fallback --- */
-  OP_FALLBACK    = 0x40, /* custom marshalers, ,string, complex structs */
+  OP_FALLBACK    = 32, /* custom marshalers, ,string, complex structs */
+
+  /* --- Keyed-field variants (33-35) --- */
+  OP_KSTRING     = 33, /* struct field string — unconditional key write */
+  OP_KINT        = 34, /* struct field int — unconditional key write */
+  OP_KINT64      = 35, /* struct field int64 — unconditional key write */
 };
 
-/* Dispatch table size — must cover all opcodes up to OP_FALLBACK (0x40). */
-#define OP_DISPATCH_COUNT 0x41
+/* Dispatch table size — compact: covers all opcodes 0..35 (36 entries). */
+#define OP_DISPATCH_COUNT 36
 
 
 /* ================================================================

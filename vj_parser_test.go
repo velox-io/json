@@ -1998,6 +1998,195 @@ func TestMarshal_MapIntString_StdlibCompat(t *testing.T) {
 	}
 }
 
+// ---------- Comprehensive non-string map key tests (stdlib compat) ----------
+
+// TestMapNonStringKey_StdlibCompat verifies that vjson produces the same
+// marshal output and unmarshal results as encoding/json for map types with
+// non-string keys: integer types, TextMarshaler/TextUnmarshaler, and various
+// value types (string, int, bool, struct, slice, nested map).
+func TestMapNonStringKey_StdlibCompat(t *testing.T) {
+	type Inner struct {
+		X int    `json:"x"`
+		Y string `json:"y"`
+	}
+
+	t.Run("map[int8]string", func(t *testing.T) {
+		m := map[int8]string{-1: "neg", 0: "zero", 127: "max"}
+		compareMapRoundtrip(t, &m)
+	})
+
+	t.Run("map[int16]string", func(t *testing.T) {
+		m := map[int16]string{-100: "neg", 100: "pos"}
+		compareMapRoundtrip(t, &m)
+	})
+
+	t.Run("map[int32]string", func(t *testing.T) {
+		m := map[int32]string{-2147483648: "min", 2147483647: "max"}
+		compareMapRoundtrip(t, &m)
+	})
+
+	t.Run("map[int64]string", func(t *testing.T) {
+		m := map[int64]string{-9999999999: "big_neg", 9999999999: "big_pos"}
+		compareMapRoundtrip(t, &m)
+	})
+
+	t.Run("map[uint8]string", func(t *testing.T) {
+		m := map[uint8]string{0: "zero", 255: "max"}
+		compareMapRoundtrip(t, &m)
+	})
+
+	t.Run("map[uint16]string", func(t *testing.T) {
+		m := map[uint16]string{0: "zero", 65535: "max"}
+		compareMapRoundtrip(t, &m)
+	})
+
+	t.Run("map[uint32]string", func(t *testing.T) {
+		m := map[uint32]string{0: "zero", 4294967295: "max"}
+		compareMapRoundtrip(t, &m)
+	})
+
+	t.Run("map[uint64]string", func(t *testing.T) {
+		m := map[uint64]string{0: "zero", 18446744073709551615: "max"}
+		compareMapRoundtrip(t, &m)
+	})
+
+	t.Run("map[int]int", func(t *testing.T) {
+		m := map[int]int{1: 10, 2: 20, -3: 30}
+		compareMapRoundtrip(t, &m)
+	})
+
+	t.Run("map[int]bool", func(t *testing.T) {
+		m := map[int]bool{1: true, 2: false, 3: true}
+		compareMapRoundtrip(t, &m)
+	})
+
+	t.Run("map[int]float64", func(t *testing.T) {
+		m := map[int]float64{1: 1.5, 2: 2.7}
+		compareMapRoundtrip(t, &m)
+	})
+
+	t.Run("map[int]struct", func(t *testing.T) {
+		m := map[int]Inner{1: {X: 10, Y: "a"}, 2: {X: 20, Y: "b"}}
+		compareMapRoundtrip(t, &m)
+	})
+
+	t.Run("map[int][]string", func(t *testing.T) {
+		m := map[int][]string{1: {"a", "b"}, 2: {"c"}}
+		compareMapRoundtrip(t, &m)
+	})
+
+	t.Run("map[int]*struct", func(t *testing.T) {
+		m := map[int]*Inner{1: {X: 10, Y: "a"}, 2: nil}
+		compareMapRoundtrip(t, &m)
+	})
+
+	t.Run("map[textKeyType]struct", func(t *testing.T) {
+		m := map[textKeyType]Inner{
+			{A: "foo", B: "bar"}: {X: 1, Y: "v1"},
+			{A: "baz", B: "qux"}: {X: 2, Y: "v2"},
+		}
+		compareMapRoundtrip(t, &m)
+	})
+
+	t.Run("map[int]map[string]int", func(t *testing.T) {
+		m := map[int]map[string]int{
+			1: {"a": 10, "b": 20},
+			2: {"c": 30},
+		}
+		compareMapRoundtrip(t, &m)
+	})
+
+	// Unmarshal-only: verify error on invalid key
+	t.Run("unmarshal_invalid_int_key", func(t *testing.T) {
+		var m map[int]string
+		vjErr := Unmarshal([]byte(`{"abc":"val"}`), &m)
+		stdErr := json.Unmarshal([]byte(`{"abc":"val"}`), &m)
+		if (vjErr == nil) != (stdErr == nil) {
+			t.Errorf("error mismatch: vjson=%v, stdlib=%v", vjErr, stdErr)
+		}
+	})
+
+	t.Run("unmarshal_overflow_int8_key", func(t *testing.T) {
+		var m map[int8]string
+		vjErr := Unmarshal([]byte(`{"999":"val"}`), &m)
+		stdErr := json.Unmarshal([]byte(`{"999":"val"}`), &m)
+		if (vjErr == nil) != (stdErr == nil) {
+			t.Errorf("error mismatch: vjson=%v, stdlib=%v", vjErr, stdErr)
+		}
+	})
+
+	// Empty map
+	t.Run("map[int]string_empty", func(t *testing.T) {
+		m := map[int]string{}
+		compareMapRoundtrip(t, &m)
+	})
+
+	// Nil map unmarshal
+	t.Run("map[int]string_null", func(t *testing.T) {
+		var vjM, stdM map[int]string
+		vjErr := Unmarshal([]byte(`null`), &vjM)
+		stdErr := json.Unmarshal([]byte(`null`), &stdM)
+		if (vjErr == nil) != (stdErr == nil) {
+			t.Errorf("error mismatch: vjson=%v, stdlib=%v", vjErr, stdErr)
+		}
+		if !reflect.DeepEqual(vjM, stdM) {
+			t.Errorf("result mismatch: vjson=%v, stdlib=%v", vjM, stdM)
+		}
+	})
+}
+
+// compareMapRoundtrip marshals with both vjson and stdlib, then unmarshals
+// each output with both libs, and checks all four results match.
+func compareMapRoundtrip[T any](t *testing.T, m *T) {
+	t.Helper()
+
+	// Marshal with vjson
+	vjData, vjErr := Marshal(m)
+	// Marshal with stdlib
+	stdData, stdErr := json.Marshal(m)
+
+	if (vjErr == nil) != (stdErr == nil) {
+		t.Fatalf("marshal error mismatch: vjson=%v, stdlib=%v", vjErr, stdErr)
+	}
+	if vjErr != nil {
+		return
+	}
+
+	// Both outputs should be valid JSON. Unmarshal vjson output with stdlib.
+	var stdFromVj T
+	if err := json.Unmarshal(vjData, &stdFromVj); err != nil {
+		t.Fatalf("stdlib cannot parse vjson output: %v\n  vjson: %s\n  stdlib: %s", err, vjData, stdData)
+	}
+
+	// Unmarshal stdlib output with vjson.
+	var vjFromStd T
+	if err := Unmarshal(stdData, &vjFromStd); err != nil {
+		t.Fatalf("vjson cannot parse stdlib output: %v\n  stdlib: %s", err, stdData)
+	}
+
+	// Unmarshal stdlib output with stdlib (reference).
+	var stdFromStd T
+	json.Unmarshal(stdData, &stdFromStd)
+
+	// Unmarshal vjson output with vjson.
+	var vjFromVj T
+	Unmarshal(vjData, &vjFromVj)
+
+	// All four should match.
+	if !reflect.DeepEqual(stdFromVj, stdFromStd) {
+		t.Errorf("vjson marshal output differs from stdlib:\n  vjson→stdlib: %+v\n  stdlib→stdlib: %+v\n  vjson data: %s\n  stdlib data: %s",
+			stdFromVj, stdFromStd, vjData, stdData)
+	}
+	if !reflect.DeepEqual(vjFromStd, stdFromStd) {
+		t.Errorf("vjson unmarshal of stdlib output differs:\n  stdlib→vjson: %+v\n  stdlib→stdlib: %+v\n  data: %s",
+			vjFromStd, stdFromStd, stdData)
+	}
+	if !reflect.DeepEqual(vjFromVj, stdFromStd) {
+		t.Errorf("vjson roundtrip differs from stdlib:\n  vjson→vjson: %+v\n  stdlib→stdlib: %+v",
+			vjFromVj, stdFromStd)
+	}
+}
+
 // ---------- stdlib types: net.IP (pure TextMarshaler, no json.Marshaler) ----------
 
 func TestRoundtrip_NetIP(t *testing.T) {

@@ -276,10 +276,23 @@ func emitStructBody(b *irBuilder, dec *StructCodec, baseOff uintptr) {
 }
 
 // emitPrimitive emits a single primitive encoding instruction (bool/int/float/string/etc).
+// For struct fields (keyLen > 0), STRING/INT/INT64 use keyed variants that
+// skip the key_len branch in the VM for better branch prediction.
 func emitPrimitive(b *irBuilder, fi *TypeInfo, fieldOff uintptr) {
 	keyOff, keyLen := b.addKey(fi.Ext.KeyBytes)
+	op := kindToOpcode(fi.Kind)
+	if keyLen > 0 {
+		switch op {
+		case opString:
+			op = opKString
+		case opInt:
+			op = opKInt
+		case opInt64:
+			op = opKInt64
+		}
+	}
 	b.emit(IRInst{
-		Op:       kindToOpcode(fi.Kind),
+		Op:       op,
 		KeyLen:   keyLen,
 		KeyOff:   keyOff,
 		FieldOff: uint16(fieldOff),

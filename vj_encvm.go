@@ -11,7 +11,7 @@ import (
 )
 
 // OpCode constants — mirror native/encvm/impl/types.h enum OpType.
-// Primitives 1–14 = ElemTypeKind; 17–20 data ops; 33–46 control-flow; 0x40 fallback.
+// Primitives 1–14 = ElemTypeKind; 15–18 data ops; 19–31 control-flow; 32 fallback.
 const (
 	opBool    uint16 = 1
 	opInt     uint16 = 2
@@ -28,30 +28,34 @@ const (
 	opFloat64 uint16 = 13
 	opString  uint16 = 14
 
-	// Non-primitive data ops (17-20).
-	opInterface  uint16 = 17 // interface{} — noinline C encoder or yield
-	opRawMessage uint16 = 18 // json.RawMessage — direct byte copy
-	opNumber     uint16 = 19 // json.Number — direct string copy
-	opByteSlice  uint16 = 20 // []byte — base64, yield to Go
+	// Non-primitive data ops (15-18).
+	opInterface  uint16 = 15 // interface{} — noinline C encoder or yield
+	opRawMessage uint16 = 16 // json.RawMessage — direct byte copy
+	opNumber     uint16 = 17 // json.Number — direct string copy
+	opByteSlice  uint16 = 18 // []byte — base64, yield to Go
 
-	// Structural control-flow instructions (33-46).
-	opSkipIfZero uint16 = 33 // conditional forward jump (omitempty)
-	opCall       uint16 = 35 // subroutine call: push CALL frame, jump to ops[operand_a]
-	opPtrDeref   uint16 = 36 // deref pointer, nil→null+jump
-	opPtrEnd     uint16 = 37 // pop ptr-deref frame, restore base
-	opSliceBegin uint16 = 38 // slice loop start
-	opSliceEnd   uint16 = 39 // slice loop end / back-edge
-	opMapBegin   uint16 = 40 // map iteration start (yield-driven)
-	opMapEnd     uint16 = 41 // map iteration end (yield)
-	opObjOpen    uint16 = 42 // write key + '{', set first=1 (no frame push)
-	opObjClose   uint16 = 43 // write '}', set first=0 (no frame pop)
-	opArrayBegin uint16 = 44 // array loop start (inline data, fixed length)
-	// 45: reserved (formerly opMapStrKV)
-	opMapStrStr uint16 = 46 // map[string]string: C-native Swiss Map iteration
-	opRet       uint16 = 47 // subroutine return: pop CALL frame, restore ops/pc/base
+	// Structural control-flow instructions (19-31).
+	opSkipIfZero uint16 = 19 // conditional forward jump (omitempty)
+	opCall       uint16 = 20 // subroutine call: push CALL frame, jump to ops[operand_a]
+	opPtrDeref   uint16 = 21 // deref pointer, nil→null+jump
+	opPtrEnd     uint16 = 22 // pop ptr-deref frame, restore base
+	opSliceBegin uint16 = 23 // slice loop start
+	opSliceEnd   uint16 = 24 // slice loop end / back-edge
+	opMapBegin   uint16 = 25 // map iteration start (yield-driven)
+	opMapEnd     uint16 = 26 // map iteration end (yield)
+	opObjOpen    uint16 = 27 // write key + '{', set first=1 (no frame push)
+	opObjClose   uint16 = 28 // write '}', set first=0 (no frame pop)
+	opArrayBegin uint16 = 29 // array loop start (inline data, fixed length)
+	opMapStrStr  uint16 = 30 // map[string]string: C-native Swiss Map iteration
+	opRet        uint16 = 31 // subroutine return: pop CALL frame, restore ops/pc/base
 
-	// Go-only fallback (0x40).
-	opFallback uint16 = 0x40 // custom marshalers, ,string, complex structs
+	// Go-only fallback (32).
+	opFallback uint16 = 32 // custom marshalers, ,string, complex structs
+
+	// Keyed-field variants (33-35) — unconditional key write, no key_len branch.
+	opKString uint16 = 33 // struct field string
+	opKInt    uint16 = 34 // struct field int
+	opKInt64  uint16 = 35 // struct field int64
 )
 
 func kindToOpcode(k ElemTypeKind) uint16 {

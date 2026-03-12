@@ -297,25 +297,49 @@ func getCodecSlow(t reflect.Type, wait bool) *TypeInfo {
 		ext := e.ti.getOrAllocExt()
 
 		if t.Implements(marshalerType) {
+			// Value receiver: extract itab once, then construct iface directly at runtime.
+			// This avoids the mallocgc boxing that reflect.Value.Interface() triggers
+			// for value types larger than a pointer (e.g. time.Time = 24 bytes).
+			sentinel := reflect.New(t)
+			iface := sentinel.Elem().Interface().(json.Marshaler)
+			itab := extractItab(unsafe.Pointer(&iface))
 			ext.MarshalFn = func(ptr unsafe.Pointer) ([]byte, error) {
-				return reflect.NewAt(t, ptr).Elem().Interface().(json.Marshaler).MarshalJSON()
+				var m json.Marshaler
+				*(*goIface)(unsafe.Pointer(&m)) = goIface{tab: itab, data: ptr}
+				return m.MarshalJSON()
 			}
 			e.ti.Flags |= tiFlagHasMarshalFn
 		} else if ptrType.Implements(marshalerType) {
+			// Pointer receiver: the itab is for *T, and ptr is already *T.
+			sentinel := reflect.New(t)
+			iface := sentinel.Interface().(json.Marshaler)
+			itab := extractItab(unsafe.Pointer(&iface))
 			ext.MarshalFn = func(ptr unsafe.Pointer) ([]byte, error) {
-				return reflect.NewAt(t, ptr).Interface().(json.Marshaler).MarshalJSON()
+				var m json.Marshaler
+				*(*goIface)(unsafe.Pointer(&m)) = goIface{tab: itab, data: ptr}
+				return m.MarshalJSON()
 			}
 			e.ti.Flags |= tiFlagHasMarshalFn
 		}
 
 		if t.Implements(unmarshalerType) {
+			sentinel := reflect.New(t)
+			iface := sentinel.Elem().Interface().(json.Unmarshaler)
+			itab := extractItab(unsafe.Pointer(&iface))
 			ext.UnmarshalFn = func(ptr unsafe.Pointer, data []byte) error {
-				return reflect.NewAt(t, ptr).Elem().Interface().(json.Unmarshaler).UnmarshalJSON(data)
+				var u json.Unmarshaler
+				*(*goIface)(unsafe.Pointer(&u)) = goIface{tab: itab, data: ptr}
+				return u.UnmarshalJSON(data)
 			}
 			e.ti.Flags |= tiFlagHasUnmarshalFn
 		} else if ptrType.Implements(unmarshalerType) {
+			sentinel := reflect.New(t)
+			iface := sentinel.Interface().(json.Unmarshaler)
+			itab := extractItab(unsafe.Pointer(&iface))
 			ext.UnmarshalFn = func(ptr unsafe.Pointer, data []byte) error {
-				return reflect.NewAt(t, ptr).Interface().(json.Unmarshaler).UnmarshalJSON(data)
+				var u json.Unmarshaler
+				*(*goIface)(unsafe.Pointer(&u)) = goIface{tab: itab, data: ptr}
+				return u.UnmarshalJSON(data)
 			}
 			e.ti.Flags |= tiFlagHasUnmarshalFn
 		}
@@ -325,25 +349,45 @@ func getCodecSlow(t reflect.Type, wait bool) *TypeInfo {
 		textUnmarshalerType := reflect.TypeFor[encoding.TextUnmarshaler]()
 
 		if t.Implements(textMarshalerType) {
+			sentinel := reflect.New(t)
+			iface := sentinel.Elem().Interface().(encoding.TextMarshaler)
+			itab := extractItab(unsafe.Pointer(&iface))
 			ext.TextMarshalFn = func(ptr unsafe.Pointer) ([]byte, error) {
-				return reflect.NewAt(t, ptr).Elem().Interface().(encoding.TextMarshaler).MarshalText()
+				var tm encoding.TextMarshaler
+				*(*goIface)(unsafe.Pointer(&tm)) = goIface{tab: itab, data: ptr}
+				return tm.MarshalText()
 			}
 			e.ti.Flags |= tiFlagHasTextMarshalFn
 		} else if ptrType.Implements(textMarshalerType) {
+			sentinel := reflect.New(t)
+			iface := sentinel.Interface().(encoding.TextMarshaler)
+			itab := extractItab(unsafe.Pointer(&iface))
 			ext.TextMarshalFn = func(ptr unsafe.Pointer) ([]byte, error) {
-				return reflect.NewAt(t, ptr).Interface().(encoding.TextMarshaler).MarshalText()
+				var tm encoding.TextMarshaler
+				*(*goIface)(unsafe.Pointer(&tm)) = goIface{tab: itab, data: ptr}
+				return tm.MarshalText()
 			}
 			e.ti.Flags |= tiFlagHasTextMarshalFn
 		}
 
 		if t.Implements(textUnmarshalerType) {
+			sentinel := reflect.New(t)
+			iface := sentinel.Elem().Interface().(encoding.TextUnmarshaler)
+			itab := extractItab(unsafe.Pointer(&iface))
 			ext.TextUnmarshalFn = func(ptr unsafe.Pointer, data []byte) error {
-				return reflect.NewAt(t, ptr).Elem().Interface().(encoding.TextUnmarshaler).UnmarshalText(data)
+				var tu encoding.TextUnmarshaler
+				*(*goIface)(unsafe.Pointer(&tu)) = goIface{tab: itab, data: ptr}
+				return tu.UnmarshalText(data)
 			}
 			e.ti.Flags |= tiFlagHasTextUnmarshalFn
 		} else if ptrType.Implements(textUnmarshalerType) {
+			sentinel := reflect.New(t)
+			iface := sentinel.Interface().(encoding.TextUnmarshaler)
+			itab := extractItab(unsafe.Pointer(&iface))
 			ext.TextUnmarshalFn = func(ptr unsafe.Pointer, data []byte) error {
-				return reflect.NewAt(t, ptr).Interface().(encoding.TextUnmarshaler).UnmarshalText(data)
+				var tu encoding.TextUnmarshaler
+				*(*goIface)(unsafe.Pointer(&tu)) = goIface{tab: itab, data: ptr}
+				return tu.UnmarshalText(data)
 			}
 			e.ti.Flags |= tiFlagHasTextUnmarshalFn
 		}
@@ -730,7 +774,9 @@ type MapCodec struct {
 	ValTI   *TypeInfo
 	KeyTI   *TypeInfo // key type info (for TextMarshaler on non-string keys)
 
-	ValIsString bool // true for map[string]string fast path (encoder)
+	ValIsString bool           // true for map[string]string fast path (encoder)
+	mapRType    unsafe.Pointer // cached *abi.MapType for mapsIterInit
+	isStringKey bool           // KeyType.Kind() == reflect.String
 	ScanMapFn   func(sc *Parser, src []byte, idx int, ptr unsafe.Pointer) (int, error)
 }
 
@@ -746,6 +792,8 @@ func BuildMapCodec(t reflect.Type) *MapCodec {
 		ValTI:       valTI,
 		KeyTI:       keyTI,
 		ValIsString: valTI.Kind == KindString && isStringKey,
+		mapRType:    rtypePtr(t),
+		isStringKey: isStringKey,
 	}
 	if isStringKey {
 		switch valTI.Kind {

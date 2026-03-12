@@ -319,13 +319,13 @@ func resolveMapKeyValue(keyStr string, keyType reflect.Type, keyTI *TypeInfo) (r
 	}
 	switch keyType.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		n, err := strconv.ParseInt(keyStr, 10, 64)
+		n, err := strconv.ParseInt(keyStr, 10, int(keyType.Size()*8))
 		if err != nil {
 			return reflect.Value{}, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid map key %q: %v", keyStr, err), 0, err)
 		}
 		return reflect.ValueOf(n).Convert(keyType), nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		n, err := strconv.ParseUint(keyStr, 10, 64)
+		n, err := strconv.ParseUint(keyStr, 10, int(keyType.Size()*8))
 		if err != nil {
 			return reflect.Value{}, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid map key %q: %v", keyStr, err), 0, err)
 		}

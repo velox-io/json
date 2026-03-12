@@ -1198,37 +1198,66 @@ func (m *Marshaler) encodeMapStringString(ptr unsafe.Pointer) error {
 	return nil
 }
 
-// resolveMapKey converts a map key to its JSON string representation.
-func resolveMapKey(k reflect.Value, keyTI *TypeInfo) (string, error) {
-	if k.Kind() == reflect.String {
-		return k.String(), nil
-	}
+// encodeMapKey encodes a non-string map key directly into m.buf as a quoted
+// JSON string, avoiding the intermediate string allocation that
+// resolveMapKeyPtr + encodeString would incur for integer keys.
+func (m *Marshaler) encodeMapKey(keyPtr unsafe.Pointer, keyTI *TypeInfo, keyType reflect.Type) error {
 	if keyTI.Flags&tiFlagHasTextMarshalFn != 0 {
-		tmp := reflect.New(k.Type())
-		tmp.Elem().Set(k)
-		text, err := keyTI.Ext.TextMarshalFn(tmp.UnsafePointer())
+		text, err := keyTI.Ext.TextMarshalFn(keyPtr)
 		if err != nil {
-			return "", err
+			return err
 		}
-		return string(text), nil
+		m.encodeString(string(text))
+		return nil
 	}
-	switch k.Kind() {
+	switch keyType.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return strconv.FormatInt(k.Int(), 10), nil
+		m.appendQuotedInt64(readIntN(keyPtr, keyType.Size()))
+		return nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return strconv.FormatUint(k.Uint(), 10), nil
+		m.appendQuotedUint64(readUintN(keyPtr, keyType.Size()))
+		return nil
 	}
-	return "", &UnsupportedTypeError{Type: k.Type()}
+	return &UnsupportedTypeError{Type: keyType}
+}
+
+// readIntN reads a signed integer of the given byte width from ptr.
+func readIntN(ptr unsafe.Pointer, size uintptr) int64 {
+	switch size {
+	case 1:
+		return int64(*(*int8)(ptr))
+	case 2:
+		return int64(*(*int16)(ptr))
+	case 4:
+		return int64(*(*int32)(ptr))
+	default:
+		return *(*int64)(ptr)
+	}
+}
+
+// readUintN reads an unsigned integer of the given byte width from ptr.
+func readUintN(ptr unsafe.Pointer, size uintptr) uint64 {
+	switch size {
+	case 1:
+		return uint64(*(*uint8)(ptr))
+	case 2:
+		return uint64(*(*uint16)(ptr))
+	case 4:
+		return uint64(*(*uint32)(ptr))
+	default:
+		return *(*uint64)(ptr)
+	}
 }
 
 func (m *Marshaler) encodeMapGeneric(dec *MapCodec, ptr unsafe.Pointer) error {
-	mapPtr := reflect.NewAt(dec.MapType, ptr)
-	mapVal := mapPtr.Elem()
-	if mapVal.IsNil() {
+	// ptr is a pointer to the map variable, which itself is a pointer to the map header.
+	mp := *(*unsafe.Pointer)(ptr)
+	if mp == nil {
 		m.buf = append(m.buf, litNull...)
 		return nil
 	}
-	if mapVal.Len() == 0 {
+	n := maplen(mp)
+	if n == 0 {
 		m.buf = append(m.buf, litEmpty...)
 		return nil
 	}
@@ -1240,8 +1269,9 @@ func (m *Marshaler) encodeMapGeneric(dec *MapCodec, ptr unsafe.Pointer) error {
 		m.depth++
 	}
 
-	iter := mapVal.MapRange()
-	for iter.Next() {
+	var it mapsIter
+	mapsIterInit(dec.mapRType, mp, &it)
+	for mapsIterKey(&it) != nil {
 		if !first {
 			m.buf = append(m.buf, ',')
 		}
@@ -1251,23 +1281,23 @@ func (m *Marshaler) encodeMapGeneric(dec *MapCodec, ptr unsafe.Pointer) error {
 			m.appendNewlineIndent()
 		}
 
-		key, err := resolveMapKey(iter.Key(), dec.KeyTI)
-		if err != nil {
+		keyPtr := mapsIterKey(&it)
+		if dec.isStringKey {
+			m.encodeString(*(*string)(keyPtr))
+		} else if err := m.encodeMapKey(keyPtr, dec.KeyTI, dec.KeyType); err != nil {
 			return err
 		}
-		m.encodeString(key)
 		if m.indent != "" {
 			m.buf = append(m.buf, ':', ' ')
 		} else {
 			m.buf = append(m.buf, ':')
 		}
 
-		val := iter.Value()
-		valPtr := reflect.New(dec.ValType)
-		valPtr.Elem().Set(val)
-		if err := m.encodeValue(dec.ValTI, valPtr.UnsafePointer()); err != nil {
+		elemPtr := mapsIterElem(&it)
+		if err := m.encodeValue(dec.ValTI, elemPtr); err != nil {
 			return err
 		}
+		mapsIterNext(&it)
 	}
 
 	if m.indent != "" {

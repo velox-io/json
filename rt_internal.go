@@ -26,6 +26,22 @@ func unsafe_NewArray(typ unsafe.Pointer, n int) unsafe.Pointer //nolint:revive
 //go:nosplit
 func typedslicecopy(typ unsafe.Pointer, dstPtr unsafe.Pointer, dstLen int, srcPtr unsafe.Pointer, srcLen int) int
 
+// goIface matches the runtime iface layout: {itab, data}.
+// Used to construct interface values with a cached itab, avoiding
+// the mallocgc boxing that reflect.Value.Interface() triggers for
+// value types larger than a pointer (e.g. time.Time = 24 bytes).
+type goIface struct {
+	tab  unsafe.Pointer
+	data unsafe.Pointer
+}
+
+// extractItab extracts the cached *itab from an interface pointer.
+// ifacePtr must point to a non-empty interface value (e.g. *json.Marshaler).
+// The interface must have layout {itab, data} (iface, not eface).
+func extractItab(ifacePtr unsafe.Pointer) unsafe.Pointer {
+	return (*goIface)(ifacePtr).tab
+}
+
 // rtypePtr extracts the *abi.Type pointer from a reflect.Type interface value.
 //
 // reflect.Type is an interface {itab, data} where data points to an *rtype,
@@ -187,22 +203,26 @@ func verifySwissMapLayout() {
 const mapsIterSize = 96 //nolint:unused
 
 // mapsIter is an opaque, stack-allocatable buffer matching maps.Iter.
-// The unsafe.Pointer array ensures proper alignment for checkptr.
+// Uses uintptr (not unsafe.Pointer) to prevent the GC stack scanner from
+// treating internal integer fields (entryOffset, dirIdx, etc.) as pointers,
+// which would cause "bad pointer in frame" panics during stack copying.
+// This is safe because Go's GC is non-moving, and the map itself (kept alive
+// by the caller) retains all referenced objects.
 // Zero value is a valid pre-Init state.
 type mapsIter struct {
-	buf [12]unsafe.Pointer // 96 bytes, matches maps.Iter size
+	buf [12]uintptr // 96 bytes, matches maps.Iter size
 }
 
 // mapsIterKey returns the current key pointer from the iterator.
 // nil indicates end of iteration. Must be called after Init+Next.
 func mapsIterKey(it *mapsIter) unsafe.Pointer {
-	return it.buf[0]
+	return *(*unsafe.Pointer)(unsafe.Pointer(&it.buf[0]))
 }
 
 // mapsIterElem returns the current elem pointer from the iterator.
 // nil indicates end of iteration. Must be called after Init+Next.
 func mapsIterElem(it *mapsIter) unsafe.Pointer {
-	return it.buf[1]
+	return *(*unsafe.Pointer)(unsafe.Pointer(&it.buf[1]))
 }
 
 // mapsIterInit initializes a stack-allocated maps.Iter and advances to

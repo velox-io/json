@@ -246,6 +246,9 @@ var opcodeName = map[uint16]string{
 	opMapStrStr:  "MAP_STR_STR",
 	opRet:        "RET",
 	opFallback:   "FALLBACK",
+	opKString:    "KSTRING",
+	opKInt:       "KINT",
+	opKInt64:     "KINT64",
 }
 
 
