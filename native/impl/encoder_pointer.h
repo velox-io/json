@@ -11,6 +11,11 @@
 #ifndef VJ_ENCODER_POINTER_H
 #define VJ_ENCODER_POINTER_H
 
+// clang-format off
+
+#include "encoder_types.h"
+#include "encoder_number.h"
+
 /* ---- Out-of-line pointer-primitive encoder ----
  *
  * Encodes a single dereferenced primitive value (bool, int*, uint*,

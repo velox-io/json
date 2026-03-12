@@ -11,9 +11,9 @@
 
 #include "textflag.h"
 
-// func vjVMExec(ctx unsafe.Pointer)
-// C: void vj_vm_exec(VjExecCtx* ctx)
+// func vjVMExecNeon(ctx unsafe.Pointer)
+// C: void vj_vm_exec_neon(VjExecCtx* ctx)
 // C ABI: ctx=X0
-TEXT ·vjVMExec(SB), NOSPLIT, $0-8
+TEXT ·vjVMExecNeon(SB), NOSPLIT, $0-8
 	MOVD ctx+0(FP), R0
-	B    vj_vm_exec(SB)
+	B    vj_vm_exec_neon(SB)

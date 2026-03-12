@@ -266,10 +266,10 @@ func (m *Marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 	case KindString:
 		tag = uint8(opString) + 1
 	case KindStruct:
-		dec := ti.Codec.(*StructCodec)
+		dec := ti.resolveCodec().(*StructCodec)
 		bp = dec.getBlueprint()
 	case KindSlice:
-		sliceDec := ti.Codec.(*SliceCodec)
+		sliceDec := ti.resolveCodec().(*SliceCodec)
 		bp = compileStandaloneSliceBlueprint(sliceDec)
 	case KindMap:
 		// Maps are Go-driven — insert with nil ops.
@@ -282,20 +282,9 @@ func (m *Marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 }
 
 // encodeAnyIface encodes an interface{} value from a pointer to the eface.
-// Uses inline fast-path dispatch for the most common JSON types.
+// Delegates to encodeAnyVal which covers all concrete JSON value types.
 func (m *Marshaler) encodeAnyIface(ifacePtr unsafe.Pointer) error {
-	v := *(*any)(ifacePtr)
-	switch val := v.(type) {
-	case map[string]any:
-		return m.encodeAnyMap(val)
-	case []any:
-		return m.encodeAnySlice(val)
-	case nil:
-		m.buf = append(m.buf, litNull...)
-		return nil
-	default:
-		return m.encodeAny(ifacePtr)
-	}
+	return m.encodeAnyVal(*(*any)(ifacePtr))
 }
 
 // handleYieldFallback handles a yield due to custom marshaler, ,string, or
@@ -394,7 +383,7 @@ func (m *Marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 		return fmt.Errorf("vjson: native VM map at PC=%d (op=%d) with no fallback info", ctx.PC, opCode)
 	}
 
-	mapDec := fb.TI.Codec.(*MapCodec)
+	mapDec := fb.TI.resolveCodec().(*MapCodec)
 
 	// Fast path for map[string]any: use encodeAnyMap which has inline type
 	// dispatch for common JSON value types, avoiding reflect overhead.

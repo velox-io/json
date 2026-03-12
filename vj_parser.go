@@ -461,7 +461,7 @@ func (sc *Parser) scanNull(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer
 	case KindSlice:
 		*(*SliceHeader)(ptr) = SliceHeader{}
 	case KindMap:
-		mapDec := ti.Codec.(*MapCodec)
+		mapDec := ti.resolveCodec().(*MapCodec)
 		reflect.NewAt(mapDec.MapType, ptr).Elem().Set(reflect.Zero(mapDec.MapType))
 	case KindAny:
 		*(*any)(ptr) = nil
@@ -475,9 +475,9 @@ func (sc *Parser) scanNull(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer
 func (sc *Parser) scanObjectValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
 	switch ti.Kind {
 	case KindStruct:
-		return sc.scanStruct(src, idx, ti.Codec.(*StructCodec), ptr)
+		return sc.scanStruct(src, idx, ti.resolveCodec().(*StructCodec), ptr)
 	case KindMap:
-		return sc.scanMap(src, idx, ti.Codec.(*MapCodec), ptr)
+		return sc.scanMap(src, idx, ti.resolveCodec().(*MapCodec), ptr)
 	case KindAny:
 		newIdx, m, err := sc.scanMapAny(src, idx)
 		if err != nil {
@@ -775,7 +775,7 @@ func (sc *Parser) scanMapAny(src []byte, idx int) (int, map[string]any, error) {
 func (sc *Parser) scanArrayValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
 	switch ti.Kind {
 	case KindSlice:
-		return sc.scanArray(src, idx, ti.Codec.(*SliceCodec), ptr)
+		return sc.scanArray(src, idx, ti.resolveCodec().(*SliceCodec), ptr)
 	case KindAny:
 		newIdx, arr, err := sc.scanArrayAny(src, idx)
 		if err != nil {
@@ -920,7 +920,7 @@ func (sc *Parser) scanPointer(src []byte, idx int, ti *TypeInfo, ptr unsafe.Poin
 	if ti.Flags&tiFlagQuoted != 0 {
 		return sc.scanPointerQuoted(src, idx, ti, ptr)
 	}
-	pDec := ti.Codec.(*PointerCodec)
+	pDec := ti.resolveCodec().(*PointerCodec)
 
 	idx = skipWS(src, idx)
 	if idx >= len(src) {

@@ -298,10 +298,6 @@ func TestMarshal_SelfRefViaEmbed_OneLevel(t *testing.T) {
 // --- Value-embedded struct containing self-pointer ---
 // This tests the case where a struct has an anonymous embedded struct,
 // and that embedded struct has a pointer back to itself.
-// NOTE: We use the self-referential inner type directly to avoid a known
-// pre-existing issue where getCodecForCycle returns a partial TypeInfo
-// with nil Codec when the self-referential type is first encountered as
-// a transitive dependency (not the top-level type).
 
 type embedSelfRefInner struct {
 	Next *embedSelfRefInner `json:"next"`
@@ -327,6 +323,91 @@ func TestMarshal_EmbedSelfRef_InnerDirect(t *testing.T) {
 	}
 	if string(got) != string(std) {
 		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, std)
+	}
+}
+
+// --- Self-referential type as indirect dependency via anonymous embedding ---
+//
+// Reproduces the getCodecForCycle nil Codec copy bug.
+//
+// When the self-referential type (Node) is embedded anonymously into Wrap,
+// and Wrap is the top-level type being built, the codec construction order
+// causes Node's *Node field to receive a nil Codec:
+//
+//   GetCodec(Wrap)
+//     BuildStructCodec(Wrap)
+//       CollectStructFields(Wrap):
+//         BFS expands anonymous Node → processes Node's fields:
+//           field Next *Node → getCodecForCycle(*Node)
+//             → not cached, sync build *Node:
+//               BuildPointerCodec(*Node):
+//                 getCodecForCycle(Node)
+//                   → not cached, sync build Node:
+//                     BuildStructCodec(Node)
+//                       CollectStructFields(Node):
+//                         field Next *Node → getCodecForCycle(*Node)
+//                           → already cached (in-progress!)
+//                           → returns ti, Codec = nil !!
+//                         fi.Codec = cached.Codec = nil  ← BUG
+//
+// In contrast, when Node is the top-level type (TestMarshal_EmbedSelfRef_InnerDirect),
+// Node's codecEntry enters the cache first, so *Node can be fully built
+// before the value copy happens — no bug.
+//
+// IMPORTANT: These types must be unique and NOT shared with any other test
+// (e.g. TestMarshal_EmbedSelfRef_InnerDirect). The global codecCache is
+// shared across all tests; if another test builds the inner type first as
+// a top-level type, the cache entry will already be complete and this test
+// will silently pass without exercising the bug path.
+
+type indirectSelfRefNode struct {
+	Next *indirectSelfRefNode `json:"next"`
+	V    int                  `json:"v"`
+}
+
+type indirectSelfRefWrap struct {
+	indirectSelfRefNode        // anonymous embed of self-referential struct
+	Tag                 string `json:"tag"`
+}
+
+func TestRoundtrip_IndirectSelfRef(t *testing.T) {
+	orig := indirectSelfRefWrap{
+		indirectSelfRefNode: indirectSelfRefNode{
+			Next: &indirectSelfRefNode{Next: nil, V: 2},
+			V:    1,
+		},
+		Tag: "ok",
+	}
+
+	// Marshal — before fix: panic (nil Codec type-asserted as *PointerCodec)
+	data, err := Marshal(&orig)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	std, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("stdlib Marshal: %v", err)
+	}
+	if string(data) != string(std) {
+		t.Errorf("marshal mismatch:\n  vjson:  %s\n  stdlib: %s", data, std)
+	}
+
+	// Unmarshal round-trip
+	var got indirectSelfRefWrap
+	if err := Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got.Tag != orig.Tag {
+		t.Errorf("Tag: %q != %q", got.Tag, orig.Tag)
+	}
+	if got.V != orig.V {
+		t.Errorf("V: %d != %d", got.V, orig.V)
+	}
+	if got.Next == nil || got.Next.V != orig.Next.V {
+		t.Errorf("Next.V mismatch")
+	}
+	if got.Next.Next != nil {
+		t.Errorf("expected terminal nil")
 	}
 }
 
@@ -660,5 +741,493 @@ func TestEmbed_ThreeLevelValue(t *testing.T) {
 	}
 	if string(got) != string(std) {
 		t.Errorf("3-level embed:\n  vjson:  %s\n  stdlib: %s", got, std)
+	}
+}
+
+// ================================================================
+// Transitive circular reference tests
+//
+// These verify that resolveCodec() correctly handles the case where a
+// self-referential type is first encountered as a *transitive dependency*
+// (not the top-level marshal/unmarshal target). In this scenario,
+// getCodecForCycle returns a partial TypeInfo with nil Codec, which is
+// value-copied into StructCodec.Fields[]. resolveCodec() must lazily
+// resolve it from the codec cache at usage time.
+//
+// Each test group uses unique types (not shared with other tests) so
+// that codec construction order is deterministic regardless of which
+// test runs first — the outer wrapper type is always the entry point.
+// ================================================================
+
+// --- Scenario 1: Wrapper embeds a self-referential struct by value ---
+// Construction: Wrapper → Inner (via value embed) → *Inner (cycle)
+// Inner's Codec is nil when Wrapper's Fields[] is built.
+
+type transInner1 struct {
+	Next *transInner1 `json:"next"`
+	V    int          `json:"v"`
+}
+
+type transWrapper1 struct {
+	transInner1
+	Label string `json:"label"`
+}
+
+func TestMarshal_TransitiveSelfRef_ViaEmbed(t *testing.T) {
+	v := transWrapper1{
+		transInner1: transInner1{
+			Next: &transInner1{
+				Next: nil,
+				V:    2,
+			},
+			V: 1,
+		},
+		Label: "wrap",
+	}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	std, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("stdlib error: %v", err)
+	}
+	if string(got) != string(std) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, std)
+	}
+}
+
+func TestMarshal_TransitiveSelfRef_ViaEmbed_NilChain(t *testing.T) {
+	v := transWrapper1{
+		transInner1: transInner1{Next: nil, V: 0},
+		Label:       "empty",
+	}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	std, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("stdlib error: %v", err)
+	}
+	if string(got) != string(std) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, std)
+	}
+}
+
+func TestUnmarshal_TransitiveSelfRef_ViaEmbed(t *testing.T) {
+	input := `{"next":{"next":null,"v":2},"v":1,"label":"wrap"}`
+
+	var std transWrapper1
+	if err := json.Unmarshal([]byte(input), &std); err != nil {
+		t.Fatalf("stdlib: %v", err)
+	}
+
+	var vj transWrapper1
+	if err := Unmarshal([]byte(input), &vj); err != nil {
+		t.Fatalf("vjson: %v", err)
+	}
+
+	if vj.Label != std.Label {
+		t.Errorf("Label: vjson=%q, stdlib=%q", vj.Label, std.Label)
+	}
+	if vj.V != std.V {
+		t.Errorf("V: vjson=%d, stdlib=%d", vj.V, std.V)
+	}
+	if vj.Next == nil {
+		t.Fatal("vjson: Next is nil")
+	}
+	if vj.Next.V != std.Next.V {
+		t.Errorf("Next.V: vjson=%d, stdlib=%d", vj.Next.V, std.Next.V)
+	}
+	if vj.Next.Next != nil {
+		t.Errorf("expected terminal nil, got %+v", vj.Next.Next)
+	}
+}
+
+func TestRoundtrip_TransitiveSelfRef_ViaEmbed(t *testing.T) {
+	orig := transWrapper1{
+		transInner1: transInner1{
+			Next: &transInner1{
+				Next: &transInner1{Next: nil, V: 3},
+				V:    2,
+			},
+			V: 1,
+		},
+		Label: "deep",
+	}
+
+	data, err := Marshal(&orig)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var got transWrapper1
+	if err := Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if got.Label != orig.Label || got.V != orig.V {
+		t.Errorf("top-level mismatch: got %+v", got)
+	}
+	if got.Next == nil || got.Next.V != 2 {
+		t.Fatal("level-2 mismatch")
+	}
+	if got.Next.Next == nil || got.Next.Next.V != 3 {
+		t.Fatal("level-3 mismatch")
+	}
+	if got.Next.Next.Next != nil {
+		t.Errorf("expected terminal nil")
+	}
+}
+
+// --- Scenario 2: Wrapper has a named field (not embed) of self-referential type ---
+// Construction: Wrapper → Inner (named field) → *Inner (cycle)
+
+type transInner2 struct {
+	Child *transInner2 `json:"child"`
+	Name  string       `json:"name"`
+}
+
+type transWrapper2 struct {
+	ID    int          `json:"id"`
+	Inner transInner2  `json:"inner"`
+}
+
+func TestMarshal_TransitiveSelfRef_NamedField(t *testing.T) {
+	v := transWrapper2{
+		ID: 1,
+		Inner: transInner2{
+			Name: "root",
+			Child: &transInner2{
+				Name:  "child",
+				Child: nil,
+			},
+		},
+	}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	std, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("stdlib error: %v", err)
+	}
+	if string(got) != string(std) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, std)
+	}
+}
+
+func TestUnmarshal_TransitiveSelfRef_NamedField(t *testing.T) {
+	input := `{"id":1,"inner":{"child":{"child":null,"name":"child"},"name":"root"}}`
+
+	var std transWrapper2
+	if err := json.Unmarshal([]byte(input), &std); err != nil {
+		t.Fatalf("stdlib: %v", err)
+	}
+
+	var vj transWrapper2
+	if err := Unmarshal([]byte(input), &vj); err != nil {
+		t.Fatalf("vjson: %v", err)
+	}
+
+	if vj.ID != std.ID || vj.Inner.Name != std.Inner.Name {
+		t.Errorf("top-level: vjson=%+v, stdlib=%+v", vj, std)
+	}
+	if vj.Inner.Child == nil || vj.Inner.Child.Name != std.Inner.Child.Name {
+		t.Errorf("child: vjson=%+v", vj.Inner.Child)
+	}
+}
+
+func TestRoundtrip_TransitiveSelfRef_NamedField(t *testing.T) {
+	orig := transWrapper2{
+		ID: 42,
+		Inner: transInner2{
+			Name: "a",
+			Child: &transInner2{
+				Name:  "b",
+				Child: &transInner2{Name: "c", Child: nil},
+			},
+		},
+	}
+
+	data, err := Marshal(&orig)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var got transWrapper2
+	if err := Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if got.ID != orig.ID {
+		t.Errorf("ID: %d != %d", got.ID, orig.ID)
+	}
+	if got.Inner.Name != "a" || got.Inner.Child == nil {
+		t.Fatal("level-1 mismatch")
+	}
+	if got.Inner.Child.Name != "b" || got.Inner.Child.Child == nil {
+		t.Fatal("level-2 mismatch")
+	}
+	if got.Inner.Child.Child.Name != "c" || got.Inner.Child.Child.Child != nil {
+		t.Fatal("level-3 mismatch")
+	}
+}
+
+// --- Scenario 3: Transitive mutual recursion through a third type ---
+// Construction: Wrapper → NodeA → *NodeB → *NodeA (cycle)
+// None of NodeA, NodeB, *NodeA, *NodeB have been seen before Wrapper.
+
+type transNodeA3 struct {
+	Name string      `json:"name"`
+	B    *transNodeB3 `json:"b"`
+}
+
+type transNodeB3 struct {
+	Value int         `json:"value"`
+	A     *transNodeA3 `json:"a"`
+}
+
+type transWrapper3 struct {
+	Tag  string     `json:"tag"`
+	Node transNodeA3 `json:"node"`
+}
+
+func TestMarshal_TransitiveMutualRecursion(t *testing.T) {
+	v := transWrapper3{
+		Tag: "test",
+		Node: transNodeA3{
+			Name: "a1",
+			B: &transNodeB3{
+				Value: 10,
+				A: &transNodeA3{
+					Name: "a2",
+					B:    nil,
+				},
+			},
+		},
+	}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	std, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("stdlib error: %v", err)
+	}
+	if string(got) != string(std) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, std)
+	}
+}
+
+func TestUnmarshal_TransitiveMutualRecursion(t *testing.T) {
+	input := `{"tag":"test","node":{"name":"a1","b":{"value":10,"a":{"name":"a2","b":null}}}}`
+
+	var std transWrapper3
+	if err := json.Unmarshal([]byte(input), &std); err != nil {
+		t.Fatalf("stdlib: %v", err)
+	}
+
+	var vj transWrapper3
+	if err := Unmarshal([]byte(input), &vj); err != nil {
+		t.Fatalf("vjson: %v", err)
+	}
+
+	if vj.Tag != std.Tag {
+		t.Errorf("Tag: vjson=%q, stdlib=%q", vj.Tag, std.Tag)
+	}
+	if vj.Node.Name != std.Node.Name {
+		t.Errorf("Node.Name: vjson=%q, stdlib=%q", vj.Node.Name, std.Node.Name)
+	}
+	if vj.Node.B == nil || vj.Node.B.Value != std.Node.B.Value {
+		t.Errorf("Node.B.Value mismatch")
+	}
+	if vj.Node.B.A == nil || vj.Node.B.A.Name != std.Node.B.A.Name {
+		t.Errorf("Node.B.A.Name mismatch")
+	}
+}
+
+func TestRoundtrip_TransitiveMutualRecursion(t *testing.T) {
+	orig := transWrapper3{
+		Tag: "round",
+		Node: transNodeA3{
+			Name: "n1",
+			B: &transNodeB3{
+				Value: 100,
+				A: &transNodeA3{
+					Name: "n2",
+					B: &transNodeB3{
+						Value: 200,
+						A:     nil,
+					},
+				},
+			},
+		},
+	}
+
+	data, err := Marshal(&orig)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var got transWrapper3
+	if err := Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if got.Tag != orig.Tag || got.Node.Name != orig.Node.Name {
+		t.Errorf("top-level mismatch")
+	}
+	if got.Node.B == nil || got.Node.B.Value != 100 {
+		t.Fatal("B mismatch")
+	}
+	if got.Node.B.A == nil || got.Node.B.A.Name != "n2" {
+		t.Fatal("B.A mismatch")
+	}
+	if got.Node.B.A.B == nil || got.Node.B.A.B.Value != 200 {
+		t.Fatal("B.A.B mismatch")
+	}
+	if got.Node.B.A.B.A != nil {
+		t.Errorf("expected terminal nil")
+	}
+}
+
+// --- Scenario 4: Slice of self-referential struct as transitive dep ---
+// Construction: Wrapper → []Inner → Inner → *Inner (cycle)
+
+type transInner4 struct {
+	ID   int           `json:"id"`
+	Next *transInner4  `json:"next"`
+}
+
+type transWrapper4 struct {
+	Items []transInner4 `json:"items"`
+	Total int           `json:"total"`
+}
+
+func TestMarshal_TransitiveSelfRef_ViaSlice(t *testing.T) {
+	v := transWrapper4{
+		Total: 2,
+		Items: []transInner4{
+			{ID: 1, Next: &transInner4{ID: 11, Next: nil}},
+			{ID: 2, Next: nil},
+		},
+	}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	std, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("stdlib error: %v", err)
+	}
+	if string(got) != string(std) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, std)
+	}
+}
+
+func TestUnmarshal_TransitiveSelfRef_ViaSlice(t *testing.T) {
+	input := `{"items":[{"id":1,"next":{"id":11,"next":null}},{"id":2,"next":null}],"total":2}`
+
+	var std transWrapper4
+	if err := json.Unmarshal([]byte(input), &std); err != nil {
+		t.Fatalf("stdlib: %v", err)
+	}
+
+	var vj transWrapper4
+	if err := Unmarshal([]byte(input), &vj); err != nil {
+		t.Fatalf("vjson: %v", err)
+	}
+
+	if vj.Total != std.Total || len(vj.Items) != len(std.Items) {
+		t.Fatalf("top-level: vjson=%+v, stdlib=%+v", vj, std)
+	}
+	if vj.Items[0].ID != 1 || vj.Items[0].Next == nil || vj.Items[0].Next.ID != 11 {
+		t.Errorf("item[0] mismatch: %+v", vj.Items[0])
+	}
+	if vj.Items[1].ID != 2 || vj.Items[1].Next != nil {
+		t.Errorf("item[1] mismatch: %+v", vj.Items[1])
+	}
+}
+
+// --- Scenario 5: Map value is a self-referential struct (transitive) ---
+// Construction: Wrapper → map[string]Inner → Inner → *Inner (cycle)
+
+type transInner5 struct {
+	Data string       `json:"data"`
+	Ref  *transInner5 `json:"ref"`
+}
+
+type transWrapper5 struct {
+	Entries map[string]transInner5 `json:"entries"`
+}
+
+func TestMarshal_TransitiveSelfRef_ViaMap(t *testing.T) {
+	v := transWrapper5{
+		Entries: map[string]transInner5{
+			"x": {Data: "hello", Ref: &transInner5{Data: "world", Ref: nil}},
+		},
+	}
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	std, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("stdlib error: %v", err)
+	}
+	if string(got) != string(std) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, std)
+	}
+}
+
+func TestUnmarshal_TransitiveSelfRef_ViaMap(t *testing.T) {
+	input := `{"entries":{"x":{"data":"hello","ref":{"data":"world","ref":null}}}}`
+
+	var std transWrapper5
+	if err := json.Unmarshal([]byte(input), &std); err != nil {
+		t.Fatalf("stdlib: %v", err)
+	}
+
+	var vj transWrapper5
+	if err := Unmarshal([]byte(input), &vj); err != nil {
+		t.Fatalf("vjson: %v", err)
+	}
+
+	if len(vj.Entries) != 1 {
+		t.Fatalf("entries len: %d", len(vj.Entries))
+	}
+	x := vj.Entries["x"]
+	if x.Data != "hello" || x.Ref == nil || x.Ref.Data != "world" || x.Ref.Ref != nil {
+		t.Errorf("mismatch: %+v", x)
+	}
+}
+
+// --- Scenario 6: MarshalIndent path for transitive self-ref ---
+// Exercises the encodeStructIndent → encodeValue → encodeValueSlow path
+// where field-level TypeInfo.Codec may be nil.
+
+func TestMarshalIndent_TransitiveSelfRef(t *testing.T) {
+	v := transWrapper2{
+		ID: 1,
+		Inner: transInner2{
+			Name: "a",
+			Child: &transInner2{
+				Name:  "b",
+				Child: nil,
+			},
+		},
+	}
+	got, err := MarshalIndent(&v, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent error: %v", err)
+	}
+	std, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		t.Fatalf("stdlib error: %v", err)
+	}
+	if string(got) != string(std) {
+		t.Errorf("indent mismatch:\n  vjson:\n%s\n  stdlib:\n%s", got, std)
 	}
 }

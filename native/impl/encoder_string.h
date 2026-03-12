@@ -10,6 +10,8 @@
 #ifndef VJ_ENCODER_STRING_H
 #define VJ_ENCODER_STRING_H
 
+// clang-format off
+
 /* ---- String escape (JSON) ----
  *
  * Writes the string content (WITHOUT surrounding quotes) to buf.
@@ -17,7 +19,7 @@
  *
  * The caller must ensure buf has enough space (worst case 6x + overhead). */
 
-static const char hex_digits[16] = "0123456789abcdef";
+static const char hex_digits[] = "0123456789abcdef";
 
 /* ---- Escape lookup table ----
  *
@@ -203,47 +205,86 @@ vj_escape_mask_8(uint64_t word, const int html) {
 #undef SWAR_LO_BITS
 #undef SWAR_BROADCAST
 
-#if defined(ISA_neon) || defined(ISA_sse42) || defined(ISA_avx512)
+#if defined(__SSE2__) || defined(__aarch64__)
 
-#define VJ_ESCAPE_MASK_FUNC(name, html)                                        \
-  static inline int name(const uint8_t *src) {                                 \
-    __m128i v = _mm_loadu_si128((const __m128i *)src);                         \
-                                                                               \
-    /* c < 0x20: max_epu8(v, 0x1F) != v → cmpeq gives 0 for ctrl chars. */     \
-    __m128i ctrl_safe =                                                        \
-        _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x1F)), v);               \
-                                                                               \
-    /* c == '"' or c == '\\' */                                                \
-    __m128i eq_q = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));                      \
-    __m128i eq_bs = _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'));                    \
-                                                                               \
-    /* c >= 0x80: signed < 0 */                                                \
-    __m128i hi = _mm_cmplt_epi8(v, _mm_setzero_si128());                       \
-                                                                               \
-    __m128i bad = _mm_or_si128(_mm_or_si128(eq_q, eq_bs), hi);                 \
-                                                                               \
-    if (html) {                                                                \
-      __m128i eq_lt = _mm_cmpeq_epi8(v, _mm_set1_epi8('<'));                   \
-      __m128i eq_gt = _mm_cmpeq_epi8(v, _mm_set1_epi8('>'));                   \
-      __m128i eq_amp = _mm_cmpeq_epi8(v, _mm_set1_epi8('&'));                  \
-      bad =                                                                    \
-          _mm_or_si128(bad, _mm_or_si128(eq_lt, _mm_or_si128(eq_gt, eq_amp))); \
-    }                                                                          \
-                                                                               \
-    /* safe = ctrl_safe & ~bad;  need_escape = ~safe */                        \
-    __m128i safe = _mm_andnot_si128(bad, ctrl_safe);                           \
-    return ~_mm_movemask_epi8(safe) & 0xFFFF;                                  \
+/* 16-byte escape mask: scan 16 bytes, return bitmask of bytes needing escape.
+ * `html` must be a compile-time constant — the compiler eliminates the dead
+ * branch entirely via constant folding + always_inline. */
+static __attribute__((always_inline)) inline int
+vj_escape_mask_16_impl(const uint8_t *src, const int html) {
+  __m128i v = _mm_loadu_si128((const __m128i *)src);
+
+  /* c < 0x20: max_epu8(v, 0x1F) != v → cmpeq gives 0 for ctrl chars. */
+  __m128i ctrl_safe =
+      _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x1F)), v);
+
+  /* c == '"' or c == '\\' */
+  __m128i eq_q = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));
+  __m128i eq_bs = _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'));
+
+  /* c >= 0x80: signed < 0 */
+  __m128i hi = _mm_cmplt_epi8(v, _mm_setzero_si128());
+
+  __m128i bad = _mm_or_si128(_mm_or_si128(eq_q, eq_bs), hi);
+
+  if (html) {
+    __m128i eq_lt = _mm_cmpeq_epi8(v, _mm_set1_epi8('<'));
+    __m128i eq_gt = _mm_cmpeq_epi8(v, _mm_set1_epi8('>'));
+    __m128i eq_amp = _mm_cmpeq_epi8(v, _mm_set1_epi8('&'));
+    bad = _mm_or_si128(bad, _mm_or_si128(eq_lt, _mm_or_si128(eq_gt, eq_amp)));
   }
 
-/* Generate two branchless specializations. The `html` parameter is a
- * compile-time constant (0 or 1), so the compiler eliminates the dead
- * branch entirely — no runtime check in either version. */
-VJ_ESCAPE_MASK_FUNC(vj_escape_mask_16, 0)
-VJ_ESCAPE_MASK_FUNC(vj_escape_mask_16_html, 1)
+  /* safe = ctrl_safe & ~bad;  need_escape = ~safe */
+  __m128i safe = _mm_andnot_si128(bad, ctrl_safe);
+  return ~_mm_movemask_epi8(safe) & 0xFFFF;
+}
 
-#undef VJ_ESCAPE_MASK_FUNC
+static inline int vj_escape_mask_16(const uint8_t *src) {
+  return vj_escape_mask_16_impl(src, 0);
+}
+static inline int vj_escape_mask_16_html(const uint8_t *src) {
+  return vj_escape_mask_16_impl(src, 1);
+}
 
-#endif /* ISA_neon || ISA_sse42 || ISA_avx512 */
+/* ---- AVX2 32-byte escape mask ---- */
+#if defined(__AVX2__)
+
+/* 32-byte escape mask (AVX2): same logic as 16-byte but with 256-bit vectors. */
+static __attribute__((always_inline)) inline int
+vj_escape_mask_32_impl(const uint8_t *src, const int html) {
+  __m256i v = _mm256_loadu_si256((const __m256i *)src);
+
+  __m256i ctrl_safe =
+      _mm256_cmpeq_epi8(_mm256_max_epu8(v, _mm256_set1_epi8(0x1F)), v);
+
+  __m256i eq_q = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('"'));
+  __m256i eq_bs = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('\\'));
+  __m256i hi = _mm256_cmpgt_epi8(_mm256_setzero_si256(), v);
+
+  __m256i bad = _mm256_or_si256(_mm256_or_si256(eq_q, eq_bs), hi);
+
+  if (html) {
+    __m256i eq_lt = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('<'));
+    __m256i eq_gt = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('>'));
+    __m256i eq_amp = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('&'));
+    bad = _mm256_or_si256(bad,
+            _mm256_or_si256(eq_lt, _mm256_or_si256(eq_gt, eq_amp)));
+  }
+
+  __m256i safe = _mm256_andnot_si256(bad, ctrl_safe);
+  return ~_mm256_movemask_epi8(safe);
+}
+
+static inline int vj_escape_mask_32(const uint8_t *src) {
+  return vj_escape_mask_32_impl(src, 0);
+}
+static inline int vj_escape_mask_32_html(const uint8_t *src) {
+  return vj_escape_mask_32_impl(src, 1);
+}
+
+#endif /* __AVX2__ */
+
+#endif /* __SSE2__ || __aarch64__ */
 
 /*
  * escape_string_content — write escaped string content (no quotes) to buf.
@@ -439,7 +480,7 @@ vj_escape_utf8_run(uint8_t **out_ptr, const uint8_t *src,
     }                                                                          \
   } while (0)
 
-#if defined(ISA_neon) || defined(ISA_sse42) || defined(ISA_avx512)
+#if defined(__SSE2__) || defined(__aarch64__)
 
 /*
  * SIMD-accelerated escape core.  The `html` parameter must be a compile-time
@@ -460,6 +501,40 @@ escape_string_content_impl(uint8_t *buf, const uint8_t *src, int64_t src_len,
   int64_t i = 0;
 
   while (i < src_len) {
+#if defined(__AVX2__)
+    /* ---- AVX2: scan 32 bytes at a time ---- */
+    if (i + 32 <= src_len) {
+      int mask = html ? vj_escape_mask_32_html(&src[i])
+                      : vj_escape_mask_32(&src[i]);
+      if (mask == 0) {
+        /* All 32 bytes are safe — bulk copy via AVX2 store. */
+        _mm256_storeu_si256((__m256i *)out,
+                            _mm256_loadu_si256((const __m256i *)&src[i]));
+        out += 32;
+        i += 32;
+        continue;
+      }
+
+      /* Copy safe prefix before the first escape byte. */
+      int safe = __builtin_ctz(mask);
+      if (safe > 0) {
+        /* Use overlapping 16-byte SIMD copies for the safe prefix. */
+        if (safe <= 16) {
+          copy_small(out, &src[i], safe);
+        } else {
+          _mm_storeu_si128((__m128i *)out,
+                           _mm_loadu_si128((const __m128i *)&src[i]));
+          copy_small(out + 16, &src[i + 16], safe - 16);
+        }
+        out += safe;
+        i += safe;
+      }
+      /* Handle the escape byte inline. */
+      ESCAPE_ONE_INLINE(html);
+      continue;
+    }
+#endif /* __AVX2__ */
+
     /* ---- SIMD: scan 16 bytes at a time ---- */
     if (i + 16 <= src_len) {
       int mask = html ? vj_escape_mask_16_html(&src[i])
@@ -612,7 +687,7 @@ escape_string_content_html(uint8_t *buf, const uint8_t *src, int64_t src_len,
   return (int)(out - buf);
 }
 
-#endif /* ISA */
+#endif /* SIMD */
 
 #undef ESCAPE_ONE_INLINE
 
@@ -622,6 +697,49 @@ static inline int escape_string_content(uint8_t *buf, const uint8_t *src,
   if (flags & VJ_ENC_ESCAPE_HTML)
     return escape_string_content_html(buf, src, src_len, flags);
   return escape_string_content_base(buf, src, src_len, flags);
+}
+
+/* ================================================================
+ *  vj_escape_string — write a complete JSON string (with quotes)
+ *
+ *  Includes a short-string fast path (SIMD scan for <= 16 bytes):
+ *  if all bytes are safe ASCII, copies directly without calling the
+ *  noinline escape_string_content function.  This avoids function-call
+ *  overhead for the ~65% of strings that are short and clean.
+ *
+ *  Returns number of bytes written (including the two quote bytes).
+ *  Caller must ensure buf has room for 2 + src_len * 6 bytes.
+ * ================================================================ */
+static __attribute__((always_inline)) inline int
+vj_escape_string(uint8_t *buf, const uint8_t *src, int64_t src_len,
+                 uint32_t flags) {
+  uint8_t *out = buf;
+  *out++ = '"';
+  if (src_len > 0) {
+#if defined(__SSE2__) || defined(__aarch64__)
+    if (__builtin_expect(src_len <= 16, 1)) {
+      __m128i v = _mm_loadu_si128((const __m128i *)src);
+      int mask;
+      if (flags & VJ_ENC_ESCAPE_HTML) {
+        mask = vj_escape_mask_16_html(src);
+      } else {
+        mask = vj_escape_mask_16(src);
+      }
+      int relevant_mask = mask & ((1 << src_len) - 1);
+      if (__builtin_expect(relevant_mask == 0, 1)) {
+        _mm_storeu_si128((__m128i *)out, v);
+        out += src_len;
+      } else {
+        out += escape_string_content(out, src, src_len, flags);
+      }
+    } else
+#endif
+    {
+      out += escape_string_content(out, src, src_len, flags);
+    }
+  }
+  *out++ = '"';
+  return (int)(out - buf);
 }
 
 #endif /* VJ_ENCODER_STRING_H */

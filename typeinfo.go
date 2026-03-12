@@ -96,6 +96,25 @@ func (ti *TypeInfo) getOrAllocExt() *TypeInfoExt {
 	return ti.Ext
 }
 
+// resolveCodec returns ti.Codec, lazily resolving it from the codec cache
+// if it was nil due to a construction-time cycle (getCodecForCycle returns
+// a partial TypeInfo whose Codec is value-copied as nil into StructCodec.Fields).
+//
+// MUST only be called after all codec construction is complete, i.e. at
+// Marshal/Unmarshal time, not during type registration.
+func (ti *TypeInfo) resolveCodec() any {
+	if c := ti.Codec; c != nil {
+		return c
+	}
+	if ti.Ext != nil && ti.Ext.Type != nil {
+		full := GetCodec(ti.Ext.Type)
+		c := full.Codec
+		ti.Codec = c // cache for next call; benign race: idempotent write
+		return c
+	}
+	return nil
+}
+
 // codecCache maps reflect.Type → *TypeInfo (steady-state) or
 // *codecEntry (transient, during construction).
 // After construction completes the entry is promoted to *TypeInfo
@@ -442,9 +461,11 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 			if quoted {
 				switch cached.Kind {
 				case KindPointer:
-					pDec := cached.Codec.(*PointerCodec)
-					if !isQuotableKind(pDec.ElemTI.Kind) {
-						quoted = false
+					if cached.Codec != nil {
+						pDec := cached.Codec.(*PointerCodec)
+						if !isQuotableKind(pDec.ElemTI.Kind) {
+							quoted = false
+						}
 					}
 				default:
 					if !isQuotableKind(cached.Kind) {

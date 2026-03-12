@@ -8,6 +8,7 @@
  * modular sub-headers.  The VM implementation is included below.
  *
  * Sub-headers (included in dependency order):
+ *   encoder_memory.h  — memcpy/memset impls, SIMD copy helpers
  *   encoder_types.h   — enums, structs, constants
  *   encoder_number.h  — integer-to-ASCII formatting
  *   encoder_string.h  — JSON string escaping (SIMD/SWAR)
@@ -22,6 +23,8 @@
 
 #ifndef VJ_ENCODER_H
 #define VJ_ENCODER_H
+
+// clang-format off
 
 /* ---- Sub-headers (order matters: each may depend on predecessors) ---- */
 #include "encoder_types.h"
@@ -44,13 +47,13 @@
     ctx->pc = (int32_t)(op - ops);                                             \
     ctx->cur_base = base;                                                      \
     ctx->depth = depth;                                                        \
-    ctx->enc_flags = flags | VJ_ENC_RESUME                                     \
-                   | (first ? VJ_ENC_RESUME_FIRST : 0);                        \
+    ctx->enc_flags =                                                           \
+        flags | VJ_ENC_RESUME | (first ? VJ_ENC_RESUME_FIRST : 0);             \
     ctx->error_code = (err);                                                   \
     return;                                                                    \
   } while (0)
 
-void vj_vm_exec(VjExecCtx *ctx) {
+static void vj_vm_exec(VjExecCtx *ctx) {
 
   /* ---- Load context into registers / locals ---- */
   uint8_t *buf = ctx->buf_cur;
@@ -85,42 +88,42 @@ void vj_vm_exec(VjExecCtx *ctx) {
 
   static const int32_t dispatch_table[OP_DISPATCH_COUNT] = {
       /* Primitives (0-13) */
-      [OP_BOOL]     = DT_ENTRY(vj_op_bool),
-      [OP_INT]      = DT_ENTRY(vj_op_int),
-      [OP_INT8]     = DT_ENTRY(vj_op_int8),
-      [OP_INT16]    = DT_ENTRY(vj_op_int16),
-      [OP_INT32]    = DT_ENTRY(vj_op_int32),
-      [OP_INT64]    = DT_ENTRY(vj_op_int64),
-      [OP_UINT]     = DT_ENTRY(vj_op_uint),
-      [OP_UINT8]    = DT_ENTRY(vj_op_uint8),
-      [OP_UINT16]   = DT_ENTRY(vj_op_uint16),
-      [OP_UINT32]   = DT_ENTRY(vj_op_uint32),
-      [OP_UINT64]   = DT_ENTRY(vj_op_uint64),
-      [OP_FLOAT32]  = DT_ENTRY(vj_op_float32),
-      [OP_FLOAT64]  = DT_ENTRY(vj_op_float64),
-      [OP_STRING]   = DT_ENTRY(vj_op_string),
+      [OP_BOOL] = DT_ENTRY(vj_op_bool),
+      [OP_INT] = DT_ENTRY(vj_op_int),
+      [OP_INT8] = DT_ENTRY(vj_op_int8),
+      [OP_INT16] = DT_ENTRY(vj_op_int16),
+      [OP_INT32] = DT_ENTRY(vj_op_int32),
+      [OP_INT64] = DT_ENTRY(vj_op_int64),
+      [OP_UINT] = DT_ENTRY(vj_op_uint),
+      [OP_UINT8] = DT_ENTRY(vj_op_uint8),
+      [OP_UINT16] = DT_ENTRY(vj_op_uint16),
+      [OP_UINT32] = DT_ENTRY(vj_op_uint32),
+      [OP_UINT64] = DT_ENTRY(vj_op_uint64),
+      [OP_FLOAT32] = DT_ENTRY(vj_op_float32),
+      [OP_FLOAT64] = DT_ENTRY(vj_op_float64),
+      [OP_STRING] = DT_ENTRY(vj_op_string),
 
       /* Non-primitive data ops (16-19) */
-      [OP_INTERFACE]   = DT_ENTRY(vj_op_interface),
+      [OP_INTERFACE] = DT_ENTRY(vj_op_interface),
       [OP_RAW_MESSAGE] = DT_ENTRY(vj_op_raw_message),
-      [OP_NUMBER]      = DT_ENTRY(vj_op_number),
-      [OP_BYTE_SLICE]  = DT_ENTRY(vj_op_yield),
+      [OP_NUMBER] = DT_ENTRY(vj_op_number),
+      [OP_BYTE_SLICE] = DT_ENTRY(vj_op_yield),
 
       /* Structural control-flow (32-40) */
       [OP_SKIP_IF_ZERO] = DT_ENTRY(vj_op_skip_if_zero),
       [OP_STRUCT_BEGIN] = DT_ENTRY(vj_op_struct_begin),
-      [OP_STRUCT_END]   = DT_ENTRY(vj_op_struct_end),
-      [OP_PTR_DEREF]    = DT_ENTRY(vj_op_ptr_deref),
-      [OP_PTR_END]      = DT_ENTRY(vj_op_ptr_end),
-      [OP_SLICE_BEGIN]  = DT_ENTRY(vj_op_slice_begin),
-      [OP_SLICE_END]    = DT_ENTRY(vj_op_slice_end),
-      [OP_MAP_BEGIN]    = DT_ENTRY(vj_op_map_begin),
-      [OP_MAP_END]      = DT_ENTRY(vj_op_map_end),
-      [OP_OBJ_OPEN]     = DT_ENTRY(vj_op_obj_open),
-      [OP_OBJ_CLOSE]    = DT_ENTRY(vj_op_obj_close),
+      [OP_STRUCT_END] = DT_ENTRY(vj_op_struct_end),
+      [OP_PTR_DEREF] = DT_ENTRY(vj_op_ptr_deref),
+      [OP_PTR_END] = DT_ENTRY(vj_op_ptr_end),
+      [OP_SLICE_BEGIN] = DT_ENTRY(vj_op_slice_begin),
+      [OP_SLICE_END] = DT_ENTRY(vj_op_slice_end),
+      [OP_MAP_BEGIN] = DT_ENTRY(vj_op_map_begin),
+      [OP_MAP_END] = DT_ENTRY(vj_op_map_end),
+      [OP_OBJ_OPEN] = DT_ENTRY(vj_op_obj_open),
+      [OP_OBJ_CLOSE] = DT_ENTRY(vj_op_obj_close),
 
       /* Go-only fallback (0x3F) */
-      [OP_FALLBACK]    = DT_ENTRY(vj_op_yield),
+      [OP_FALLBACK] = DT_ENTRY(vj_op_yield),
   };
 
 #undef DT_ENTRY
@@ -129,7 +132,7 @@ void vj_vm_exec(VjExecCtx *ctx) {
 #define VM_CHECK(n)                                                            \
   do {                                                                         \
     if (__builtin_expect(buf + (n) > bend, 0)) {                               \
-      VM_SAVE_AND_RETURN(VJ_ERR_BUF_FULL);                                    \
+      VM_SAVE_AND_RETURN(VJ_ERR_BUF_FULL);                                     \
     }                                                                          \
   } while (0)
 
@@ -141,7 +144,7 @@ void vj_vm_exec(VjExecCtx *ctx) {
     }                                                                          \
     first = 0;                                                                 \
     if (op->key_len > 0) {                                                     \
-      vj_copy_key(buf, op->key_ptr, op->key_len);                             \
+      vj_copy_key(buf, op->key_ptr, op->key_len);                              \
       buf += op->key_len;                                                      \
     }                                                                          \
   } while (0)
@@ -173,8 +176,16 @@ void vj_vm_exec(VjExecCtx *ctx) {
 #error "VM_DISPATCH: unsupported architecture (need aarch64 or x86_64)"
 #endif
 
-#define VM_NEXT() do { op++; VM_DISPATCH(); } while (0)
-#define VM_JUMP(n) do { op += (n); VM_DISPATCH(); } while (0)
+#define VM_NEXT()                                                              \
+  do {                                                                         \
+    op++;                                                                      \
+    VM_DISPATCH();                                                             \
+  } while (0)
+#define VM_JUMP(n)                                                             \
+  do {                                                                         \
+    op += (n);                                                                 \
+    VM_DISPATCH();                                                             \
+  } while (0)
 
   /* ---- Begin dispatch ---- */
   VM_DISPATCH();
@@ -309,11 +320,7 @@ vj_op_string: {
   int64_t max_need = 1 + op->key_len + 2 + (s->len * 6);
   VM_CHECK(max_need);
   VM_WRITE_KEY();
-  *buf++ = '"';
-  if (s->len > 0) {
-    buf += escape_string_content(buf, s->ptr, s->len, flags);
-  }
-  *buf++ = '"';
+  buf += vj_escape_string(buf, (const uint8_t *)s->ptr, s->len, flags);
   VM_NEXT();
 }
 
@@ -438,7 +445,6 @@ vj_op_ptr_end: {
   VM_NEXT();
 }
 
-
 vj_op_slice_begin: {
   const GoSlice *sl = (const GoSlice *)(base + op->field_off);
 
@@ -468,8 +474,8 @@ vj_op_slice_begin: {
   frame->iter_data = sl->data;
   frame->iter_count = sl->len;
   frame->iter_idx = 0;
-  frame->elem_size = op->operand_a;  /* element size */
-  frame->loop_pc_op = op + 1;        /* first body instruction */
+  frame->elem_size = op->operand_a; /* element size */
+  frame->loop_pc_op = op + 1;       /* first body instruction */
   frame->ret_base = base;
   frame->first = first;
   frame->frame_type = VJ_FRAME_SLICE;
@@ -502,7 +508,6 @@ vj_op_slice_end: {
   first = 0; /* parent had at least this field */
   VM_NEXT();
 }
-
 
 vj_op_obj_open: {
   /* Lightweight nested struct open: write key + '{', flip first flag.
@@ -559,14 +564,12 @@ vj_op_interface: {
    * (Go handles its own key+comma when falling back). */
   VM_CHECK(op->key_len + 1 + 330);
   uint8_t *iface_saved_buf = buf;
-  int      iface_saved_first = first;
+  int iface_saved_first = first;
   VM_WRITE_KEY();
 
   VjIfaceResult iface_r = vj_encode_interface_value(
-      buf, bend,
-      base + op->field_off,
-      ctx->iface_cache_ptr, ctx->iface_cache_count,
-      flags);
+      buf, bend, base + op->field_off, ctx->iface_cache_ptr,
+      ctx->iface_cache_count, flags);
 
   switch (__builtin_expect(iface_r.action, VJ_IFACE_DONE)) {
   case VJ_IFACE_DONE:
@@ -600,9 +603,9 @@ vj_op_interface: {
     }
     ops = iface_r.cached_ops;
     op = &ops[0];
-    base = iface_r.data_ptr;  /* set base to struct data inside interface */
-    first = 1;                /* interface value context: no leading comma */
-    VM_DISPATCH();            /* execute cached Blueprint ops */
+    base = iface_r.data_ptr; /* set base to struct data inside interface */
+    first = 1;               /* interface value context: no leading comma */
+    VM_DISPATCH();           /* execute cached Blueprint ops */
   case VJ_IFACE_BUF_FULL:
     VM_SAVE_AND_RETURN(VJ_ERR_BUF_FULL);
   case VJ_IFACE_NAN_INF:
@@ -655,8 +658,7 @@ vj_op_yield: {
   ctx->yield_info = VJ_YIELD_FALLBACK;
   /* Pack first flag into bit 31 of yield_field_idx so Go knows
    * whether a comma is needed when encoding the fallback field. */
-  ctx->yield_field_idx = op->operand_a
-                       | (first ? (int32_t)0x80000000 : 0);
+  ctx->yield_field_idx = op->operand_a | (first ? (int32_t)0x80000000 : 0);
   VM_SAVE_AND_RETURN(VJ_ERR_YIELD);
 }
 

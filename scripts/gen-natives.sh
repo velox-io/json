@@ -113,6 +113,24 @@ get_zig_target() {
     esac
 }
 
+# Build clang target triple (for clangd --target)
+get_clang_target() {
+    local os=$1
+    local arch=$2
+
+    case "$arch" in
+        amd64)  arch="x86_64" ;;
+        arm64)  arch="aarch64" ;;
+    esac
+
+    case "$os" in
+        darwin)  echo "${arch}-apple-darwin" ;;
+        linux)   echo "${arch}-unknown-linux-gnu" ;;
+        windows) echo "${arch}-pc-windows-msvc" ;;
+        *)       echo "${arch}-unknown-${os}" ;;
+    esac
+}
+
 # Select compiler
 if [ "$NEEDS_CROSS_COMPILE" = true ]; then
     if command -v zig &> /dev/null; then
@@ -129,22 +147,47 @@ fi
 
 # ============================================================
 #  Platform-ISA constraints
-#  The encoder does not have multi-ISA runtime dispatch (unlike the
-#  scanner in simd project), so each platform compiles a single ISA.
-#  darwin: arm64 + neon
-#  linux:  arm64 (neon) or amd64 (sse42)
+#  Each platform may compile one or more ISA variants. When multiple
+#  ISAs are listed, the Go init() in encoder_<os>_<arch>.go selects
+#  the best one at runtime via golang.org/x/sys/cpu detection.
+#  darwin: arm64 (neon)
+#  linux:  arm64 (neon) or amd64 (sse42 avx2 avx512)
 # ============================================================
 
 get_available_isas() {
     local os=$1
     local arch=$2
 
-    case "$arch" in
-        arm64) echo "neon" ;;
-        amd64) echo "sse42" ;;
-        *)     echo "" ;;
+    case "$os" in
+        darwin)
+            if [ "$arch" = "arm64" ]; then
+                echo "neon"
+            else
+                echo ""
+            fi
+            ;;
+        linux)
+            case "$arch" in
+                arm64) echo "neon" ;;
+                amd64) echo "sse42 avx2 avx512" ;;
+            esac
+            ;;
+        windows)
+            if [ "$arch" = "amd64" ]; then
+                echo "sse42 avx2 avx512"
+            else
+                echo ""
+            fi
+            ;;
+        *)
+            case "$arch" in
+                arm64) echo "neon" ;;
+                amd64) echo "sse42 avx2 avx512" ;;
+            esac
+            ;;
     esac
 }
+
 
 DEFAULT_ISAS=$(get_available_isas "$TARGET_OS" "$TARGET_ARCH")
 ISAS="${ISAs:-$DEFAULT_ISAS}"
@@ -165,6 +208,7 @@ get_isa_flags() {
     case "$1" in
         neon)   echo "" ;;
         sse42)  echo "-msse4.2 -mpclmul" ;;
+        avx2)   echo "-mavx2 -msse4.2 -mpclmul" ;;
         avx512) echo "-mavx512f -mavx512bw -mpclmul" ;;
         *)      echo "" ;;
     esac
@@ -188,6 +232,27 @@ echo "  Output: $OUTPUT_DIR"
 echo ""
 
 ALL_OBJS=""
+
+# ============================================================
+#  Compile shared memcpy/memset (ISA-independent, compiled once)
+#
+#  Each ISA object references memcpy/memset via extern declarations.
+#  This single object provides the definitions, avoiding duplicate
+#  symbol errors when multiple ISA objects are linked together.
+# ============================================================
+MEMFN_SRC="$(dirname "$SOURCE_FILE")/encoder_memfn.c"
+if [ -f "$MEMFN_SRC" ]; then
+    MEMFN_OBJ="${OUTPUT_DIR}/encoder_memfn_${TARGET_OS}_${TARGET_ARCH}.o"
+    echo "  Compiling $(basename "$MEMFN_OBJ") (shared memcpy/memset)"
+    $CC -O3 -fPIC -g0 -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset $ARCH_FLAGS \
+        -I"$(dirname "$MEMFN_SRC")" -I"$REPO_ROOT/native/include" \
+        -c "$MEMFN_SRC" -o "$MEMFN_OBJ"
+    ALL_OBJS="$MEMFN_OBJ"
+fi
+
+# Collect flags for .clangd generation (from first ISA/mode combination)
+CLANGD_FLAGS_COLLECTED=false
+CLANGD_ADD_FLAGS=""
 
 for isa in $ISAS; do
     ISA_FLAGS=$(get_isa_flags "$isa")
@@ -229,6 +294,12 @@ for isa in $ISAS; do
         echo "  Compiling $(basename "$OFILE")"
         $CC -O3 -fPIC -g0 -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset $ARCH_FLAGS $ISA_FLAGS -c "$CFILE" -o "$OFILE"
         ALL_OBJS="$ALL_OBJS $OFILE"
+
+        # Capture flags for .clangd from the first ISA/mode combination
+        if [ "$CLANGD_FLAGS_COLLECTED" = false ]; then
+            CLANGD_FLAGS_COLLECTED=true
+            CLANGD_ADD_FLAGS="-DOS=${TARGET_OS} -DARCH=${TARGET_ARCH} $MODE_FLAG -I$REPO_ROOT/native/include"
+        fi
 
         # Step 3: Generate assembly for reference (strip debug info)
         echo "  Generating $(basename "$SFILE")"
@@ -303,6 +374,29 @@ if [ "$NEEDS_PRELINK" != true ]; then
         ld -r -o "$SYSO_PATH" $ALL_OBJS
     fi
 fi
+
+# ============================================================
+#  Generate .clangd for IDE support (clangd, ccls, etc.)
+#
+#  Unlike compile_commands.json (which only covers .c files),
+#  .clangd applies CompileFlags to ALL files in the directory
+#  including headers — so macros like ISA_neon are resolved
+#  when editing .h files directly.
+# ============================================================
+
+CLANGD_PATH="$REPO_ROOT/$VJ_LIB_DIR/.clangd"
+CLANG_TARGET=$(get_clang_target "$TARGET_OS" "$TARGET_ARCH")
+{
+    echo "# Auto-generated by gen-natives.sh — do not edit manually."
+    echo "# Target: ${TARGET_OS}/${TARGET_ARCH} ($(echo $ISAS | tr ' ' ','))"
+    echo "CompileFlags:"
+    echo "  Add:"
+    echo "    - --target=$CLANG_TARGET"
+    for flag in $CLANGD_ADD_FLAGS; do
+        echo "    - $flag"
+    done
+} > "$CLANGD_PATH"
+echo "Generated $CLANGD_PATH"
 
 # ============================================================
 #  Summary

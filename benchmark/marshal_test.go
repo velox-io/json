@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"dev.local/benchmark/twitter"
+	"dev.local/benchmark/twitter_typed"
 
 	"github.com/bytedance/sonic"
 	vjson "github.com/velox-io/json"
@@ -184,6 +185,104 @@ func Benchmark_Marshal_Twitter_Velox(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := vjson.Marshal(loadTwitterValue()); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// =============================================================================
+// TwitterTyped: same data, all interface{} replaced with concrete types.
+// Zero yield benchmark — C VM runs the entire struct without yielding.
+// =============================================================================
+
+var (
+	twitterTypedValueOnce sync.Once
+	twitterTypedValue     twitter_typed.TwitterStruct
+)
+
+func loadTwitterTypedValue() *twitter_typed.TwitterStruct {
+	twitterTypedValueOnce.Do(func() {
+		if err := json.Unmarshal(LoadTwitterCompactJSON(), &twitterTypedValue); err != nil {
+			panic("load twitter_typed: " + err.Error())
+		}
+	})
+	return &twitterTypedValue
+}
+
+func Benchmark_Marshal_TwitterTyped_StdJSON(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := json.Marshal(loadTwitterTypedValue()); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Marshal_TwitterTyped_Sonic(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := sonic.Marshal(loadTwitterTypedValue()); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Marshal_TwitterTyped_Velox(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := vjson.Marshal(loadTwitterTypedValue()); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// =============================================================================
+// MapAny: map[string]any – exercises encodeAnyMap / encodeAnyVal path
+// Uses KubePods JSON decoded into map[string]any for realistic nested data.
+// =============================================================================
+
+var (
+	mapAnyValueOnce sync.Once
+	mapAnyValue     map[string]any
+)
+
+func loadMapAnyValue() *map[string]any {
+	mapAnyValueOnce.Do(func() {
+		if err := json.Unmarshal(LoadPodsCompactJSON(), &mapAnyValue); err != nil {
+			panic("load map[string]any: " + err.Error())
+		}
+	})
+	return &mapAnyValue
+}
+
+func Benchmark_Marshal_MapAny_StdJSON(b *testing.B) {
+	v := loadMapAnyValue()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := json.Marshal(v); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Marshal_MapAny_Sonic(b *testing.B) {
+	v := loadMapAnyValue()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := sonic.Marshal(v); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Marshal_MapAny_Velox(b *testing.B) {
+	v := loadMapAnyValue()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := vjson.Marshal(v); err != nil {
 			b.Fatal(err)
 		}
 	}

@@ -166,7 +166,7 @@ func emitStructBody(b *blueprintBuilder, fixups *[]keyFixup, dec *StructCodec, b
 			emitPrimitive(b, fixups, fi, fieldOff)
 
 		case KindStruct:
-			subDec := fi.Codec.(*StructCodec)
+			subDec := fi.resolveCodec().(*StructCodec)
 			if needsOmitempty {
 				// Calculate the span of the nested struct instructions.
 				// We emit a placeholder OP_SKIP_IF_ZERO, then emit the
@@ -180,7 +180,7 @@ func emitStructBody(b *blueprintBuilder, fixups *[]keyFixup, dec *StructCodec, b
 			}
 
 		case KindPointer:
-			pDec := fi.Codec.(*PointerCodec)
+			pDec := fi.resolveCodec().(*PointerCodec)
 			if needsOmitempty {
 				// For pointers, omitempty checks nil (same as ptr_deref).
 				// The ptr_deref instruction already handles nil→null+jump,
@@ -193,7 +193,7 @@ func emitStructBody(b *blueprintBuilder, fixups *[]keyFixup, dec *StructCodec, b
 			}
 
 		case KindSlice:
-			sliceDec := fi.Codec.(*SliceCodec)
+			sliceDec := fi.resolveCodec().(*SliceCodec)
 			// []byte needs base64 encoding — yield to Go.
 			if sliceDec.ElemTI.Kind == KindUint8 && sliceDec.ElemSize == 1 {
 				if needsOmitempty {
@@ -211,7 +211,7 @@ func emitStructBody(b *blueprintBuilder, fixups *[]keyFixup, dec *StructCodec, b
 			}
 
 		case KindMap:
-			mapDec := fi.Codec.(*MapCodec)
+			mapDec := fi.resolveCodec().(*MapCodec)
 			if needsOmitempty {
 				// Map omitempty needs Go-side len check (C only checks nil).
 				// Emit as fallback so Go handles omitempty + full map encoding.
@@ -346,7 +346,7 @@ func emitDerefBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) {
 		})
 
 	case KindStruct:
-		subDec := elemTI.Codec.(*StructCodec)
+		subDec := elemTI.resolveCodec().(*StructCodec)
 		// Cycle detection: if this struct type is already being compiled
 		// along the current call chain, emit a fallback to avoid infinite
 		// recursion. The Go encoder will handle the recursive type at runtime.
@@ -374,11 +374,11 @@ func emitDerefBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) {
 		delete(b.visiting, subDec.Typ)
 
 	case KindSlice:
-		sliceDec := elemTI.Codec.(*SliceCodec)
+		sliceDec := elemTI.resolveCodec().(*SliceCodec)
 		emitSliceInner(b, fixups, 0, sliceDec)
 
 	case KindMap:
-		mapDec := elemTI.Codec.(*MapCodec)
+		mapDec := elemTI.resolveCodec().(*MapCodec)
 		emitMapInner(b, fixups, 0, elemTI, mapDec)
 
 	case KindAny:
@@ -389,7 +389,7 @@ func emitDerefBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) {
 
 	case KindPointer:
 		// Pointer to pointer — recurse
-		innerDec := elemTI.Codec.(*PointerCodec)
+		innerDec := elemTI.resolveCodec().(*PointerCodec)
 		derefIdx := b.emit(VjOpStep{
 			OpType:   opPtrDeref,
 			FieldOff: 0,
@@ -482,7 +482,7 @@ func emitElementBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) 
 		})
 
 	case KindStruct:
-		subDec := elemTI.Codec.(*StructCodec)
+		subDec := elemTI.resolveCodec().(*StructCodec)
 		// Cycle detection (same as emitDerefBody).
 		if b.visiting[subDec.Typ] {
 			idx := b.emit(VjOpStep{OpType: opFallback})
@@ -503,7 +503,7 @@ func emitElementBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) 
 		delete(b.visiting, subDec.Typ)
 
 	case KindPointer:
-		pDec := elemTI.Codec.(*PointerCodec)
+		pDec := elemTI.resolveCodec().(*PointerCodec)
 		derefIdx := b.emit(VjOpStep{
 			OpType:   opPtrDeref,
 			FieldOff: 0,
@@ -515,11 +515,11 @@ func emitElementBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) 
 		b.ops[derefIdx].OperandA = int32(b.pc() - derefIdx - 1)
 
 	case KindSlice:
-		sliceDec := elemTI.Codec.(*SliceCodec)
+		sliceDec := elemTI.resolveCodec().(*SliceCodec)
 		emitSliceInner(b, fixups, 0, sliceDec)
 
 	case KindMap:
-		mapDec := elemTI.Codec.(*MapCodec)
+		mapDec := elemTI.resolveCodec().(*MapCodec)
 		emitMapInner(b, fixups, 0, elemTI, mapDec)
 
 	case KindAny:

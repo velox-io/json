@@ -10,7 +10,7 @@ import (
 // Only []byte (elem = uint8, size = 1) is supported — base64-decode the string.
 // All other slice types return an error.
 func (sc *Parser) scanStringToSlice(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
-	sDec := ti.Codec.(*SliceCodec)
+	sDec := ti.resolveCodec().(*SliceCodec)
 	if sDec.ElemTI.Kind != KindUint8 || sDec.ElemSize != 1 {
 		return idx, newUnmarshalTypeError("string", ti.Ext.Type, idx)
 	}

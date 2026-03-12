@@ -329,16 +329,32 @@ func buildStructEncodeSteps(dec *StructCodec) {
 			}
 		case hasOmitEmpty:
 			isZeroFn := fi.Ext.IsZeroFn
-			steps[i] = func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error) {
-				ptr := unsafe.Add(base, offset)
-				if isZeroFn(ptr) {
-					return first, nil
+			if encodeFn != nil {
+				steps[i] = func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error) {
+					ptr := unsafe.Add(base, offset)
+					if isZeroFn(ptr) {
+						return first, nil
+					}
+					if !first {
+						m.buf = append(m.buf, ',')
+					}
+					m.buf = append(m.buf, keyBytes...)
+					return false, encodeFn(m, ptr)
 				}
-				if !first {
-					m.buf = append(m.buf, ',')
+			} else {
+				// EncodeFn nil due to cycle — resolve at runtime via encodeValue.
+				fiRef := fi
+				steps[i] = func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error) {
+					ptr := unsafe.Add(base, offset)
+					if isZeroFn(ptr) {
+						return first, nil
+					}
+					if !first {
+						m.buf = append(m.buf, ',')
+					}
+					m.buf = append(m.buf, keyBytes...)
+					return false, m.encodeValue(fiRef, ptr)
 				}
-				m.buf = append(m.buf, keyBytes...)
-				return false, encodeFn(m, ptr)
 			}
 		case isQuoted:
 			tiCopy := *fi
@@ -350,12 +366,24 @@ func buildStructEncodeSteps(dec *StructCodec) {
 				return false, m.encodeValueQuoted(&tiCopy, unsafe.Add(base, offset))
 			}
 		default:
-			steps[i] = func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error) {
-				if !first {
-					m.buf = append(m.buf, ',')
+			if encodeFn != nil {
+				steps[i] = func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error) {
+					if !first {
+						m.buf = append(m.buf, ',')
+					}
+					m.buf = append(m.buf, keyBytes...)
+					return false, encodeFn(m, unsafe.Add(base, offset))
 				}
-				m.buf = append(m.buf, keyBytes...)
-				return false, encodeFn(m, unsafe.Add(base, offset))
+			} else {
+				// EncodeFn nil due to cycle — resolve at runtime via encodeValue.
+				fiRef := fi
+				steps[i] = func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error) {
+					if !first {
+						m.buf = append(m.buf, ',')
+					}
+					m.buf = append(m.buf, keyBytes...)
+					return false, m.encodeValue(fiRef, unsafe.Add(base, offset))
+				}
 			}
 		}
 	}
@@ -574,13 +602,13 @@ func (m *Marshaler) encodeValueSlow(ti *TypeInfo, ptr unsafe.Pointer) error {
 		return nil
 
 	case KindStruct:
-		return m.encodeStruct(ti.Codec.(*StructCodec), ptr)
+		return m.encodeStruct(ti.resolveCodec().(*StructCodec), ptr)
 	case KindSlice:
-		return m.encodeSlice(ti.Codec.(*SliceCodec), ptr)
+		return m.encodeSlice(ti.resolveCodec().(*SliceCodec), ptr)
 	case KindPointer:
-		return m.encodePointer(ti.Codec.(*PointerCodec), ptr)
+		return m.encodePointer(ti.resolveCodec().(*PointerCodec), ptr)
 	case KindMap:
-		return m.encodeMap(ti.Codec.(*MapCodec), ptr)
+		return m.encodeMap(ti.resolveCodec().(*MapCodec), ptr)
 	case KindRawMessage:
 		raw := *(*[]byte)(ptr)
 		if len(raw) == 0 {
@@ -663,7 +691,7 @@ func (m *Marshaler) encodeValueQuoted(ti *TypeInfo, ptr unsafe.Pointer) error {
 	case KindString:
 		m.encodeQuotedString(*(*string)(ptr))
 	case KindPointer:
-		dec := ti.Codec.(*PointerCodec)
+		dec := ti.resolveCodec().(*PointerCodec)
 		elemPtr := *(*unsafe.Pointer)(ptr)
 		if elemPtr == nil {
 			m.buf = append(m.buf, litNull...)
@@ -1006,20 +1034,50 @@ func (m *Marshaler) encodeMapGeneric(dec *MapCodec, ptr unsafe.Pointer) error {
 	return nil
 }
 
+// encodeAny encodes an any-typed value from a pointer to the interface{} eface.
+// Thin wrapper over encodeAnyVal; exists to satisfy the EncodeFn / encodeValueSlow
+// signature that requires unsafe.Pointer.
 func (m *Marshaler) encodeAny(ptr unsafe.Pointer) error {
-	v := *(*any)(ptr)
+	return m.encodeAnyVal(*(*any)(ptr))
+}
+
+// encodeAnyVal encodes an arbitrary Go value stored in an interface{}.
+// It handles all concrete types that can appear as a JSON value:
+//   - Common JSON types inline: string, float64, bool, []any, map[string]any
+//   - Numeric types: int/int8/../int64, uint/uint8/../uint64, float32
+//   - Special types: []byte (base64), json.Number
+//   - Everything else falls back to encodeAnyReflect (reflect-based)
+//
+// NOTE: encodeAnyMap and encodeAnySlice duplicate the 6 hot cases as an
+// inline type switch in their own loop bodies, then call encodeAnyVal only
+// for the cold default branch. This keeps hot-path code in the same
+// function body as the loop, preserving icache locality and avoiding a
+// function call per iteration. Benchmarks show ~4% regression on
+// map[string]any workloads without this duplication. See encodeAnyMap.
+func (m *Marshaler) encodeAnyVal(v any) error {
 	if v == nil {
 		m.buf = append(m.buf, litNull...)
 		return nil
 	}
 
 	switch val := v.(type) {
+	case string:
+		m.encodeString(val)
+	case float64:
+		if math.IsNaN(val) || math.IsInf(val, 0) {
+			return &UnsupportedValueError{Str: strconv.FormatFloat(val, 'f', -1, 64)}
+		}
+		m.buf = strconv.AppendFloat(m.buf, val, 'f', -1, 64)
 	case bool:
 		if val {
 			m.buf = append(m.buf, litTrue...)
 		} else {
 			m.buf = append(m.buf, litFalse...)
 		}
+	case []any:
+		return m.encodeAnySlice(val)
+	case map[string]any:
+		return m.encodeAnyMap(val)
 	case int:
 		_ = m.appendInt64(int64(val))
 	case int8:
@@ -1046,13 +1104,6 @@ func (m *Marshaler) encodeAny(ptr unsafe.Pointer) error {
 			return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
 		}
 		m.buf = strconv.AppendFloat(m.buf, f, 'f', -1, 32)
-	case float64:
-		if math.IsNaN(val) || math.IsInf(val, 0) {
-			return &UnsupportedValueError{Str: fmt.Sprintf("%v", val)}
-		}
-		m.buf = strconv.AppendFloat(m.buf, val, 'f', -1, 64)
-	case string:
-		m.encodeString(val)
 	case []byte:
 		if val == nil {
 			m.buf = append(m.buf, litNull...)
@@ -1064,10 +1115,6 @@ func (m *Marshaler) encodeAny(ptr unsafe.Pointer) error {
 			base64.StdEncoding.Encode(m.buf[start:], val)
 			m.buf = append(m.buf, '"')
 		}
-	case []any:
-		return m.encodeAnySlice(val)
-	case map[string]any:
-		return m.encodeAnyMap(val)
 	case json.Number:
 		s := string(val)
 		if s == "" {
@@ -1081,6 +1128,10 @@ func (m *Marshaler) encodeAny(ptr unsafe.Pointer) error {
 	return nil
 }
 
+// encodeAnySlice encodes a []any as a JSON array.
+// Hot value types are handled inline to avoid per-element function call
+// overhead; cold types fall through to encodeAnyVal. See encodeAnyVal for
+// rationale.
 func (m *Marshaler) encodeAnySlice(arr []any) error {
 	if arr == nil {
 		m.buf = append(m.buf, litNull...)
@@ -1105,9 +1156,35 @@ func (m *Marshaler) encodeAnySlice(arr []any) error {
 			m.appendNewlineIndent()
 		}
 
-		vv := v
-		if err := m.encodeAny(unsafe.Pointer(&vv)); err != nil {
-			return err
+		// Inline fast-path for the most common JSON value types.
+		switch val := v.(type) {
+		case string:
+			m.encodeString(val)
+		case float64:
+			if math.IsNaN(val) || math.IsInf(val, 0) {
+				return &UnsupportedValueError{Str: strconv.FormatFloat(val, 'f', -1, 64)}
+			}
+			m.buf = strconv.AppendFloat(m.buf, val, 'f', -1, 64)
+		case bool:
+			if val {
+				m.buf = append(m.buf, litTrue...)
+			} else {
+				m.buf = append(m.buf, litFalse...)
+			}
+		case nil:
+			m.buf = append(m.buf, litNull...)
+		case []any:
+			if err := m.encodeAnySlice(val); err != nil {
+				return err
+			}
+		case map[string]any:
+			if err := m.encodeAnyMap(val); err != nil {
+				return err
+			}
+		default:
+			if err := m.encodeAnyVal(v); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1120,6 +1197,12 @@ func (m *Marshaler) encodeAnySlice(arr []any) error {
 	return nil
 }
 
+// encodeAnyMap encodes a map[string]any as a JSON object.
+// Hot value types (string, float64, bool, nil, []any, map[string]any) are
+// dispatched inline within the loop body to keep the tight iteration code
+// in a single function -- this preserves icache locality and avoids a
+// function call per map entry. Only cold/rare types fall through to
+// encodeAnyVal.
 func (m *Marshaler) encodeAnyMap(mp map[string]any) error {
 	if mp == nil {
 		m.buf = append(m.buf, litNull...)
@@ -1155,7 +1238,7 @@ func (m *Marshaler) encodeAnyMap(mp map[string]any) error {
 		}
 
 		// Inline fast-path for the most common JSON value types.
-		// Avoids the encodeAny dispatch + unsafe.Pointer indirection.
+		// Avoids function call overhead for hot cases (string, float64, etc.).
 		switch val := v.(type) {
 		case string:
 			m.encodeString(val)
@@ -1181,8 +1264,7 @@ func (m *Marshaler) encodeAnyMap(mp map[string]any) error {
 				return err
 			}
 		default:
-			vv := v
-			if err := m.encodeAny(unsafe.Pointer(&vv)); err != nil {
+			if err := m.encodeAnyVal(v); err != nil {
 				return err
 			}
 		}

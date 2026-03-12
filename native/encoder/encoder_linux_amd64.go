@@ -2,21 +2,31 @@
 
 package encoder
 
-import "unsafe"
+import (
+	"unsafe"
 
-// Available reports whether the native C encoder is linked on this platform.
-const Available = true
+	"golang.org/x/sys/cpu"
+)
 
-// VMExec calls the C engine entry point vj_vm_exec (native VM).
-//
-// ctx must point to a VjExecCtx struct with all fields initialized.
-func VMExec(ctx unsafe.Pointer) {
-	vjVMExec(ctx)
-}
-
-// vjVMExec is the assembly trampoline to C vj_vm_exec.
-// Defined in trampoline_linux_amd64.s.
-//
 //go:noescape
 //go:nosplit
-func vjVMExec(ctx unsafe.Pointer)
+func vjVMExecSSE42(ctx unsafe.Pointer)
+
+//go:noescape
+//go:nosplit
+func vjVMExecAVX2(ctx unsafe.Pointer)
+
+//go:noescape
+//go:nosplit
+func vjVMExecAVX512(ctx unsafe.Pointer)
+
+func init() {
+	if cpu.X86.HasAVX512BW {
+		vmExec = vjVMExecAVX512
+		//} else if cpu.X86.HasAVX2 {
+		//}   vmExec = vjVMExecAVX2
+	} else {
+		vmExec = vjVMExecSSE42
+	}
+	Available = true
+}
