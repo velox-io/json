@@ -28,14 +28,12 @@ func skipWS(src []byte, idx int) int {
 // skipWSLong skips whitespace bytes starting at idx, optimized for runs
 // that are typically 8+ bytes (newline + indentation).
 //
-// Used at call sites where whitespace is typically long:
-// after '{' / '[' (93%+ are 8+ bytes) and after ',' (96%+ are 8+ bytes)
-// in pretty-printed JSON.
+// Used where whitespace is usually long in pretty-printed JSON:
+// after '{' / '[' and after ','.
 //
-// Strategy: skip the leading newline byte, then SWAR scan 8 bytes at a time
-// checking that all bytes are spaces (0x20). This covers the dominant case
-// of "\n    " indentation patterns. Falls back to byte-at-a-time for other
-// whitespace characters and for the tail.
+// Strategy: skip a leading newline/CR if present, then SWAR scan 8 bytes at a time
+// checking for all-spaces (0x20). Falls back to byte-at-a-time for other
+// whitespace characters and the tail.
 func skipWSLong(src []byte, idx int) int {
 	n := len(src)
 	// Quick bail: no whitespace at all (compact JSON fast path)
@@ -43,7 +41,7 @@ func skipWSLong(src []byte, idx int) int {
 		return idx
 	}
 	// Skip leading newline/CR if present (the typical "\n   ..." pattern)
-	if src[idx] <= '\r' { // \t=0x09, \n=0x0A, \r=0x0D are all < ' '=0x20
+	if src[idx] <= '\r' { // Handle leading control whitespace (\t, \n, \r), including CRLF.
 		idx++
 		if idx >= n || wsLUT[src[idx]] == 0 {
 			return idx
@@ -95,19 +93,14 @@ func parseInt64(src []byte, start, end int) int64 {
 }
 
 // parseEightDigitsSWAR converts exactly 8 ASCII digit bytes into a uint32
-// using SWAR (SIMD Within A Register) parallel reduction.
-// Caller must ensure src[i:i+8] are all ASCII digits and i+8 <= len(src).
-// Requires little-endian byte order (always true on amd64/arm64).
+// using SWAR reduction.
+// Caller must ensure src[i:i+8] are ASCII digits and i+8 <= len(src).
+// Requires little-endian byte order (true on amd64/arm64).
 //
-// Algorithm from simdjson (scalar fallback for parse_eight_digits_unrolled):
-//
-//	Step 1: mask off high nibbles → each byte is 0-9
-//	Step 2: multiply by 2561 (=256*10+1) merges adjacent digit pairs
-//	         into 2-digit values in the high byte of each 16-bit lane, shift right 8
-//	Step 3: multiply by 6553601 (=65536*100+1) merges adjacent 2-digit pairs
-//	         into 4-digit values in the high 16 bits of each 32-bit lane, shift right 16
-//	Step 4: multiply by 42949672960001 (=2^32*10000+1) merges the two 4-digit halves
-//	         into the final 8-digit value in the upper 32 bits, shift right 32
+// Based on simdjson's parse_eight_digits_unrolled:
+//   - *2561 (=256*10+1) merges adjacent digits into 2-digit values
+//   - *6553601 (=65536*100+1) merges 2-digit pairs into 4-digit values
+//   - *42949672960001 (=2^32*10000+1) merges the two 4-digit halves
 func parseEightDigitsSWAR(src []byte, i int) uint32 {
 	val := *(*uint64)(unsafe.Pointer(&src[i]))
 	val = (val & 0x0F0F0F0F0F0F0F0F) * 2561 >> 8

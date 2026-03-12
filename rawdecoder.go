@@ -155,7 +155,8 @@ func getDecoderSlow(t reflect.Type, wait bool) *TypeInfo {
 }
 
 // CollectStructFields collects fields from a struct type, promoting
-// embedded struct fields. Outer fields take precedence.
+// anonymous embedded struct fields. Direct (outer) fields take precedence
+// over embedded fields with the same JSON name.
 func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 	var fields []TypeInfo
 	seen := make(map[string]bool)

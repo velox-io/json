@@ -1,0 +1,92 @@
+name: Performance Regression Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: '1.24'
+
+jobs:
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Run benchmarks
+      run: |
+        cd benchmark && go test -bench=".*Velox" -benchmem -count=5 . > bench-current.txt
+
+    - name: Restore baseline
+      uses: actions/cache/restore@v4
+      with:
+        path: benchmark/bench-baseline.txt
+        key: benchmark-baseline
+
+    - name: Compare with baseline
+      id: compare
+      run: |
+        if [ -f "benchmark/bench-baseline.txt" ]; then
+          echo "Comparing with baseline..."
+          go install golang.org/x/perf/cmd/benchstat@latest
+          benchstat benchmark/bench-baseline.txt benchmark/bench-current.txt > benchmark/comparison.txt || true
+
+          echo "=== Performance Comparison ===" >> $GITHUB_STEP_SUMMARY
+          cat benchmark/comparison.txt >> $GITHUB_STEP_SUMMARY
+
+          # Detect significant regressions (>10% slower)
+          REGRESSION_DETECTED=0
+          while IFS= read -r line; do
+            if echo "$line" | grep -qE '\+[0-9]+\.[0-9]+%'; then
+              percent=$(echo "$line" | grep -oE '\+[0-9]+\.[0-9]+%' | tr -d '+%')
+              if [ -n "$percent" ] && [ $(echo "$percent > 10" | bc -l) -eq 1 ]; then
+                echo "::warning::Significant regression detected: $line"
+                REGRESSION_DETECTED=1
+              fi
+            fi
+          done < benchmark/comparison.txt
+
+          if [ $REGRESSION_DETECTED -eq 1 ]; then
+            echo "regression_detected=true" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "No baseline found. This run will become the baseline."
+        fi
+
+    - name: Save baseline (on main branch)
+      if: github.ref == 'refs/heads/main'
+      run: |
+        cp benchmark/bench-current.txt benchmark/bench-baseline.txt
+
+    - name: Cache baseline
+      if: github.ref == 'refs/heads/main'
+      uses: actions/cache/save@v4
+      with:
+        path: benchmark/bench-baseline.txt
+        key: benchmark-baseline
+
+    - name: Fail on significant regression
+      if: steps.compare.outputs.regression_detected == 'true'
+      run: |
+        echo "::error::Performance regression detected (>10% slower). Please review the benchmark comparison above."
+        exit 1
+
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-results
+        path: benchmark/*.txt
+        retention-days: 30

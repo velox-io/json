@@ -19,8 +19,23 @@ bench:
 	cd benchmark && go test -bench=. -benchmem .
 	go test -bench=. -benchmem .
 
+# Run benchmarks (count=5) and save baseline (root + ./benchmark)
+bench-baseline:
+	@mkdir -p .benchdata
+	go test -bench=. -benchmem -count=5 ./... > .benchdata/baseline.txt 2>/dev/null || true
+	cd benchmark && go test -bench=. -benchmem -count=5 . >> ../.benchdata/baseline.txt 2>/dev/null || true
+	@echo "Baseline saved to .benchdata/baseline.txt"
+
+# Check for regressions against baseline (default threshold: 10%)
+bench-check:
+	@./scripts/benchcheck.sh
+
+# Check with custom threshold: make bench-check-threshold THRESHOLD=5
+bench-check-threshold:
+	@./scripts/benchcheck.sh .benchdata/baseline.txt $(or $(THRESHOLD),10)
+
 clean:
 	go clean
 	rm -f coverage.out coverage.html cpu.out mem.out
 
-.PHONY: lint lint-ci fmt test test-coverage bench clean
+.PHONY: lint lint-ci fmt test test-coverage bench bench-baseline bench-check bench-check-threshold clean

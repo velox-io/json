@@ -59,9 +59,9 @@ linters-settings:
 
   gosec:
     excludes:
-      - G104 # Audit errors not checked
-      - G304 # File path provided as taint input
-      - G115 # Integer overflow conversion
+      - G104 # Allow intentionally ignored errors (reviewed)
+      - G304 # Paths come from controlled testdata fixtures
+      - G115 # Allow intentional integer conversions flagged as overflow risk
 
 issues:
   exclude-rules:

@@ -44,12 +44,10 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 }
 
 // --- String Scanning ---
+// Hot-path string scanners inline findQuoteOrBackslash because the compiler won't inline it (cost 143 > budget 80).
 
 // scanStringValue is an optimized string scanner that finds the closing quote
 // in a single pass and performs in-place unescaping without intermediate allocations.
-//
-// findQuoteOrBackslash is manually inlined because the Go compiler
-// does not inline it (cost 143 > budget 80).
 func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
 	start := idx + 1
 	n := len(src)
@@ -76,7 +74,7 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 			continue
 		}
 
-		// Found something - determine which came first
+		// Found something - locate the first marked byte
 		combined := mq | mb | mc
 		off := firstMarkedByteIndex(combined)
 		foundPos := pos + off
@@ -144,9 +142,6 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 // scanStringBytes scans a JSON string starting at idx (pointing to the opening '"').
 // Returns (newIdx, rawBytes, error). rawBytes is the decoded string content.
 // Fast path (no escapes): zero-copy slice into src.
-//
-// findQuoteOrBackslash is manually inlined because the Go compiler
-// does not inline it (cost 143 > budget 80).
 func (sc *Parser) scanStringBytes(src []byte, idx int) (int, []byte, error) {
 	start := idx + 1
 	n := len(src)
@@ -192,9 +187,6 @@ func (sc *Parser) scanStringBytes(src []byte, idx int) (int, []byte, error) {
 
 // scanStringAny scans a JSON string and returns it as a Go string.
 // Fast path: zero-copy via unsafe.String. Slow path: allocate + unescape.
-//
-// findQuoteOrBackslash is manually inlined because the Go compiler
-// does not inline it (cost 143 > budget 80).
 func (sc *Parser) scanStringAny(src []byte, idx int) (int, string, error) {
 	start := idx + 1
 	n := len(src)
@@ -1041,9 +1033,6 @@ func skipValue(src []byte, idx int) (int, error) {
 }
 
 // skipString skips a JSON string starting at idx (the opening '"').
-//
-// findQuoteOrBackslash is manually inlined because the Go compiler
-// does not inline it (cost 143 > budget 80).
 func skipString(src []byte, idx int) (int, error) {
 	i := idx + 1
 	n := len(src)

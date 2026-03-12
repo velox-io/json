@@ -25,12 +25,13 @@ func simpleMixer(s string, seed uint64) uint64 {
 	return h
 }
 
-// mulaccMixer uses a multiply-accumulate chain over 5 character positions:
+// mulaccMixer uses a multiply-accumulate chain over 5 positions:
 // first, last, middle, second, and penultimate bytes, seeded with length.
-// The chained multiply makes each position's contribution dependent on all
-// previous ones, providing much stronger distribution than XOR-based mixers.
-// Still O(1) constant time, works well for 30-100+ fields including sets
-// with shared prefixes (e.g. "profile_*").
+// These positions capture prefix/suffix and interior to reduce collisions
+// for names with shared prefixes/suffixes (e.g. "profile_*").
+// The chained multiply makes each position's contribution dependent on prior ones,
+// providing stronger distribution than XOR-based mixers.
+// Still O(1) constant time, works well for 30-100+ fields.
 func mulaccMixer(s string, seed uint64) uint64 {
 	n := uint64(len(s))
 	if n == 0 {
@@ -68,7 +69,7 @@ func fnv1aMixer(s string, seed uint64) uint64 {
 // --- ASCII Case Conversion ---
 
 // toLowerASCII returns a lowercased version of s for ASCII letters.
-// If s contains no uppercase ASCII, returns s directly (zero allocation).
+// If s contains no uppercase ASCII, returns s directly (common case, zero alloc).
 // Non-ASCII bytes are left unchanged.
 func toLowerASCII(s string) string {
 	// Fast check: any uppercase?
@@ -152,9 +153,9 @@ const maxSeedAttempts = 1 << 16 // 64K seeds, each tested against all shifts
 // tryBuildPerfectHash attempts to find (seed, shift) such that mixer(name, seed) >> shift
 // maps each field's lowercased name to a unique slot in a power-of-2 table.
 //
-// Strategy: for each seed, compute all hashes once, then sweep all useful shift
-// values to find a zero-collision mapping. This is much faster than calling
-// findBestShift as a separate function with its own allocations.
+// Strategy: for each seed, compute all hashes once, then sweep shifts to find a
+// zero-collision mapping. The search is bounded by maxSeedAttempts; callers
+// fall back to a map when no perfect hash is found.
 func tryBuildPerfectHash(dec *ReflectStructDecoder, mixer hashMixer) bool {
 	n := len(dec.Fields)
 	tableSize := nextPowerOf2(n * 2) // load factor ~50%
@@ -282,11 +283,7 @@ const (
 )
 
 // hasUpperASCII reports whether any byte in key is an uppercase ASCII letter (A-Z).
-// Uses SWAR to check 8 bytes at a time.
-//
-// Technique: for a byte b in [0x41, 0x5A], adding (0x80-0x5B)=0x25 will NOT
-// set the high bit, but adding (0x80-0x41)=0x3F WILL set it. XOR detects this
-// difference.
+// Uses SWAR to check 8 bytes at a time with a branchless range test.
 func hasUpperASCII(key []byte) bool {
 	const (
 		addLo = (0x80 - 0x5B) * swarLo64 // 0x2525252525252525

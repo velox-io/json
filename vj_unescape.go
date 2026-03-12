@@ -118,9 +118,12 @@ func unescapeSequence(data []byte, n int, i int, dst []byte, pos int) (int, int,
 //
 // Buffer strategy:
 //   - If arena has >= scratchBufSize free: decode directly into arena (zero copy)
-//   - Otherwise: decode into Parser's 2KB scratch buffer
+//   - Otherwise: decode into Parser's scratch buffer
 //   - On overflow: double the buffer and continue (amortized O(n))
-//   - On completion: small results (<= 1KB) go to arena, large results get exact heap alloc
+//   - On completion: small results (<= arenaInlineMax) go to arena, large results get exact heap alloc
+//
+// scratchBufSize bounds reusable temp storage; arenaInlineMax keeps large strings
+// out of the arena to reduce retained memory.
 func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, []byte, error) {
 	n := len(src)
 

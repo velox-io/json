@@ -21,6 +21,10 @@ mem.out
 coverage.out
 coverage.html
 
+# Benchmark data (local only)
+.benchdata/
+.benchmarks/
+
 # OS
 .DS_Store
 Thumbs.db

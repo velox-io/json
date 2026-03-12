@@ -1,6 +1,7 @@
 package vjson
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,9 +46,25 @@ func TestJSONTestSuiteAccept(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var v any
-			if err := Unmarshal(data, &v); err != nil {
+
+			// Parse with stdlib first to get expected result
+			var expected any
+			if err := json.Unmarshal(data, &expected); err != nil {
+				t.Fatalf("stdlib failed to parse: %v", err)
+			}
+
+			// Parse with vjson
+			var got any
+			if err := Unmarshal(data, &got); err != nil {
 				t.Errorf("must accept but got error: %v", err)
+				return
+			}
+
+			// Compare results
+			expectedJSON, _ := json.Marshal(expected)
+			gotJSON, _ := json.Marshal(got)
+			if string(expectedJSON) != string(gotJSON) {
+				t.Errorf("result mismatch:\nexpected: %s\ngot:      %s", expectedJSON, gotJSON)
 			}
 		})
 	}

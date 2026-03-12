@@ -9,8 +9,8 @@ const (
 	hi64 = uint64(0x8080808080808080)
 )
 
-// hasZeroByte returns non-zero (with the high bit of zero bytes set)
-// if any byte in x is 0.
+// hasZeroByte returns a mask with the high bit set for each zero byte.
+// Returns 0 if no byte in x is zero.
 func hasZeroByte(x uint64) uint64 {
 	return (x - lo64) & ^x & hi64
 }
@@ -20,9 +20,9 @@ func hasZeroByte(x uint64) uint64 {
 // If end of buffer reached, returns (len(src), 0).
 //
 // NOTE: The Go compiler does not inline this function (cost 185 > budget 80),
-// so skipContainer manually inlines the SWAR logic for performance.
+// so skipContainer inlines the SWAR loop in its hot path.
 //
-//nolint:unused
+//nolint:unused // kept for reference; not used in hot paths
 func findStructuralChar(src []byte, idx int) (int, byte) {
 	n := len(src)
 
@@ -75,8 +75,7 @@ func findQuoteOrBackslash(src []byte, idx int) (int, byte) {
 		mb := hasZeroByte(w ^ (lo64 * 0x5C))
 
 		// Check for control chars (byte < 0x20):
-		// If byte < 0x20, then (byte - 0x20) wraps and sets high bit,
-		// while original high bit was 0, so ~byte has high bit set.
+		// bit trick: (w-0x20) & ^w & hi64 flags bytes with value < 0x20.
 		mc := (w - lo64*0x20) & ^w & hi64
 
 		combined := mq | mb | mc
