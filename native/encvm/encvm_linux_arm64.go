@@ -4,11 +4,11 @@ package encvm
 
 import "unsafe"
 
-// ---- Default mode ----
+// ---- Full mode ----
 
 //go:noescape
 //go:nosplit
-func vjVMExecDefaultNeon(ctx unsafe.Pointer)
+func vjVMExecFullNeon(ctx unsafe.Pointer)
 
 // ---- Fast mode ----
 
@@ -23,7 +23,7 @@ func vjVMExecFastNeon(ctx unsafe.Pointer)
 func vjVMExecCompactNeon(ctx unsafe.Pointer)
 
 func init() {
-	vmExec = vjVMExecDefaultNeon
+	vmExec = vjVMExecFullNeon
 	vmExecFast = vjVMExecFastNeon
 	vmExecCompact = vjVMExecCompactNeon
 	Available = true

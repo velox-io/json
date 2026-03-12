@@ -22,13 +22,16 @@ EXTRA_SOURCES="
   native/encvm/impl/strfn_nonascii.c
   native/encvm/impl/uscale.c
   native/encvm/impl/log.c
+  native/encvm/impl/number.c
 "
 
 TARGET_DIR="native/encvm"
 
 # Build modes.  Each mode compiles SOURCE_FILE with the corresponding MODE_FLAGS.
-MODES="default compact fast"
-MODE_FLAGS_default="-DMODE_DEFAULT"
+if [ -z "$MODES" ];then
+  MODES="full compact fast"
+fi
+MODE_FLAGS_full="-DMODE_FULL"
 MODE_FLAGS_compact="-DMODE_COMPACT"
 MODE_FLAGS_fast="-DMODE_FAST"
 

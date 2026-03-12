@@ -94,6 +94,14 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	// depth=0, exit=0, yield=0.
 	ctx.VMState = vmstateBuildInitial(m.flags)
 
+	// Set key pool base pointer for C VM.
+	kpSnap := loadKeyPoolSnapshot()
+	if kpSnap != nil && len(kpSnap.data) > 0 {
+		ctx.KeyPoolBase = unsafe.Pointer(&kpSnap.data[0])
+	} else {
+		ctx.KeyPoolBase = nil
+	}
+
 	// Select VM mode: three-way dispatch based on indent and escape flags.
 	//
 	// indent + any escape  → VMExec       (default: indent + flags at runtime)
@@ -195,6 +203,12 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 					ctx.IfaceCachePtr = unsafe.Pointer(&snap.entries[0])
 					ctx.IfaceCacheCount = int32(len(snap.entries))
 				}
+				// Reload key pool: the newly compiled Blueprint may have
+				// inserted keys that weren't in the snapshot loaded at VM entry.
+				kpSnap = loadKeyPoolSnapshot()
+				if kpSnap != nil && len(kpSnap.data) > 0 {
+					ctx.KeyPoolBase = unsafe.Pointer(&kpSnap.data[0])
+				}
 				// ctx.VMState already has correct state; PC unchanged for retry
 
 			case yieldFallback:
@@ -204,7 +218,7 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 				activeBP := activeBlueprint(ctx, bp)
 				m.traceRecordBlueprint(activeBP)
 
-				if activeBP.Ops[ctx.PC].OpType == opInterface {
+				if opHdrAt(activeBP.Ops, ctx.PC).OpType == opInterface {
 					// Hot path: OP_INTERFACE yield.
 					if err := m.handleInterfaceYield(ctx, activeBP); err == errVMContinue {
 						continue // batch slice takeover: PC already past SLICE_END
@@ -301,7 +315,7 @@ func (m *Marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 	// Extract the 'first' flag from vmstate.
 	isFirst := vmstateGetFirst(ctx.VMState)
 
-	// Look up fallback info by PC.
+	// Look up fallback info by byte offset PC.
 	fb, ok := bp.Fallbacks[int(ctx.PC)]
 	if !ok {
 		return fmt.Errorf("vjson: native VM yield at PC=%d with no fallback info", ctx.PC)
@@ -313,8 +327,8 @@ func (m *Marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 	// Handle omitempty: skip if zero-valued.
 	if fb.TI.Flags&tiFlagOmitEmpty != 0 && fb.TI.Ext != nil && fb.TI.Ext.IsZeroFn != nil {
 		if fb.TI.Ext.IsZeroFn(fieldPtr) {
-			// Skip: advance PC, preserve first flag as-is in vmstate.
-			ctx.PC++
+			// Skip: advance PC past the 8-byte FALLBACK instruction.
+			ctx.PC += 8
 			// vmstate already has correct first flag; no change needed.
 			return nil
 		}
@@ -344,8 +358,8 @@ func (m *Marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 		}
 	}
 
-	// Advance PC past the fallback instruction.
-	ctx.PC++
+	// Advance PC past the 8-byte fallback instruction.
+	ctx.PC += 8
 
 	// A field was written, so clear first flag in vmstate.
 	ctx.VMState &^= vjStFirstBit
@@ -361,21 +375,22 @@ func (m *Marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 // common JSON value types (string, float64, bool, nil, []any, map[string]any),
 // avoiding the reflect-based encodeMapGeneric path.
 func (m *Marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
-	op := bp.Ops[ctx.PC]
-	opCode := op.OpType
+	hdr := opHdrAt(bp.Ops, ctx.PC)
+	ext := opExtAt(bp.Ops, ctx.PC)
+	opCodeVal := hdr.OpType
 
 	// Extract the 'first' flag from vmstate (set by VM before yielding).
 	isFirst := vmstateGetFirst(ctx.VMState)
 
 	// Find the associated field info to get the MapCodec.
 	// The map instruction's field_off tells us where the map is in the struct.
-	mapPtr := unsafe.Add(ctx.CurBase, uintptr(op.FieldOff))
+	mapPtr := unsafe.Add(ctx.CurBase, uintptr(hdr.FieldOff))
 
 	// Look up the MapCodec from the fallback table or Blueprint.
 	// Maps always have a fallback entry so Go can encode them.
 	fb, ok := bp.Fallbacks[int(ctx.PC)]
 	if !ok {
-		return fmt.Errorf("vjson: native VM map at PC=%d (op=%d) with no fallback info", ctx.PC, opCode)
+		return fmt.Errorf("vjson: native VM map at PC=%d (op=%d) with no fallback info", ctx.PC, opCodeVal)
 	}
 
 	mapDec := fb.TI.resolveCodec().(*MapCodec)
@@ -388,9 +403,8 @@ func (m *Marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 	}
 
 	// Write key from the instruction's key data.
-	if op.KeyLen > 0 {
-		keyBytes := unsafe.Slice((*byte)(op.KeyPtr), op.KeyLen)
-		m.buf = append(m.buf, keyBytes...)
+	if hdr.KeyLen > 0 {
+		m.buf = append(m.buf, keyPoolBytes(hdr.KeyOff, hdr.KeyLen)...)
 		m.vmWriteKeySpace(ctx)
 	}
 
@@ -408,8 +422,9 @@ func (m *Marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 		}
 	}
 
-	// Advance PC past MAP_END: skip MAP_BEGIN + operand_a (distance to MAP_END) + 1 (past MAP_END)
-	ctx.PC += op.OperandA + 1
+	// Advance PC past MAP_END: operand_a is byte distance from MAP_BEGIN to MAP_END,
+	// then add MAP_END size (8 bytes) to move past it.
+	ctx.PC += ext.OperandA + 8
 
 	// A field was written, so clear first flag in vmstate.
 	ctx.VMState &^= vjStFirstBit

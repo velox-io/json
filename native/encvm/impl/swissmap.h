@@ -146,7 +146,7 @@ vj_swiss_map_iterate(uint8_t *buf, const uint8_t *bend,
       if (__builtin_expect(buf + need > bend, 0)) {
         frame->map.map_ptr = m;
         frame->map.remaining = remaining;
-        frame->map.slot_idx = si;
+        frame->map.slot_idx = (uint8_t)si;
         frame->map.dir_idx = 0;
         frame->map.group_idx = 0;
         return (VjSwissMapResult){buf, VJ_SWISS_BUF_FULL};
@@ -180,8 +180,8 @@ vj_swiss_map_iterate(uint8_t *buf, const uint8_t *bend,
             frame->map.map_ptr = m;
             frame->map.remaining = remaining;
             frame->map.dir_idx = di;
-            frame->map.group_idx = gi;
-            frame->map.slot_idx = si;
+            frame->map.group_idx = (uint8_t)gi;
+            frame->map.slot_idx = (uint8_t)si;
             return (VjSwissMapResult){buf, VJ_SWISS_BUF_FULL};
           }
 

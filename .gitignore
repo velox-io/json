@@ -39,3 +39,4 @@ Thumbs.db
 *.bck.yml
 
 __pycache__
+.gocache

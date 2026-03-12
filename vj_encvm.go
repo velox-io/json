@@ -36,7 +36,7 @@ const (
 
 	// Structural control-flow instructions (33-46).
 	opSkipIfZero uint16 = 33 // conditional forward jump (omitempty)
-	opRecurse    uint16 = 35 // intra-Blueprint call: push CALL frame, jump to ops[operand_a]
+	opCall       uint16 = 35 // subroutine call: push CALL frame, jump to ops[operand_a]
 	opPtrDeref   uint16 = 36 // deref pointer, nil→null+jump
 	opPtrEnd     uint16 = 37 // pop ptr-deref frame, restore base
 	opSliceBegin uint16 = 38 // slice loop start
@@ -48,12 +48,13 @@ const (
 	opArrayBegin uint16 = 44 // array loop start (inline data, fixed length)
 	// 45: reserved (formerly opMapStrKV)
 	opMapStrStr uint16 = 46 // map[string]string: C-native Swiss Map iteration
+	opRet       uint16 = 47 // subroutine return: pop CALL frame, restore ops/pc/base
 
 	// Go-only fallback (0x40).
 	opFallback uint16 = 0x40 // custom marshalers, ,string, complex structs
 
-	// Sentinel.
-	opEnd uint16 = 0xFF
+	// Sentinel (not emitted by compiler; used as C dispatch bounds-check target).
+	opHalt uint16 = 0xFF //nolint:unused
 )
 
 // kindToOpcode maps an ElemTypeKind to its VM opcode.
@@ -103,9 +104,11 @@ const (
 	yieldMapHandoff uint32 = 3 // map encoding handoff — Go takes over full map field encoding
 )
 
-// FallbackReason constants — stored in VjOpStep.OperandB for OP_FALLBACK.
+// FallbackReason constants — stored in fbInfo for OP_FALLBACK.
 // Mirrors enum FallbackReason in native/encvm/impl/types.h.
-// Used by debug trace to display why a field was delegated to Go.
+// Used by Go-side debug trace to display why a field was delegated to Go.
+// Note: with variable-length instructions, FALLBACK is 8-byte (no operands);
+// the reason is tracked via Blueprint.Fallbacks[pc].Reason instead.
 const (
 	fbReasonUnknown       int32 = 0 // unspecified / unknown kind
 	fbReasonMarshaler     int32 = 1 // implements json.Marshaler
@@ -121,8 +124,7 @@ const (
 //
 //  Layout:
 //    bits [0..7]   = depth        (unified stack depth)
-//    bits [8..9]   = top_frame    (VJ_FRAME_CALL/LOOP/MAP — topmost frame type)
-//    bits [10..15] = reserved
+//    bits [8..15]  = reserved
 //    bit  [16]     = first        (comma latch: 0 => write ',' before next item)
 //    bits [17..31] = enc_flags    (encoding config: escape, float fmt)
 //    bits [32..39] = exit_code    (VM exit status)
@@ -131,13 +133,11 @@ const (
 // ================================================================
 
 const (
-	vjStDepthMask     = uint64(0x000000FF)
-	vjStTopFrameShift = 8
-	vjStTopFrameMask  = uint64(0x00000300) // bits [8..9]
-	vjStFirstBit      = uint64(1) << 16
-	vjStFlagsShift    = 17
-	vjStExitShift     = 32
-	vjStYieldShift    = 40
+	vjStDepthMask  = uint64(0x000000FF)
+	vjStFirstBit   = uint64(1) << 16
+	vjStFlagsShift = 17
+	vjStExitShift  = 32
+	vjStYieldShift = 40
 )
 
 // vmstateGetExit extracts the VM exit code from vmstate.
@@ -161,12 +161,6 @@ func vmstateGetDepth(st uint64) int32 {
 	return int32(st & vjStDepthMask)
 }
 
-// vmstateGetTopFrame extracts the topmost frame type from vmstate.
-// Only meaningful when vmstateGetDepth(st) > 0.
-func vmstateGetTopFrame(st uint64) int32 {
-	return int32((st & vjStTopFrameMask) >> vjStTopFrameShift)
-}
-
 // vmstateBuildInitial builds the initial vmstate for VM entry.
 // flags contains escape flags (bits 0-2) and vjEncFloatExpAuto (bit 3).
 // The first bit is set. depth=0, exit=0, yield=0.
@@ -174,25 +168,78 @@ func vmstateBuildInitial(flags uint32) uint64 {
 	return vjStFirstBit | (uint64(flags) << vjStFlagsShift)
 }
 
-// VjOpStep mirrors the C OpStep (24 bytes).
-type VjOpStep struct {
-	OpType   uint16
-	KeyLen   uint16
-	FieldOff uint32
-	KeyPtr   unsafe.Pointer // points into Blueprint.KeyPool
-	OperandA int32          // jump offset, elem_size, etc.
-	OperandB int32          // loop body len, reserved
+// VjOpHdr mirrors the C VjOpHdr (8 bytes).
+// This is the common header for all instructions (both short and extended).
+// Keys are stored in the global key pool; KeyOff indexes into it.
+type VjOpHdr struct {
+	OpType   uint16 //  0: opcode | 0x8000 for extended (16-byte) instructions
+	KeyLen   uint8  //  2: pre-encoded key length (max 255)
+	_pad0    uint8  //  3: alignment padding
+	FieldOff uint16 //  4: field offset in struct (max 65535)
+	KeyOff   uint16 //  6: offset into global key pool
 }
 
-var _ [24]byte = [unsafe.Sizeof(VjOpStep{})]byte{}
+var _ [8]byte = [unsafe.Sizeof(VjOpHdr{})]byte{}
 
-// Blueprint holds the compiled instruction stream for a type.
+// VjOpExt holds operands for extended (16-byte) instructions.
+// Immediately follows VjOpHdr in the byte stream.
+type VjOpExt struct {
+	OperandA int32 //  0: jump byte offset, elem_size, etc.
+	OperandB int32 //  4: body byte length, ZeroCheckTag, etc.
+}
+
+var _ [8]byte = [unsafe.Sizeof(VjOpExt{})]byte{}
+
+// opIsLong maps opcodes to their instruction width.
+// Long (16-byte) opcodes have operand_a/operand_b in a VjOpExt extension.
+// Short (8-byte) opcodes use only the VjOpHdr header.
+// Used by Go-side trace/debug code to iterate the ops byte stream.
+var opIsLong [256]bool //nolint:unused
+
+func init() { //nolint:unused
+	for _, op := range []uint16{
+		opSkipIfZero, opCall, opPtrDeref,
+		opSliceBegin, opSliceEnd,
+		opMapBegin, opArrayBegin,
+	} {
+		opIsLong[op] = true
+	}
+}
+
+// opSizeOf returns the instruction size in bytes (8 or 16) for the given opcode.
+// Used in vjdebug build (vj_vm_trace.go); linter may report unused in normal builds.
+func opSizeOf(opType uint16) int32 { //nolint:unused
+	if opIsLong[opType] {
+		return 16
+	}
+	return 8
+}
+
+// opHdrAt returns a pointer to the VjOpHdr at the given byte offset.
+func opHdrAt(ops []byte, pc int32) *VjOpHdr {
+	return (*VjOpHdr)(unsafe.Pointer(&ops[pc]))
+}
+
+// opExtAt returns a pointer to the VjOpExt at the given byte offset + 8.
+// Only valid for long (16-byte) instructions.
+func opExtAt(ops []byte, pc int32) *VjOpExt {
+	return (*VjOpExt)(unsafe.Pointer(&ops[pc+8]))
+}
+
+// opSizeAt returns the size of the instruction at the given byte offset.
+// Used in vjdebug build (vj_vm_trace.go); linter may report unused in normal builds.
+func opSizeAt(ops []byte, pc int32) int32 { //nolint:unused
+	hdr := opHdrAt(ops, pc)
+	return opSizeOf(hdr.OpType)
+}
+
+// Blueprint holds the compiled instruction byte stream for a type.
 // It is immutable after construction and safe for concurrent use.
+// Keys are stored in the global key pool (globalKeyPool), not per-Blueprint.
 type Blueprint struct {
 	Name      string          // type name (debug/trace only)
-	Ops       []VjOpStep      // linear instruction stream, terminated by opEnd
-	KeyPool   []byte          // contiguous storage for all pre-encoded keys
-	Fallbacks map[int]*fbInfo // PC index → fallback field info (only for OP_FALLBACK instructions)
+	Ops       []byte          // linear instruction byte stream, terminated by opRet (8-byte aligned via alignedOps)
+	Fallbacks map[int]*fbInfo // byte offset → fallback field info (only for OP_FALLBACK instructions)
 }
 
 // fbInfo describes a fallback field that requires Go encoding.
@@ -216,37 +263,35 @@ const VJ_MAX_DEPTH = 64 //nolint
 // maxIndentDepth is the combined max nesting for indent template sizing.
 const maxIndentDepth = VJ_MAX_DEPTH
 
-// VjStackFrame mirrors the C VjStackFrame (56 bytes).
+// VjStackFrame mirrors the C VjStackFrame (32 bytes).
 // Unified frame for all stack-using ops: ptr_deref, interface/switch_ops,
 // slice_begin, array_begin, map_str_str.
 //
-// The frame type discriminator lives in vmstate bits [8..9] and only
-// records the topmost frame's type.  Instruction pairing (begin/end)
-// ensures correct pop semantics without per-frame type tags.
+// Instruction pairing (begin/end) ensures correct pop semantics without
+// per-frame type tags.
 //
 // NOTE: 'first' is tracked in VMState bit 16 (set on object entry,
 // test-and-clear when writing a key). Stack frames do not store/restore it.
+//
+// ret_ops/ret_pc are only used by CALL frames and live inside the call
+// union branch.  Go never reads them (only C does on OP_RET).
 type VjStackFrame struct {
-	RetOps      unsafe.Pointer //  0: parent ops array base (CALL only)
-	RetPC       int32          //  8: return PC (CALL only)
-	_reservedFT int32          // 12: reserved (formerly frame_type)
-	RetBase     unsafe.Pointer // 16: parent data base
-	_reserved0  int32          // 24: reserved (legacy first slot)
-	_pad0       int32          // 28: reserved
-	_union      [24]byte       // 32-55: call/loop/map iteration state
+	RetBase unsafe.Pointer //  0: parent data base (all frame types)
+	_union  [20]byte       //  8-27: call/seq/map iteration state
+	State   int32          // 28: bit 0 = iter active; bits 24-31 = trace depth
 }
 
-var _ [56]byte = [unsafe.Sizeof(VjStackFrame{})]byte{}
+var _ [32]byte = [unsafe.Sizeof(VjStackFrame{})]byte{}
 
-// Top-frame type constants matching C VJ_FRAME_* defines.
-// Stored in vmstate bits [8..9], not per-frame.
+// Frame type constants matching C VJ_FRAME_* defines.
+// Used for documentation/debug only; not stored in vmstate.
 const (
-	vjFrameCall = int32(0) // VJ_FRAME_CALL
-	vjFrameLoop = int32(1) // VJ_FRAME_LOOP
-	vjFrameMap  = int32(2) // VJ_FRAME_MAP
+	_ = int32(0) // VJ_FRAME_CALL: subroutine call (recurse / ptr deref / iface switch-ops)
+	_ = int32(1) // VJ_FRAME_ITER: linear iteration (slice / array)
+	_ = int32(2) // VJ_FRAME_ITER_STR_STR_LEAF: map[string]string iteration
 )
 
-// --- LOOP iter frame helpers (read-only from Go side) ---
+// --- seq iter frame helpers (read-only from Go side) ---
 
 func (f *VjStackFrame) iterData() unsafe.Pointer {
 	return *(*unsafe.Pointer)(unsafe.Pointer(&f._union[0]))
@@ -255,10 +300,10 @@ func (f *VjStackFrame) iterCount() int64 {
 	return *(*int64)(unsafe.Pointer(&f._union[8]))
 }
 func (f *VjStackFrame) iterIdx() int64 {
-	return *(*int64)(unsafe.Pointer(&f._union[16]))
+	return int64(*(*int32)(unsafe.Pointer(&f._union[16])))
 }
 
-// VjExecCtx mirrors the C VjExecCtx (1448 bytes).
+// VjExecCtx mirrors the C VjExecCtx (2152 bytes).
 // Layout optimized for cache locality:
 //
 //	Cache line 0 (0-63):  hot VM registers (buf, ops, pc, base, vmstate)
@@ -268,8 +313,8 @@ type VjExecCtx struct {
 	// Cache line 0: hot VM registers
 	BufCur          unsafe.Pointer //   0: current write position
 	BufEnd          uintptr        //   8: one past last writable byte (NOT GC-traced)
-	OpsPtr          unsafe.Pointer //  16: &Blueprint.Ops[0] (current active ops)
-	PC              int32          //  24: current instruction index
+	OpsPtr          unsafe.Pointer //  16: &Blueprint.Ops[0] (current active byte stream)
+	PC              int32          //  24: current byte offset into ops
 	_padPC          int32          //  28: alignment padding
 	CurBase         unsafe.Pointer //  32: current struct/elem base address
 	VMState         uint64         //  40: packed state register (see VMState layout)
@@ -284,19 +329,19 @@ type VjExecCtx struct {
 	IndentPrefixLen uint8          //  75: bytes of prefix before indent
 	_pad1           int32          //  76: alignment padding
 	YieldTypePtr    unsafe.Pointer //  80: interface cache miss: eface.type_ptr
-	_yieldReserved  [2]int32       //  88: reserved (keep C/Go ABI layout stable)
+	KeyPoolBase     unsafe.Pointer //  88: global key pool base pointer
 
 	// Unified stack + debug trace
-	Stack    [VJ_MAX_DEPTH]VjStackFrame //  96: 24 x 56 = 1344 bytes
-	TraceBuf unsafe.Pointer             // 1440: Go-allocated VjTraceBuf
+	Stack    [VJ_MAX_DEPTH]VjStackFrame //  96: 64 x 32 = 2048 bytes
+	TraceBuf unsafe.Pointer             // 2144: Go-allocated VjTraceBuf
 }
 
-var _ [3688]byte = [unsafe.Sizeof(VjExecCtx{})]byte{}
+var _ [2152]byte = [unsafe.Sizeof(VjExecCtx{})]byte{}
 
 // VjIfaceCacheEntry maps a Go *abi.Type to its compiled Blueprint ops (24 bytes).
 type VjIfaceCacheEntry struct {
 	TypePtr unsafe.Pointer // *abi.Type
-	OpsPtr  unsafe.Pointer // &Blueprint.Ops[0], nil if not compilable by C
+	OpsPtr  unsafe.Pointer // &Blueprint.Ops[0] (byte stream), nil if not compilable by C
 	Tag     uint8          // opcode for primitives (= ElemTypeKind); 0 = none
 	_pad    [7]byte
 }
@@ -353,6 +398,102 @@ func init() {
 	// Initialize blueprintRegistry with an empty map.
 	empty := make(map[unsafe.Pointer]*Blueprint)
 	blueprintRegistry.Store(&empty)
+	// Initialize globalKeyPool with an empty snapshot.
+	globalKeyPool.current.Store(&keyPoolSnapshot{
+		idx: make(map[string]keyPoolEntry),
+	})
+}
+
+// ================================================================
+//  Global Key Pool — shared across all Blueprints
+//
+//  All pre-encoded JSON keys ("field_name":) are stored in a single
+//  contiguous byte pool. VjOpHdr.KeyOff indexes into this pool.
+//  Append-only + COW: offsets are stable forever once assigned.
+//  Deduplication: identical key bytes are stored only once.
+// ================================================================
+
+// globalKeyPool is the process-wide shared key name pool.
+var globalKeyPool struct {
+	current atomic.Pointer[keyPoolSnapshot]
+	mu      sync.Mutex // guards writes (append + publish)
+}
+
+// keyPoolSnapshot is an immutable snapshot of the global key pool.
+// Once published, it is never modified — new keys produce a new snapshot.
+type keyPoolSnapshot struct {
+	data []byte                  // contiguous key bytes
+	idx  map[string]keyPoolEntry // dedup index: key_bytes → (offset, len)
+}
+
+// keyPoolEntry records the position of a key in the pool.
+type keyPoolEntry struct {
+	off uint16
+	len uint8
+}
+
+// globalKeyPoolInsert adds key bytes to the global pool (with deduplication).
+// Returns the pool offset and length. Thread-safe via COW + mutex.
+// Panics if the pool would exceed 65535 bytes (virtually impossible with dedup).
+func globalKeyPoolInsert(keyBytes []byte) (off uint16, klen uint8) {
+	if len(keyBytes) == 0 {
+		return 0, 0
+	}
+	if len(keyBytes) > 255 {
+		panic("vjson: key too long for uint8 key_len (>255 bytes)")
+	}
+
+	key := string(keyBytes)
+
+	// Fast path: check existing snapshot (lock-free).
+	snap := globalKeyPool.current.Load()
+	if snap != nil {
+		if entry, ok := snap.idx[key]; ok {
+			return entry.off, entry.len
+		}
+	}
+
+	// Slow path: acquire lock, double-check, append.
+	globalKeyPool.mu.Lock()
+	defer globalKeyPool.mu.Unlock()
+
+	snap = globalKeyPool.current.Load()
+	if entry, ok := snap.idx[key]; ok {
+		return entry.off, entry.len
+	}
+
+	// Validate pool capacity.
+	newOff := len(snap.data)
+	if newOff+len(keyBytes) > 65535 {
+		panic("vjson: global key pool overflow (>65535 bytes)")
+	}
+
+	// COW: copy data + extend.
+	newData := make([]byte, newOff+len(keyBytes))
+	copy(newData, snap.data)
+	copy(newData[newOff:], keyBytes)
+
+	newIdx := make(map[string]keyPoolEntry, len(snap.idx)+1)
+	for k, v := range snap.idx {
+		newIdx[k] = v
+	}
+	entry := keyPoolEntry{off: uint16(newOff), len: uint8(len(keyBytes))}
+	newIdx[key] = entry
+
+	globalKeyPool.current.Store(&keyPoolSnapshot{data: newData, idx: newIdx})
+	return entry.off, entry.len
+}
+
+// loadKeyPoolSnapshot returns the current immutable key pool snapshot.
+func loadKeyPoolSnapshot() *keyPoolSnapshot {
+	return globalKeyPool.current.Load()
+}
+
+// keyPoolBytes returns the key bytes for a given offset and length from the
+// current global key pool snapshot. Used by Go-side yield handlers.
+func keyPoolBytes(off uint16, klen uint8) []byte {
+	snap := globalKeyPool.current.Load()
+	return snap.data[off : uint16(off)+uint16(klen)]
 }
 
 // registerBlueprintOps records the mapping from &bp.Ops[0] → bp so that

@@ -16,19 +16,19 @@ var (
 	hasAVX512 = cpu.X86.HasAVX512BW
 )
 
-// ---- Default mode ----
+// ---- Full mode ----
 
 //go:noescape
 //go:nosplit
-func vjVMExecDefaultSSE42(ctx unsafe.Pointer)
+func vjVMExecFullSSE42(ctx unsafe.Pointer)
 
 //go:noescape
 //go:nosplit
-func vjVMExecDefaultAVX2(ctx unsafe.Pointer)
+func vjVMExecFullAVX2(ctx unsafe.Pointer)
 
 //go:noescape
 //go:nosplit
-func vjVMExecDefaultAVX512(ctx unsafe.Pointer)
+func vjVMExecFullAVX512(ctx unsafe.Pointer)
 
 // ---- Fast mode ----
 
@@ -60,7 +60,7 @@ func vjVMExecCompactAVX512(ctx unsafe.Pointer)
 
 // applySSE42 sets the VM function pointers to SSE4.2 implementations.
 func applySSE42() {
-	vmExec = vjVMExecDefaultSSE42
+	vmExec = vjVMExecFullSSE42
 	vmExecFast = vjVMExecFastSSE42
 	vmExecCompact = vjVMExecCompactSSE42
 	currentISA = ISASSE42
@@ -68,7 +68,7 @@ func applySSE42() {
 
 // applyAVX2 sets the VM function pointers to AVX2 implementations.
 func applyAVX2() {
-	vmExec = vjVMExecDefaultAVX2
+	vmExec = vjVMExecFullAVX2
 	vmExecFast = vjVMExecFastAVX2
 	vmExecCompact = vjVMExecCompactAVX2
 	currentISA = ISAAVX2
@@ -76,7 +76,7 @@ func applyAVX2() {
 
 // applyAVX512 sets the VM function pointers to AVX-512 implementations.
 func applyAVX512() {
-	vmExec = vjVMExecDefaultAVX512
+	vmExec = vjVMExecFullAVX512
 	vmExecFast = vjVMExecFastAVX512
 	vmExecCompact = vjVMExecCompactAVX512
 	currentISA = ISAAVX512

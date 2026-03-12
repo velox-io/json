@@ -5,26 +5,26 @@
 // On Linux (ELF), C symbols have no underscore prefix — the Go linker
 // handles this automatically.
 //
-// Each ISA has three mode variants: default, compact, and fast.
+// Each ISA has three mode variants: full, compact, and fast.
 
 #include "textflag.h"
 
-// ---- Default mode ----
+// ---- Full mode ----
 
-// func vjVMExecDefaultSSE42(ctx unsafe.Pointer)
-TEXT ·vjVMExecDefaultSSE42(SB), NOSPLIT, $0-8
+// func vjVMExecFullSSE42(ctx unsafe.Pointer)
+TEXT ·vjVMExecFullSSE42(SB), NOSPLIT, $0-8
 	MOVQ ctx+0(FP), DI
-	JMP  vj_vm_exec_default_sse42(SB)
+	JMP  vj_vm_exec_full_sse42(SB)
 
-// func vjVMExecDefaultAVX2(ctx unsafe.Pointer)
-TEXT ·vjVMExecDefaultAVX2(SB), NOSPLIT, $0-8
+// func vjVMExecFullAVX2(ctx unsafe.Pointer)
+TEXT ·vjVMExecFullAVX2(SB), NOSPLIT, $0-8
 	MOVQ ctx+0(FP), DI
-	JMP  vj_vm_exec_default_avx2(SB)
+	JMP  vj_vm_exec_full_avx2(SB)
 
-// func vjVMExecDefaultAVX512(ctx unsafe.Pointer)
-TEXT ·vjVMExecDefaultAVX512(SB), NOSPLIT, $0-8
+// func vjVMExecFullAVX512(ctx unsafe.Pointer)
+TEXT ·vjVMExecFullAVX512(SB), NOSPLIT, $0-8
 	MOVQ ctx+0(FP), DI
-	JMP  vj_vm_exec_default_avx512(SB)
+	JMP  vj_vm_exec_full_avx512(SB)
 
 // ---- Fast mode ----
 

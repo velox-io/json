@@ -233,7 +233,7 @@ var opcodeName = map[uint16]string{
 	opNumber:     "NUMBER",
 	opByteSlice:  "BYTE_SLICE",
 	opSkipIfZero: "SKIP_IF_ZERO",
-	opRecurse:    "RECURSE",
+	opCall:        "CALL",
 	opPtrDeref:   "PTR_DEREF",
 	opPtrEnd:     "PTR_END",
 	opSliceBegin: "SLICE_BEGIN",
@@ -244,8 +244,9 @@ var opcodeName = map[uint16]string{
 	opObjClose:   "OBJ_CLOSE",
 	opArrayBegin: "ARRAY_BEGIN",
 	opMapStrStr:  "MAP_STR_STR",
+	opRet:        "RET",
 	opFallback:   "FALLBACK",
-	opEnd:        "END",
+	opHalt:       "HALT",
 }
 
 // dumpBlueprint prints one blueprint's instruction listing to stderr
@@ -265,17 +266,25 @@ func dumpBlueprint(bp *Blueprint) {
 	}
 
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "####[vjson:blueprint] %s (%d ops):\n", name, len(bp.Ops))
+	nOps := 0
+	for pc := int32(0); pc < int32(len(bp.Ops)); pc += opSizeOf(opHdrAt(bp.Ops, pc).OpType) {
+		nOps++
+	}
+	fmt.Fprintf(&buf, "####[vjson:blueprint] %s (%d ops, %d bytes):\n", name, nOps, len(bp.Ops))
 
 	depth := 0
-	for i, op := range bp.Ops {
-		label := opcodeName[op.OpType]
+	for pc := int32(0); pc < int32(len(bp.Ops)); {
+		hdr := opHdrAt(bp.Ops, pc)
+		code := hdr.OpType
+		sz := opSizeOf(code)
+
+		label := opcodeName[code]
 		if label == "" {
-			label = fmt.Sprintf("OP_%d", op.OpType)
+			label = fmt.Sprintf("OP_%d", code)
 		}
 
 		// Closing ops reduce depth before printing.
-		switch op.OpType {
+		switch code {
 		case opObjClose, opSliceEnd, opMapEnd, opPtrEnd:
 			depth--
 			if depth < 0 {
@@ -283,23 +292,29 @@ func dumpBlueprint(bp *Blueprint) {
 			}
 		}
 
-		// Line number left-aligned, then guide lines for depth.
-		fmt.Fprintf(&buf, "%3d: ", i)
+		// Byte offset left-aligned, then guide lines for depth.
+		fmt.Fprintf(&buf, "%4d: ", pc)
 		for j := 0; j < depth; j++ {
 			buf.WriteString(guide)
 		}
-		if op.KeyLen > 0 && op.KeyPtr != nil {
-			key := unsafe.Slice((*byte)(op.KeyPtr), op.KeyLen)
-			fmt.Fprintf(&buf, "%s %s\n", label, key)
+		sizeTag := "S"
+		if opIsLong[hdr.OpType] {
+			sizeTag = "L"
+		}
+		if hdr.KeyLen > 0 {
+			key := keyPoolBytes(hdr.KeyOff, hdr.KeyLen)
+			fmt.Fprintf(&buf, "[%s] %s %s\n", sizeTag, label, key)
 		} else {
-			fmt.Fprintf(&buf, "%s\n", label)
+			fmt.Fprintf(&buf, "[%s] %s\n", sizeTag, label)
 		}
 
 		// Opening ops increase depth after printing.
-		switch op.OpType {
+		switch code {
 		case opObjOpen, opSliceBegin, opMapBegin, opArrayBegin, opPtrDeref:
 			depth++
 		}
+
+		pc += sz
 	}
 
 	os.Stderr.Write(buf.Bytes())

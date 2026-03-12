@@ -82,6 +82,10 @@ static inline char *vj_fmt_hex32(char *end, uint32_t v) {
   return vj_fmt_hex64(end, (uint64_t)v);
 }
 
+/* Prevent LTO from replacing this with a call to libc strlen.
+ * The .syso has no libc — an unresolved strlen would jump past .text
+ * into unmapped memory and SIGSEGV. */
+__attribute__((no_builtin("strlen")))
 static inline int vj_strlen(const char *s) {
   const char *p = s;
   while (*p) p++;

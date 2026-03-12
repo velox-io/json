@@ -155,7 +155,7 @@ VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend,
 
   /* ---- Single binary search with found flag ---- */
   uint8_t tag = 0;
-  const VjOpStep *cached_ops = NULL;
+  const uint8_t *cached_ops = NULL;
   int found = 0;
 
   {

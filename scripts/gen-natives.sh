@@ -260,8 +260,8 @@ if [ -z "$ISAS" ]; then
     exit 1
 fi
 
-# Modes (from sources.sh; default to single "default" mode if not set)
-ALL_MODES="${MODES:-default}"
+# Modes (from sources.sh; default to single "fast" mode if not set)
+ALL_MODES="${MODES:-fast}"
 
 # ============================================================
 #  LTO support
@@ -325,6 +325,29 @@ echo "  Source: $SOURCE_FILE"
 echo "  Output: $OUTPUT_DIR"
 echo ""
 
+# Prevent LTO from replacing hand-written loops with libc calls.
+# The .syso is linked with -nostdlib — any unresolved libc symbol
+# becomes a call past the end of .text, causing SIGSEGV at runtime.
+#
+# Only list functions that LTO's loop idiom recognizer can synthesize:
+#   - strlen/strnlen:  while(*p) p++
+#   - memcmp/bcmp:     byte-by-byte compare loops
+#   - memchr/strchr:   scan-for-byte loops
+#   - bzero:           zero-fill loops (memset(p,0,n) variant)
+#   - printf/fprintf/sprintf/snprintf: va_list formatting patterns
+#
+# Note: memcpy/memset are NOT listed here because the codebase uses
+# __builtin_memcpy/__builtin_memset exclusively.  -fno-builtin-memcpy
+# would prevent the compiler from inlining __builtin_memcpy(buf,"true",4)
+# as a single mov instruction.  The stdlib sources (memory.c) have their
+# own -fno-builtin-memcpy/memset flags to prevent recursive calls.
+NO_BUILTIN_FLAGS="-fno-builtin-strlen -fno-builtin-strnlen"
+#NO_BUILTIN_FLAGS="$NO_BUILTIN_FLAGS -fno-builtin-memcmp -fno-builtin-bcmp"
+#NO_BUILTIN_FLAGS="$NO_BUILTIN_FLAGS -fno-builtin-memchr -fno-builtin-strchr"
+#NO_BUILTIN_FLAGS="$NO_BUILTIN_FLAGS -fno-builtin-bzero"
+NO_BUILTIN_FLAGS="$NO_BUILTIN_FLAGS -fno-builtin-printf -fno-builtin-fprintf"
+NO_BUILTIN_FLAGS="$NO_BUILTIN_FLAGS -fno-builtin-sprintf -fno-builtin-snprintf"
+
 STDLIB_OBJS=""
 EXTRA_OBJS=""
 
@@ -368,7 +391,7 @@ for extra_src in $EXTRA_SOURCES; do
         extra_base=$(basename "$extra_src" .c)
         extra_obj="${OUTPUT_DIR}/${extra_base}_${TARGET_OS}_${TARGET_ARCH}.o"
         echo "  Compiling $(basename "$extra_obj") (extra source,${USE_LTO:+ LTO,} min ISA: $MIN_ISA)"
-        $CC -O3 $LTO_FLAG -fPIC -g0 -fno-stack-protector $ARCH_FLAGS $MIN_ISA_FLAGS \
+        $CC -O3 $LTO_FLAG -fPIC -g0 -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS $MIN_ISA_FLAGS \
             -I"$(dirname "$extra_src")" -I"$REPO_ROOT/native/include" -I"$REPO_ROOT/native" \
             ${EXTRA_CFLAGS:-} \
             -c "$extra_src" -o "$extra_obj"
@@ -402,7 +425,7 @@ for isa in $ISAS; do
 
         # Step 1: Compile to object (with LTO when supported, for cross-TU inlining)
         echo "  Compiling $(basename "$OFILE")"
-        $CC -O3 $LTO_FLAG -fPIC -g0 -fno-stack-protector $ARCH_FLAGS $ISA_FLAGS \
+        $CC -O3 $LTO_FLAG -fPIC -g0 -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS $ISA_FLAGS \
             $COMMON_DEFS $COMMON_INCLUDES \
             -c "$SOURCE_FILE" -o "$OFILE"
 
@@ -417,7 +440,7 @@ for isa in $ISAS; do
             mkdir -p "$OUTPUT_DIR/asm"
             SFILE="$OUTPUT_DIR/asm/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.s"
             echo "  Generating asm: "$SFILE""
-            $CC -S -O3 -g0 -fno-stack-protector $ARCH_FLAGS -fno-asynchronous-unwind-tables $ISA_FLAGS \
+            $CC -S -O3 -g0 -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS -fno-asynchronous-unwind-tables $ISA_FLAGS \
                 $COMMON_DEFS $COMMON_INCLUDES \
                 "$SOURCE_FILE" -o "$SFILE"
 

@@ -32,16 +32,16 @@
 /* ---------- Entry-point symbol name ----------
  * Define VJ_VM_EXEC_FN_NAME before including encvm.h so that the VM
  * function body is emitted directly as the public entry point
- * (e.g. vj_vm_exec_default_sse42), eliminating the wrapper+jmp. */
+ * (e.g. vj_vm_exec_full_sse42), eliminating the wrapper+jmp. */
 
 #if defined(MODE_FAST)
 #define VJ_MODE_TAG fast
 #elif defined(MODE_COMPACT)
 #define VJ_MODE_TAG compact
-#elif defined(MODE_DEFAULT)
-#define VJ_MODE_TAG default
+#elif defined(MODE_FULL)
+#define VJ_MODE_TAG full
 #else
-#define VJ_MODE_TAG default
+#error "MODE is not defined"
 #endif
 
 /* Two-level expansion so VJ_MODE_TAG is expanded before pasting. */

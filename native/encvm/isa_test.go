@@ -24,16 +24,16 @@ func funcPtr(fn func(unsafe.Pointer)) uintptr {
 }
 
 // ---------------------------------------------------------------------------
-// TestSetISA_DefaultIsSSE42 — init should select SSE4.2.
+// TestSetISA_Full_IsSSE42 — init should select SSE4.2.
 // ---------------------------------------------------------------------------
 
-func TestSetISA_DefaultIsSSE42(t *testing.T) {
+func TestSetISA_Full_IsSSE42(t *testing.T) {
 	resetISAStateForTest()
 
 	if got := CurrentISA(); got != ISASSE42 {
 		t.Fatalf("after init, CurrentISA() = %v, want sse42", got)
 	}
-	if funcPtr(vmExec) != funcPtr(vjVMExecDefaultSSE42) {
+	if funcPtr(vmExec) != funcPtr(vjVMExecFullSSE42) {
 		t.Fatal("vmExec does not point to SSE4.2 implementation")
 	}
 }
@@ -124,7 +124,7 @@ func TestSetISA_FunctionPointers(t *testing.T) {
 	resetISAStateForTest()
 
 	// SSE4.2 by default
-	if funcPtr(vmExec) != funcPtr(vjVMExecDefaultSSE42) {
+	if funcPtr(vmExec) != funcPtr(vjVMExecFullSSE42) {
 		t.Error("default: vmExec != SSE42")
 	}
 	if funcPtr(vmExecFast) != funcPtr(vjVMExecFastSSE42) {
@@ -139,7 +139,7 @@ func TestSetISA_FunctionPointers(t *testing.T) {
 		if err := SetISA(ISAAVX2); err != nil {
 			t.Fatalf("SetISA(AVX2): %v", err)
 		}
-		if funcPtr(vmExec) != funcPtr(vjVMExecDefaultAVX2) {
+		if funcPtr(vmExec) != funcPtr(vjVMExecFullAVX2) {
 			t.Error("avx2: vmExec != AVX2")
 		}
 		if funcPtr(vmExecFast) != funcPtr(vjVMExecFastAVX2) {
@@ -155,7 +155,7 @@ func TestSetISA_FunctionPointers(t *testing.T) {
 		if err := SetISA(ISAAVX512); err != nil {
 			t.Fatalf("SetISA(AVX512): %v", err)
 		}
-		if funcPtr(vmExec) != funcPtr(vjVMExecDefaultAVX512) {
+		if funcPtr(vmExec) != funcPtr(vjVMExecFullAVX512) {
 			t.Error("avx512: vmExec != AVX512")
 		}
 		if funcPtr(vmExecFast) != funcPtr(vjVMExecFastAVX512) {

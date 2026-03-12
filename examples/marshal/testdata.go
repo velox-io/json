@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // Custom type implementing the json.Marshaler interface
 type Status struct {
@@ -14,8 +17,9 @@ func (s Status) MarshalJSON() ([]byte, error) {
 
 // Anonymous embedded struct
 type Base struct {
-	ID        int    `json:"id"`
-	CreatedBy string `json:"created_by"`
+	ID        int            `json:"id"`
+	CreatedBy string         `json:"created_by"`
+	Attrs     map[string]any `json:"attrs"`
 }
 
 // Named field struct
@@ -63,7 +67,16 @@ type User struct {
 // NewTestUser creates a new test User instance with predefined data.
 func NewTestUser() User {
 	return User{
-		Base:   Base{ID: 1, CreatedBy: "system"},
+		Base: Base{
+			ID:        1,
+			CreatedBy: "system",
+			Attrs: map[string]any{
+				"env":        "dev",
+				"created_at": time.Date(2026, time.March, 6, 10, 0, 0, 0, time.UTC),
+				"retry":      3,
+				"enabled":    true,
+			},
+		},
 		Name:   "alice",
 		Age:    30,
 		Addr:   Address{City: "Beijing", Street: "Chang'an Ave"},

@@ -25,7 +25,7 @@ enum VjIfaceAction {
 /* Result struct — returned by value (fits in 3-4 registers on arm64/x86_64). */
 typedef struct {
   uint8_t *buf; /* advanced buffer pointer (valid when action=DONE) */
-  const VjOpStep *cached_ops; /* Blueprint ops (valid when action=SWITCH_OPS) */
+  const uint8_t *cached_ops; /* Blueprint ops byte stream (valid when action=SWITCH_OPS) */
   const void *type_ptr;    /* eface.type_ptr (valid when action=CACHE_MISS) */
   const uint8_t *data_ptr; /* eface.data_ptr (valid when action=SWITCH_OPS) */
   int32_t action;          /* VjIfaceAction */
