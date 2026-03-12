@@ -240,12 +240,12 @@ for isa in $ISAS; do
 
         # Step 2: Compile to object
         echo "  Compiling $(basename "$OFILE")"
-        $CC -O3 -fPIC -g0 $ISA_FLAGS -c "$CFILE" -o "$OFILE"
+        $CC -O3 -fPIC -g0 -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset -mno-outline $ISA_FLAGS -c "$CFILE" -o "$OFILE"
         ALL_OBJS="$ALL_OBJS $OFILE"
 
         # Step 3: Generate assembly for reference (strip debug info)
         echo "  Generating $(basename "$SFILE")"
-        $CC -S -O3 -g0 -fno-asynchronous-unwind-tables $ISA_FLAGS "$CFILE" -o "$SFILE"
+        $CC -S -O3 -g0 -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset -mno-outline -fno-asynchronous-unwind-tables $ISA_FLAGS "$CFILE" -o "$SFILE"
 
         # Remove debug directives
         sed -i '/^[[:space:]]*\.file[[:space:]]/d' "$SFILE"

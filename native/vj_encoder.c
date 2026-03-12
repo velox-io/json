@@ -1,4 +1,8 @@
 #include <stdint.h>
+#include <stddef.h>
+#include <string.h>
+#include <math.h>
+#include <stdio.h>
 
 /* ---------- Build configuration validation ---------- */
 #if !defined(OS)
@@ -10,3 +14,6 @@
 #if !defined(ISA_neon) && !defined(ISA_sse42) && !defined(ISA_avx512)
 #error "ISA must be defined (use -DISA_neon, -DISA_sse42, or -DISA_avx512)"
 #endif
+
+/* ---------- Engine implementation (includes VM) ---------- */
+#include "impl/encoder.h"

@@ -702,9 +702,63 @@ func (m *Marshaler) encodeFloat64(ptr unsafe.Pointer) error {
 }
 
 func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
+	// Indent mode: use Go implementation
 	if m.indent != "" {
 		return m.encodeStructIndent(dec, base)
 	}
+
+	// Native C engine fast path: compact mode only, eligible structs only.
+	// The C engine handles the complete struct encoding (including braces),
+	// writing directly into m.buf's unused capacity for zero-copy output.
+	if ops, ok := dec.getNativeOps(); ok {
+		return m.encodeStructNative(ops, base)
+	}
+
+	// Go fallback: structs with omitempty/,string/custom marshalers,
+	// or unsupported field types (floats, slices, maps, pointers, interfaces).
+	return m.encodeStructGo(dec, base)
+}
+
+// encodeStructNative encodes a struct using the native C engine.
+// It writes directly into m.buf's unused capacity and retries with
+// a larger buffer when the C engine reports buffer-full.
+func (m *Marshaler) encodeStructNative(ops []COpStep, base unsafe.Pointer) error {
+	flags := uint32(m.flags)
+
+	for {
+		avail := cap(m.buf) - len(m.buf)
+		if avail < 64 {
+			newCap := max(cap(m.buf)*2, 4096)
+			newBuf := make([]byte, len(m.buf), newCap)
+			copy(newBuf, m.buf)
+			m.buf = newBuf
+		}
+
+		workBuf := m.buf[len(m.buf):cap(m.buf)]
+		written, errCode := nativeEncodeStruct(workBuf, base, ops, flags)
+
+		switch errCode {
+		case vjOK:
+			m.buf = m.buf[:len(m.buf)+written]
+			return nil
+		case vjErrBufFull:
+			newCap := max(cap(m.buf)*2, len(m.buf)+4096)
+			newBuf := make([]byte, len(m.buf), newCap)
+			copy(newBuf, m.buf)
+			m.buf = newBuf
+			// retry
+		case vjErrStackOvfl:
+			return fmt.Errorf("vjson: struct nesting depth exceeds %d levels", vjMaxDepth)
+		default:
+			return fmt.Errorf("vjson: native encoder error %d", errCode)
+		}
+	}
+}
+
+// encodeStructGo encodes a struct using the pure-Go encoder.
+// This is the fallback path for structs with features
+// not supported by the C engine (omitempty, custom marshalers, etc.).
+func (m *Marshaler) encodeStructGo(dec *StructCodec, base unsafe.Pointer) error {
 	m.buf = append(m.buf, '{')
 	first := true
 	for _, step := range dec.EncodeSteps {

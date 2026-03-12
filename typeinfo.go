@@ -541,6 +541,17 @@ type StructCodec struct {
 	HashTable    []uint8              // indices into Fields[]; 0xFF = empty
 	FieldMap     map[string]*TypeInfo // fallback for 33+ fields
 	HasMixedCase bool                 // true if any JSONName differs from JSONNameLower
+
+	// Native C encoder cache — lazily initialized by getNativeOps().
+	native *nativeEncoderCache
+}
+
+// nativeCache returns the (lazily allocated) native encoder cache.
+func (dec *StructCodec) nativeCache() *nativeEncoderCache {
+	if dec.native == nil {
+		dec.native = &nativeEncoderCache{}
+	}
+	return dec.native
 }
 
 func BuildStructCodec(t reflect.Type) *StructCodec {
