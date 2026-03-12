@@ -22,6 +22,7 @@ EXTRA_SOURCES="
   native/encvm/impl/pointer.c
   native/encvm/impl/strfn_nonascii.c
   native/encvm/impl/uscale.c
+  native/encvm/impl/log.c
 "
 
 TARGET_DIR="native/encvm"

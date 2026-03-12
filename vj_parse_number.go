@@ -708,7 +708,7 @@ func scanArrayFloat64(src []byte, idx int, arrayLen int, elemSize uintptr, ptr u
 			if usedFast {
 				*(*float64)(elemPtr) = v
 			} else {
-				fv, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 64)
+				fv, err := strconv.ParseFloat(unsafeString(src[idx:end]), 64)
 				if err != nil {
 					return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
 				}

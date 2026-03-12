@@ -369,6 +369,7 @@ for extra_src in $EXTRA_SOURCES; do
         echo "  Compiling $(basename "$extra_obj") (extra source,${USE_LTO:+ LTO,} min ISA: $MIN_ISA)"
         $CC -O3 $LTO_FLAG -fPIC -g0 -fno-stack-protector $ARCH_FLAGS $MIN_ISA_FLAGS \
             -I"$(dirname "$extra_src")" -I"$REPO_ROOT/native/include" -I"$REPO_ROOT/native" \
+            ${EXTRA_CFLAGS:-} \
             -c "$extra_src" -o "$extra_obj"
         ALL_OBJS="$ALL_OBJS $extra_obj"
     else

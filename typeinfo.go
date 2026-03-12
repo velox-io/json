@@ -19,7 +19,8 @@ var int64Type = reflect.TypeFor[int64]()
 type ElemTypeKind uint8
 
 const (
-	KindBool ElemTypeKind = iota
+	_ ElemTypeKind = iota // 0 reserved (invalid/unset)
+	KindBool
 	KindInt
 	KindInt8
 	KindInt16
@@ -32,15 +33,15 @@ const (
 	KindUint64
 	KindFloat32
 	KindFloat64
-	KindString
-	KindStruct     // nested struct - Decoder field holds *StructCodec
-	KindSlice      // slice - Decoder field holds *SliceCodec
-	KindPointer    // pointer to T - Decoder field holds *PointerCodec
-	KindAny        // interface{} field
-	KindMap        // map type - Decoder field holds *MapCodec
-	KindRawMessage // json.RawMessage — raw JSON bytes, skip parse
-	KindNumber     // json.Number — raw number string, skip float64 conversion
-	KindArray      // fixed-size array [N]T — Decoder field holds *ArrayCodec
+	KindString     // 1–14: primitives (= VM opcode = ZeroCheckTag)
+	KindStruct     // Codec: *StructCodec
+	KindSlice      // Codec: *SliceCodec
+	KindPointer    // Codec: *PointerCodec
+	KindAny        // interface{}
+	KindMap        // Codec: *MapCodec
+	KindRawMessage // json.RawMessage
+	KindNumber     // json.Number
+	KindArray      // Codec: *ArrayCodec
 )
 
 // tiFlag is a bitmask for hot-path checks in scanValue / encodeValue.
@@ -882,4 +883,18 @@ func makeIsZeroStruct(t reflect.Type) func(unsafe.Pointer) bool {
 		}
 		return true
 	}
+}
+
+// typeFromRTypePtr reconstructs a reflect.Type from a raw *abi.Type pointer
+// (reverse of rtypePtr).
+func typeFromRTypePtr(p unsafe.Pointer) reflect.Type {
+	// Construct reflect.Type by copying the itab from a donor and
+	// setting the data word to p.
+	var dummy reflect.Type
+	eface := (*[2]unsafe.Pointer)(unsafe.Pointer(&dummy))
+	donor := reflect.TypeFor[int]()
+	donorEface := (*[2]unsafe.Pointer)(unsafe.Pointer(&donor))
+	eface[0] = donorEface[0] // copy itab
+	eface[1] = p             // set *rtype data word
+	return dummy
 }

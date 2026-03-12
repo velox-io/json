@@ -612,7 +612,7 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 			return end, nil
 		}
 		// Fall back to strconv for complex numbers
-		fv, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 64)
+		fv, err := strconv.ParseFloat(unsafeString(src[idx:end]), 64)
 		if err != nil {
 			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
 		}
@@ -624,7 +624,7 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 		if numErr != nil {
 			return end, numErr
 		}
-		v, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 32)
+		v, err := strconv.ParseFloat(unsafeString(src[idx:end]), 32)
 		if err != nil {
 			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
 		}
@@ -688,7 +688,7 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 			return end, nil
 		}
 		// Default: all numbers → float64 for interface{}
-		v, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 64)
+		v, err := strconv.ParseFloat(unsafeString(src[idx:end]), 64)
 		if err != nil {
 			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid number %q: %v", src[idx:end], err), end, err)
 		}
@@ -731,7 +731,7 @@ func (sc *Parser) scanNumberAny(src []byte, idx int) (int, any, error) {
 		}
 	}
 
-	v, err := strconv.ParseFloat(UnsafeString(span), 64)
+	v, err := strconv.ParseFloat(unsafeString(span), 64)
 	if err != nil {
 		return end, nil, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid number %q: %v", span, err), end, err)
 	}

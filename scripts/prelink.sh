@@ -330,11 +330,12 @@ if [ "$TARGET_OS" = "darwin" ]; then
     DYLIB_TMP="$WORKDIR/${BASENAME_NOEXT}.dylib"
 
     log "  Linking dylib..."
+    log "    $DYLIB_TMP"
     link_darwin_dylib "$DYLIB_TMP" $ALL_OBJS
 
     log "  Converting dylib to object..."
     python3 "$REPO_ROOT/scripts/dylib_to_obj.py" "$DYLIB_TMP" "$OUTPUT"
-    rm -f "$DYLIB_TMP"
+    #rm -f "$DYLIB_TMP"
 else
     # ── ELF (Linux, Windows, etc.): -shared + linker script → so-to-obj ──
     MERGED_SO="$WORKDIR/${BASENAME_NOEXT}.so"

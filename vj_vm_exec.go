@@ -59,20 +59,6 @@ func (m *Marshaler) encodeArrayNative(dec *ArrayCodec, base unsafe.Pointer) erro
 	return m.execVM(bp, base)
 }
 
-// activeBlueprint returns the Blueprint whose ops the VM is currently executing.
-// Hot path (no SWITCH_OPS): single pointer compare against the root Blueprint.
-// Cold path (SWITCH_OPS active): registry lookup by ctx.OpsPtr.
-func activeBlueprint(ctx *VjExecCtx, rootBP *Blueprint) *Blueprint {
-	if ctx.OpsPtr == unsafe.Pointer(&rootBP.Ops[0]) {
-		return rootBP // hot path: still executing root Blueprint
-	}
-	// Cold path: VM switched to a child Blueprint via SWITCH_OPS
-	if bp := lookupBlueprintByOps(ctx.OpsPtr); bp != nil {
-		return bp
-	}
-	panic("vjson: activeBlueprint: unknown ops pointer (SWITCH_OPS without registry entry)")
-}
-
 // execVM runs the C VM engine with the given Blueprint and data base pointer.
 // It manages the Go↔C interaction loop including buffer growth, yield handling,
 // and interface cache management.
@@ -98,8 +84,10 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	ctx.OpsPtr = unsafe.Pointer(&bp.Ops[0])
 	ctx.PC = 0
 	ctx.CurBase = base
-	ctx.EncFlags = uint32(m.flags) | m.encFlags
-	ctx.Depth = 0
+
+	// Build initial vmstate: first=1, flags from m.flags|m.encFlags,
+	// cdepth=0, idepth=0, err=0, yield=0.
+	ctx.VMState = vmstateBuildInitial(uint32(m.flags) | m.encFlags)
 
 	// Select VM mode: three-way dispatch based on indent and escape flags.
 	//
@@ -153,7 +141,6 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 		bufStart := unsafe.Pointer(&workBuf[0])
 		ctx.BufCur = bufStart
 		ctx.BufEnd = uintptr(bufStart) + uintptr(len(workBuf))
-		ctx.ErrCode = 0
 
 		// Enter C VM
 		vmExec(unsafe.Pointer(ctx))
@@ -163,7 +150,7 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 
 		written := int(uintptr(ctx.BufCur) - uintptr(bufStart))
 
-		switch ctx.ErrCode {
+		switch vmstateGetErr(ctx.VMState) {
 		case vjOK:
 			m.buf = m.buf[:len(m.buf)+written]
 			return nil
@@ -193,7 +180,7 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 				m.depth = int(ctx.IndentDepth)
 			}
 
-			switch ctx.YieldInfo {
+			switch vmstateGetYield(ctx.VMState) {
 			case yieldIfaceMiss:
 				if err := m.handleIfaceCacheMiss(ctx); err != nil {
 					return err
@@ -203,7 +190,7 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 					ctx.IfaceCachePtr = unsafe.Pointer(&snap.entries[0])
 					ctx.IfaceCacheCount = int32(len(snap.entries))
 				}
-				// ctx.EncFlags has VJ_ENC_RESUME; PC unchanged for retry
+				// ctx.VMState already has correct state; PC unchanged for retry
 
 			case yieldFallback:
 				// Resolve the active Blueprint. Usually this is the root bp
@@ -211,63 +198,13 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 				// the VM may be executing a child Blueprint's ops.
 				activeBP := activeBlueprint(ctx, bp)
 
-				// Hot path: OP_INTERFACE yield. Inline to avoid
-				// map lookup + function call overhead.
-				op := activeBP.Ops[ctx.PC]
-				if op.OpType&opTypeMask == opInterface {
-					isFirst := (uint32(ctx.YieldFieldIdx) & escOpFirstBit) != 0
-					ifacePtr := unsafe.Add(ctx.CurBase, uintptr(op.FieldOff))
-
-					if !isFirst {
-						m.buf = append(m.buf, ',')
-						m.vmWriteIndent(ctx)
-					}
-					if op.KeyLen > 0 {
-						keyBytes := unsafe.Slice((*byte)(op.KeyPtr), op.KeyLen)
-						m.buf = append(m.buf, keyBytes...)
-						m.vmWriteKeySpace(ctx)
-					}
-
-					// Encode the current interface{} element.
-					if err := m.encodeAnyIface(ifacePtr); err != nil {
+				if activeBP.Ops[ctx.PC].OpType&opTypeMask == opInterface {
+					// Hot path: OP_INTERFACE yield.
+					if err := m.handleInterfaceYield(ctx, activeBP); err == errVMContinue {
+						continue // batch slice takeover: PC already past SLICE_END
+					} else if err != nil {
 						return err
 					}
-
-					// Batch slice takeover: encode remaining []interface{}
-					// elements in Go, saving N-1 C↔Go round-trips.
-					// Only safe when parent frame is a SLICE in bp.Ops.
-					if ctx.Depth > 0 && ctx.PC > 0 {
-						frame := &ctx.Stack[ctx.Depth-1]
-						if frame.FrameType == vjFrameLoop &&
-							int(ctx.PC-1) < len(activeBP.Ops) &&
-							activeBP.Ops[ctx.PC-1].OpType&opTypeMask == opSliceBegin {
-							// Encode remaining slice elements in Go.
-							elemSize := uintptr(frame.ElemSize)
-							count := frame.iterCount()
-							for idx := frame.iterIdx() + 1; idx < count; idx++ {
-								m.buf = append(m.buf, ',')
-								m.vmWriteIndent(ctx)
-								elemPtr := unsafe.Add(frame.iterData(), uintptr(idx)*elemSize)
-								if err := m.encodeAnyIface(elemPtr); err != nil {
-									return err
-								}
-							}
-							// Close array, pop slice frame.
-							// PC past SLICE_END = PC + body_len + 1.
-							ctx.IndentDepth--
-							m.vmWriteIndent(ctx)
-							m.buf = append(m.buf, ']')
-							ctx.Depth--
-							ctx.CurBase = frame.RetBase
-							bodyLen := bp.Ops[ctx.PC-1].OperandB
-							ctx.PC = ctx.PC + bodyLen + 1
-							ctx.EncFlags = uint32(m.flags) | m.encFlags | vjEncResume
-							continue
-						}
-					}
-
-					ctx.PC++
-					ctx.EncFlags = uint32(m.flags) | m.encFlags | vjEncResume
 				} else {
 					// Cold path: custom marshalers, ,string, etc.
 					if err := m.handleYieldFallback(ctx, activeBP); err != nil {
@@ -282,17 +219,18 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 				}
 
 			default:
-				return fmt.Errorf("vjson: unknown yield reason %d", ctx.YieldInfo)
+				return fmt.Errorf("vjson: unknown yield reason %d", vmstateGetYield(ctx.VMState))
 			}
 
 		case vjErrStackOvfl:
-			return fmt.Errorf("vjson: struct nesting depth exceeds %d levels", maxStackDepth)
+			return fmt.Errorf("vjson: nesting depth exceeds limit (depth=%d/%d)",
+				vmstateGetDepth(ctx.VMState), maxDepth)
 
 		case vjErrNanInf:
 			return &UnsupportedValueError{Str: "NaN or Inf float value"}
 
 		default:
-			return fmt.Errorf("vjson: native encoder error %d", ctx.ErrCode)
+			return fmt.Errorf("vjson: native encoder error %d", vmstateGetErr(ctx.VMState))
 		}
 	}
 }
@@ -312,52 +250,29 @@ func (m *Marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 	ti := GetCodec(rtype)
 
 	// Determine tag for primitives or compile Blueprint for complex types.
-	// Tag = (opcode + 1) so tag=0 means "no tag" (OP_BOOL == 0).
+	// Tag = opcode directly (all primitive opcodes >= 1, so tag=0 means "no tag").
 	var tag uint8
 	var bp *Blueprint
 
-	switch ti.Kind {
-	case KindBool:
-		tag = uint8(opBool) + 1
-	case KindInt:
-		tag = uint8(opInt) + 1
-	case KindInt8:
-		tag = uint8(opInt8) + 1
-	case KindInt16:
-		tag = uint8(opInt16) + 1
-	case KindInt32:
-		tag = uint8(opInt32) + 1
-	case KindInt64:
-		tag = uint8(opInt64) + 1
-	case KindUint:
-		tag = uint8(opUint) + 1
-	case KindUint8:
-		tag = uint8(opUint8) + 1
-	case KindUint16:
-		tag = uint8(opUint16) + 1
-	case KindUint32:
-		tag = uint8(opUint32) + 1
-	case KindUint64:
-		tag = uint8(opUint64) + 1
-	case KindFloat32:
-		tag = uint8(opFloat32) + 1
-	case KindFloat64:
-		tag = uint8(opFloat64) + 1
-	case KindString:
-		tag = uint8(opString) + 1
-	case KindStruct:
-		dec := ti.resolveCodec().(*StructCodec)
-		bp = dec.getBlueprint()
-	case KindSlice:
-		sliceDec := ti.resolveCodec().(*SliceCodec)
-		bp = compileStandaloneSliceBlueprint(sliceDec)
-	case KindArray:
-		aDec := ti.resolveCodec().(*ArrayCodec)
-		bp = compileStandaloneArrayBlueprint(aDec)
-	case KindMap:
-		// Maps are Go-driven — insert with nil ops.
+	switch {
+	case ti.Kind <= KindString:
+		tag = uint8(kindToOpcode(ti.Kind))
 	default:
-		// Insert with nil ops — C will yield on next encounter.
+		switch ti.Kind {
+		case KindStruct:
+			dec := ti.resolveCodec().(*StructCodec)
+			bp = dec.getBlueprint()
+		case KindSlice:
+			sliceDec := ti.resolveCodec().(*SliceCodec)
+			bp = compileStandaloneSliceBlueprint(sliceDec)
+		case KindArray:
+			aDec := ti.resolveCodec().(*ArrayCodec)
+			bp = compileStandaloneArrayBlueprint(aDec)
+		case KindMap:
+			// Maps are Go-driven — insert with nil ops.
+		default:
+			// Insert with nil ops — C will yield on next encounter.
+		}
 	}
 
 	insertIfaceCache(typePtr, bp, tag)
@@ -373,8 +288,8 @@ func (m *Marshaler) encodeAnyIface(ifacePtr unsafe.Pointer) error {
 // handleYieldFallback handles a yield due to custom marshaler, ,string, or
 // unsupported type. Go encodes the field, then returns.
 func (m *Marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
-	// Extract the 'first' flag from yield_field_idx (bit 31).
-	isFirst := (uint32(ctx.YieldFieldIdx) & escOpFirstBit) != 0
+	// Extract the 'first' flag from vmstate.
+	isFirst := vmstateGetFirst(ctx.VMState)
 
 	// Look up fallback info by PC.
 	fb, ok := bp.Fallbacks[int(ctx.PC)]
@@ -388,13 +303,9 @@ func (m *Marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 	// Handle omitempty: skip if zero-valued.
 	if fb.TI.Flags&tiFlagOmitEmpty != 0 && fb.TI.Ext != nil && fb.TI.Ext.IsZeroFn != nil {
 		if fb.TI.Ext.IsZeroFn(fieldPtr) {
-			// Skip: advance PC, preserve first flag as-is.
+			// Skip: advance PC, preserve first flag as-is in vmstate.
 			ctx.PC++
-			// Set resume flags: first stays the same.
-			ctx.EncFlags = uint32(m.flags) | m.encFlags | vjEncResume
-			if isFirst {
-				ctx.EncFlags |= vjEncResumeFirst
-			}
+			// vmstate already has correct first flag; no change needed.
 			return nil
 		}
 	}
@@ -426,27 +337,16 @@ func (m *Marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 	// Advance PC past the fallback instruction.
 	ctx.PC++
 
-	// Set resume flags: a field was written, so first=false.
-	ctx.EncFlags = uint32(m.flags) | m.encFlags | vjEncResume
+	// A field was written, so clear first flag in vmstate.
+	ctx.VMState &^= vjStFirstBit
 
 	return nil
 }
-
-// mapStrStrPair holds one map[string]string entry as two GoString headers.
-// Laid out contiguously so the C VM can access entries at base + i*32.
-type mapStrStrPair struct {
-	Key [2]uintptr // GoString{ptr, len} — 16 bytes
-	Val [2]uintptr // GoString{ptr, len} — 16 bytes
-}
-
-var _ [32]byte = [unsafe.Sizeof(mapStrStrPair{})]byte{}
 
 // handleMapIteration handles the Go-driven map iteration protocol.
 // When C yields at OP_MAP_BEGIN, Go takes over the entire map encoding,
 // then advances PC past OP_MAP_END.
 //
-// For map[string]string, dynamic instruction expansion generates VM
-// instructions for all k-v pairs and hands them to C in one batch.
 // For map[string]any, we use encodeAnyMap which has inline fast-paths for
 // common JSON value types (string, float64, bool, nil, []any, map[string]any),
 // avoiding the reflect-based encodeMapGeneric path.
@@ -454,9 +354,8 @@ func (m *Marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 	op := bp.Ops[ctx.PC]
 	opCode := op.OpType & opTypeMask
 
-	// Extract the 'first' flag from enc_flags (set by VM_SAVE_AND_RETURN).
-	// MAP_BEGIN doesn't set yield_field_idx, so we read first from enc_flags.
-	isFirst := (ctx.EncFlags & vjEncResumeFirst) != 0
+	// Extract the 'first' flag from vmstate (set by VM before yielding).
+	isFirst := vmstateGetFirst(ctx.VMState)
 
 	// Find the associated field info to get the MapCodec.
 	// The map instruction's field_off tells us where the map is in the struct.
@@ -470,12 +369,6 @@ func (m *Marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 	}
 
 	mapDec := fb.TI.resolveCodec().(*MapCodec)
-
-	// Fast path: map[string]string → dynamic instruction expansion.
-	// Generate VM instructions for all k-v pairs in one batch.
-	if mapDec.ValIsString && mapDec.KeyType.Kind() == reflect.String {
-		return m.handleMapStrStr(ctx, bp, op, mapDec, mapPtr, isFirst)
-	}
 
 	// Write comma if not the first field.
 	if !isFirst {
@@ -508,152 +401,8 @@ func (m *Marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 	// Advance PC past MAP_END: skip MAP_BEGIN + operand_a (distance to MAP_END) + 1 (past MAP_END)
 	ctx.PC += op.OperandA + 1
 
-	// Set resume flags: a field was written, so first=false.
-	ctx.EncFlags = uint32(m.flags) | m.encFlags | vjEncResume
+	// A field was written, so clear first flag in vmstate.
+	ctx.VMState &^= vjStFirstBit
 
 	return nil
-}
-
-// handleMapStrStr implements dynamic instruction expansion for map[string]string.
-// It iterates the map via linkname, generates a flat opMapStrKV instruction sequence,
-// pushes a stack frame, and hands the instructions to the C VM in one batch.
-func (m *Marshaler) handleMapStrStr(
-	ctx *VjExecCtx,
-	bp *Blueprint,
-	op VjOpStep,
-	mapDec *MapCodec,
-	mapPtr unsafe.Pointer,
-	isFirst bool,
-) error {
-	// Read the map header pointer: mapPtr points to the map variable in the struct,
-	// which itself is a pointer to the runtime map header.
-	hdr := *(*unsafe.Pointer)(mapPtr)
-
-	// nil map → write key + "null", advance past MAP_END.
-	if hdr == nil {
-		if !isFirst {
-			m.buf = append(m.buf, ',')
-			m.vmWriteIndent(ctx)
-		}
-		if op.KeyLen > 0 {
-			keyBytes := unsafe.Slice((*byte)(op.KeyPtr), op.KeyLen)
-			m.buf = append(m.buf, keyBytes...)
-			m.vmWriteKeySpace(ctx)
-		}
-		m.buf = append(m.buf, litNull...)
-		ctx.PC += op.OperandA + 1
-		ctx.EncFlags = uint32(m.flags) | m.encFlags | vjEncResume
-		if isFirst {
-			ctx.EncFlags |= vjEncResumeFirst
-		}
-		return nil
-	}
-
-	n := maplen(hdr)
-
-	// empty map → write key + "{}", advance past MAP_END.
-	if n == 0 {
-		if !isFirst {
-			m.buf = append(m.buf, ',')
-			m.vmWriteIndent(ctx)
-		}
-		if op.KeyLen > 0 {
-			keyBytes := unsafe.Slice((*byte)(op.KeyPtr), op.KeyLen)
-			m.buf = append(m.buf, keyBytes...)
-			m.vmWriteKeySpace(ctx)
-		}
-		m.buf = append(m.buf, litEmpty...)
-		ctx.PC += op.OperandA + 1
-		ctx.EncFlags = uint32(m.flags) | m.encFlags | vjEncResume
-		return nil
-	}
-
-	// ---- Write comma + key + '{' + indent_inc (Go side) ----
-	if !isFirst {
-		m.buf = append(m.buf, ',')
-		m.vmWriteIndent(ctx)
-	}
-	if op.KeyLen > 0 {
-		keyBytes := unsafe.Slice((*byte)(op.KeyPtr), op.KeyLen)
-		m.buf = append(m.buf, keyBytes...)
-		m.vmWriteKeySpace(ctx)
-	}
-	m.buf = append(m.buf, '{')
-	if ctx.IndentStep > 0 {
-		ctx.IndentDepth++
-		m.vmWriteIndent(ctx) // indent for first entry
-	}
-
-	// ---- Collect k-v pairs via linkname iteration ----
-	if cap(m.dynData) < n {
-		m.dynData = make([]mapStrStrPair, n)
-	} else {
-		m.dynData = m.dynData[:n]
-	}
-
-	mapTypePtr := rtypePtr(mapDec.MapType)
-	var it mapsIter
-	mapsIterInit(mapTypePtr, hdr, &it)
-
-	for i := 0; i < n; i++ {
-		// mapsIterKey points directly into the SwissTable slot.
-		// For string keys/values (< 128 bytes), data is inline as GoString.
-		m.dynData[i] = *(*mapStrStrPair)(mapsIterKey(&it))
-		mapsIterNext(&it)
-	}
-
-	// ---- Generate dynamic ops: N × opMapStrKV + opObjClose + opEnd ----
-	needOps := n + 2 // N entries + opObjClose + opEnd
-	if cap(m.dynOps) < needOps {
-		m.dynOps = make([]VjOpStep, needOps)
-	} else {
-		m.dynOps = m.dynOps[:needOps]
-	}
-
-	for i := 0; i < n; i++ {
-		m.dynOps[i] = VjOpStep{
-			OpType:   opMapStrKV,
-			KeyLen:   0,
-			FieldOff: uint32(i) * 32, // offset into dynData array
-		}
-	}
-	m.dynOps[n] = VjOpStep{OpType: opObjClose}   // write '}' + indent_dec
-	m.dynOps[n+1] = VjOpStep{OpType: opEnd}       // pop frame, return to parent
-
-	// ---- Push stack frame ----
-	if ctx.Depth >= maxStackDepth {
-		return fmt.Errorf("vjson: struct nesting depth exceeds %d levels", maxStackDepth)
-	}
-	frame := &ctx.Stack[ctx.Depth]
-	frame.RetOps = ctx.OpsPtr
-	frame.RetPC = ctx.PC + op.OperandA + 1 // past MAP_END in parent
-	frame.FrameType = vjFrameCall
-	frame.RetBase = ctx.CurBase
-	frame.First = 0 // parent: this field was written (first=false)
-	frame.ElemSize = 0
-	ctx.Depth++
-
-	// ---- Switch to dynamic ops ----
-	ctx.OpsPtr = unsafe.Pointer(&m.dynOps[0])
-	ctx.PC = 0
-	ctx.CurBase = unsafe.Pointer(&m.dynData[0])
-
-	// Resume with first=1 so the first entry has no leading comma.
-	ctx.EncFlags = uint32(m.flags) | m.encFlags | vjEncResume | vjEncResumeFirst
-
-	return nil
-}
-
-// typeFromRTypePtr reconstructs a reflect.Type from a raw *abi.Type pointer
-// (reverse of rtypePtr).
-func typeFromRTypePtr(p unsafe.Pointer) reflect.Type {
-	// Construct reflect.Type by copying the itab from a donor and
-	// setting the data word to p.
-	var dummy reflect.Type
-	eface := (*[2]unsafe.Pointer)(unsafe.Pointer(&dummy))
-	donor := reflect.TypeFor[int]()
-	donorEface := (*[2]unsafe.Pointer)(unsafe.Pointer(&donor))
-	eface[0] = donorEface[0] // copy itab
-	eface[1] = p             // set *rtype data word
-	return dummy
 }

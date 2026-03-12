@@ -2,6 +2,7 @@ package vjson
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -506,6 +507,57 @@ func TestMarshal_NonByteSlice_Empty(t *testing.T) {
 	stdGot, _ := json.Marshal(v)
 	if string(got) != string(stdGot) {
 		t.Errorf("empty slices: vjson=%s stdlib=%s", got, stdGot)
+	}
+}
+
+// --- Map HTML escape ---
+
+// TestMarshal_MapStringString_HTMLEscape verifies that the EscapeHTML flag
+// is correctly propagated into the Swiss Map iteration path
+// (vj_swiss_map_iterate). Because that function is noinline, a linker
+// that resolves it to the wrong translation unit could silently ignore the
+// flags parameter, making WithEscapeHTML() and default produce identical
+// output for map[string]string values.
+func TestMarshal_MapStringString_HTMLEscape(t *testing.T) {
+	type S struct {
+		M map[string]string `json:"m"`
+	}
+	v := S{M: map[string]string{
+		"x": "<b>bold</b>",
+	}}
+
+	// Default: no HTML escaping — <, > appear literally.
+	gotDefault, err := Marshal(&v)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// With HTML escaping — <, > must become \u003c, \u003e.
+	gotHTML, err := Marshal(&v, WithEscapeHTML())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(gotDefault) == string(gotHTML) {
+		t.Fatalf("default and WithEscapeHTML() produced identical output for map[string]string;\n"+
+			"flags not propagated to swiss map iterate path?\n"+
+			"  output: %s", gotDefault)
+	}
+
+	// Verify the HTML-escaped output actually contains the unicode escapes.
+	s := string(gotHTML)
+	for _, esc := range []string{`\u003c`, `\u003e`} {
+		if !strings.Contains(s, esc) {
+			t.Errorf("WithEscapeHTML() output missing %s: %s", esc, s)
+		}
+	}
+
+	// Verify the default output does NOT contain the unicode escapes.
+	sd := string(gotDefault)
+	for _, esc := range []string{`\u003c`, `\u003e`} {
+		if strings.Contains(sd, esc) {
+			t.Errorf("default output should not contain %s: %s", esc, sd)
+		}
 	}
 }
 

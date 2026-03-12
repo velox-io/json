@@ -184,22 +184,25 @@ func verifySwissMapLayout() {
 
 // mapsIterSize is the size of internal/runtime/maps.Iter on 64-bit platforms.
 // This MUST match unsafe.Sizeof(maps.Iter{}). Verified at init time.
-const mapsIterSize = 96
+const mapsIterSize = 96 //nolint:unused
 
 // mapsIter is an opaque, stack-allocatable buffer matching maps.Iter.
+// The unsafe.Pointer array ensures proper alignment for checkptr.
 // Zero value is a valid pre-Init state.
-type mapsIter [mapsIterSize]byte
+type mapsIter struct {
+	buf [12]unsafe.Pointer // 96 bytes, matches maps.Iter size
+}
 
 // mapsIterKey returns the current key pointer from the iterator.
 // nil indicates end of iteration. Must be called after Init+Next.
 func mapsIterKey(it *mapsIter) unsafe.Pointer {
-	return *(*unsafe.Pointer)(unsafe.Pointer(it))
+	return it.buf[0]
 }
 
 // mapsIterElem returns the current elem pointer from the iterator.
 // nil indicates end of iteration. Must be called after Init+Next.
 func mapsIterElem(it *mapsIter) unsafe.Pointer {
-	return *(*unsafe.Pointer)(unsafe.Pointer(uintptr(unsafe.Pointer(it)) + unsafe.Sizeof(uintptr(0))))
+	return it.buf[1]
 }
 
 // mapsIterInit initializes a stack-allocated maps.Iter and advances to

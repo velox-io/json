@@ -60,19 +60,16 @@ func compileBlueprint(dec *StructCodec) *Blueprint {
 	// Mark top-level struct as visiting to detect cycles.
 	b.visiting[dec.Typ] = true
 
-	// Emit top-level struct as STRUCT_BEGIN + body + STRUCT_END.
-	beginIdx := b.emit(VjOpStep{
-		OpType:   opStructBegin,
-		FieldOff: 0,
+	// Emit top-level struct as OBJ_OPEN + body + OBJ_CLOSE.
+	b.emit(VjOpStep{
+		OpType: opObjOpen,
 	})
 
 	emitStructBody(&b, &fixups, dec, 0)
 
 	b.emit(VjOpStep{
-		OpType: opStructEnd,
+		OpType: opObjClose,
 	})
-
-	b.ops[beginIdx].OperandA = int32(b.pc() - beginIdx - 1)
 
 	// Terminate
 	b.emit(VjOpStep{OpType: opEnd})
@@ -352,16 +349,14 @@ func emitDerefBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) {
 			return
 		}
 		b.visiting[subDec.Typ] = true
-		// Inline the struct with STRUCT_BEGIN/END (keyless, off=0)
-		beginIdx := b.emit(VjOpStep{
-			OpType:   opStructBegin,
-			FieldOff: 0,
+		// Inline the struct with OBJ_OPEN/CLOSE (keyless, off=0)
+		b.emit(VjOpStep{
+			OpType: opObjOpen,
 		})
 		emitStructBody(b, fixups, subDec, 0)
 		b.emit(VjOpStep{
-			OpType: opStructEnd,
+			OpType: opObjClose,
 		})
-		b.ops[beginIdx].OperandA = int32(b.pc() - beginIdx - 1)
 		delete(b.visiting, subDec.Typ)
 
 	case KindSlice:
@@ -431,9 +426,11 @@ func emitSlice(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fieldOff u
 	// Emit element body (offset=0, base points to elem[i])
 	emitElementBody(b, fixups, sliceDec.ElemTI)
 
-	// SLICE_END
+	// SLICE_END: OperandA = body_pc (back-edge target), OperandB = elem_size
 	b.emit(VjOpStep{
-		OpType: opSliceEnd,
+		OpType:   opSliceEnd,
+		OperandA: int32(bodyStart),         // body_pc
+		OperandB: int32(sliceDec.ElemSize), // elem_size
 	})
 
 	// Patch: OperandB = body length (from instruction after SLICE_BEGIN to before SLICE_END)
@@ -451,7 +448,11 @@ func emitSliceInner(b *blueprintBuilder, fixups *[]keyFixup, fieldOff uintptr, s
 
 	bodyStart := b.pc()
 	emitElementBody(b, fixups, sliceDec.ElemTI)
-	b.emit(VjOpStep{OpType: opSliceEnd})
+	b.emit(VjOpStep{
+		OpType:   opSliceEnd,
+		OperandA: int32(bodyStart),
+		OperandB: int32(sliceDec.ElemSize),
+	})
 
 	bodyLen := b.pc() - bodyStart - 1
 	b.ops[beginIdx].OperandB = int32(bodyLen)
@@ -480,9 +481,11 @@ func emitArray(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fieldOff u
 	// Emit element body (offset=0, base points to elem[i])
 	emitElementBody(b, fixups, aDec.ElemTI)
 
-	// Reuse SLICE_END for loop back-edge
+	// Reuse SLICE_END for loop back-edge: OperandA = body_pc, OperandB = elem_size
 	b.emit(VjOpStep{
-		OpType: opSliceEnd,
+		OpType:   opSliceEnd,
+		OperandA: int32(bodyStart),
+		OperandB: int32(aDec.ElemSize),
 	})
 
 	bodyLen := b.pc() - bodyStart - 1
@@ -501,7 +504,11 @@ func emitArrayInner(b *blueprintBuilder, fixups *[]keyFixup, fieldOff uintptr, a
 
 	bodyStart := b.pc()
 	emitElementBody(b, fixups, aDec.ElemTI)
-	b.emit(VjOpStep{OpType: opSliceEnd})
+	b.emit(VjOpStep{
+		OpType:   opSliceEnd,
+		OperandA: int32(bodyStart),
+		OperandB: int32(aDec.ElemSize),
+	})
 
 	bodyLen := b.pc() - bodyStart - 1
 	b.ops[beginIdx].OperandB = int32(bodyLen)
@@ -562,13 +569,11 @@ func emitElementBody(b *blueprintBuilder, fixups *[]keyFixup, elemTI *TypeInfo) 
 			return
 		}
 		b.visiting[subDec.Typ] = true
-		beginIdx := b.emit(VjOpStep{
-			OpType:   opStructBegin,
-			FieldOff: 0,
+		b.emit(VjOpStep{
+			OpType: opObjOpen,
 		})
 		emitStructBody(b, fixups, subDec, 0)
-		b.emit(VjOpStep{OpType: opStructEnd})
-		b.ops[beginIdx].OperandA = int32(b.pc() - beginIdx - 1)
+		b.emit(VjOpStep{OpType: opObjClose})
 		delete(b.visiting, subDec.Typ)
 
 	case KindPointer:

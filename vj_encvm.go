@@ -2,6 +2,7 @@ package vjson
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"sort"
 	"sync"
@@ -9,50 +10,46 @@ import (
 	"unsafe"
 )
 
-// OpCode constants — mirror native/impl/encoder_types.h enum OpType.
-// Primitives 0-13 align with ElemTypeKind; 16-19 are data ops;
-// 32-42 are structural control-flow; 0x3F is Go fallback.
+// OpCode constants — mirror native/encvm/impl/types.h enum OpType.
+// Primitives 1–14 = ElemTypeKind; 17–20 data ops; 33–46 control-flow; 0x40 fallback.
 const (
-	// Primitive types (0-13), aligned with ElemTypeKind.
-	opBool    uint16 = 0
-	opInt     uint16 = 1
-	opInt8    uint16 = 2
-	opInt16   uint16 = 3
-	opInt32   uint16 = 4
-	opInt64   uint16 = 5
-	opUint    uint16 = 6
-	opUint8   uint16 = 7
-	opUint16  uint16 = 8
-	opUint32  uint16 = 9
-	opUint64  uint16 = 10
-	opFloat32 uint16 = 11
-	opFloat64 uint16 = 12
-	opString  uint16 = 13
+	opBool    uint16 = 1
+	opInt     uint16 = 2
+	opInt8    uint16 = 3
+	opInt16   uint16 = 4
+	opInt32   uint16 = 5
+	opInt64   uint16 = 6
+	opUint    uint16 = 7
+	opUint8   uint16 = 8
+	opUint16  uint16 = 9
+	opUint32  uint16 = 10
+	opUint64  uint16 = 11
+	opFloat32 uint16 = 12
+	opFloat64 uint16 = 13
+	opString  uint16 = 14
 
-	// Non-primitive data ops (16-19).
-	opInterface  uint16 = 16 // interface{} — noinline C encoder or yield
-	opRawMessage uint16 = 17 // json.RawMessage — direct byte copy
-	opNumber     uint16 = 18 // json.Number — direct string copy
-	opByteSlice  uint16 = 19 // []byte — base64, yield to Go
+	// Non-primitive data ops (17-20).
+	opInterface  uint16 = 17 // interface{} — noinline C encoder or yield
+	opRawMessage uint16 = 18 // json.RawMessage — direct byte copy
+	opNumber     uint16 = 19 // json.Number — direct string copy
+	opByteSlice  uint16 = 20 // []byte — base64, yield to Go
 
-	// Structural control-flow instructions (32-42).
-	opSkipIfZero  uint16 = 32 // conditional forward jump (omitempty)
-	opStructBegin uint16 = 33 // push frame, write '{'
-	opStructEnd   uint16 = 34 // write '}', pop frame
-	opPtrDeref    uint16 = 35 // deref pointer, nil→null+jump
-	opPtrEnd      uint16 = 36 // pop ptr-deref frame, restore base
-	opSliceBegin  uint16 = 37 // slice loop start
-	opSliceEnd    uint16 = 38 // slice loop end / back-edge
-	opMapBegin    uint16 = 39 // map iteration start (yield-driven)
-	opMapEnd      uint16 = 40 // map iteration end (yield)
-	opObjOpen     uint16 = 41 // write key + '{', set first=1 (no frame push)
-	opObjClose    uint16 = 42 // write '}', set first=0 (no frame pop)
-	opArrayBegin  uint16 = 43 // array loop start (inline data, fixed length)
-	opMapStrKV    uint16 = 44 // encode one map[string]string entry (key + value)
-	opMapStrStr   uint16 = 45 // map[string]string: C-native Swiss Map iteration
+	// Structural control-flow instructions (33-46).
+	opSkipIfZero uint16 = 33 // conditional forward jump (omitempty)
+	opPtrDeref   uint16 = 36 // deref pointer, nil→null+jump
+	opPtrEnd     uint16 = 37 // pop ptr-deref frame, restore base
+	opSliceBegin uint16 = 38 // slice loop start
+	opSliceEnd   uint16 = 39 // slice loop end / back-edge
+	opMapBegin   uint16 = 40 // map iteration start (yield-driven)
+	opMapEnd     uint16 = 41 // map iteration end (yield)
+	opObjOpen    uint16 = 42 // write key + '{', set first=1 (no frame push)
+	opObjClose   uint16 = 43 // write '}', set first=0 (no frame pop)
+	opArrayBegin uint16 = 44 // array loop start (inline data, fixed length)
+	// 45: reserved (formerly opMapStrKV)
+	opMapStrStr uint16 = 46 // map[string]string: C-native Swiss Map iteration
 
-	// Go-only fallback (0x3F).
-	opFallback uint16 = 0x3F // custom marshalers, ,string, complex structs
+	// Go-only fallback (0x40).
+	opFallback uint16 = 0x40 // custom marshalers, ,string, complex structs
 
 	// Sentinel.
 	opEnd uint16 = 0xFF
@@ -62,12 +59,11 @@ const (
 // the high byte used by opSkipIfZero to encode the ZeroCheckTag.
 const opTypeMask = uint16(0x00FF)
 
-// kindToOpcode maps an ElemTypeKind to the corresponding VM opcode.
-// Primitives 0-13 map 1:1. Panics if k has no single-instruction opcode.
+// kindToOpcode maps an ElemTypeKind to its VM opcode.
+// Panics if k has no single-instruction opcode.
 func kindToOpcode(k ElemTypeKind) uint16 {
 	switch {
 	case k <= KindString:
-		// Primitives: 1:1 mapping with ElemTypeKind.
 		return uint16(k)
 	case k == KindAny:
 		return opInterface
@@ -80,7 +76,7 @@ func kindToOpcode(k ElemTypeKind) uint16 {
 	}
 }
 
-// Error codes returned in ExecCtx.ErrCode.
+// Error codes returned via vmstate (VjError enum).
 const (
 	vjOK           int32 = 0
 	vjErrBufFull   int32 = 1
@@ -89,26 +85,72 @@ const (
 	vjErrYield     int32 = 6 // VM yielded to Go (interface miss, fallback, map iter)
 )
 
-// Encoding flags (VjEncFlags bitmask).
+// Encoding flags — Go-side bit positions (low 4 bits).
+// These match the VJ_FLAGS_* legacy constants extracted by VJ_ST_GET_FLAGS().
 const (
 	vjEncEscapeHTML   uint32 = 1 << 0
 	vjEncFloatExpAuto uint32 = 1 << 3 // scientific notation for |f|<1e-6 or |f|>=1e21
-
-	// Hot resume flags for re-entering C after Go handles a fallback field.
-	vjEncResume      uint32 = 1 << 7 // skip opening '{'; resume mid-struct
-	vjEncResumeFirst uint32 = 1 << 8 // with RESUME: no field written yet (first=1)
 )
 
-// Bitmask constant for decoding esc_op_idx (packed by C on fallback).
-// Bit 31 = first flag.
-const escOpFirstBit uint32 = 0x80000000
-
-// Yield reason values stored in ExecCtx.YieldInfo.
+// Yield reason values extracted from vmstate bits [40..47].
 const (
 	yieldFallback  uint32 = 1 // custom marshaler / ,string / unsupported type
 	yieldIfaceMiss uint32 = 2 // interface{} cache miss — need Go compilation
 	yieldMapNext   uint32 = 3 // map iteration — need Go to provide next k/v
 )
+
+// ================================================================
+//  VMState — packed 64-bit VM state register (mirrors C layout)
+//
+//  Layout:
+//    bits [0..7]   = depth        (unified stack depth, max 24)
+//    bits [8..15]  = reserved
+//    bit  [16]     = first        (first-field flag: no comma prefix)
+//    bits [17..31] = enc_flags    (encoding config: escape, float fmt)
+//    bits [32..39] = error_code   (VjError value)
+//    bits [40..47] = yield_reason (VjYieldReason value)
+//    bits [48..63] = reserved
+// ================================================================
+
+const (
+	vjStDepthShift = 0
+	vjStDepthMask  = uint64(0x000000FF)
+	vjStFirstBit   = uint64(1) << 16
+	vjStFlagsShift = 17
+	vjStFlagsMask  = uint64(0xFFFE0000) // bits [17..31]
+	vjStErrShift   = 32
+	vjStErrMask    = uint64(0x000000FF00000000)
+	vjStYieldShift = 40
+	vjStYieldMask  = uint64(0x0000FF0000000000)
+)
+
+// vmstateGetErr extracts the error code from vmstate.
+func vmstateGetErr(st uint64) int32 {
+	return int32((st >> vjStErrShift) & 0xFF)
+}
+
+// vmstateGetYield extracts the yield reason from vmstate.
+func vmstateGetYield(st uint64) uint32 {
+	return uint32((st >> vjStYieldShift) & 0xFF)
+}
+
+// vmstateGetFirst extracts the first-field flag from vmstate.
+func vmstateGetFirst(st uint64) bool {
+	return (st & vjStFirstBit) != 0
+}
+
+// vmstateGetDepth extracts the unified stack depth from vmstate.
+func vmstateGetDepth(st uint64) int32 {
+	return int32(st & vjStDepthMask)
+}
+
+// vmstateBuildInitial builds the initial vmstate for VM entry.
+// flags contains escape flags (bits 0-3) already combined from
+// escapeFlags and vjEncFloatExpAuto. The first bit is set.
+// cdepth=0, idepth=0, err=0, yield=0.
+func vmstateBuildInitial(flags uint32) uint64 {
+	return vjStFirstBit | (uint64(flags) << vjStFlagsShift)
+}
 
 // VjOpStep mirrors the C OpStep (24 bytes).
 type VjOpStep struct {
@@ -145,22 +187,23 @@ type encvmCache struct {
 	blueprint *Blueprint // compiled Blueprint (flat instruction stream)
 }
 
-// maxStackDepth matches the C VJ_MAX_DEPTH.
-const maxStackDepth = 24
+// maxDepth matches the C VJ_MAX_DEPTH.
+const maxDepth = 24
+
+// maxIndentDepth is the combined max nesting for indent template sizing.
+const maxIndentDepth = maxDepth
 
 // VjStackFrame mirrors the C VjStackFrame (56 bytes).
-// Redesigned as a unified call/loop frame:
-//
-//	Common fields (0-31): ret_ops, ret_pc, frame_type, ret_base, first, elem_size
-//	Union (32-55):        loop iteration state (for VJ_FRAME_LOOP)
+// Unified frame for all stack-using ops: ptr_deref, interface/switch_ops,
+// slice_begin, array_begin, map_str_str.
 type VjStackFrame struct {
-	RetOps    unsafe.Pointer //  0: parent ops array base
-	RetPC     int32          //  8: return PC (index into ret_ops)
-	FrameType int32          // 12: VJ_FRAME_CALL(0) or VJ_FRAME_LOOP(1)
-	RetBase   unsafe.Pointer // 16: parent data base address
-	First     int32          // 24: parent first-field flag
-	ElemSize  int32          // 28: element size (LOOP only, 0 for CALL)
-	_union    [24]byte       // 32-55: loop iteration state
+	RetOps    unsafe.Pointer //  0: parent ops array base (CALL only)
+	RetPC     int32          //  8: return PC (CALL only)
+	FrameType int32          // 12: VJ_FRAME_CALL(0), LOOP(1), MAP(2)
+	RetBase   unsafe.Pointer // 16: parent data base
+	First     int32          // 24: parent first-field flag (CALL only)
+	_pad0     int32          // 28: alignment
+	_union    [24]byte       // 32-55: call/loop/map iteration state
 }
 
 var _ [56]byte = [unsafe.Sizeof(VjStackFrame{})]byte{}
@@ -169,10 +212,10 @@ var _ [56]byte = [unsafe.Sizeof(VjStackFrame{})]byte{}
 const (
 	vjFrameCall = int32(0) // VJ_FRAME_CALL
 	vjFrameLoop = int32(1) // VJ_FRAME_LOOP
-	vjFrameMap  = int32(2) // VJ_FRAME_MAP — C-native Swiss Map iteration
+	vjFrameMap  = int32(2) // VJ_FRAME_MAP
 )
 
-// --- LOOP frame helpers (read-only from Go side) ---
+// --- LOOP iter frame helpers (read-only from Go side) ---
 
 func (f *VjStackFrame) iterData() unsafe.Pointer {
 	return *(*unsafe.Pointer)(unsafe.Pointer(&f._union[0]))
@@ -187,22 +230,21 @@ func (f *VjStackFrame) iterIdx() int64 {
 // VjExecCtx mirrors the C VjExecCtx (1448 bytes).
 // Layout optimized for cache locality:
 //
-//	Cache line 0 (0-63):  hot VM registers (buf, ops, pc, base, flags)
+//	Cache line 0 (0-63):  hot VM registers (buf, ops, pc, base, vmstate)
 //	Cache line 1 (64-95): indent state, yield metadata
-//	96+:                  stack frames + debug trace
+//	96+:                  unified stack + debug trace
 type VjExecCtx struct {
 	// Cache line 0: hot VM registers
 	BufCur          unsafe.Pointer //   0: current write position
 	BufEnd          uintptr        //   8: one past last writable byte (NOT GC-traced)
 	OpsPtr          unsafe.Pointer //  16: &Blueprint.Ops[0] (current active ops)
 	PC              int32          //  24: current instruction index
-	Depth           int32          //  28: stack depth (0 = top-level)
+	_padPC          int32          //  28: alignment padding
 	CurBase         unsafe.Pointer //  32: current struct/elem base address
-	EncFlags        uint32         //  40: VjEncFlags bitmask
-	ErrCode         int32          //  44: VjError enum value
+	VMState         uint64         //  40: packed state register (see VMState layout)
 	IfaceCachePtr   unsafe.Pointer //  48: *VjIfaceCacheEntry sorted array
 	IfaceCacheCount int32          //  56: number of entries
-	YieldInfo       uint32         //  60: yield reason (yieldFallback, yieldIfaceMiss, etc.)
+	_padIface       int32          //  60: alignment padding
 
 	// Cache line 1: less-hot state
 	IndentTpl       unsafe.Pointer //  64: precomputed indent template
@@ -211,22 +253,21 @@ type VjExecCtx struct {
 	IndentPrefixLen uint8          //  75: bytes of prefix before indent
 	_pad1           int32          //  76: alignment padding
 	YieldTypePtr    unsafe.Pointer //  80: interface cache miss: eface.type_ptr
-	YieldFieldIdx   int32          //  88: fallback: field index for Go to handle
-	_pad2           int32          //  92: alignment padding
+	YieldFieldIdx   int32          //  88: fallback: field index (no first bit packing)
+	_padYield       int32          //  92: alignment padding
 
-	// Stack + debug trace
-	Stack    [maxStackDepth]VjStackFrame //  96: 24 × 56 = 1344 bytes
-	TraceBuf unsafe.Pointer              // 1440: Go-allocated VjTraceBuf
+	// Unified stack + debug trace
+	Stack    [maxDepth]VjStackFrame //  96: 24 x 56 = 1344 bytes
+	TraceBuf unsafe.Pointer         // 1440: Go-allocated VjTraceBuf
 }
 
 var _ [1448]byte = [unsafe.Sizeof(VjExecCtx{})]byte{}
 
 // VjIfaceCacheEntry maps a Go *abi.Type to its compiled Blueprint ops (24 bytes).
-// Tag = opcode+1 for primitives (0 = none); C subtracts 1 before dispatch.
 type VjIfaceCacheEntry struct {
-	TypePtr unsafe.Pointer // *abi.Type (address-comparable)
+	TypePtr unsafe.Pointer // *abi.Type
 	OpsPtr  unsafe.Pointer // &Blueprint.Ops[0], nil if not compilable by C
-	Tag     uint8          // (opcode+1) for primitives, 0 for complex/yield
+	Tag     uint8          // opcode for primitives (= ElemTypeKind); 0 = none
 	_pad    [7]byte
 }
 
@@ -236,19 +277,6 @@ var _ [24]byte = [unsafe.Sizeof(VjIfaceCacheEntry{})]byte{}
 // Once published, it is never modified — new entries produce a new snapshot.
 type ifaceCacheSnapshot struct {
 	entries []VjIfaceCacheEntry // sorted by TypePtr (ascending)
-}
-
-// globalIfaceCache is the process-wide interface type cache (COW snapshots).
-var globalIfaceCache struct {
-	current atomic.Pointer[ifaceCacheSnapshot]
-	mu      sync.Mutex
-}
-
-var initPrimitiveIfaceCacheOnce sync.Once
-
-func init() {
-	// Initialize with an empty snapshot so Load() never returns nil.
-	globalIfaceCache.current.Store(&ifaceCacheSnapshot{})
 }
 
 // lookup returns the entry for typePtr via binary search, or nil.
@@ -270,6 +298,12 @@ func (s *ifaceCacheSnapshot) lookup(typePtr unsafe.Pointer) *VjIfaceCacheEntry {
 	return nil
 }
 
+// globalIfaceCache is the process-wide interface type cache (COW snapshots).
+var globalIfaceCache struct {
+	current atomic.Pointer[ifaceCacheSnapshot]
+	mu      sync.Mutex
+}
+
 // loadIfaceCacheSnapshot returns the current immutable cache snapshot.
 func loadIfaceCacheSnapshot() *ifaceCacheSnapshot {
 	return globalIfaceCache.current.Load()
@@ -284,6 +318,9 @@ func loadIfaceCacheSnapshot() *ifaceCacheSnapshot {
 var blueprintRegistry atomic.Pointer[map[unsafe.Pointer]*Blueprint]
 
 func init() {
+	// Initialize globalIfaceCache with an empty snapshot so Load() never returns nil.
+	globalIfaceCache.current.Store(&ifaceCacheSnapshot{})
+	// Initialize blueprintRegistry with an empty map.
 	empty := make(map[unsafe.Pointer]*Blueprint)
 	blueprintRegistry.Store(&empty)
 }
@@ -302,17 +339,9 @@ func registerBlueprintOps(bp *Blueprint) {
 	}
 	// COW: copy + insert
 	newMap := make(map[unsafe.Pointer]*Blueprint, len(*cur)+1)
-	for k, v := range *cur {
-		newMap[k] = v
-	}
+	maps.Copy(newMap, *cur)
 	newMap[key] = bp
 	blueprintRegistry.Store(&newMap)
-}
-
-// lookupBlueprintByOps returns the Blueprint whose Ops[0] is at opsPtr.
-func lookupBlueprintByOps(opsPtr unsafe.Pointer) *Blueprint {
-	m := blueprintRegistry.Load()
-	return (*m)[opsPtr]
 }
 
 // insertIfaceCache adds a new type→blueprint mapping to the global cache.
@@ -358,21 +387,21 @@ func initPrimitiveIfaceCache() {
 		t   reflect.Type
 		tag uint8
 	}{
-		// Tag stored as (opcode + 1) so tag=0 means "no tag".
-		{reflect.TypeFor[bool](), uint8(opBool) + 1},
-		{reflect.TypeFor[int](), uint8(opInt) + 1},
-		{reflect.TypeFor[int8](), uint8(opInt8) + 1},
-		{reflect.TypeFor[int16](), uint8(opInt16) + 1},
-		{reflect.TypeFor[int32](), uint8(opInt32) + 1},
-		{reflect.TypeFor[int64](), uint8(opInt64) + 1},
-		{reflect.TypeFor[uint](), uint8(opUint) + 1},
-		{reflect.TypeFor[uint8](), uint8(opUint8) + 1},
-		{reflect.TypeFor[uint16](), uint8(opUint16) + 1},
-		{reflect.TypeFor[uint32](), uint8(opUint32) + 1},
-		{reflect.TypeFor[uint64](), uint8(opUint64) + 1},
-		{reflect.TypeFor[float32](), uint8(opFloat32) + 1},
-		{reflect.TypeFor[float64](), uint8(opFloat64) + 1},
-		{reflect.TypeFor[string](), uint8(opString) + 1},
+		// Tag = opcode directly; tag=0 means "no tag" (all opcodes >= 1).
+		{reflect.TypeFor[bool](), uint8(opBool)},
+		{reflect.TypeFor[int](), uint8(opInt)},
+		{reflect.TypeFor[int8](), uint8(opInt8)},
+		{reflect.TypeFor[int16](), uint8(opInt16)},
+		{reflect.TypeFor[int32](), uint8(opInt32)},
+		{reflect.TypeFor[int64](), uint8(opInt64)},
+		{reflect.TypeFor[uint](), uint8(opUint)},
+		{reflect.TypeFor[uint8](), uint8(opUint8)},
+		{reflect.TypeFor[uint16](), uint8(opUint16)},
+		{reflect.TypeFor[uint32](), uint8(opUint32)},
+		{reflect.TypeFor[uint64](), uint8(opUint64)},
+		{reflect.TypeFor[float32](), uint8(opFloat32)},
+		{reflect.TypeFor[float64](), uint8(opFloat64)},
+		{reflect.TypeFor[string](), uint8(opString)},
 	}
 	table := make([]VjIfaceCacheEntry, len(entries))
 	for i, e := range entries {
@@ -387,15 +416,13 @@ func initPrimitiveIfaceCache() {
 	globalIfaceCache.current.Store(&ifaceCacheSnapshot{entries: table})
 }
 
-func ensureIfaceCache() {
-	initPrimitiveIfaceCacheOnce.Do(initPrimitiveIfaceCache)
-}
+var initPrimitiveIfaceCacheOnce sync.Once
 
 // initMarshalerVMCtx sets up the interface cache snapshot on the pooled
 // Marshaler's VjExecCtx. Called once per getMarshaler() so that execVM
 // doesn't need a per-call atomic.Load + sync.Once check.
 func initMarshalerVMCtx(m *Marshaler) {
-	ensureIfaceCache()
+	initPrimitiveIfaceCacheOnce.Do(initPrimitiveIfaceCache)
 	snap := loadIfaceCacheSnapshot()
 	if len(snap.entries) > 0 {
 		m.vmCtx.IfaceCachePtr = unsafe.Pointer(&snap.entries[0])
@@ -404,4 +431,21 @@ func initMarshalerVMCtx(m *Marshaler) {
 		m.vmCtx.IfaceCachePtr = nil
 		m.vmCtx.IfaceCacheCount = 0
 	}
+}
+
+// activeBlueprint returns the Blueprint whose ops the VM is currently executing.
+// Hot path (no SWITCH_OPS): single pointer compare against the root Blueprint.
+// Cold path (SWITCH_OPS active): registry lookup by ctx.OpsPtr.
+func activeBlueprint(ctx *VjExecCtx, rootBP *Blueprint) *Blueprint {
+	if ctx.OpsPtr == unsafe.Pointer(&rootBP.Ops[0]) {
+		return rootBP // hot path: still executing root Blueprint
+	}
+
+	m := blueprintRegistry.Load()
+	bp := (*m)[ctx.OpsPtr]
+	// Cold path: VM switched to a child Blueprint via SWITCH_OPS
+	if bp != nil {
+		return bp
+	}
+	panic("vjson: activeBlueprint: unknown ops pointer (SWITCH_OPS without registry entry)")
 }

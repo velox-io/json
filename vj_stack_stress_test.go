@@ -175,7 +175,7 @@ func TestNativeEncoder_GoroutineStackStress_Simple(t *testing.T) {
 }
 
 // TestNativeEncoder_GoroutineStackStress_Nested tests nested structs
-// (multiple STRUCT_BEGIN/END in the VM) on fresh stacks.
+// (multiple OBJ_OPEN/CLOSE in the VM) on fresh stacks.
 func TestNativeEncoder_GoroutineStackStress_Nested(t *testing.T) {
 	v := stackTestNested{
 		Name:  "test",
@@ -190,7 +190,7 @@ func TestNativeEncoder_GoroutineStackStress_Nested(t *testing.T) {
 }
 
 // TestNativeEncoder_GoroutineStackStress_DeepNesting tests deeply nested
-// struct layouts (STRUCT_BEGIN pushes VM stack frames) on fresh stacks.
+// struct layouts (OBJ_OPEN/CLOSE in the VM) on fresh stacks.
 func TestNativeEncoder_GoroutineStackStress_DeepNesting(t *testing.T) {
 	v := stackTestDeep{}
 	v.Level1.Level2.Level3.X = 99

@@ -112,12 +112,7 @@ type Marshaler struct {
 	// indentTpl holds the precomputed "\n" + prefix + indent×MAX_DEPTH template
 	// for the C VM indent path. Only used when isSimpleIndent returns true.
 	// Pointer to pool-allocated array; nil in compact mode (zero overhead).
-	indentTpl *[1 + 255 + maxStackDepth*8]byte
-
-	// Dynamic instruction expansion buffers for map[string]string VM encoding.
-	// Reused across calls to avoid per-map allocation.
-	dynOps  []VjOpStep      // dynamic instruction buffer
-	dynData []mapStrStrPair // contiguous k-v pair data for opMapStrKV
+	indentTpl *[1 + 255 + maxIndentDepth*8]byte
 
 	// flushFn enables streaming mode: flush accumulated data through
 	// this callback instead of growing the buffer indefinitely.
@@ -135,7 +130,7 @@ var marshalerPool = sync.Pool{
 
 var indentTplPool = sync.Pool{
 	New: func() any {
-		return new([1 + 255 + maxStackDepth*8]byte)
+		return new([1 + 255 + maxIndentDepth*8]byte)
 	},
 }
 
@@ -641,12 +636,12 @@ func isSimpleIndent(prefix, indent string) int {
 // Allocates the template array from indentTplPool on first use.
 func (m *Marshaler) buildIndentTpl(prefix, indent string) {
 	if m.indentTpl == nil {
-		m.indentTpl = indentTplPool.Get().(*[1 + 255 + maxStackDepth*8]byte)
+		m.indentTpl = indentTplPool.Get().(*[1 + 255 + maxIndentDepth*8]byte)
 	}
 	m.indentTpl[0] = '\n'
 	off := 1
 	off += copy(m.indentTpl[off:], prefix)
-	for range maxStackDepth {
+	for range maxIndentDepth {
 		off += copy(m.indentTpl[off:], indent)
 	}
 }
@@ -758,7 +753,7 @@ func (m *Marshaler) encodeString(s string) {
 // encodeQuotedString double-encodes a string: Go "hello" → JSON "\"hello\"".
 func (m *Marshaler) encodeQuotedString(s string) {
 	inner := appendEscapedString(nil, s, m.flags)
-	m.buf = appendEscapedString(m.buf, UnsafeString(inner), m.flags)
+	m.buf = appendEscapedString(m.buf, unsafeString(inner), m.flags)
 }
 
 // encodeValueQuoted encodes a value wrapped in a JSON string (for `,string` tag).

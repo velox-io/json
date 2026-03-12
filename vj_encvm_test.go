@@ -14,8 +14,7 @@ import (
 // ================================================================
 
 func TestPrimitiveOpTypeAlignedWithElemTypeKind(t *testing.T) {
-	// Primitive opcodes (0-13) must equal the corresponding ElemTypeKind
-	// values so kindToOpcode can use a direct 1:1 mapping.
+	// Primitive opcodes 1-14 must equal the corresponding ElemTypeKind.
 	checks := []struct {
 		kind ElemTypeKind
 		op   uint16

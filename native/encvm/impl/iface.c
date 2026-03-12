@@ -60,16 +60,15 @@ VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend,
   }
 
   /* Found but not compilable by C (tag=0, ops=NULL) → yield fallback.
-   * Tag is stored as (opcode + 1) so that tag=0 is unambiguous for
-   * "no primitive tag" (needed because OP_BOOL == 0). */
+   * Since opcodes are 1-based, tag=0 unambiguously means "no primitive tag". */
   if (tag == 0 && cached_ops == NULL) {
     return (VjIfaceResult){buf, NULL, NULL, NULL, VJ_IFACE_YIELD};
   }
 
   /* ---- Primitive type (tag != 0) → encode inline ---- */
   if (tag != 0) {
-    /* Subtract 1 to recover the actual opcode (tag was stored as opcode+1). */
-    VjPtrEncResult r = vj_encode_ptr_value(buf, bend, data_ptr, tag - 1, flags);
+    /* Tag is the opcode directly (opcodes are 1-based, so tag >= 1). */
+    VjPtrEncResult r = vj_encode_ptr_value(buf, bend, data_ptr, tag, flags);
     if (__builtin_expect(r.buf == NULL, 0)) {
       if (r.error == VJ_ERR_NAN_INF)
         return (VjIfaceResult){NULL, NULL, NULL, NULL, VJ_IFACE_NAN_INF};

@@ -1,37 +1,77 @@
 /*
- * swissmap.h — Velox JSON C Engine: Swiss Map Iteration for map[string]string
+ * swissmap.h — Swiss Map iteration for map[string]string.
  *
- * Out-of-line encoder for map[string]string values.
- * Marked noinline to keep the VM's hot dispatch loop compact.
- *
- * The function iterates over the Go runtime's Swiss Map data structures
- * (Map, table, group) and encodes all key-value pairs as JSON.
- *
- * Returns VjSwissMapResult with the advanced buffer pointer and an action
- * code indicating success or buffer-full (caller must save VM state and
- * return VJ_ERR_BUF_FULL, then resume).
+ * Noinline encoder called from the VM dispatch loop.
+ * Iterates Go runtime Swiss Map structures and encodes all KV pairs as JSON.
  */
 
 #ifndef VJ_ENCVM_SWISSMAP_H
 #define VJ_ENCVM_SWISSMAP_H
 
-#include "types.h"
 #include "strfn.h"
+#include "types.h"
 
 // clang-format off
 
+/* Swiss Map constants for map[string]string (inline slots). */
+#define SWISS_GROUP_SLOTS     8
+#define SWISS_CTRL_SIZE       8
+#define SWISS_SLOT_SIZE       32
+#define SWISS_ELEM_OFF        16
+#define SWISS_GROUP_SIZE      264    /* CTRL_SIZE + GROUP_SLOTS * SLOT_SIZE */
+#define SWISS_CTRL_EMPTY      0x80
+
+/* Mirrors internal/runtime/maps.Map (48 bytes).
+ * Offsets verified at Go init time (rt_internal.go). */
+typedef struct GoSwissMap {
+  uint64_t  used;           /*  0 */
+  uintptr_t seed;           /*  8 */
+  void     *dir_ptr;        /* 16: → group (small) or → *table[] (large) */
+  int64_t   dir_len;        /* 24: 0 = small map, else 1<<globalDepth */
+  uint8_t   global_depth;   /* 32 */
+  uint8_t   global_shift;   /* 33 */
+  uint8_t   writing;        /* 34 */
+  uint8_t   _pad_tombstone; /* 35 */
+  uint32_t  _pad36;         /* 36 */
+  uint64_t  clear_seq;      /* 40 */
+} GoSwissMap;
+
+_Static_assert(sizeof(GoSwissMap) == 48, "GoSwissMap must be 48 bytes");
+_Static_assert(offsetof(GoSwissMap, used) == 0, "GoSwissMap.used offset");
+_Static_assert(offsetof(GoSwissMap, dir_ptr) == 16, "GoSwissMap.dir_ptr offset");
+_Static_assert(offsetof(GoSwissMap, dir_len) == 24, "GoSwissMap.dir_len offset");
+_Static_assert(offsetof(GoSwissMap, global_depth) == 32, "GoSwissMap.global_depth offset");
+_Static_assert(offsetof(GoSwissMap, clear_seq) == 40, "GoSwissMap.clear_seq offset");
+
+/* Mirrors internal/runtime/maps.table (32 bytes). */
+typedef struct GoSwissTable {
+  uint16_t  used;           /*  0 */
+  uint16_t  capacity;       /*  2 */
+  uint16_t  growth_left;    /*  4 */
+  uint8_t   local_depth;    /*  6 */
+  uint8_t   _pad7;          /*  7 */
+  int64_t   index;          /*  8 */
+  void     *groups_data;    /* 16 */
+  uint64_t  groups_mask;    /* 24: num_groups - 1 */
+} GoSwissTable;
+
+_Static_assert(sizeof(GoSwissTable) == 32, "GoSwissTable must be 32 bytes");
+_Static_assert(offsetof(GoSwissTable, used) == 0, "GoSwissTable.used offset");
+_Static_assert(offsetof(GoSwissTable, local_depth) == 6, "GoSwissTable.local_depth offset");
+_Static_assert(offsetof(GoSwissTable, index) == 8, "GoSwissTable.index offset");
+_Static_assert(offsetof(GoSwissTable, groups_data) == 16, "GoSwissTable.groups_data offset");
+_Static_assert(offsetof(GoSwissTable, groups_mask) == 24, "GoSwissTable.groups_mask offset");
+
 enum VjSwissMapAction {
-  VJ_SWISS_DONE     = 0,  /* all entries encoded */
-  VJ_SWISS_BUF_FULL = 1,  /* buffer insufficient — iteration state saved in frame */
+  VJ_SWISS_DONE     = 0,
+  VJ_SWISS_BUF_FULL = 1,
 };
 
-/* Result struct — returned by value (fits in 2 registers). */
 typedef struct {
-  uint8_t *buf;       /* advanced buffer pointer */
-  int32_t  action;    /* VjSwissMapAction */
+  uint8_t *buf;
+  int32_t  action;
 } VjSwissMapResult;
 
-/* Indent parameters passed from the VM to avoid macro dependencies. */
 typedef struct {
   const uint8_t *indent_tpl;
   int16_t        indent_depth;
@@ -39,9 +79,7 @@ typedef struct {
   uint8_t        indent_prefix_len;
 } VjSwissIndent;
 
-/* Write indent: '\n' + prefix + indent for current depth. No-op if step==0. */
-static inline uint8_t *
-vj_swiss_write_indent(uint8_t *buf, const VjSwissIndent *ind) {
+static inline uint8_t * vj_swiss_write_indent(uint8_t *buf, const VjSwissIndent *ind) {
   if (ind->indent_step) {
     int n = 1 + ind->indent_prefix_len + ind->indent_depth * ind->indent_step;
     __builtin_memcpy(buf, ind->indent_tpl, n);
@@ -50,22 +88,16 @@ vj_swiss_write_indent(uint8_t *buf, const VjSwissIndent *ind) {
   return buf;
 }
 
-/* Max indent bytes for buffer check. Returns 0 if step==0. */
-static inline int
-vj_swiss_indent_pad(const VjSwissIndent *ind) {
+static inline int vj_swiss_indent_pad(const VjSwissIndent *ind) {
   return ind->indent_step
            ? (1 + ind->indent_prefix_len + ind->indent_depth * ind->indent_step)
            : 0;
 }
 
-/*
- * vj_swiss_encode_one — encode a single map entry (key + ":" + value).
- * Returns advanced buf pointer. Caller must have checked buffer space.
- */
 static inline uint8_t *
 vj_swiss_encode_one(uint8_t *buf, const GoString *k, const GoString *v,
-                    int *entry_first, uint32_t flags,
-                    const VjSwissIndent *ind) {
+                    int *entry_first, uint32_t flags, const VjSwissIndent *ind)
+{
   if (!*entry_first) {
     *buf++ = ',';
     buf = vj_swiss_write_indent(buf, ind);
@@ -86,41 +118,22 @@ vj_swiss_encode_one(uint8_t *buf, const GoString *k, const GoString *v,
   return buf;
 }
 
-/*
- * vj_swiss_map_iterate — iterate a Swiss Map and encode all entries as JSON.
- *
- * On first call, frame->map must be initialized (map_ptr, remaining, indices=0).
- * On resume after BUF_FULL, the saved indices in frame->map are used to continue.
- *
- * Parameters:
- *   buf, bend     — output buffer range
- *   frame         — VJ_FRAME_MAP stack frame (iteration state)
- *   entry_first   — whether the next entry is the first in the object
- *   flags         — VjEncFlags bitmask
- *   ind           — indent parameters
- *
- * Returns:
- *   .buf    — advanced buffer pointer
- *   .action — VJ_SWISS_DONE or VJ_SWISS_BUF_FULL
- *
- * On VJ_SWISS_BUF_FULL, frame->map.{dir_idx, group_idx, slot_idx, remaining}
- * are saved so the caller can resume after buffer growth.
- */
 __attribute__((noinline)) static VjSwissMapResult
 vj_swiss_map_iterate(uint8_t *buf, const uint8_t *bend,
-                     VjStackFrame *frame, int entry_first,
+                     VjStackFrame *frame,
+                     const GoSwissMap *m, int32_t remaining,
+                     int32_t di, int32_t gi, int32_t si,
+                     int entry_first,
                      uint32_t flags, const VjSwissIndent *ind) {
-  const GoSwissMap *m = (const GoSwissMap *)frame->map.map_ptr;
   int ipad = vj_swiss_indent_pad(ind);
   int key_space = ind->indent_step ? 1 : 0;
 
   if (m->dir_len == 0) {
-    /* === Small map: single inline group === */
+    /* Small map: single inline group */
     const uint8_t *group = (const uint8_t *)m->dir_ptr;
     uint64_t ctrls = *(const uint64_t *)group;
-    int si = frame->map.slot_idx;
 
-    while (frame->map.remaining > 0 && si < SWISS_GROUP_SLOTS) {
+    while (remaining > 0 && si < SWISS_GROUP_SLOTS) {
       uint8_t ctrl = (uint8_t)(ctrls >> (si * 8));
       if (ctrl & SWISS_CTRL_EMPTY) {
         si++;
@@ -131,29 +144,30 @@ vj_swiss_map_iterate(uint8_t *buf, const uint8_t *bend,
 
       int64_t need = 1 + ipad + key_space + 2 + (k->len * 6) + 1 + 2 + (v->len * 6);
       if (__builtin_expect(buf + need > bend, 0)) {
+        frame->map.map_ptr = m;
+        frame->map.remaining = remaining;
         frame->map.slot_idx = si;
+        frame->map.dir_idx = 0;
+        frame->map.group_idx = 0;
+        frame->frame_type = VJ_FRAME_MAP;
         return (VjSwissMapResult){buf, VJ_SWISS_BUF_FULL};
       }
 
       buf = vj_swiss_encode_one(buf, k, v, &entry_first, flags, ind);
-      frame->map.remaining--;
+      remaining--;
       si++;
     }
   } else {
-    /* === Large map: directory → tables → groups → slots === */
-    int32_t di = frame->map.dir_idx;
-    int32_t gi = frame->map.group_idx;
-    int32_t si = frame->map.slot_idx;
-
-    while (di < (int32_t)m->dir_len && frame->map.remaining > 0) {
+    /* Large map: directory → tables → groups → slots */
+    while (di < (int32_t)m->dir_len && remaining > 0) {
       const GoSwissTable *tab = ((const GoSwissTable **)m->dir_ptr)[di];
       uint64_t num_groups = tab->groups_mask + 1;
 
-      while ((uint64_t)gi < num_groups && frame->map.remaining > 0) {
+      while ((uint64_t)gi < num_groups && remaining > 0) {
         const uint8_t *group = (const uint8_t *)tab->groups_data + (uint64_t)gi * SWISS_GROUP_SIZE;
         uint64_t ctrls = *(const uint64_t *)group;
 
-        while (si < SWISS_GROUP_SLOTS && frame->map.remaining > 0) {
+        while (si < SWISS_GROUP_SLOTS && remaining > 0) {
           uint8_t ctrl = (uint8_t)(ctrls >> (si * 8));
           if (ctrl & SWISS_CTRL_EMPTY) {
             si++;
@@ -164,21 +178,23 @@ vj_swiss_map_iterate(uint8_t *buf, const uint8_t *bend,
 
           int64_t need = 1 + ipad + key_space + 2 + (k->len * 6) + 1 + 2 + (v->len * 6);
           if (__builtin_expect(buf + need > bend, 0)) {
+            frame->map.map_ptr = m;
+            frame->map.remaining = remaining;
             frame->map.dir_idx = di;
             frame->map.group_idx = gi;
             frame->map.slot_idx = si;
+            frame->frame_type = VJ_FRAME_MAP;
             return (VjSwissMapResult){buf, VJ_SWISS_BUF_FULL};
           }
 
           buf = vj_swiss_encode_one(buf, k, v, &entry_first, flags, ind);
-          frame->map.remaining--;
+          remaining--;
           si++;
         }
         si = 0;
         gi++;
       }
       gi = 0;
-      /* Skip duplicate directory entries pointing to same table */
       {
         int skip = 1 << (m->global_depth - tab->local_depth);
         di += skip;
