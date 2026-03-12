@@ -724,6 +724,114 @@ func TestScanStringBytes_Escape_Tail(t *testing.T) {
 	}
 }
 
+// ---------- escaped key matching (bitmap path, ≤8 fields) ----------
+
+func TestEscapedKey_BitmapExactMatch(t *testing.T) {
+	// ≤8 fields → bitmap lookup; key uses \uXXXX that decodes to exact match
+	type S struct {
+		Name  string `json:"name"`
+		Value int    `json:"value"`
+	}
+	var s S
+	// "n\u0061me" → "name"
+	input := []byte(`{"\u006eame":"hello","value":42}`)
+	err := Unmarshal(input, &s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.Name != "hello" {
+		t.Errorf("Name: got %q, want %q", s.Name, "hello")
+	}
+	if s.Value != 42 {
+		t.Errorf("Value: got %d, want 42", s.Value)
+	}
+}
+
+func TestEscapedKey_BitmapCaseInsensitive(t *testing.T) {
+	// ≤8 fields → bitmap; escaped key decodes to case-different match
+	type S struct {
+		Name  string `json:"name"`
+		Value int    `json:"value"`
+	}
+	var s S
+	// "N\u0061me" → "Name" should case-insensitive match "name"
+	input := []byte(`{"N\u0061me":"hello","value":42}`)
+	err := Unmarshal(input, &s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.Name != "hello" {
+		t.Errorf("Name: got %q, want %q", s.Name, "hello")
+	}
+}
+
+func TestEscapedKey_BitmapBackslashEscapes(t *testing.T) {
+	// ≤8 fields → bitmap; key contains \t \n \\ etc.
+	// These keys won't match any field, but must parse without error.
+	type S struct {
+		A string `json:"a"`
+	}
+	var s S
+	input := []byte(`{"hello\tworld":"skip","a":"ok"}`)
+	err := Unmarshal(input, &s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.A != "ok" {
+		t.Errorf("A: got %q, want %q", s.A, "ok")
+	}
+}
+
+func TestEscapedKey_NonBitmapExactMatch(t *testing.T) {
+	// >8 fields → non-bitmap (perfect hash / map); escaped key exact match
+	type S struct {
+		F1 string `json:"f1"`
+		F2 string `json:"f2"`
+		F3 string `json:"f3"`
+		F4 string `json:"f4"`
+		F5 string `json:"f5"`
+		F6 string `json:"f6"`
+		F7 string `json:"f7"`
+		F8 string `json:"f8"`
+		F9 string `json:"f9"`
+	}
+	var s S
+	// "\u00669" → "f9"
+	input := []byte(`{"\u00669":"match"}`)
+	err := Unmarshal(input, &s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.F9 != "match" {
+		t.Errorf("F9: got %q, want %q", s.F9, "match")
+	}
+}
+
+func TestEscapedKey_NonBitmapCaseInsensitive(t *testing.T) {
+	// >8 fields → non-bitmap; escaped key case-insensitive match
+	type S struct {
+		F1 string `json:"f1"`
+		F2 string `json:"f2"`
+		F3 string `json:"f3"`
+		F4 string `json:"f4"`
+		F5 string `json:"f5"`
+		F6 string `json:"f6"`
+		F7 string `json:"f7"`
+		F8 string `json:"f8"`
+		F9 string `json:"f9"`
+	}
+	var s S
+	// "\u00469" → "F9" should case-insensitive match "f9"
+	input := []byte(`{"\u00469":"match"}`)
+	err := Unmarshal(input, &s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.F9 != "match" {
+		t.Errorf("F9: got %q, want %q", s.F9, "match")
+	}
+}
+
 func TestScanStringBytes_ControlChar_Tail(t *testing.T) {
 	// scanStringKey: control char in tail loop
 	type S struct {

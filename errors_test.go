@@ -265,12 +265,44 @@ func TestInvalidUnmarshalError_Messages(t *testing.T) {
 }
 
 func TestUnsupportedTypeError_Message(t *testing.T) {
-	// We don't have a direct way to trigger this from public API easily,
-	// but we can test the error type directly.
-	e := &UnsupportedTypeError{Type: nil}
-	// Type is nil, so this will panic; test with a real type instead.
-	// Just verify the struct implements error.
-	var _ error = e
+	// Marshal a struct containing an unsupported type (chan).
+	// Should return UnsupportedTypeError, not panic.
+	type S struct {
+		Ch chan int
+	}
+	val := S{Ch: make(chan int)}
+	_, err := Marshal(&val)
+	if err == nil {
+		t.Fatal("expected error for unsupported type chan, got nil")
+	}
+	var ute *UnsupportedTypeError
+	if !errors.As(err, &ute) {
+		t.Fatalf("expected *UnsupportedTypeError, got %T: %v", err, err)
+	}
+	if !strings.Contains(ute.Error(), "chan int") {
+		t.Errorf("error message should mention 'chan int', got: %s", ute.Error())
+	}
+
+	// Also verify errors.As bridges to encoding/json.UnsupportedTypeError.
+	var jute *json.UnsupportedTypeError
+	if !errors.As(err, &jute) {
+		t.Fatalf("expected bridging to *json.UnsupportedTypeError, got %T", err)
+	}
+}
+
+func TestUnsupportedTypeError_Func(t *testing.T) {
+	type S struct {
+		Fn func()
+	}
+	val := S{Fn: func() {}}
+	_, err := Marshal(&val)
+	if err == nil {
+		t.Fatal("expected error for unsupported type func, got nil")
+	}
+	var ute *UnsupportedTypeError
+	if !errors.As(err, &ute) {
+		t.Fatalf("expected *UnsupportedTypeError, got %T: %v", err, err)
+	}
 }
 
 func TestMarshalerError_Unwrap(t *testing.T) {

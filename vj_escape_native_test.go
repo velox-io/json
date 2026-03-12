@@ -375,3 +375,73 @@ func containsBytes(haystack, needle []byte) bool {
 	}
 	return false
 }
+
+// TestLineTerminatorTrailingBoundary verifies that U+2028/U+2029 at the very end
+// of a string is correctly escaped.
+func TestLineTerminatorTrailingBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		// Pure line terminator only
+		{"only_2028", "\u2028"},
+		{"only_2029", "\u2029"},
+
+		// ASCII prefix + trailing line terminator (scalar tail path)
+		{"ascii3_trailing_2028", "abc\u2028"},
+		{"ascii3_trailing_2029", "xyz\u2029"},
+
+		// Non-ASCII prefix + trailing line terminator
+		{"chinese_trailing_2028", "中\u2028"},
+		{"chinese_trailing_2029", "日\u2029"},
+
+		// Exactly 16 bytes of ASCII before trailing U+2028 (SIMD processes 16, tail=3)
+		{"simd16_trailing_2028", "0123456789abcdef\u2028"},
+		{"simd16_trailing_2029", "0123456789abcdef\u2029"},
+
+		// 15 bytes ASCII + U+2028 = 18 bytes total (SIMD=16, tail=2+3=5, but U+2028 at byte 15)
+		{"simd15_trailing_2028", "0123456789abcde\u2028"},
+
+		// 13 bytes ASCII + U+2028 = 16 bytes (fits in one SIMD load, 0xE2 at pos 13)
+		{"simd13_trailing_2028", "0123456789abc\u2028"},
+
+		// Edge case: two consecutive line terminators at end
+		{"trailing_both", "test\u2028\u2029"},
+
+		// Long string ending with line terminator (multiple SIMD iterations)
+		{"long_trailing_2028", longString('a', 100) + "\u2028"},
+		{"long_trailing_2029", longString('b', 100) + "\u2029"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			type S struct {
+				V string `json:"v"`
+			}
+
+			// Test with WithEscapeLineTerms (line terms escaped, HTML/UTF8 passthrough)
+			got, err := Marshal(&S{V: tc.input}, WithEscapeLineTerms())
+			if err != nil {
+				t.Fatalf("Marshal error: %v", err)
+			}
+
+			// Verify: output must NOT contain raw U+2028 (E2 80 A8) or U+2029 (E2 80 A9)
+			if containsBytes(got, []byte{0xE2, 0x80, 0xA8}) {
+				t.Errorf("U+2028 not escaped (raw bytes found):\n  input: %q\n  got:   %s", tc.input, got)
+			}
+			if containsBytes(got, []byte{0xE2, 0x80, 0xA9}) {
+				t.Errorf("U+2029 not escaped (raw bytes found):\n  input: %q\n  got:   %s", tc.input, got)
+			}
+
+			// Verify: output must contain the escaped form \u2028 or \u2029
+			has2028 := containsBytes([]byte(tc.input), []byte{0xE2, 0x80, 0xA8})
+			has2029 := containsBytes([]byte(tc.input), []byte{0xE2, 0x80, 0xA9})
+			if has2028 && !containsBytes(got, []byte(`\u2028`)) {
+				t.Errorf("U+2028 escape sequence missing:\n  input: %q\n  got:   %s", tc.input, got)
+			}
+			if has2029 && !containsBytes(got, []byte(`\u2029`)) {
+				t.Errorf("U+2029 escape sequence missing:\n  input: %q\n  got:   %s", tc.input, got)
+			}
+		})
+	}
+}

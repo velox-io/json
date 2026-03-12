@@ -74,14 +74,25 @@ endif
 # Default to host platform
 TARGET_OS ?= $(_HOST_OS)
 TARGET_ARCH ?= $(_HOST_ARCH)
+# Set NO_PRELINK=1 to disable prelink path in scripts/gen-natives.sh
+GEN_NATIVE_PRELINK_FLAG := $(if $(NO_PRELINK),--no-prelink,)
+
 gen:
-	@bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) $(if $(ASM),--asm) \
+	@bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
 		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
-# Generate native artifacts with debug trace support.
+# Generate native artifacts optimized using AutoFDO sample profile data.
+# Requires local/pgo-data/merged.profdata (generated via perf + create_llvm_prof).
+gen-with-pgo:
+	@bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) --pgo-use \
+		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
+
+# Generate native artifacts for debugging:
+# - enable encvm trace (VJ_ENCVM_DEBUG)
+# - keep richer syso symbols for native debugging
 # Use with: go test -tags vjdebug -run TestFoo -v
 gen-debug:
-	@EXTRA_CFLAGS="-DVJ_ENCVM_DEBUG" bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) $(if $(ASM),--asm) \
+	@EXTRA_CFLAGS="-DVJ_ENCVM_DEBUG" DEBUG_SYMBOLS=1 bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
 		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
 # Generate benchmark visualization SVG
@@ -98,4 +109,4 @@ benchviz:
 	(cd benchmark && go run ./benchviz/ -title '$(BENCH_TITLE)' -format html < '../$(BENCH_OUTPUT)' > '../$(basename $(BENCH_OUTPUT)).html');
 	(cd benchmark && go run ./benchviz/ -title '$(BENCH_TITLE)' -format svg < '../$(BENCH_OUTPUT)' > '../$(basename $(BENCH_OUTPUT)).svg');
 
-.PHONY: lint lint-ci fmt test test-coverage bench bench-baseline bench-check bench-check-threshold clean fuzz fuzz-parallel fuzz-concurrent gen gen-debug benchviz
+.PHONY: lint lint-ci fmt test test-coverage bench bench-baseline bench-check bench-check-threshold clean fuzz fuzz-parallel fuzz-concurrent gen gen-debug gen-pgo-use benchviz

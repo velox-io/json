@@ -105,12 +105,12 @@ type Marshaler struct {
 	// of what fields follow. Do not reorder.
 	vmCtx VjExecCtx // reusable C VM context (avoids per-call stack zeroing)
 
-	buf    []byte
-	indent string
-	prefix string
-	depth  int
-	flags  uint32 // escapeFlags (bits 0-2) | vjEncFloatExpAuto (bit 3)
-	inVM   bool   // true while execVM is active; prevents re-entrant VM calls
+	buf         []byte
+	indent      string
+	prefix      string
+	indentDepth int
+	flags       uint32 // escapeFlags (bits 0-2) | vjEncFloatExpAuto (bit 3)
+	inVM        bool   // true while execVM is active; prevents re-entrant VM calls
 
 	// indentTpl holds the precomputed "\n" + prefix + indent×MAX_DEPTH template
 	// for the C VM indent path. Only used when isSimpleIndent returns true.
@@ -147,7 +147,7 @@ func getMarshaler() *Marshaler {
 	m.buf = m.buf[:0]
 	m.indent = ""
 	m.prefix = ""
-	m.depth = 0
+	m.indentDepth = 0
 	m.flags = 0
 	m.flushFn = nil
 	// Zero indent fields on vmCtx so execVM's compact path can skip them.
@@ -169,7 +169,7 @@ func putMarshaler(m *Marshaler) {
 		m.indentTpl = nil
 	}
 	m.flushFn = nil      // clear closure reference before pooling
-	marshalerPool.Put(m) // always recycle the struct (vmCtx is 1448 bytes)
+	marshalerPool.Put(m) // always recycle the struct (vmCtx is 2152 bytes)
 }
 
 // flush writes all buffered data through flushFn and resets the buffer.
@@ -553,7 +553,7 @@ func Marshal[T any](v *T, opts ...MarshalOption) ([]byte, error) {
 		o(m)
 	}
 
-	ti := GetCodec(reflect.TypeFor[T]())
+	ti := getCodec(reflect.TypeFor[T]())
 
 	if ti.HintBytes > cap(m.buf) {
 		m.buf = make([]byte, 0, ti.HintBytes)
@@ -577,7 +577,7 @@ func MarshalIndent[T any](v *T, prefix, indent string, opts ...MarshalOption) ([
 	m.prefix = prefix
 	m.indent = indent
 
-	ti := GetCodec(reflect.TypeFor[T]())
+	ti := getCodec(reflect.TypeFor[T]())
 	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
 		putMarshaler(m)
 		return nil, err
@@ -595,7 +595,7 @@ func AppendMarshal[T any](dst []byte, v *T, opts ...MarshalOption) ([]byte, erro
 
 	m.buf = dst
 
-	ti := GetCodec(reflect.TypeFor[T]())
+	ti := getCodec(reflect.TypeFor[T]())
 	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
 		m.buf = nil // detach caller's buffer before pooling
 		putMarshaler(m)
@@ -620,7 +620,7 @@ func (m *Marshaler) finalize() []byte {
 func (m *Marshaler) appendNewlineIndent() {
 	m.buf = append(m.buf, '\n')
 	m.buf = append(m.buf, m.prefix...)
-	for range m.depth {
+	for range m.indentDepth {
 		m.buf = append(m.buf, m.indent...)
 	}
 }
@@ -964,7 +964,7 @@ func (m *Marshaler) encodeStructGo(dec *StructCodec, base unsafe.Pointer) error 
 func (m *Marshaler) encodeStructIndent(dec *StructCodec, base unsafe.Pointer) error {
 	m.buf = append(m.buf, '{')
 	first := true
-	m.depth++
+	m.indentDepth++
 
 	for i := range dec.Fields {
 		fi := &dec.Fields[i]
@@ -991,7 +991,7 @@ func (m *Marshaler) encodeStructIndent(dec *StructCodec, base unsafe.Pointer) er
 		}
 	}
 
-	m.depth--
+	m.indentDepth--
 	if !first {
 		m.appendNewlineIndent()
 	}
@@ -1035,7 +1035,7 @@ func (m *Marshaler) encodeSliceGo(dec *SliceCodec, ptr unsafe.Pointer) error {
 	elemSize := dec.ElemSize
 
 	if m.indent != "" {
-		m.depth++
+		m.indentDepth++
 	}
 
 	for i := range sh.Len {
@@ -1053,7 +1053,7 @@ func (m *Marshaler) encodeSliceGo(dec *SliceCodec, ptr unsafe.Pointer) error {
 	}
 
 	if m.indent != "" {
-		m.depth--
+		m.indentDepth--
 		m.appendNewlineIndent()
 	}
 
@@ -1098,7 +1098,7 @@ func (m *Marshaler) encodeArrayGo(dec *ArrayCodec, ptr unsafe.Pointer) error {
 	elemSize := dec.ElemSize
 
 	if m.indent != "" {
-		m.depth++
+		m.indentDepth++
 	}
 
 	for i := range dec.ArrayLen {
@@ -1116,7 +1116,7 @@ func (m *Marshaler) encodeArrayGo(dec *ArrayCodec, ptr unsafe.Pointer) error {
 	}
 
 	if m.indent != "" {
-		m.depth--
+		m.indentDepth--
 		m.appendNewlineIndent()
 	}
 
@@ -1146,7 +1146,7 @@ func (m *Marshaler) encodePointer(dec *PointerCodec, ptr unsafe.Pointer) error {
 }
 
 func (m *Marshaler) encodeMap(dec *MapCodec, ptr unsafe.Pointer) error {
-	if dec.ValIsString {
+	if dec.MapKind == MapVariantStrStr {
 		return m.encodeMapStringString(ptr)
 	}
 	return m.encodeMapGeneric(dec, ptr)
@@ -1167,7 +1167,7 @@ func (m *Marshaler) encodeMapStringString(ptr unsafe.Pointer) error {
 	first := true
 
 	if m.indent != "" {
-		m.depth++
+		m.indentDepth++
 	}
 
 	for k, v := range mp {
@@ -1190,7 +1190,7 @@ func (m *Marshaler) encodeMapStringString(ptr unsafe.Pointer) error {
 	}
 
 	if m.indent != "" {
-		m.depth--
+		m.indentDepth--
 		m.appendNewlineIndent()
 	}
 
@@ -1266,7 +1266,7 @@ func (m *Marshaler) encodeMapGeneric(dec *MapCodec, ptr unsafe.Pointer) error {
 	first := true
 
 	if m.indent != "" {
-		m.depth++
+		m.indentDepth++
 	}
 
 	var it mapsIter
@@ -1301,7 +1301,7 @@ func (m *Marshaler) encodeMapGeneric(dec *MapCodec, ptr unsafe.Pointer) error {
 	}
 
 	if m.indent != "" {
-		m.depth--
+		m.indentDepth--
 		m.appendNewlineIndent()
 	}
 
@@ -1409,7 +1409,7 @@ func (m *Marshaler) encodeAnySlice(arr []any) error {
 	m.buf = append(m.buf, '[')
 
 	if m.indent != "" {
-		m.depth++
+		m.indentDepth++
 	}
 
 	for i, v := range arr {
@@ -1453,7 +1453,7 @@ func (m *Marshaler) encodeAnySlice(arr []any) error {
 	}
 
 	if m.indent != "" {
-		m.depth--
+		m.indentDepth--
 		m.appendNewlineIndent()
 	}
 
@@ -1477,7 +1477,7 @@ func (m *Marshaler) encodeAnyMap(mp map[string]any) error {
 	first := true
 
 	if m.indent != "" {
-		m.depth++
+		m.indentDepth++
 	}
 
 	for k, v := range mp {
@@ -1531,7 +1531,7 @@ func (m *Marshaler) encodeAnyMap(mp map[string]any) error {
 	}
 
 	if m.indent != "" {
-		m.depth--
+		m.indentDepth--
 		m.appendNewlineIndent()
 	}
 
@@ -1555,7 +1555,7 @@ func (m *Marshaler) encodeAnyReflect(v any) error {
 		rv = rv.Elem()
 	}
 
-	ti := GetCodec(rv.Type())
+	ti := getCodec(rv.Type())
 
 	tmp := reflect.New(rv.Type())
 	tmp.Elem().Set(rv)

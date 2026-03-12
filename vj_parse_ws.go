@@ -13,31 +13,39 @@ func init() {
 	wsLUT['\r'] = 1
 }
 
+// sliceByteAt returns src[i] without bounds check.
+func sliceByteAt(src []byte, i int) byte {
+	return *(*byte)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(src)), i))
+}
+
 // skipWS skips JSON whitespace (SP, TAB, LF, CR) starting at idx.
 func skipWS(src []byte, idx int) int {
-	for idx < len(src) && wsLUT[src[idx]] != 0 {
+	for idx < len(src) && wsLUT[sliceByteAt(src, idx)] != 0 {
 		idx++
 	}
 	return idx
 }
 
 // skipWSLong skips JSON whitespace with a fast path for long space runs.
+//
+//go:nosplit
 func skipWSLong(src []byte, idx int) int {
 	n := len(src)
 	// Fast exit for compact JSON.
-	if idx >= n || wsLUT[src[idx]] == 0 {
+	// if idx >= n || wsLUT[src[idx]] == 0
+	if idx >= n || wsLUT[sliceByteAt(src, idx)] == 0 {
 		return idx
 	}
 	// Handle leading control whitespace.
-	if src[idx] <= '\r' {
+	if sliceByteAt(src, idx) <= '\r' {
 		idx++
-		if idx >= n || wsLUT[src[idx]] == 0 {
+		if idx >= n || wsLUT[sliceByteAt(src, idx)] == 0 {
 			return idx
 		}
 		// CRLF support.
-		if src[idx] == '\n' {
+		if sliceByteAt(src, idx) == '\n' {
 			idx++
-			if idx >= n || wsLUT[src[idx]] == 0 {
+			if idx >= n || wsLUT[sliceByteAt(src, idx)] == 0 {
 				return idx
 			}
 		}
@@ -45,14 +53,14 @@ func skipWSLong(src []byte, idx int) int {
 	// SWAR scan for 8-byte all-space chunks.
 	const allSpaces = lo64 * 0x20 // 0x2020202020202020
 	for idx+8 <= n {
-		w := *(*uint64)(unsafe.Pointer(&src[idx]))
+		w := *(*uint64)(unsafe.Add(unsafe.Pointer(&src[0]), idx))
 		if w != allSpaces {
 			break
 		}
 		idx += 8
 	}
 	// Tail scan for remaining whitespace.
-	for idx < n && wsLUT[src[idx]] != 0 {
+	for idx < n && wsLUT[sliceByteAt(src, idx)] != 0 {
 		idx++
 	}
 	return idx

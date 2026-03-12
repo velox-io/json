@@ -194,10 +194,10 @@ func TestEscapeBehavior_Summary(t *testing.T) {
 	}
 
 	type result struct {
-		name   string
-		html   escapeResult
-		lineT  escapeResult
-		utf8   escapeResult
+		name  string
+		html  escapeResult
+		lineT escapeResult
+		utf8  escapeResult
 	}
 
 	// encoding/json

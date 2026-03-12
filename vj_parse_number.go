@@ -16,7 +16,7 @@ func parseInt64(src []byte, start, end int) int64 {
 	}
 	neg := false
 	i := start
-	if src[i] == '-' {
+	if sliceByteAt(src, i) == '-' {
 		neg = true
 		i++
 	}
@@ -52,7 +52,7 @@ func parseUint64(src []byte, start, end int) uint64 {
 		}
 	}
 	for ; i < end; i++ {
-		n = n*10 + uint64(src[i]-'0')
+		n = n*10 + uint64(sliceByteAt(src, i)-'0')
 	}
 	return n
 }
@@ -130,20 +130,20 @@ func scanInt64SinglePass(src []byte, idx int) (end int, value int64, isFloat boo
 	neg := false
 
 	// Optional leading '-'
-	if i < n && src[i] == '-' {
+	if i < n && sliceByteAt(src, i) == '-' {
 		neg = true
 		i++
 	}
 
-	if i >= n || src[i] < '0' || src[i] > '9' {
+	if i >= n || sliceByteAt(src, i) < '0' || sliceByteAt(src, i) > '9' {
 		return i, 0, false, false
 	}
 
 	// Leading zero: must not be followed by another digit
-	if src[i] == '0' {
+	if sliceByteAt(src, i) == '0' {
 		i++
 		if i < n {
-			c := src[i]
+			c := sliceByteAt(src, i)
 			if c >= '0' && c <= '9' {
 				return i, 0, false, false // leading zeros
 			}
@@ -155,14 +155,14 @@ func scanInt64SinglePass(src []byte, idx int) (end int, value int64, isFloat boo
 	}
 
 	var val uint64
-	val = uint64(src[i] - '0')
+	val = uint64(sliceByteAt(src, i) - '0')
 	i++
 
 	// Accumulate up to 18 digits (cannot overflow uint64 with ≤18 digits starting from 1-9)
 	fastLimit := min(i+17, n)
 
 	for i < fastLimit {
-		c := src[i]
+		c := sliceByteAt(src, i)
 		if c < '0' || c > '9' {
 			goto done
 		}
@@ -171,26 +171,32 @@ func scanInt64SinglePass(src []byte, idx int) (end int, value int64, isFloat boo
 	}
 
 	// 19th digit
-	if i < n && src[i] >= '0' && src[i] <= '9' {
-		d := uint64(src[i] - '0')
+	if i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
+		d := uint64(sliceByteAt(src, i) - '0')
 		val = val*10 + d
 		i++
 
 		// 20+ digits: overflow
-		if i < n && src[i] >= '0' && src[i] <= '9' {
-			for i < n && src[i] >= '0' && src[i] <= '9' {
+		if i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
+			for i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
 				i++
 			}
-			if i < n && (src[i] == '.' || src[i] == 'e' || src[i] == 'E') {
-				return i, 0, true, true
+			if i < n {
+				c := sliceByteAt(src, i)
+				if c == '.' || c == 'e' || c == 'E' {
+					return i, 0, true, true
+				}
 			}
 			return i, 0, false, false
 		}
 	}
 
 done:
-	if i < n && (src[i] == '.' || src[i] == 'e' || src[i] == 'E') {
-		return i, 0, true, true
+	if i < n {
+		c := sliceByteAt(src, i)
+		if c == '.' || c == 'e' || c == 'E' {
+			return i, 0, true, true
+		}
 	}
 
 	// Convert to int64 with sign
@@ -214,29 +220,32 @@ func scanUint64SinglePass(src []byte, idx int) (end int, value uint64, isFloat b
 	n := len(src)
 	i := idx
 
-	if i < n && src[i] == '-' {
+	if i < n && sliceByteAt(src, i) == '-' {
 		// Scan past the number to report correct end position
 		i++
-		for i < n && src[i] >= '0' && src[i] <= '9' {
+		for i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
 			i++
 		}
-		if i < n && src[i] == '.' {
+		if i < n && sliceByteAt(src, i) == '.' {
 			return i, 0, true, true
 		}
-		if i < n && (src[i] == 'e' || src[i] == 'E') {
-			return i, 0, true, true
+		if i < n {
+			c := sliceByteAt(src, i)
+			if c == 'e' || c == 'E' {
+				return i, 0, true, true
+			}
 		}
 		return i, 0, false, false
 	}
 
-	if i >= n || src[i] < '0' || src[i] > '9' {
+	if i >= n || sliceByteAt(src, i) < '0' || sliceByteAt(src, i) > '9' {
 		return i, 0, false, false
 	}
 
-	if src[i] == '0' {
+	if sliceByteAt(src, i) == '0' {
 		i++
 		if i < n {
-			c := src[i]
+			c := sliceByteAt(src, i)
 			if c >= '0' && c <= '9' {
 				return i, 0, false, false
 			}
@@ -248,13 +257,13 @@ func scanUint64SinglePass(src []byte, idx int) (end int, value uint64, isFloat b
 	}
 
 	var val uint64
-	val = uint64(src[i] - '0')
+	val = uint64(sliceByteAt(src, i) - '0')
 	i++
 
 	// Accumulate up to 19 total digits
 	fastLimit := min(i+18, n)
 	for i < fastLimit {
-		c := src[i]
+		c := sliceByteAt(src, i)
 		if c < '0' || c > '9' {
 			goto done
 		}
@@ -263,17 +272,20 @@ func scanUint64SinglePass(src []byte, idx int) (end int, value uint64, isFloat b
 	}
 
 	// 20th digit: check overflow
-	if i < n && src[i] >= '0' && src[i] <= '9' {
-		d := uint64(src[i] - '0')
+	if i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
+		d := uint64(sliceByteAt(src, i) - '0')
 		const cutoff = math.MaxUint64 / 10
 		const lastDigit = math.MaxUint64 % 10
 		if val > cutoff || (val == cutoff && d > lastDigit) {
 			i++
-			for i < n && src[i] >= '0' && src[i] <= '9' {
+			for i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
 				i++
 			}
-			if i < n && (src[i] == '.' || src[i] == 'e' || src[i] == 'E') {
-				return i, 0, true, true
+			if i < n {
+				c := sliceByteAt(src, i)
+				if c == '.' || c == 'e' || c == 'E' {
+					return i, 0, true, true
+				}
 			}
 			return i, 0, false, false
 		}
@@ -281,20 +293,26 @@ func scanUint64SinglePass(src []byte, idx int) (end int, value uint64, isFloat b
 		i++
 
 		// 21+ digits: overflow
-		if i < n && src[i] >= '0' && src[i] <= '9' {
-			for i < n && src[i] >= '0' && src[i] <= '9' {
+		if i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
+			for i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
 				i++
 			}
-			if i < n && (src[i] == '.' || src[i] == 'e' || src[i] == 'E') {
-				return i, 0, true, true
+			if i < n {
+				c := sliceByteAt(src, i)
+				if c == '.' || c == 'e' || c == 'E' {
+					return i, 0, true, true
+				}
 			}
 			return i, 0, false, false
 		}
 	}
 
 done:
-	if i < n && (src[i] == '.' || src[i] == 'e' || src[i] == 'E') {
-		return i, 0, true, true
+	if i < n {
+		c := sliceByteAt(src, i)
+		if c == '.' || c == 'e' || c == 'E' {
+			return i, 0, true, true
+		}
 	}
 	return i, val, false, true
 }
@@ -315,12 +333,12 @@ func scanFloat64Fast(src []byte, idx int) (end int, value float64, usedFast bool
 	neg := false
 
 	// Optional leading '-'
-	if i < n && src[i] == '-' {
+	if i < n && sliceByteAt(src, i) == '-' {
 		neg = true
 		i++
 	}
 
-	if i >= n || src[i] < '0' || src[i] > '9' {
+	if i >= n || sliceByteAt(src, i) < '0' || sliceByteAt(src, i) > '9' {
 		return i, 0, false, newSyntaxError(fmt.Sprintf("vjson: invalid number at offset %d", idx), idx)
 	}
 
@@ -329,9 +347,9 @@ func scanFloat64Fast(src []byte, idx int) (end int, value float64, usedFast bool
 	decimalPos := -1
 
 	// Integer part
-	if src[i] == '0' {
+	if sliceByteAt(src, i) == '0' {
 		i++
-		if i < n && src[i] >= '0' && src[i] <= '9' {
+		if i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
 			return i, 0, false, newSyntaxError(fmt.Sprintf("vjson: leading zeros in number at offset %d", idx), idx)
 		}
 	} else {
@@ -351,9 +369,9 @@ func scanFloat64Fast(src []byte, idx int) (end int, value float64, usedFast bool
 			}
 			i += 8
 		}
-		for i < n && src[i] >= '0' && src[i] <= '9' {
+		for i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
 			if nDigits < 19 {
-				mantissa = mantissa*10 + uint64(src[i]-'0')
+				mantissa = mantissa*10 + uint64(sliceByteAt(src, i)-'0')
 			}
 			nDigits++
 			i++
@@ -361,16 +379,16 @@ func scanFloat64Fast(src []byte, idx int) (end int, value float64, usedFast bool
 	}
 
 	// Fraction
-	if i < n && src[i] == '.' {
+	if i < n && sliceByteAt(src, i) == '.' {
 		i++
-		if i >= n || src[i] < '0' || src[i] > '9' {
+		if i >= n || sliceByteAt(src, i) < '0' || sliceByteAt(src, i) > '9' {
 			return i, 0, false, newSyntaxError(fmt.Sprintf("vjson: invalid fraction in number at offset %d", idx), idx)
 		}
 		decimalPos = nDigits
 
 		if nDigits == 0 {
 			// "0.000123" — skip leading fraction zeros
-			for i < n && src[i] == '0' {
+			for i < n && sliceByteAt(src, i) == '0' {
 				decimalPos++
 				i++
 			}
@@ -392,9 +410,9 @@ func scanFloat64Fast(src []byte, idx int) (end int, value float64, usedFast bool
 			}
 			i += 8
 		}
-		for i < n && src[i] >= '0' && src[i] <= '9' {
+		for i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
 			if nDigits < 19 {
-				mantissa = mantissa*10 + uint64(src[i]-'0')
+				mantissa = mantissa*10 + uint64(sliceByteAt(src, i)-'0')
 			}
 			nDigits++
 			i++
@@ -403,23 +421,23 @@ func scanFloat64Fast(src []byte, idx int) (end int, value float64, usedFast bool
 
 	// Exponent
 	explicitExp := 0
-	if i < n && (src[i] == 'e' || src[i] == 'E') {
+	if i < n && (sliceByteAt(src, i) == 'e' || sliceByteAt(src, i) == 'E') {
 		i++
 		expNeg := false
-		if i < n && (src[i] == '+' || src[i] == '-') {
-			if src[i] == '-' {
+		if i < n && (sliceByteAt(src, i) == '+' || sliceByteAt(src, i) == '-') {
+			if sliceByteAt(src, i) == '-' {
 				expNeg = true
 			}
 			i++
 		}
-		if i >= n || src[i] < '0' || src[i] > '9' {
+		if i >= n || sliceByteAt(src, i) < '0' || sliceByteAt(src, i) > '9' {
 			return i, 0, false, newSyntaxError(fmt.Sprintf("vjson: invalid exponent in number at offset %d", idx), idx)
 		}
-		for i < n && src[i] >= '0' && src[i] <= '9' {
-			explicitExp = explicitExp*10 + int(src[i]-'0')
+		for i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
+			explicitExp = explicitExp*10 + int(sliceByteAt(src, i)-'0')
 			if explicitExp > 400 {
 				i++
-				for i < n && src[i] >= '0' && src[i] <= '9' {
+				for i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
 					i++
 				}
 				return i, 0, false, nil
@@ -540,14 +558,14 @@ func scanArrayInt(src []byte, idx int, arrayLen int, elemSize uintptr, elemKind 
 	n := len(src)
 	idx++
 
-	if idx < n && src[idx] <= ' ' {
+	if idx < n && sliceByteAt(src, idx) <= ' ' {
 		idx = skipWSLong(src, idx)
 	}
 
 	if idx >= n {
 		return idx, errUnexpectedEOF
 	}
-	if src[idx] == ']' {
+	if sliceByteAt(src, idx) == ']' {
 		zeroArrayElements(ptr, elemSize, 0, arrayLen)
 		return idx + 1, nil
 	}
@@ -565,7 +583,7 @@ func scanArrayInt(src []byte, idx int, arrayLen int, elemSize uintptr, elemKind 
 				return numEnd, newUnmarshalTypeError("number", elemType, numEnd)
 			}
 			if !ok {
-				if end == idx || (end == idx+1 && src[idx] == '-') {
+				if end == idx || (end == idx+1 && sliceByteAt(src, idx) == '-') {
 					return end, newSyntaxError(fmt.Sprintf("vjson: invalid number at offset %d", idx), idx)
 				}
 				return end, newUnmarshalTypeError("number "+string(src[idx:end]), elemType, end)
@@ -584,26 +602,26 @@ func scanArrayInt(src []byte, idx int, arrayLen int, elemSize uintptr, elemKind 
 		}
 		count++
 
-		if idx < n && src[idx] <= ' ' {
+		if idx < n && sliceByteAt(src, idx) <= ' ' {
 			idx = skipWS(src, idx)
 		}
 		if idx >= n {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] == ',' {
+		if sliceByteAt(src, idx) == ',' {
 			idx++
-			if idx < n && src[idx] <= ' ' {
+			if idx < n && sliceByteAt(src, idx) <= ' ' {
 				idx = skipWSLong(src, idx)
 			}
 			continue
 		}
-		if src[idx] == ']' {
+		if sliceByteAt(src, idx) == ']' {
 			if count < arrayLen {
 				zeroArrayElements(ptr, elemSize, count, arrayLen)
 			}
 			return idx + 1, nil
 		}
-		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in array, got %q", src[idx]), idx)
+		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in array, got %q", sliceByteAt(src, idx)), idx)
 	}
 }
 
@@ -613,14 +631,14 @@ func scanArrayUint(src []byte, idx int, arrayLen int, elemSize uintptr, elemKind
 	n := len(src)
 	idx++
 
-	if idx < n && src[idx] <= ' ' {
+	if idx < n && sliceByteAt(src, idx) <= ' ' {
 		idx = skipWSLong(src, idx)
 	}
 
 	if idx >= n {
 		return idx, errUnexpectedEOF
 	}
-	if src[idx] == ']' {
+	if sliceByteAt(src, idx) == ']' {
 		zeroArrayElements(ptr, elemSize, 0, arrayLen)
 		return idx + 1, nil
 	}
@@ -657,26 +675,26 @@ func scanArrayUint(src []byte, idx int, arrayLen int, elemSize uintptr, elemKind
 		}
 		count++
 
-		if idx < n && src[idx] <= ' ' {
+		if idx < n && sliceByteAt(src, idx) <= ' ' {
 			idx = skipWS(src, idx)
 		}
 		if idx >= n {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] == ',' {
+		if sliceByteAt(src, idx) == ',' {
 			idx++
-			if idx < n && src[idx] <= ' ' {
+			if idx < n && sliceByteAt(src, idx) <= ' ' {
 				idx = skipWSLong(src, idx)
 			}
 			continue
 		}
-		if src[idx] == ']' {
+		if sliceByteAt(src, idx) == ']' {
 			if count < arrayLen {
 				zeroArrayElements(ptr, elemSize, count, arrayLen)
 			}
 			return idx + 1, nil
 		}
-		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in array, got %q", src[idx]), idx)
+		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in array, got %q", sliceByteAt(src, idx)), idx)
 	}
 }
 
@@ -685,14 +703,14 @@ func scanArrayFloat64(src []byte, idx int, arrayLen int, elemSize uintptr, ptr u
 	n := len(src)
 	idx++
 
-	if idx < n && src[idx] <= ' ' {
+	if idx < n && sliceByteAt(src, idx) <= ' ' {
 		idx = skipWSLong(src, idx)
 	}
 
 	if idx >= n {
 		return idx, errUnexpectedEOF
 	}
-	if src[idx] == ']' {
+	if sliceByteAt(src, idx) == ']' {
 		zeroArrayElements(ptr, elemSize, 0, arrayLen)
 		return idx + 1, nil
 	}
@@ -724,25 +742,25 @@ func scanArrayFloat64(src []byte, idx int, arrayLen int, elemSize uintptr, ptr u
 		}
 		count++
 
-		if idx < n && src[idx] <= ' ' {
+		if idx < n && sliceByteAt(src, idx) <= ' ' {
 			idx = skipWS(src, idx)
 		}
 		if idx >= n {
 			return idx, errUnexpectedEOF
 		}
-		if src[idx] == ',' {
+		if sliceByteAt(src, idx) == ',' {
 			idx++
-			if idx < n && src[idx] <= ' ' {
+			if idx < n && sliceByteAt(src, idx) <= ' ' {
 				idx = skipWSLong(src, idx)
 			}
 			continue
 		}
-		if src[idx] == ']' {
+		if sliceByteAt(src, idx) == ']' {
 			if count < arrayLen {
 				zeroArrayElements(ptr, elemSize, count, arrayLen)
 			}
 			return idx + 1, nil
 		}
-		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in array, got %q", src[idx]), idx)
+		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in array, got %q", sliceByteAt(src, idx)), idx)
 	}
 }

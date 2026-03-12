@@ -42,9 +42,9 @@ func (m *Marshaler) handleInterfaceYield(ctx *VjExecCtx, activeBP *Blueprint) er
 	// saving N-1 C↔Go round-trips.
 	// Only safe when parent frame is a SLICE loop (verified by opSliceBegin check).
 	// SLICE_BEGIN is always 16 bytes (extended instruction), so prevPC = ctx.PC - 16.
-	depth := vmstateGetDepth(ctx.VMState)
-	if depth > 0 && ctx.PC >= 16 {
-		frame := &ctx.Stack[depth-1]
+	stackDepth := vmstateGetStackDepth(ctx.VMState)
+	if stackDepth > 0 && ctx.PC >= 16 {
+		frame := &ctx.Stack[stackDepth-1]
 		prevPC := ctx.PC - 16
 		if int(prevPC) >= 0 &&
 			opHdrAt(activeBP.Ops, prevPC).OpType == opSliceBegin {
@@ -67,8 +67,8 @@ func (m *Marshaler) handleInterfaceYield(ctx *VjExecCtx, activeBP *Blueprint) er
 			ctx.IndentDepth--
 			m.vmWriteIndent(ctx)
 			m.buf = append(m.buf, ']')
-			// Decrement depth in vmstate and clear first flag.
-			ctx.VMState-- // VJ_ST_DEC_DEPTH: depth at bits [0..7]
+			// Decrement stack depth in vmstate and clear first flag.
+			ctx.VMState-- // VJ_ST_DEC_STACK_DEPTH: stack_depth at bits [0..7]
 			ctx.VMState &^= vjStFirstBit
 			ctx.CurBase = frame.RetBase
 			bodyByteLen := prevExt.OperandB

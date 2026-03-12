@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/bits"
 	"reflect"
 	"strconv"
 	"unsafe"
@@ -40,7 +41,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 	if idx >= len(src) {
 		return idx, errUnexpectedEOF
 	}
-	switch src[idx] {
+	switch sliceByteAt(src, idx) {
 	case '"':
 		if ti.Kind == KindSlice {
 			return sc.scanStringToSlice(src, idx, ti, ptr)
@@ -49,7 +50,6 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 	case '{':
 		switch ti.Kind {
 		case KindStruct:
-			//return sc.scanStruct(src, idx, ti.resolveCodec().(*StructCodec), ptr)
 			{
 				dec := ti.resolveCodec().(*StructCodec)
 				base := ptr
@@ -59,89 +59,157 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 				if idx >= len(src) {
 					return idx, errUnexpectedEOF
 				}
-				if src[idx] == '}' {
+				if sliceByteAt(src, idx) == '}' {
 					return idx + 1, nil
 				}
 
 				var firstErr error
 
+				// Pre-extract bitmap lookup outside field loop (zero cost if not bitmap)
+				bm, hasBitmap := dec.Lookup.(*bitmapLookup8)
+
 				for {
 					if idx >= len(src) {
 						return idx, errUnexpectedEOF
 					}
-					if src[idx] != '"' {
+					if sliceByteAt(src, idx) != '"' {
 						return idx, newSyntaxError("vjson: syntax error", idx)
 					}
-					var keyBytes []byte
+
+					var fi *TypeInfo
 					var err error
 
-					//idx, keyBytes, err = sc.scanStringKey(src, idx)
-					//{
-					{
+					if hasBitmap {
+						// Fused scan + bitmap lookup: scan key bytes while
+						// simultaneously ANDing the bitmap to identify the field.
+						// This avoids a second pass over the key bytes.
 						start := idx + 1
-						n := len(src)
-
-						// SWAR scan 8 bytes at a time for '"', '\\', or control chars (< 0x20)
 						pos := start
-						for pos+8 <= n {
-							w := *(*uint64)(unsafe.Pointer(&src[pos]))
-							mq := hasZeroByte(w ^ (lo64 * 0x22)) // '"'
-							mb := hasZeroByte(w ^ (lo64 * 0x5C)) // '\\'
-							mc := (w - lo64*0x20) & ^w & hi64    // < 0x20
-							combined := mq | mb | mc
-							if combined != 0 {
-								off := firstMarkedByteIndex(combined)
-								foundIdx := pos + off
-								c := src[foundIdx]
+						n := len(src)
+						cur := uint8(0xFF)
+						bmMaxKeyLen := int(bm.maxKeyLen)
+						bmBitmap := bm.bitmap
+						bmLenMask := bm.lenMask
+						charIdx := 0
+
+						for pos < n {
+							c := sliceByteAt(src, pos)
+							if c == '"' {
+								// Key ended — finalize bitmap match
+								if cur != 0 && charIdx <= bmMaxKeyLen {
+									cur &= sliceGet(bmLenMask, charIdx)
+									if cur != 0 {
+										fi = &dec.Fields[bits.TrailingZeros8(cur)]
+									}
+								}
+								idx = pos + 1
+								goto bmDone
+							}
+							if c == '\\' {
+								// Escaped key — fall back to full scan + standard lookup
+								var keyBytes []byte
+								idx, keyBytes, err = sc.unescapeSinglePass(src, start, pos)
+								if err != nil {
+									return idx, err
+								}
+								fi = dec.LookupFieldBytes(keyBytes)
+								goto bmDone
+							}
+							if c < 0x20 {
+								return pos, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", pos), pos)
+							}
+							// Bitmap AND — only while charIdx is in range
+							if charIdx < bmMaxKeyLen && cur != 0 {
+								cur &= sliceGet(bmBitmap, charIdx*256+int(c))
+							} else {
+								cur = 0
+							}
+							charIdx++
+							pos++
+						}
+						return pos, errUnexpectedEOF
+					bmDone:
+						// Case-insensitive fallback when bitmap exact match misses
+						if fi == nil && dec.HasMixedCase {
+							k := unsafe.String(unsafe.SliceData(src[start:]), idx-1-start)
+							fields := dec.Fields
+							for i := range fields {
+								if equalFoldASCII(fields[i].JSONName, k) {
+									fi = &fields[i]
+									break
+								}
+							}
+						}
+					} else {
+						// Non-bitmap path: SWAR key scan then polymorphic lookup
+						var keyBytes []byte
+
+						{
+							start := idx + 1
+							n := len(src)
+
+							// SWAR scan 8 bytes at a time for '"', '\\', or control chars (< 0x20)
+							pos := start
+							base := unsafe.Pointer(unsafe.SliceData(src)) //nolint
+							for pos+8 <= n {
+								w := *(*uint64)(unsafe.Add(base, pos))
+								mq := hasZeroByte(w ^ (lo64 * 0x22)) // '"'
+								mb := hasZeroByte(w ^ (lo64 * 0x5C)) // '\\'
+								mc := (w - lo64*0x20) & ^w & hi64    // < 0x20
+								combined := mq | mb | mc
+								if combined != 0 {
+									off := firstMarkedByteIndex(combined)
+									foundIdx := pos + off
+									c := sliceByteAt(src, foundIdx)
+									if c == '"' {
+										idx, keyBytes, err = foundIdx+1, unsafe.Slice((*byte)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(src)), start)), foundIdx-start), nil
+										goto out
+									}
+									if c == '\\' {
+										idx, keyBytes, err = sc.unescapeSinglePass(src, start, foundIdx)
+										goto out
+									}
+									idx, keyBytes, err = foundIdx, nil, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", foundIdx), foundIdx)
+									goto out
+								}
+								pos += 8
+							}
+
+							for pos < n {
+								c := sliceByteAt(src, pos)
 								if c == '"' {
-									idx, keyBytes, err = foundIdx+1, src[start:foundIdx], nil
+									idx, keyBytes, err = pos+1, unsafe.Slice((*byte)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(src)), start)), pos-start), nil
 									goto out
 								}
 								if c == '\\' {
-									idx, keyBytes, err = sc.unescapeSinglePass(src, start, foundIdx)
+									idx, keyBytes, err = sc.unescapeSinglePass(src, start, pos)
 									goto out
 								}
-								idx, keyBytes, err = foundIdx, nil, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", foundIdx), foundIdx)
-								goto out
+								if c < 0x20 {
+									idx, keyBytes, err = pos, nil, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", pos), pos)
+									goto out
+								}
+								pos++
 							}
-							pos += 8
+							idx, keyBytes, err = n, nil, errUnexpectedEOF
+						out:
+						}
+						if err != nil {
+							return idx, err
 						}
 
-						for pos < n {
-							c := src[pos]
-							if c == '"' {
-								idx, keyBytes, err = pos+1, src[start:pos], nil
-								goto out
-							}
-							if c == '\\' {
-								idx, keyBytes, err = sc.unescapeSinglePass(src, start, pos)
-								goto out
-							}
-							if c < 0x20 {
-								idx, keyBytes, err = pos, nil, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", pos), pos)
-								goto out
-							}
-							pos++
-						}
-						idx, keyBytes, err = n, nil, errUnexpectedEOF
-					out:
-					}
-					//}
-					if err != nil {
-						return idx, err
+						fi = dec.LookupFieldBytes(keyBytes)
 					}
 
 					idx = skipWS(src, idx)
 					if idx >= len(src) {
 						return idx, errUnexpectedEOF
 					}
-					if src[idx] != ':' {
+					if sliceByteAt(src, idx) != ':' {
 						return idx, newSyntaxError("vjson: syntax error", idx)
 					}
 					idx++
 					idx = skipWS(src, idx)
-
-					fi := dec.LookupFieldBytes(keyBytes)
 					if fi == nil {
 						// Unknown field — skip value
 						idx, err = skipValue(src, idx)
@@ -152,7 +220,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 						savedIdx := idx
 						fieldPtr := unsafe.Add(base, fi.Offset)
 
-						if idx < len(src) && src[idx] == '"' && fi.Flags == 0 && fi.Kind != KindPointer {
+						if idx < len(src) && sliceByteAt(src, idx) == '"' && fi.Flags == 0 && fi.Kind != KindPointer {
 							//fast path
 							if fi.Kind == KindSlice {
 								idx, err = sc.scanStringToSlice(src, idx, fi, fieldPtr)
@@ -185,20 +253,20 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 					if idx >= len(src) {
 						return idx, errUnexpectedEOF
 					}
-					c := src[idx]
+					c := sliceByteAt(src, idx)
 					if c == ',' {
 						idx++
 						if idx >= len(src) {
 							return idx, errUnexpectedEOF
 						}
-						if src[idx] == '"' {
+						if sliceByteAt(src, idx) == '"' {
 							continue
 						}
 						idx = skipWSLong(src, idx)
 						if idx >= len(src) {
 							return idx, errUnexpectedEOF
 						}
-						if src[idx] != '"' {
+						if sliceByteAt(src, idx) != '"' {
 							return idx, newSyntaxError("vjson: syntax error", idx)
 						}
 						continue
@@ -211,20 +279,20 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 						if idx >= len(src) {
 							return idx, errUnexpectedEOF
 						}
-						c = src[idx]
+						c = sliceByteAt(src, idx)
 						if c == ',' {
 							idx++
 							if idx >= len(src) {
 								return idx, errUnexpectedEOF
 							}
-							if src[idx] == '"' {
+							if sliceByteAt(src, idx) == '"' {
 								continue
 							}
 							idx = skipWSLong(src, idx)
 							if idx >= len(src) {
 								return idx, errUnexpectedEOF
 							}
-							if src[idx] != '"' {
+							if sliceByteAt(src, idx) != '"' {
 								return idx, newSyntaxError("vjson: syntax error", idx)
 							}
 							continue
@@ -233,7 +301,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 							return idx + 1, firstErr
 						}
 					}
-					return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in object, got %q", src[idx]), idx)
+					return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in object, got %q", sliceByteAt(src, idx)), idx)
 				}
 			} //inline scanStruct end
 		case KindMap:
@@ -268,7 +336,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 		if idx+4 > len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32True {
+		if *(*uint32)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(src)), idx)) != litU32True {
 			return idx, invalidLiteralError(idx)
 		}
 		switch ti.Kind {
@@ -284,7 +352,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 		if idx+5 > len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse {
+		if *(*uint32)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(src)), idx+1)) != litU32Alse {
 			return idx, invalidLiteralError(idx)
 		}
 		switch ti.Kind {
@@ -300,7 +368,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 		if idx+4 > len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null {
+		if *(*uint32)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(src)), idx)) != litU32Null {
 			return idx, invalidLiteralError(idx)
 		}
 		switch ti.Kind {
@@ -322,7 +390,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 		return sc.scanNumber(src, idx, ti, ptr)
 		// }
 	default:
-		return idx, newSyntaxError(fmt.Sprintf("vjson: unexpected character %q at offset %d", src[idx], idx), idx)
+		return idx, newSyntaxError(fmt.Sprintf("vjson: unexpected character %q at offset %d", sliceByteAt(src, idx), idx), idx)
 	}
 }
 
@@ -351,8 +419,9 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 
 	// Process 8 bytes at a time looking for '"' or '\\'
 	pos := start
+	base := unsafe.Pointer(&src[0])
 	for pos+8 <= n {
-		w := *(*uint64)(unsafe.Pointer(&src[pos]))
+		w := *(*uint64)(unsafe.Add(base, pos))
 
 		// Check for quote (0x22)
 		mq := hasZeroByte(w ^ (lo64 * 0x22))
@@ -370,7 +439,7 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 		combined := mq | mb | mc
 		off := firstMarkedByteIndex(combined)
 		foundPos := pos + off
-		foundChar := src[foundPos]
+		foundChar := sliceByteAt(src, foundPos)
 
 		if foundChar == '"' {
 			raw := src[start:foundPos]
@@ -398,7 +467,7 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 
 	// Handle remaining bytes (tail)
 	for pos < n {
-		c := src[pos]
+		c := sliceByteAt(src, pos)
 		if c == '"' {
 			raw := src[start:pos]
 			needCopy := sc.copyString || (ti.Flags&tiFlagCopyString != 0)
@@ -434,8 +503,9 @@ func (sc *Parser) scanStringKey(src []byte, idx int) (int, []byte, error) {
 
 	// SWAR scan 8 bytes at a time for '"', '\\', or control chars (< 0x20)
 	pos := start
+	base := unsafe.Pointer(&src[0])
 	for pos+8 <= n {
-		w := *(*uint64)(unsafe.Pointer(&src[pos]))
+		w := *(*uint64)(unsafe.Add(base, pos))
 		mq := hasZeroByte(w ^ (lo64 * 0x22)) // '"'
 		mb := hasZeroByte(w ^ (lo64 * 0x5C)) // '\\'
 		mc := (w - lo64*0x20) & ^w & hi64    // < 0x20
@@ -443,7 +513,7 @@ func (sc *Parser) scanStringKey(src []byte, idx int) (int, []byte, error) {
 		if combined != 0 {
 			off := firstMarkedByteIndex(combined)
 			foundIdx := pos + off
-			c := src[foundIdx]
+			c := sliceByteAt(src, foundIdx)
 			if c == '"' {
 				return foundIdx + 1, src[start:foundIdx], nil
 			}
@@ -456,7 +526,7 @@ func (sc *Parser) scanStringKey(src []byte, idx int) (int, []byte, error) {
 	}
 
 	for pos < n {
-		c := src[pos]
+		c := sliceByteAt(src, pos)
 		if c == '"' {
 			return pos + 1, src[start:pos], nil
 		}
@@ -540,24 +610,24 @@ func scanNumberSpan(src []byte, idx int) (int, bool, error) {
 	n := len(src)
 
 	// Optional leading '-'
-	if i < n && src[i] == '-' {
+	if i < n && sliceByteAt(src, i) == '-' {
 		i++
 	}
 
 	// Integer part (required)
-	if i >= n || src[i] < '0' || src[i] > '9' {
+	if i >= n || sliceByteAt(src, i) < '0' || sliceByteAt(src, i) > '9' {
 		return i, false, newSyntaxError(fmt.Sprintf("vjson: invalid number at offset %d", idx), idx)
 	}
-	if src[i] == '0' {
+	if sliceByteAt(src, i) == '0' {
 		i++
 		// Leading zeros forbidden: "0" must not be followed by another digit
-		if i < n && src[i] >= '0' && src[i] <= '9' {
+		if i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
 			return i, false, newSyntaxError(fmt.Sprintf("vjson: leading zeros in number at offset %d", idx), idx)
 		}
 	} else {
 		// 1-9 followed by any digits
 		i++
-		for i < n && src[i] >= '0' && src[i] <= '9' {
+		for i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
 			i++
 		}
 	}
@@ -565,33 +635,33 @@ func scanNumberSpan(src []byte, idx int) (int, bool, error) {
 	isFloat := false
 
 	// Optional fraction
-	if i < n && src[i] == '.' {
+	if i < n && sliceByteAt(src, i) == '.' {
 		isFloat = true
 		i++
 		// Must have at least one digit after '.'
-		if i >= n || src[i] < '0' || src[i] > '9' {
+		if i >= n || sliceByteAt(src, i) < '0' || sliceByteAt(src, i) > '9' {
 			return i, true, newSyntaxError(fmt.Sprintf("vjson: invalid fraction in number at offset %d", idx), idx)
 		}
 		i++
-		for i < n && src[i] >= '0' && src[i] <= '9' {
+		for i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
 			i++
 		}
 	}
 
 	// Optional exponent
-	if i < n && (src[i] == 'e' || src[i] == 'E') {
+	if i < n && (sliceByteAt(src, i) == 'e' || sliceByteAt(src, i) == 'E') {
 		isFloat = true
 		i++
 		// Optional sign
-		if i < n && (src[i] == '+' || src[i] == '-') {
+		if i < n && (sliceByteAt(src, i) == '+' || sliceByteAt(src, i) == '-') {
 			i++
 		}
 		// Must have at least one digit after exponent marker
-		if i >= n || src[i] < '0' || src[i] > '9' {
+		if i >= n || sliceByteAt(src, i) < '0' || sliceByteAt(src, i) > '9' {
 			return i, true, newSyntaxError(fmt.Sprintf("vjson: invalid exponent in number at offset %d", idx), idx)
 		}
 		i++
-		for i < n && src[i] >= '0' && src[i] <= '9' {
+		for i < n && sliceByteAt(src, i) >= '0' && sliceByteAt(src, i) <= '9' {
 			i++
 		}
 	}
@@ -1452,8 +1522,9 @@ func skipString(src []byte, idx int) (int, error) {
 	limit := n - 8
 
 	// SWAR scan 8 bytes at a time for '"', '\\', or control chars (< 0x20).
+	base := unsafe.Pointer(&src[0])
 	for i <= limit {
-		w := *(*uint64)(unsafe.Pointer(&src[i]))
+		w := *(*uint64)(unsafe.Add(base, i))
 		mq := hasZeroByte(w ^ (lo64 * 0x22)) // '"'
 		mb := hasZeroByte(w ^ (lo64 * 0x5C)) // '\\'
 		mc := (w - lo64*0x20) & ^w & hi64    // < 0x20
@@ -1465,7 +1536,7 @@ func skipString(src []byte, idx int) (int, error) {
 
 		off := firstMarkedByteIndex(combined)
 		pos := i + off
-		c := src[pos]
+		c := sliceByteAt(src, pos)
 		if c == '"' {
 			return pos + 1, nil
 		}
@@ -1483,7 +1554,7 @@ func skipString(src []byte, idx int) (int, error) {
 
 	// Tail: byte-at-a-time
 	for i < n {
-		c := src[i]
+		c := sliceByteAt(src, i)
 		if c == '"' {
 			return i + 1, nil
 		}
@@ -1514,7 +1585,8 @@ outer:
 	for i < n && depth > 0 {
 		// Fast path: SWAR scan 8 bytes at a time for { } [ ] "
 		if i+8 <= n {
-			w := *(*uint64)(unsafe.Pointer(&src[i]))
+			base := unsafe.Pointer(&src[0])
+			w := *(*uint64)(unsafe.Add(base, i))
 
 			// Fold bit 0x20 so '{' and '[' share 0x5B, '}' and ']' share 0x5D.
 			wNoCase := w & ^(lo64 * 0x20)
@@ -1530,7 +1602,7 @@ outer:
 			// Process ALL structural chars in this 8-byte word.
 			for m != 0 {
 				off := firstMarkedByteIndex(m)
-				c := src[i+off]
+				c := sliceByteAt(src, i+off)
 
 				switch c {
 				case '{', '[':
@@ -1545,7 +1617,7 @@ outer:
 					j := i + off + 1
 					for {
 						if j+8 <= n {
-							sw := *(*uint64)(unsafe.Pointer(&src[j]))
+							sw := *(*uint64)(unsafe.Add(base, j))
 							sq := hasZeroByte(sw ^ (lo64 * 0x22)) // '"'
 							sb := hasZeroByte(sw ^ (lo64 * 0x5C)) // '\\'
 							sc := sq | sb
@@ -1554,7 +1626,7 @@ outer:
 								continue
 							}
 							soff := firstMarkedByteIndex(sc)
-							if src[j+soff] == '"' {
+							if sliceByteAt(src, j+soff) == '"' {
 								j += soff + 1
 								break
 							}
@@ -1566,11 +1638,11 @@ outer:
 						if j >= n {
 							return j, errUnexpectedEOF
 						}
-						if src[j] == '"' {
+						if sliceByteAt(src, j) == '"' {
 							j++
 							break
 						}
-						if src[j] == '\\' {
+						if sliceByteAt(src, j) == '\\' {
 							j += 2
 							continue
 						}
@@ -1588,7 +1660,7 @@ outer:
 		}
 
 		// Slow path: byte-by-byte for remaining < 8 bytes
-		c := src[i]
+		c := sliceByteAt(src, i)
 		switch c {
 		case '{', '[':
 			depth++
@@ -1600,11 +1672,11 @@ outer:
 			// Inline string skip for tail bytes
 			i++
 			for i < n {
-				if src[i] == '"' {
+				if sliceByteAt(src, i) == '"' {
 					i++
 					continue outer
 				}
-				if src[i] == '\\' {
+				if sliceByteAt(src, i) == '\\' {
 					i += 2
 					continue
 				}

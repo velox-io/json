@@ -160,7 +160,7 @@ func (d *Decoder) Decode(v any) error {
 	if elemType == d.lastType {
 		ti = d.lastTI
 	} else {
-		ti = GetCodec(elemType)
+		ti = getCodec(elemType)
 		d.lastType = elemType
 		d.lastTI = ti
 	}

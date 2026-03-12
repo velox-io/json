@@ -80,7 +80,7 @@ func lower(insts []IRInst) (ops []byte, fallbacks map[int]*fbInfo, annotations m
 	}
 
 	if len(ops) != totalSize {
-		panic(fmt.Sprintf("vjson: lower: expected %d bytes, got %d", totalSize, len(ops)))
+		panic(fmt.Sprintf("vjson: lower: expected %d bytes, got %d", totalSize, len(ops))) // internal bug: pass1/pass2 size mismatch
 	}
 
 	return ops, fallbacks, annotations

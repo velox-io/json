@@ -3,11 +3,14 @@
 # gen-natives.sh - Compile C sources, generate Go integration files
 #
 # Usage:
-#   ./gen-natives.sh [--zig] [--asm] <sources.sh> [target_os] [target_arch]
+#   ./gen-natives.sh [--zig] [--asm] [--pgo-use] [--no-prelink] <sources.sh> [target_os] [target_arch]
 #
 # Options:
-#   --zig         - Force using zig cc even for native (non-cross) builds.
-#   --asm         - Generate assembly files for debugging.
+#   --zig           - Force using zig cc even for native (non-cross) builds.
+#   --asm           - Generate assembly files for debugging.
+#   --pgo-use       - Enable AutoFDO profile-guided optimization (-fprofile-sample-use).
+#                     Uses profile data from local/pgo-data/merged.profdata
+#   --no-prelink    - Disable prelink path and force relocatable link (ld -r / zig ld.lld -r).
 #
 # Arguments:
 #   sources.sh  - Build configuration file (relative to repo root). Defines:
@@ -18,6 +21,8 @@
 #
 # Environment variables (optional):
 #   OUTPUT_DIR    - Output directory for intermediate .o files. Default: build/native
+#   DEBUG_SYMBOLS - If true/1, keep richer syso symbols for debugging and compile with -g3.
+#   NO_PRELINK    - If true/1, disable prelink path (same as --no-prelink).
 #
 # Output:
 #   - {OUTPUT_DIR}/{basename}[_{mode}]_{os}_{arch}_{isa}.o
@@ -39,10 +44,14 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 FORCE_ZIG=false
 GEN_ASM=false
+PGO_USE=false
+DISABLE_PRELINK=false
 while [[ "${1:-}" == --* ]]; do
     case "$1" in
         --zig) FORCE_ZIG=true; shift ;;
         --asm) GEN_ASM=true; shift ;;
+        --pgo-use) PGO_USE=true; shift ;;
+        --no-prelink) DISABLE_PRELINK=true; shift ;;
         *)     echo "Error: Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -56,7 +65,7 @@ shift || true
 
 if [ -z "$SOURCES_FILE" ]; then
     echo "Error: sources.sh path is required as first argument"
-    echo "Usage: gen-natives.sh [--zig] [--asm] <sources.sh> [target_os] [target_arch]"
+    echo "Usage: gen-natives.sh [--zig] [--asm] [--pgo-use] [--no-prelink] <sources.sh> [target_os] [target_arch]"
     exit 1
 fi
 
@@ -98,6 +107,44 @@ EXTRA_SOURCES=$(_abs_paths "$EXTRA_SOURCES")
 
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/build/native}"
 mkdir -p "$OUTPUT_DIR"
+
+is_true() {
+    case "${1:-}" in
+        1|true|TRUE|yes|YES|on|ON) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+if is_true "${NO_PRELINK:-}"; then
+    DISABLE_PRELINK=true
+fi
+
+DEBUG_SYMBOLS_ENABLED=false
+C_DEBUG_FLAGS="-g0"
+if is_true "${DEBUG_SYMBOLS:-}"; then
+    DEBUG_SYMBOLS_ENABLED=true
+    C_DEBUG_FLAGS="-g3 -fno-omit-frame-pointer"
+    echo "Debug: DEBUG_SYMBOLS enabled (keep richer syso symbols)"
+fi
+
+# ============================================================
+#  AutoFDO (Profile-Guided Optimization) Configuration
+# ============================================================
+
+PGO_DATA_DIR="$REPO_ROOT/local/pgo-data"
+PGO_CFLAGS=""
+
+if [ "$PGO_USE" = true ]; then
+    PROFDATA="$PGO_DATA_DIR/merged.profdata"
+    if [ ! -f "$PROFDATA" ]; then
+        echo "Error: PGO profile not found: $PROFDATA"
+        echo "  Run AutoFDO collection first to generate the profile data."
+        exit 1
+    fi
+    # -fprofile-sample-use: AutoFDO sample-based optimization (no instrumentation needed)
+    PGO_CFLAGS="-fprofile-sample-use=$PROFDATA"
+    echo "PGO: AutoFDO optimization enabled (profile: $PROFDATA)"
+fi
 
 # Derive VJ_LIB_DIR from the source file's directory
 VJ_LIB_DIR=$(dirname "$SOURCE_FILE")
@@ -273,7 +320,10 @@ ALL_MODES="${MODES:-fast}"
 # ============================================================
 
 USE_LTO=true
-if [ "$USE_ZIG" = true ] && [ "$TARGET_OS" = "darwin" ]; then
+if [ "$DISABLE_PRELINK" = true ]; then
+    USE_LTO=false
+    echo "Note: LTO disabled (prelink disabled; relocatable -r path requires native object format)"
+elif [ "$USE_ZIG" = true ] && [ "$TARGET_OS" = "darwin" ]; then
     USE_LTO=false
     echo "Note: LTO disabled (zig cc does not support -flto for darwin targets)"
 fi
@@ -365,7 +415,7 @@ for stdlib_src in $STDLIB_SOURCES; do
         stdlib_base=$(basename "$stdlib_src" .c)
         stdlib_obj="${OUTPUT_DIR}/${stdlib_base}_${TARGET_OS}_${TARGET_ARCH}.o"
         echo "  Compiling $(basename "$stdlib_obj") (stdlib)"
-        $CC -O3 -fPIC -g0 -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset $ARCH_FLAGS \
+        $CC -O3 -fPIC $C_DEBUG_FLAGS -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset $ARCH_FLAGS \
             -I"$(dirname "$stdlib_src")" -I"$REPO_ROOT/native/include" -I"$REPO_ROOT/native" \
             -c "$stdlib_src" -o "$stdlib_obj"
         STDLIB_OBJS="$STDLIB_OBJS $stdlib_obj"
@@ -390,10 +440,12 @@ for extra_src in $EXTRA_SOURCES; do
     if [ -f "$extra_src" ]; then
         extra_base=$(basename "$extra_src" .c)
         extra_obj="${OUTPUT_DIR}/${extra_base}_${TARGET_OS}_${TARGET_ARCH}.o"
-        echo "  Compiling $(basename "$extra_obj") (extra source,${USE_LTO:+ LTO,} min ISA: $MIN_ISA)"
-        $CC -O3 $LTO_FLAG -fPIC -g0 -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS $MIN_ISA_FLAGS \
+        EXTRA_LTO_LABEL=""
+        if [ "$USE_LTO" = true ]; then EXTRA_LTO_LABEL=" LTO,"; fi
+        echo "  Compiling $(basename "$extra_obj") (extra source,${EXTRA_LTO_LABEL} min ISA: $MIN_ISA)"
+        $CC -O3 $LTO_FLAG -fPIC $C_DEBUG_FLAGS -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS $MIN_ISA_FLAGS \
             -I"$(dirname "$extra_src")" -I"$REPO_ROOT/native/include" -I"$REPO_ROOT/native" \
-            ${EXTRA_CFLAGS:-} \
+            ${EXTRA_CFLAGS:-} ${PGO_CFLAGS:-} \
             -c "$extra_src" -o "$extra_obj"
         EXTRA_OBJS="$EXTRA_OBJS $extra_obj"
     else
@@ -425,8 +477,8 @@ for isa in $ISAS; do
 
         # Step 1: Compile to object (with LTO when supported, for cross-TU inlining)
         echo "  Compiling $(basename "$OFILE")"
-        $CC -O3 $LTO_FLAG -fPIC -g0 -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS $ISA_FLAGS \
-            $COMMON_DEFS $COMMON_INCLUDES \
+        $CC -O3 $LTO_FLAG -fPIC $C_DEBUG_FLAGS -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS $ISA_FLAGS \
+            $COMMON_DEFS $COMMON_INCLUDES ${PGO_CFLAGS:-} \
             -c "$SOURCE_FILE" -o "$OFILE"
 
         # Capture flags for .clangd from the first ISA/mode combination
@@ -440,7 +492,7 @@ for isa in $ISAS; do
             mkdir -p "$OUTPUT_DIR/asm"
             SFILE="$OUTPUT_DIR/asm/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.s"
             echo "  Generating asm: "$SFILE""
-            $CC -S -O3 -g0 -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS -fno-asynchronous-unwind-tables $ISA_FLAGS \
+            $CC -S -O3 $C_DEBUG_FLAGS -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS -fno-asynchronous-unwind-tables $ISA_FLAGS \
                 $COMMON_DEFS $COMMON_INCLUDES \
                 "$SOURCE_FILE" -o "$SFILE"
 
@@ -474,30 +526,40 @@ done
 # ============================================================
 #  Link each mode×ISA into separate .syso
 #
-#  Strategy based on target platform:
+#  Strategy based on target platform (default):
 #  - darwin, linux/amd64: prelink (LTO link → extract .text → zero-relocation object)
 #  - linux/arm64, windows: ld -r (simple relocatable link)
 #
-#  Each (mode, isa) combination produces one syso containing:
-#    stdlib objs + extra objs + {basename}_{mode}_{os}_{arch}_{isa}.o
+#  Override:
+#  - --no-prelink / NO_PRELINK=1: force ld -r / zig ld.lld -r for all platforms
+#
+#  Each (mode, isa) combination produces one syso.
+#  - prelink path: each syso contains stdlib + extra + mode/isa main object
+#  - relocatable path: stdlib + extra are linked into the first syso only;
+#    remaining sysos contain only their mode/isa main object
 # ============================================================
 
 echo ""
 
 # Check if target platform needs prelink (resolved relocations, zero-reloc output)
 needs_prelink() {
+    if [ "$DISABLE_PRELINK" = true ]; then return 1; fi
     if [ "$TARGET_OS" = "darwin" ]; then return 0; fi
     if [ "$TARGET_OS" = "linux" ] && [ "$TARGET_ARCH" = "amd64" ]; then return 0; fi
     return 1
 }
 
+if [ "$DISABLE_PRELINK" = true ]; then
+    echo "Note: prelink disabled (--no-prelink or NO_PRELINK=1); using relocatable link path"
+fi
+
 ALL_SYSO_PATHS=""
+COMMON_OBJS_LINKED=false
 
 for isa in $ISAS; do
     for mode in $ALL_MODES; do
         MODE_SUFFIX="_${mode}"
         MAIN_OBJ="${OUTPUT_DIR}/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.o"
-        LINK_OBJS="$STDLIB_OBJS $EXTRA_OBJS $MAIN_OBJ"
 
         SYSO_NAME="${BASENAME}_${mode}_${isa}_${TARGET_OS}_${TARGET_ARCH}.syso"
         SYSO_PATH="$TARGET_DIR/$SYSO_NAME"
@@ -505,15 +567,20 @@ for isa in $ISAS; do
         echo "Linking $SYSO_NAME..."
 
         if needs_prelink; then
+            LINK_OBJS="$STDLIB_OBJS $EXTRA_OBJS $MAIN_OBJ"
+
             ZIG_TARGET=$(get_zig_target "$TARGET_OS" "$TARGET_ARCH")
-            PRELINK_FLAGS="-o $SYSO_PATH -t $ZIG_TARGET"
+            PRELINK_FLAGS="-o $SYSO_PATH -t $ZIG_TARGET -i $isa"
             if [ "$USE_LTO" = true ]; then
                 PRELINK_FLAGS="-l $PRELINK_FLAGS"
             fi
 
-            # Export symbol list: only the single vj_vm_exec_* symbol for this mode×ISA.
-            # Darwin uses _exported_symbols_list; Linux uses --version-script (via prelink.sh).
-            # Both are driven by the same -e flag passed to prelink.sh.
+            # Export symbol list: keep only vj_vm_exec_* as global symbols.
+            # This is required on Darwin even in debug mode — without the
+            # export filter, internal helpers (e.g. us_write_float32) stay
+            # N_EXT in the dylib, and dylib_to_obj.py extracts them into
+            # every .syso file, causing duplicate symbol errors in Go's linker.
+            # Debug info (DWARF) is not affected by symbol visibility.
             if [ -n "${EXPORT_SYMBOL_PREFIX:-}" ]; then
                 EXPORT_LIST="$OUTPUT_DIR/_exports_${mode}_${isa}.txt"
                 if [ "$TARGET_OS" = "darwin" ]; then
@@ -528,12 +595,16 @@ for isa in $ISAS; do
 
             "$REPO_ROOT/scripts/prelink.sh" $PRELINK_FLAGS $LINK_OBJS
         else
-            # Simple relocatable link (linux/arm64, windows, etc.)
-            if [ "$USE_ZIG" = true ]; then
-                zig ld.lld -r $LINK_OBJS -o "$SYSO_PATH"
+            # Relocatable link path:
+            # - Include stdlib/extra objects only once to avoid duplicate symbol definitions across multiple mode×ISA .syso files.
+            # - Link through compiler driver for better compatibility (e.g. LTO plugins).
+            if [ "$COMMON_OBJS_LINKED" = false ]; then
+                LINK_OBJS="$STDLIB_OBJS $EXTRA_OBJS $MAIN_OBJ"
+                COMMON_OBJS_LINKED=true
             else
-                ld -r -o "$SYSO_PATH" $LINK_OBJS
+                LINK_OBJS="$MAIN_OBJ"
             fi
+            $CC -r $LTO_FLAG $LINK_OBJS -o "$SYSO_PATH"
         fi
 
         ALL_SYSO_PATHS="$ALL_SYSO_PATHS $SYSO_PATH"

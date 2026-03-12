@@ -13,24 +13,24 @@ const (
 	padLeft    = 30
 	padRight   = 30
 	padTop     = 30
-	headerH    = 90  // title + subtitle + legend
-	groupGap   = 18  // vertical gap between groups within a section
-	secGap     = 36  // vertical gap before a new section
-	secHdrH    = 36  // section header height (text + rule)
+	headerH    = 90 // title + subtitle + legend
+	groupGap   = 18 // vertical gap between groups within a section
+	secGap     = 36 // vertical gap before a new section
+	secHdrH    = 36 // section header height (text + rule)
 	footerH    = 40
-	barH       = 20  // bar height
-	barSpacing = 7   // vertical spacing between bars
-	barRx      = 3   // bar corner radius
-	grpHdr     = 28  // group card header height
-	colHdr     = 16  // column header row height
+	barH       = 20 // bar height
+	barSpacing = 7  // vertical spacing between bars
+	barRx      = 3  // bar corner radius
+	grpHdr     = 28 // group card header height
+	colHdr     = 16 // column header row height
 
 	// Column layout: libLabel | nsOp chart | gap | bOp chart | gap | allocs chart
 	// Total budget: svgWidth - padLeft - padRight - 14 (x0 offset) = 886
 	libLabelW = 68
-	nsBarW    = 280  // max bar width for ns/op
-	bBarW     = 170  // max bar width for B/op
-	aBarW     = 100  // max bar width for allocs/op
-	colGapW   = 10   // gap between columns
+	nsBarW    = 280 // max bar width for ns/op
+	bBarW     = 170 // max bar width for B/op
+	aBarW     = 100 // max bar width for allocs/op
+	colGapW   = 10  // gap between columns
 	// Text annotation widths (space after bar for value + badge)
 	nsAnnotW = 110
 	bAnnotW  = 70
@@ -243,7 +243,7 @@ func renderGroup(b *strings.Builder, data *BenchData, group, displayName string,
 	minNs, maxNs := math.MaxFloat64, 0.0
 	minB, maxB := math.MaxFloat64, 0.0
 	minA, maxA := math.MaxFloat64, 0.0
-	
+
 	for _, lib := range libs {
 		r, ok := gr[lib]
 		if !ok {

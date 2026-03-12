@@ -76,9 +76,9 @@ func (b *irBuilder) emit(inst IRInst) int {
 	return idx
 }
 
-func (b *irBuilder) addKey(keyBytes []byte) (keyOff uint16, keyLen uint8) {
+func (b *irBuilder) addKey(keyBytes []byte) (keyOff uint16, keyLen uint8, ok bool) {
 	if len(keyBytes) == 0 {
-		return 0, 0
+		return 0, 0, true
 	}
 	return globalKeyPoolInsert(keyBytes)
 }

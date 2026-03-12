@@ -120,7 +120,7 @@ func (enc *Encoder) Encode(v any) error {
 		elemType = rv.Type()
 	}
 
-	err := enc.encodePtr(GetCodec(elemType), ptr)
+	err := enc.encodePtr(getCodec(elemType), ptr)
 	// Keep v alive so the GC does not collect the eface data pointer
 	// while encodePtr is using it.
 	runtime.KeepAlive(v)
@@ -135,7 +135,7 @@ func EncodeValue[T any](enc *Encoder, v *T) error {
 	if enc.err != nil {
 		return enc.err
 	}
-	return enc.encodePtr(GetCodec(reflect.TypeFor[T]()), unsafe.Pointer(v))
+	return enc.encodePtr(getCodec(reflect.TypeFor[T]()), unsafe.Pointer(v))
 }
 
 // encodePtr is the shared encoding core for Encode and EncodeValue.

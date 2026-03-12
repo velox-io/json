@@ -85,11 +85,11 @@ func writeRelocatableELF(path string, textData []byte, syms []symInfo) error {
 		if s.Local {
 			bind = elf.STB_LOCAL
 		}
-		symtabData[off+4] = byte(bind)<<4 | byte(elf.STT_FUNC)        // st_info
-		symtabData[off+5] = byte(elf.STV_DEFAULT)                      // st_other
-		binary.LittleEndian.PutUint16(symtabData[off+6:], 1)           // st_shndx = 1 (.text)
-		binary.LittleEndian.PutUint64(symtabData[off+8:], s.Offset)    // st_value
-		binary.LittleEndian.PutUint64(symtabData[off+16:], s.Size)     // st_size
+		symtabData[off+4] = byte(bind)<<4 | byte(elf.STT_FUNC)      // st_info
+		symtabData[off+5] = byte(elf.STV_DEFAULT)                   // st_other
+		binary.LittleEndian.PutUint16(symtabData[off+6:], 1)        // st_shndx = 1 (.text)
+		binary.LittleEndian.PutUint64(symtabData[off+8:], s.Offset) // st_value
+		binary.LittleEndian.PutUint64(symtabData[off+16:], s.Size)  // st_size
 	}
 
 	// First global symbol index: null(0) + numLocal locals → index numLocal+1

@@ -65,11 +65,11 @@ func LoadConfig(path string) error {
 // This is the single source of truth for library ordering and colors.
 var knownLibraries = []libraryDef{
 	{Name: "StdJSON", Color: "#e67e22"},   // orange
-	{Name: "Sonic", Color: "#3498db"},      // blue
-	{Name: "Segmentio", Color: "#34495e"},  // slate
-	{Name: "GoJSON", Color: "#8e44ad"},     // purple
-	{Name: "EasyJSON", Color: "#e74c8b"},   // pink
-	{Name: "Velox", Color: "#27ae60"},      // green — this project (last = protagonist)
+	{Name: "Sonic", Color: "#3498db"},     // blue
+	{Name: "Segmentio", Color: "#34495e"}, // slate
+	{Name: "GoJSON", Color: "#8e44ad"},    // purple
+	{Name: "EasyJSON", Color: "#e74c8b"},  // pink
+	{Name: "Velox", Color: "#27ae60"},     // green — this project (last = protagonist)
 }
 
 // fallbackColors is a palette for libraries not in knownLibraries.

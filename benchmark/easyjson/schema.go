@@ -59,7 +59,7 @@ type KubePod struct {
 
 type PodMeta struct {
 	Annotations       map[string]string `json:"annotations"`
-	CreationTimestamp  string            `json:"creationTimestamp"`
+	CreationTimestamp string            `json:"creationTimestamp"`
 	GenerateName      string            `json:"generateName"`
 	Labels            map[string]string `json:"labels"`
 	Name              string            `json:"name"`
@@ -287,10 +287,10 @@ type Resources struct {
 }
 
 type Component struct {
-	Replicas  int        `json:"replicas"`
-	Shards    int        `json:"shards"`
-	Resources Resources  `json:"resources"`
-	Pods      []Pod `json:"pods"`
+	Replicas  int       `json:"replicas"`
+	Shards    int       `json:"shards"`
+	Resources Resources `json:"resources"`
+	Pods      []Pod     `json:"pods"`
 }
 
 type Components struct {

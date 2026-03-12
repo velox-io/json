@@ -47,7 +47,6 @@ type BenchData struct {
 	RunCount int                                // number of runs per benchmark (from -count)
 }
 
-
 // splitGroupToSection splits a group name following the pattern "{Action}_{Dataset}".
 // Examples:
 //   - "Marshal_Twitter" -> section="Marshal", dataset="Twitter"

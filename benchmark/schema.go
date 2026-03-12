@@ -321,9 +321,9 @@ type SpikyItem struct {
 }
 
 type SpikyPayload struct {
-	Kind    string      `json:"kind"`
-	Seq     int         `json:"seq"`
-	Items   []SpikyItem `json:"items"`
+	Kind  string      `json:"kind"`
+	Seq   int         `json:"seq"`
+	Items []SpikyItem `json:"items"`
 }
 
 // --- LogRecord: matches testdata/log.json.zst structure (OTEL-style log lines) ---

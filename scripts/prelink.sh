@@ -189,6 +189,7 @@ get_isa_flags() {
     case "$1" in
         neon)   echo "" ;;
         sse42)  echo "-msse4.2 -mpclmul" ;;
+        avx2)   echo "-mavx2 -mpclmul" ;;
         avx512) echo "-mavx512f -mavx512bw -mpclmul" ;;
         *)      echo "" ;;
     esac
@@ -236,19 +237,25 @@ link_elf_shared() {
     local objs="$@"
     local lto_flag=""
     [ "$LTO" = true ] && lto_flag="-flto"
+
+    # -Bsymbolic-functions: bind function references to local definitions,
+    #   preventing PLT indirection for internal calls. Without this, the linker
+    #   creates PLT stubs for exported functions called within the same .so,
+    #   which land outside .text and are lost during so-to-obj extraction.
+    #   Note: zig's LLD does not support -Bsymbolic-functions, so we skip it.
+    local symbolic_flag=""
     case "$COMPILER" in
         clang)
-            # -nostdlib: don't link standard libraries
-            # -Wl,-Bsymbolic-functions: bind function references to local definitions,
-            #   preventing PLT indirection for internal calls. Without this, the linker
-            #   creates PLT stubs for exported functions called within the same .so,
-            #   which land outside .text and are lost during so-to-obj extraction.
-            clang -shared $lto_flag -nostdlib -Wl,-Bsymbolic-functions -Wl,-T,"$ldscript" $objs -o "$out"
+            symbolic_flag="-Wl,-Bsymbolic-functions"
             ;;
         zig)
-            zig cc -target "$TARGET" -shared $lto_flag -nostdlib -Wl,-Bsymbolic-functions -Wl,-T,"$ldscript" $objs -o "$out"
+            # LLD doesn't support -Bsymbolic-functions, but the so-to-obj
+            # tool handles symbol resolution correctly anyway.
+            symbolic_flag=""
             ;;
     esac
+
+    $CC_CMD -shared $lto_flag -nostdlib $symbolic_flag -Wl,-T,"$ldscript" $objs -o "$out"
 }
 
 # Link Darwin dylib

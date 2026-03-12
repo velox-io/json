@@ -33,7 +33,7 @@ typedef struct {
 
 typedef struct {
   uint8_t *buf; /* advanced buffer pointer; NULL on error */
-  int exit_code; /* 0 = ok, VJ_EXIT_BUF_FULL, VJ_EXIT_NAN_INF */
+  int exit_code; /* 0 = ok; otherwise one of the internal VJ_EXIT_* sentinels */
 } VjPtrEncResult;
 
 VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend,

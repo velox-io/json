@@ -159,14 +159,14 @@ static void vj_trace_yield(VjTraceBuf *tb,
 #define VM_TRACE(label)                                                        \
   do {                                                                         \
     if (tbuf)                                                                  \
-      vj_trace_simple(tbuf, label, VM_DEPTH());                                \
+      vj_trace_simple(tbuf, label, VM_TRACE_DEPTH());                                \
   } while (0)
 
 /* Keyed opcode trace — prints field name from key pool if present. */
 #define VM_TRACE_KEY(label)                                                    \
   do {                                                                         \
     if (tbuf)                                                                  \
-      vj_trace_opkey(tbuf, label, VM_DEPTH(), op, key_pool);                   \
+      vj_trace_opkey(tbuf, label, VM_TRACE_DEPTH(), op, key_pool);                   \
   } while (0)
 
 #define VM_TRACE_MSG(msg)                                                      \
@@ -178,19 +178,19 @@ static void vj_trace_yield(VjTraceBuf *tb,
 #define VM_TRACE_ELEM_IDX(idx)                                                 \
   do {                                                                         \
     if (tbuf)                                                                  \
-      vj_trace_elem_idx(tbuf, VM_DEPTH(), (uint64_t)(idx));                    \
+      vj_trace_elem_idx(tbuf, VM_TRACE_DEPTH(), (uint64_t)(idx));                    \
   } while (0)
 
 #define VM_TRACE_KEY_LEN(label, count)                                         \
   do {                                                                         \
     if (tbuf)                                                                  \
-      vj_trace_opkey_len(tbuf, label, VM_DEPTH(), op, key_pool, (uint64_t)(count)); \
+      vj_trace_opkey_len(tbuf, label, VM_TRACE_DEPTH(), op, key_pool, (uint64_t)(count)); \
   } while (0)
 
 #define VM_TRACE_YIELD(op_type)                                                \
   do {                                                                         \
     if (tbuf)                                                                  \
-      vj_trace_yield(tbuf, (uint16_t)(op_type), VM_DEPTH(), op, key_pool);     \
+      vj_trace_yield(tbuf, (uint16_t)(op_type), VM_TRACE_DEPTH(), op, key_pool);     \
   } while (0)
 
 #else /* !VJ_ENCVM_DEBUG */

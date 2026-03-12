@@ -1,18 +1,138 @@
 package vjson
 
 import (
+	"math/bits"
 	"strings"
 	"unsafe"
 )
 
-const (
-	lookupModeEmpty uint8 = iota
-	lookupModeLinear
-	lookupModePerfectSimple
-	lookupModePerfectFNV
-	lookupModePerfectMulacc
-	lookupModeMap
-)
+// fieldLookup is the interface for struct field lookup strategies.
+type fieldLookup interface {
+	lookup(dec *StructCodec, key string) *TypeInfo
+}
+
+// emptyLookup always returns nil (zero-field struct).
+type emptyLookup struct{}
+
+func (emptyLookup) lookup(_ *StructCodec, _ string) *TypeInfo { return nil }
+
+// bitmapLookup8 uses a per-position character bitmap for ≤8 fields.
+// Each field is assigned 1 bit. For each (charIndex, byte) pair, the bitmap
+// records which fields have that byte at that position. Lookup ANDs the bits
+// across all positions + length mask, yielding the unique matching field.
+type bitmapLookup8 struct {
+	maxKeyLen uint8
+	bitmap    []uint8 // flattened [maxKeyLen][256], row-major
+	lenMask   []uint8 // lenMask[len] = bitmask of fields with this length; size = maxKeyLen+1
+}
+
+// sliceGet performs an unchecked index into a slice.
+// The caller must guarantee i is in bounds.
+//
+//go:nosplit
+func sliceGet[T any](s []T, i int) T {
+	return *(*T)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(s)), uintptr(i)*unsafe.Sizeof(s[0])))
+}
+
+func (b *bitmapLookup8) lookup(dec *StructCodec, key string) *TypeInfo {
+	klen := len(key)
+	if klen == 0 || klen > int(b.maxKeyLen) {
+		return nil
+	}
+	bitmap := b.bitmap
+	lenMask := b.lenMask
+	cur := uint8(0xFF)
+	for i := 0; i < klen; i++ {
+		cur &= sliceGet(bitmap, i*256+int(key[i]))
+		if cur == 0 {
+			return nil
+		}
+	}
+	cur &= sliceGet(lenMask, klen)
+	if cur == 0 {
+		return nil
+	}
+	idx := bits.TrailingZeros8(cur)
+	return &dec.Fields[idx]
+}
+
+// buildBitmapLookup8 constructs a bitmapLookup8 for a StructCodec with ≤8 fields.
+func buildBitmapLookup8(dec *StructCodec) *bitmapLookup8 {
+	n := len(dec.Fields)
+	maxLen := 0
+	for i := range dec.Fields {
+		if l := len(dec.Fields[i].JSONName); l > maxLen {
+			maxLen = l
+		}
+	}
+
+	b := &bitmapLookup8{
+		maxKeyLen: uint8(maxLen),
+		bitmap:    make([]uint8, maxLen*256),
+		lenMask:   make([]uint8, maxLen+1),
+	}
+
+	for i := 0; i < n; i++ {
+		name := dec.Fields[i].JSONName
+		bit := uint8(1) << i
+		for j := 0; j < len(name); j++ {
+			b.bitmap[j*256+int(name[j])] |= bit
+		}
+		b.lenMask[len(name)] |= bit
+	}
+
+	return b
+}
+
+// perfectHashBase holds the common state for all perfect-hash strategies.
+type perfectHashBase struct {
+	seed  uint64
+	shift uint8
+	table []uint8 // indices into Fields[]; 0xFF = empty
+}
+
+func (b *perfectHashBase) lookupByHash(dec *StructCodec, key string, h uint64) *TypeInfo {
+	slot := int(h>>b.shift) & (len(b.table) - 1)
+	idx := b.table[slot]
+	if idx == 0xFF {
+		return nil
+	}
+	fi := &dec.Fields[idx]
+	if fi.JSONName == key {
+		return fi
+	}
+	return nil
+}
+
+// perfectSimpleLookup uses simpleMixer for hashing.
+type perfectSimpleLookup struct{ perfectHashBase }
+
+func (p *perfectSimpleLookup) lookup(dec *StructCodec, key string) *TypeInfo {
+	return p.lookupByHash(dec, key, simpleMixer(key, p.seed))
+}
+
+// perfectFNVLookup uses fnv1aMixer for hashing.
+type perfectFNVLookup struct{ perfectHashBase }
+
+func (p *perfectFNVLookup) lookup(dec *StructCodec, key string) *TypeInfo {
+	return p.lookupByHash(dec, key, fnv1aMixer(key, p.seed))
+}
+
+// perfectMulaccLookup uses mulaccMixer for hashing.
+type perfectMulaccLookup struct{ perfectHashBase }
+
+func (p *perfectMulaccLookup) lookup(dec *StructCodec, key string) *TypeInfo {
+	return p.lookupByHash(dec, key, mulaccMixer(key, p.seed))
+}
+
+// mapLookup uses a fallback map for large structs.
+type mapLookup struct {
+	m map[string]*TypeInfo
+}
+
+func (l *mapLookup) lookup(_ *StructCodec, key string) *TypeInfo {
+	return l.m[key]
+}
 
 // LookupFieldBytes looks up a struct field by JSON key.
 // It tries an exact match first (fast path), then falls back to
@@ -20,24 +140,8 @@ const (
 func (dec *StructCodec) LookupFieldBytes(key []byte) *TypeInfo {
 	k := unsafe.String(unsafe.SliceData(key), len(key))
 
-	// Fast path: exact match against original tag names.
-	var fi *TypeInfo
-	switch dec.LookupMode {
-	case lookupModeEmpty:
-		fi = nil
-	case lookupModeLinear:
-		fi = lookupLinear(dec, k)
-	case lookupModePerfectSimple:
-		fi = lookupPerfectByHash(dec, k, simpleMixer(k, dec.HashSeed))
-	case lookupModePerfectFNV:
-		fi = lookupPerfectByHash(dec, k, fnv1aMixer(k, dec.HashSeed))
-	case lookupModePerfectMulacc:
-		fi = lookupPerfectByHash(dec, k, mulaccMixer(k, dec.HashSeed))
-	case lookupModeMap:
-		fi = lookupMap(dec, k)
-	default:
-		fi = dec.LookupFn(dec, k)
-	}
+	// Fast path: exact match via polymorphic lookup.
+	fi := dec.Lookup.lookup(dec, k)
 	if fi != nil {
 		return fi
 	}
@@ -50,9 +154,10 @@ func (dec *StructCodec) LookupFieldBytes(key []byte) *TypeInfo {
 	// Slow path: case-insensitive linear scan.
 	// Use fast ASCII fold first; fall back to strings.EqualFold only
 	// when a non-ASCII byte is detected.
-	for i := range dec.Fields {
-		if equalFoldASCII(dec.Fields[i].JSONName, k) {
-			return &dec.Fields[i]
+	fields := dec.Fields
+	for i := range fields {
+		if equalFoldASCII(fields[i].JSONName, k) {
+			return &fields[i]
 		}
 	}
 	return nil
@@ -73,25 +178,20 @@ func buildLookup(dec *StructCodec) {
 	n := len(dec.Fields)
 	switch {
 	case n == 0:
-		dec.LookupFn = lookupEmpty
-		dec.LookupMode = lookupModeEmpty
-	case n <= 4:
-		dec.LookupFn = lookupLinear
-		dec.LookupMode = lookupModeLinear
+		dec.Lookup = emptyLookup{}
+	case n <= 8:
+		dec.Lookup = buildBitmapLookup8(dec)
 	case n <= 32:
-		if tryBuildPerfectHash(dec, simpleMixer) {
-			dec.LookupFn = makePerfectHashLookup(simpleMixer)
-			dec.LookupMode = lookupModePerfectSimple
-		} else if tryBuildPerfectHash(dec, fnv1aMixer) {
-			dec.LookupFn = makePerfectHashLookup(fnv1aMixer)
-			dec.LookupMode = lookupModePerfectFNV
+		if base, ok := tryBuildPerfectHash(dec, simpleMixer); ok {
+			dec.Lookup = &perfectSimpleLookup{base}
+		} else if base, ok := tryBuildPerfectHash(dec, fnv1aMixer); ok {
+			dec.Lookup = &perfectFNVLookup{base}
 		} else {
 			buildMapFallback(dec)
 		}
 	default:
-		if tryBuildPerfectHash(dec, mulaccMixer) {
-			dec.LookupFn = makePerfectHashLookup(mulaccMixer)
-			dec.LookupMode = lookupModePerfectMulacc
+		if base, ok := tryBuildPerfectHash(dec, mulaccMixer); ok {
+			dec.Lookup = &perfectMulaccLookup{base}
 		} else {
 			buildMapFallback(dec)
 		}
@@ -100,13 +200,16 @@ func buildLookup(dec *StructCodec) {
 
 const maxSeedAttempts = 1 << 16 // 64K seeds, each tested against all shifts
 
+// hashMixer is a hash function type used for perfect hash construction.
+type hashMixer func(s string, seed uint64) uint64
+
 // tryBuildPerfectHash attempts to find (seed, shift) such that mixer(name, seed) >> shift
 // maps each field's JSON tag name to a unique slot in a power-of-2 table.
 //
 // Strategy: for each seed, compute all hashes once, then sweep shifts to find a
 // zero-collision mapping. The search is bounded by maxSeedAttempts; callers
 // fall back to a map when no perfect hash is found.
-func tryBuildPerfectHash(dec *StructCodec, mixer hashMixer) bool {
+func tryBuildPerfectHash(dec *StructCodec, mixer hashMixer) (perfectHashBase, bool) {
 	n := len(dec.Fields)
 	tableSize := nextPowerOf2(n * 2) // load factor ~50%
 	mask := uint64(tableSize - 1)
@@ -149,82 +252,31 @@ func tryBuildPerfectHash(dec *StructCodec, mixer hashMixer) bool {
 
 			if !collision {
 				// Found a perfect hash — build the table
-				dec.HashSeed = seed
-				dec.HashShift = shift
-				dec.HashTable = make([]uint8, tableSize)
-				for i := range dec.HashTable {
-					dec.HashTable[i] = 0xFF
+				table := make([]uint8, tableSize)
+				for i := range table {
+					table[i] = 0xFF
 				}
 				for i, h := range hashes {
 					slot := (h >> shift) & mask
-					dec.HashTable[slot] = uint8(i)
+					table[slot] = uint8(i)
 				}
-				return true
+				return perfectHashBase{seed: seed, shift: shift, table: table}, true
 			}
 		}
 	}
-	return false
+	return perfectHashBase{}, false
 }
 
 // buildMapFallback initializes the traditional map[string]*TypeInfo for large structs.
 func buildMapFallback(dec *StructCodec) {
-	dec.FieldMap = make(map[string]*TypeInfo, len(dec.Fields))
+	m := make(map[string]*TypeInfo, len(dec.Fields))
 	for i := range dec.Fields {
-		dec.FieldMap[dec.Fields[i].JSONName] = &dec.Fields[i]
+		m[dec.Fields[i].JSONName] = &dec.Fields[i]
 	}
-	dec.LookupFn = lookupMap
-	dec.LookupMode = lookupModeMap
-}
-
-// Lookup strategies (one is selected per struct by buildLookup).
-
-// lookupEmpty always returns nil (zero-field struct).
-func lookupEmpty(_ *StructCodec, _ string) *TypeInfo {
-	return nil
-}
-
-// lookupLinear performs a linear scan over 1-4 fields.
-func lookupLinear(dec *StructCodec, key string) *TypeInfo {
-	fields := dec.Fields
-	for i := range fields {
-		if fields[i].JSONName == key {
-			return &fields[i]
-		}
-	}
-	return nil
-}
-
-func lookupPerfectByHash(dec *StructCodec, key string, h uint64) *TypeInfo {
-	slot := int(h>>dec.HashShift) & (len(dec.HashTable) - 1)
-
-	idx := dec.HashTable[slot]
-	if idx == 0xFF {
-		return nil
-	}
-
-	fi := &dec.Fields[idx]
-	if fi.JSONName == key {
-		return fi
-	}
-	return nil
-}
-
-// makePerfectHashLookup returns a lookup function bound to a specific mixer.
-func makePerfectHashLookup(mixer hashMixer) func(*StructCodec, string) *TypeInfo {
-	return func(dec *StructCodec, key string) *TypeInfo {
-		return lookupPerfectByHash(dec, key, mixer(key, dec.HashSeed))
-	}
-}
-
-// lookupMap uses the fallback map for large structs.
-func lookupMap(dec *StructCodec, key string) *TypeInfo {
-	return dec.FieldMap[key]
+	dec.Lookup = &mapLookup{m: m}
 }
 
 // Hash mixers.
-
-// hashMixer is a hash function type used for perfect hash construction.
-type hashMixer func(s string, seed uint64) uint64
 
 // simpleMixer hashes a string using 4 features: length, first byte, last byte,
 // and middle byte. No loop — constant time regardless of string length.

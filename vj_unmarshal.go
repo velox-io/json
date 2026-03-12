@@ -89,7 +89,7 @@ func Unmarshal[T any](data []byte, v *T, opts ...UnmarshalOption) error {
 	}
 
 	// Fast path: avoid interface boxing and reflect.ValueOf.
-	ti := GetCodec(reflect.TypeFor[T]())
+	ti := getCodec(reflect.TypeFor[T]())
 	ptr := unsafe.Pointer(v)
 
 	idx := skipWS(data, 0)

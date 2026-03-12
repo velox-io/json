@@ -212,7 +212,7 @@ ALWAYS_INLINE int write_int64(uint8_t *buf, int64_t v) {
   uint64_t uv = (uint64_t)(-(v + 1)) + 1;
   return 1 + write_uint64(buf + 1, uv);
 }
-NOINLINE int write_int64_call(uint8_t *buf, uint64_t v);
+NOINLINE int write_int64_call(uint8_t *buf, int64_t v);
 
 // clang-format on
 

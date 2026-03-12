@@ -152,13 +152,13 @@ func emitStructBody(b *irBuilder, dec *StructCodec, baseOff uintptr) {
 
 		// Check field_off overflow: if > uint16 max, emit as Go fallback.
 		if fieldOff > math.MaxUint16 {
-			emitYieldOverflow(b, fi, fieldOff, i)
+			emitYieldOverflow(b, fi, fieldOff)
 			continue
 		}
 
 		// Check key_len overflow: if > 255, emit as Go fallback.
 		if fi.Ext != nil && len(fi.Ext.KeyBytes) > 255 {
-			emitYieldOverflow(b, fi, fieldOff, i)
+			emitYieldOverflow(b, fi, fieldOff)
 			continue
 		}
 
@@ -167,7 +167,7 @@ func emitStructBody(b *irBuilder, dec *StructCodec, baseOff uintptr) {
 			if needsOmitempty {
 				emitSkipIfZero(b, fi, fieldOff, 16+8, fi.Kind)
 			}
-			emitYield(b, fi, fieldOff, i, fallbackReasonFromFlags(fi.Flags))
+			emitYield(b, fi, fieldOff, fallbackReasonFromFlags(fi.Flags))
 			continue
 		}
 
@@ -222,7 +222,7 @@ func emitStructBody(b *irBuilder, dec *StructCodec, baseOff uintptr) {
 				if needsOmitempty {
 					emitSkipIfZero(b, fi, fieldOff, 16+8, KindSlice)
 				}
-				emitYield(b, fi, fieldOff, i, fbReasonByteSlice)
+				emitYield(b, fi, fieldOff, fbReasonByteSlice)
 				continue
 			}
 			if needsOmitempty {
@@ -243,7 +243,7 @@ func emitStructBody(b *irBuilder, dec *StructCodec, baseOff uintptr) {
 			aDec := fi.resolveCodec().(*ArrayCodec)
 			// [N]byte needs base64 encoding — yield to Go.
 			if aDec.ElemTI.Kind == KindUint8 && aDec.ElemSize == 1 {
-				emitYield(b, fi, fieldOff, i, fbReasonByteArray)
+				emitYield(b, fi, fieldOff, fbReasonByteArray)
 				continue
 			}
 			// Arrays can't be nil; omitempty is not meaningful.
@@ -252,8 +252,8 @@ func emitStructBody(b *irBuilder, dec *StructCodec, baseOff uintptr) {
 		case KindMap:
 			mapDec := fi.resolveCodec().(*MapCodec)
 			if needsOmitempty {
-				emitYield(b, fi, fieldOff, i, fbReasonMapOmitempty)
-			} else if mapDec.ValIsString && mapDec.KeyType.Kind() == reflect.String {
+				emitYield(b, fi, fieldOff, fbReasonMapOmitempty)
+			} else if mapDec.MapKind == MapVariantStrStr && SwissMapLayoutOK {
 				emitMapStrStr(b, fi, fieldOff)
 			} else {
 				emitMap(b, fi, fieldOff, mapDec)
@@ -270,7 +270,7 @@ func emitStructBody(b *irBuilder, dec *StructCodec, baseOff uintptr) {
 			if needsOmitempty {
 				emitSkipIfZero(b, fi, fieldOff, 16+8, fi.Kind)
 			}
-			emitYield(b, fi, fieldOff, i, fbReasonUnknown)
+			emitYield(b, fi, fieldOff, fbReasonUnknown)
 		}
 	}
 }
@@ -279,7 +279,11 @@ func emitStructBody(b *irBuilder, dec *StructCodec, baseOff uintptr) {
 // For struct fields (keyLen > 0), STRING/INT/INT64 use keyed variants that
 // skip the key_len branch in the VM for better branch prediction.
 func emitPrimitive(b *irBuilder, fi *TypeInfo, fieldOff uintptr) {
-	keyOff, keyLen := b.addKey(fi.Ext.KeyBytes)
+	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
+	if !ok {
+		emitYieldOverflow(b, fi, fieldOff)
+		return
+	}
 	op := kindToOpcode(fi.Kind)
 	if keyLen > 0 {
 		switch op {
@@ -301,7 +305,11 @@ func emitPrimitive(b *irBuilder, fi *TypeInfo, fieldOff uintptr) {
 
 // emitNestedStruct emits OBJ_OPEN + body + OBJ_CLOSE for a nested struct.
 func emitNestedStruct(b *irBuilder, fi *TypeInfo, fieldOff uintptr, subDec *StructCodec) {
-	keyOff, keyLen := b.addKey(fi.Ext.KeyBytes)
+	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
+	if !ok {
+		emitYieldOverflow(b, fi, fieldOff)
+		return
+	}
 
 	b.emit(IRInst{
 		Op:     opObjOpen,
@@ -330,7 +338,11 @@ func emitNestedStruct(b *irBuilder, fi *TypeInfo, fieldOff uintptr, subDec *Stru
 
 // emitPointer emits PTR_DEREF + the dereferenced type's instructions + PTR_END.
 func emitPointer(b *irBuilder, fi *TypeInfo, fieldOff uintptr, pDec *PointerCodec) {
-	keyOff, keyLen := b.addKey(fi.Ext.KeyBytes)
+	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
+	if !ok {
+		emitYieldOverflow(b, fi, fieldOff)
+		return
+	}
 	elemTI := pDec.ElemTI
 
 	afterLabel := b.allocLabel()
@@ -408,7 +420,7 @@ func emitDerefBody(b *irBuilder, elemTI *TypeInfo) {
 
 	case KindMap:
 		mapDec := elemTI.resolveCodec().(*MapCodec)
-		if mapDec.ValIsString && mapDec.KeyType.Kind() == reflect.String {
+		if mapDec.MapKind == MapVariantStrStr && SwissMapLayoutOK {
 			emitMapStrStrInner(b, 0)
 		} else {
 			emitMapInner(b, 0, elemTI, mapDec)
@@ -444,7 +456,11 @@ func emitDerefBody(b *irBuilder, elemTI *TypeInfo) {
 
 // emitSlice emits SLICE_BEGIN + element body + SLICE_END for a slice field.
 func emitSlice(b *irBuilder, fi *TypeInfo, fieldOff uintptr, sliceDec *SliceCodec) {
-	keyOff, keyLen := b.addKey(fi.Ext.KeyBytes)
+	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
+	if !ok {
+		emitYieldOverflow(b, fi, fieldOff)
+		return
+	}
 
 	bodyLabel := b.allocLabel()
 	afterLabel := b.allocLabel()
@@ -498,7 +514,11 @@ func emitSliceInner(b *irBuilder, fieldOff uintptr, sliceDec *SliceCodec) {
 
 // emitArray emits ARRAY_BEGIN + element body + SLICE_END for an array field.
 func emitArray(b *irBuilder, fi *TypeInfo, fieldOff uintptr, aDec *ArrayCodec) {
-	keyOff, keyLen := b.addKey(fi.Ext.KeyBytes)
+	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
+	if !ok {
+		emitYieldOverflow(b, fi, fieldOff)
+		return
+	}
 	packed := int32(aDec.ElemSize&0xFFFF) | int32(aDec.ArrayLen&0xFFFF)<<16
 
 	bodyLabel := b.allocLabel()
@@ -620,7 +640,7 @@ func emitElementBody(b *irBuilder, elemTI *TypeInfo) {
 
 	case KindMap:
 		mapDec := elemTI.resolveCodec().(*MapCodec)
-		if mapDec.ValIsString && mapDec.KeyType.Kind() == reflect.String {
+		if mapDec.MapKind == MapVariantStrStr && SwissMapLayoutOK {
 			emitMapStrStrInner(b, 0)
 		} else {
 			emitMapInner(b, 0, elemTI, mapDec)
@@ -645,7 +665,11 @@ func emitElementBody(b *irBuilder, elemTI *TypeInfo) {
 
 // emitMap emits MAP_BEGIN + value body + MAP_END for a map field.
 func emitMap(b *irBuilder, fi *TypeInfo, fieldOff uintptr, mapDec *MapCodec) {
-	keyOff, keyLen := b.addKey(fi.Ext.KeyBytes)
+	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
+	if !ok {
+		emitYieldOverflow(b, fi, fieldOff)
+		return
+	}
 	endLabel := b.allocLabel()
 
 	b.emit(IRInst{
@@ -687,7 +711,11 @@ func emitMapInner(b *irBuilder, fieldOff uintptr, elemTI *TypeInfo, mapDec *MapC
 }
 
 func emitMapStrStr(b *irBuilder, fi *TypeInfo, fieldOff uintptr) {
-	keyOff, keyLen := b.addKey(fi.Ext.KeyBytes)
+	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
+	if !ok {
+		emitYieldOverflow(b, fi, fieldOff)
+		return
+	}
 	b.emit(IRInst{
 		Op:       opMapStrStr,
 		KeyLen:   keyLen,
@@ -747,7 +775,11 @@ func emitCall(b *irBuilder, dec *StructCodec, fieldOff uintptr) {
 }
 
 func emitInterface(b *irBuilder, fi *TypeInfo, fieldOff uintptr) {
-	keyOff, keyLen := b.addKey(fi.Ext.KeyBytes)
+	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
+	if !ok {
+		emitYieldOverflow(b, fi, fieldOff)
+		return
+	}
 	b.emit(IRInst{
 		Op:       opInterface,
 		KeyLen:   keyLen,
@@ -770,8 +802,12 @@ func fallbackReasonFromFlags(flags tiFlag) int32 {
 }
 
 // emitYield emits a single OP_FALLBACK instruction for Go fallback.
-func emitYield(b *irBuilder, fi *TypeInfo, fieldOff uintptr, fieldIdx int, reason int32) {
-	keyOff, keyLen := b.addKey(fi.Ext.KeyBytes)
+func emitYield(b *irBuilder, fi *TypeInfo, fieldOff uintptr, reason int32) {
+	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
+	if !ok {
+		emitYieldOverflow(b, fi, fieldOff)
+		return
+	}
 	b.emit(IRInst{
 		Op:       opFallback,
 		KeyLen:   keyLen,
@@ -780,19 +816,23 @@ func emitYield(b *irBuilder, fi *TypeInfo, fieldOff uintptr, fieldIdx int, reaso
 		Fallback: &fbInfo{
 			TI:     fi,
 			Offset: fieldOff,
+			Reason: reason,
 		},
 	})
 }
 
 // emitYieldOverflow emits an OP_FALLBACK for a field whose field_off or key_len
-// exceeds the uint16/uint8 range.
-func emitYieldOverflow(b *irBuilder, fi *TypeInfo, fieldOff uintptr, fieldIdx int) {
+// exceeds the uint16/uint8 range, or when the global key pool is full.
+// The key bytes are not stored in the pool; instead Go reads them from
+// fbInfo.TI.Ext.KeyBytes at yield time.
+func emitYieldOverflow(b *irBuilder, fi *TypeInfo, fieldOff uintptr) {
 	b.emit(IRInst{
 		Op:       opFallback,
 		FieldOff: 0,
 		Fallback: &fbInfo{
 			TI:     fi,
 			Offset: fieldOff,
+			Reason: fbReasonKeyPoolFull,
 		},
 	})
 }

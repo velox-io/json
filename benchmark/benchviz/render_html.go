@@ -19,8 +19,8 @@ type htmlMetric struct {
 type htmlRow struct {
 	Library  string
 	Color    string
-	NsOp    htmlMetric
-	BOp     htmlMetric
+	NsOp     htmlMetric
+	BOp      htmlMetric
 	AllocsOp htmlMetric
 }
 
@@ -35,12 +35,12 @@ type htmlSection struct {
 }
 
 type htmlData struct {
-	Title      string
-	Subtitle   string
-	Libs       []htmlLib
-	Sections   []htmlSection
+	Title       string
+	Subtitle    string
+	Libs        []htmlLib
+	Sections    []htmlSection
 	Collapsible bool // true when >1 section
-	RunCount   int
+	RunCount    int
 }
 
 type htmlLib struct {

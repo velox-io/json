@@ -86,8 +86,8 @@ func TestToLowerASCII_NonASCII(t *testing.T) {
 
 func TestBuildLookup_Empty(t *testing.T) {
 	dec := makeTestStructCodec(nil)
-	if dec.LookupFn == nil {
-		t.Fatal("LookupFn should not be nil")
+	if _, ok := dec.Lookup.(emptyLookup); !ok {
+		t.Fatalf("expected emptyLookup, got %T", dec.Lookup)
 	}
 	if fi := lookupField(dec, "anything"); fi != nil {
 		t.Error("expected nil for empty struct")
@@ -106,13 +106,17 @@ func TestBuildLookup_SingleField(t *testing.T) {
 }
 
 func TestBuildLookup_LinearRange(t *testing.T) {
-	// 1-4 fields should use linear scan
+	// 1-4 fields should now use bitmap lookup
 	for n := 1; n <= 4; n++ {
 		names := make([]string, n)
 		for i := range n {
 			names[i] = fmt.Sprintf("field%d", i)
 		}
 		dec := makeTestStructCodec(names)
+
+		if _, ok := dec.Lookup.(*bitmapLookup8); !ok {
+			t.Errorf("n=%d: expected bitmapLookup8, got %T", n, dec.Lookup)
+		}
 
 		for _, name := range names {
 			fi := lookupField(dec, name)
@@ -130,17 +134,48 @@ func TestBuildLookup_LinearRange(t *testing.T) {
 	}
 }
 
-func TestBuildLookup_PerfectHashRange(t *testing.T) {
-	// 5-32 fields should use perfect hash
-	for _, n := range []int{5, 8, 12, 16, 20, 24, 28, 32} {
+func TestBuildLookup_BitmapRange(t *testing.T) {
+	// 5-8 fields should use bitmap lookup
+	for n := 5; n <= 8; n++ {
 		names := make([]string, n)
 		for i := range n {
 			names[i] = fmt.Sprintf("field_%d", i)
 		}
 		dec := makeTestStructCodec(names)
 
-		if dec.HashTable == nil {
-			t.Errorf("n=%d: expected perfect hash table", n)
+		if _, ok := dec.Lookup.(*bitmapLookup8); !ok {
+			t.Errorf("n=%d: expected bitmapLookup8, got %T", n, dec.Lookup)
+		}
+
+		for _, name := range names {
+			fi := lookupField(dec, name)
+			if fi == nil {
+				t.Errorf("n=%d: expected to find %q", n, name)
+			} else if fi.JSONName != name {
+				t.Errorf("n=%d: expected %q, got %q", n, name, fi.JSONName)
+			}
+		}
+
+		if fi := lookupField(dec, "nonexistent"); fi != nil {
+			t.Errorf("n=%d: expected nil for unknown key", n)
+		}
+	}
+}
+
+func TestBuildLookup_PerfectHashRange(t *testing.T) {
+	// 9-32 fields should use perfect hash
+	for _, n := range []int{9, 12, 16, 20, 24, 28, 32} {
+		names := make([]string, n)
+		for i := range n {
+			names[i] = fmt.Sprintf("field_%d", i)
+		}
+		dec := makeTestStructCodec(names)
+
+		switch dec.Lookup.(type) {
+		case *perfectSimpleLookup, *perfectFNVLookup, *perfectMulaccLookup:
+			// ok
+		default:
+			t.Errorf("n=%d: expected perfect hash lookup, got %T", n, dec.Lookup)
 			continue
 		}
 
@@ -168,8 +203,8 @@ func TestBuildLookup_MapFallback(t *testing.T) {
 	}
 	dec := makeTestStructCodec(names)
 
-	if dec.FieldMap == nil {
-		t.Fatal("expected FieldMap for 40 fields")
+	if _, ok := dec.Lookup.(*mapLookup); !ok {
+		t.Fatalf("expected mapLookup for 40 fields, got %T", dec.Lookup)
 	}
 
 	for _, name := range names {
@@ -213,7 +248,7 @@ func TestLookup_CaseInsensitive(t *testing.T) {
 	}
 }
 
-func TestLookup_CaseInsensitive_PerfectHash(t *testing.T) {
+func TestLookup_CaseInsensitive_Bitmap(t *testing.T) {
 	names := []string{"id", "name", "email", "phone", "address", "city", "state", "zip"}
 	dec := makeTestStructCodec(names)
 
@@ -343,7 +378,7 @@ func TestLookup_ViaReflect(t *testing.T) {
 		Email string `json:"email"`
 	}
 
-	dec := GetCodec(reflect.TypeOf(User{})).Codec.(*StructCodec)
+	dec := getCodec(reflect.TypeOf(User{})).Codec.(*StructCodec)
 
 	tests := []struct {
 		key  string
@@ -387,10 +422,13 @@ func TestLookup_ViaReflect_LargeStruct(t *testing.T) {
 		F16 string `json:"f16"`
 	}
 
-	dec := GetCodec(reflect.TypeOf(BigStruct{})).Codec.(*StructCodec)
+	dec := getCodec(reflect.TypeOf(BigStruct{})).Codec.(*StructCodec)
 
-	if dec.HashTable == nil {
-		t.Fatal("expected perfect hash for 16-field struct")
+	switch dec.Lookup.(type) {
+	case *perfectSimpleLookup, *perfectFNVLookup, *perfectMulaccLookup:
+		// ok
+	default:
+		t.Fatalf("expected perfect hash lookup for 16-field struct, got %T", dec.Lookup)
 	}
 
 	for i := 1; i <= 16; i++ {
@@ -452,7 +490,7 @@ func BenchmarkLookup_Linear_4fields(b *testing.B) {
 	}
 }
 
-func BenchmarkLookup_PerfectHash_8fields(b *testing.B) {
+func BenchmarkLookup_Bitmap_8fields(b *testing.B) {
 	dec := makeTestStructCodec([]string{"id", "name", "email", "phone", "address", "city", "state", "zip"})
 	key := []byte("address")
 	b.ResetTimer()
@@ -487,7 +525,7 @@ func BenchmarkLookup_Map_40fields(b *testing.B) {
 	}
 }
 
-func BenchmarkLookup_Miss_PerfectHash(b *testing.B) {
+func BenchmarkLookup_Miss_Bitmap(b *testing.B) {
 	dec := makeTestStructCodec([]string{"id", "name", "email", "phone", "address", "city", "state", "zip"})
 	key := []byte("nonexistent")
 	b.ResetTimer()

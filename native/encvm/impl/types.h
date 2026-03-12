@@ -13,7 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define VJ_MAX_DEPTH 64
+#define VJ_MAX_STACK_DEPTH 64
 
 /* ================================================================
  *  Debug Trace Ring Buffer
@@ -40,7 +40,7 @@ typedef struct VjTraceBuf {
  *  19-31: Structural control-flow
  *  32:    Go-only fallback
  *
- *  Compact layout — no gaps; dispatch table = 33 entries (2 cache lines).
+ *  Compact layout — no gaps; dispatch table = 36 entries (2 cache lines).
  * ================================================================ */
 
 enum OpType {
@@ -246,12 +246,12 @@ enum VjExitCode {
  *  pressure on x86-64.
  *
  *  Layout:
- *    bits [0..7]   = depth        (unified stack depth, max 24)
+ *    bits [0..7]   = stack_depth (VM call/iter stack depth, max 64; NOT JSON nesting depth)
  *    bits [8..15]  = reserved
  *    bit  [16]     = first        (first-field flag: no comma prefix)
  *    bits [17..31] = enc_flags    (encoding config: escape, float fmt)
  *    bits [32..39] = exit_code    (VjExitCode value)
- *    bits [40..47] = yield_reason (VjYieldReason; valid when exit_code=VJ_EXIT_YIELD)
+ *    bits [40..47] = yield_reason (VjYieldReason; valid when exit_code uses the synthetic VJ_EXIT_YIELD value defined below)
  *    bits [48..63] = reserved
  *
  *  Hot path uses low 32 bits (single-register ops on x86-64).
@@ -261,8 +261,8 @@ enum VjExitCode {
  * ================================================================ */
 
 /* Low 32 bits: hot-path state */
-#define VJ_ST_DEPTH_SHIFT    0
-#define VJ_ST_DEPTH_MASK     ((uint64_t)0x000000FF)       /* bits [0..7]  */
+#define VJ_ST_STACK_DEPTH_SHIFT    0
+#define VJ_ST_STACK_DEPTH_MASK     ((uint64_t)0x000000FF)       /* bits [0..7]  */
 #define VJ_ST_FIRST_BIT      ((uint64_t)1 << 16)          /* bit  [16]    */
 #define VJ_ST_FLAGS_SHIFT    17
 #define VJ_ST_FLAGS_MASK     ((uint64_t)0xFFFE0000)       /* bits [17..31]*/
@@ -274,7 +274,7 @@ enum VjExitCode {
 #define VJ_ST_YIELD_MASK     ((uint64_t)0x0000FF0000000000ULL) /* bits [40..47] */
 
 /* Access macros — extract fields from vmstate. */
-#define VJ_ST_GET_DEPTH(st)   ((int32_t)((st) & VJ_ST_DEPTH_MASK))
+#define VJ_ST_GET_STACK_DEPTH(st)   ((int32_t)((st) & VJ_ST_STACK_DEPTH_MASK))
 #define VJ_ST_GET_FIRST(st)   ((int)(((st) & VJ_ST_FIRST_BIT) != 0))
 #define VJ_ST_GET_FLAGS(st)   ((uint32_t)(((st) & VJ_ST_FLAGS_MASK) >> VJ_ST_FLAGS_SHIFT))
 #define VJ_ST_GET_EXIT(st)     ((int32_t)(((st) >> VJ_ST_EXIT_SHIFT) & 0xFF))
@@ -288,10 +288,10 @@ enum VjExitCode {
 #define VJ_ST_SET_EXIT(st, v)    ((st) = ((st) & ~VJ_ST_EXIT_MASK) | (((uint64_t)(v) & 0xFF) << VJ_ST_EXIT_SHIFT))
 #define VJ_ST_SET_YIELD(st, v)  ((st) = ((st) & ~VJ_ST_YIELD_MASK) | (((uint64_t)(v) & 0xFF) << VJ_ST_YIELD_SHIFT))
 
-/* Depth increment/decrement — depth at bits [0..7]: +1/-1 directly.
+/* Depth increment/decrement — stack_depth at bits [0..7]: +1/-1 directly.
  * Callers MUST check overflow BEFORE incrementing. */
-#define VJ_ST_INC_DEPTH(st)   ((st) += 1)
-#define VJ_ST_DEC_DEPTH(st)   ((st) -= 1)
+#define VJ_ST_INC_STACK_DEPTH(st)   ((st) += 1)
+#define VJ_ST_DEC_STACK_DEPTH(st)   ((st) -= 1)
 
 /* VJ_ST_BTR_FIRST — test-and-clear of the first flag (bit 16).
  *
@@ -374,7 +374,7 @@ _Static_assert(sizeof(VjOpExt) == 8, "VjOpExt must be 8 bytes");
  *
  *  Frame type constants are only used for debug/documentation purposes.
  *
- *  Stack depth limit:  VJ_MAX_DEPTH
+ *  Stack depth limit:  VJ_MAX_STACK_DEPTH
  * */
 
 /* Frame type constants — documentation/debug only, not stored in vmstate. */
@@ -391,8 +391,8 @@ _Static_assert(sizeof(VjOpExt) == 8, "VjOpExt must be 8 bytes");
  * Instruction pairing (begin/end) ensures correct pop semantics
  * without per-frame type tags.
  *
- * body_pc and elem_size for iteration are compile-time constants
- * encoded in the SLICE_END instruction's operands.
+ * The loop-back byte offset and elem_size for iteration are compile-time
+ * constants encoded in the SLICE_END instruction's operands.
  *
  * ret_ops/ret_pc are only used by CALL frames (OP_CALL, INTERFACE
  * switch-ops).  PTR_DEREF, SLICE, ARRAY, MAP_STR_STR never use them.
@@ -423,7 +423,7 @@ typedef struct __attribute__((aligned(8))) VjStackFrame {
 #pragma pack(pop)
 
   int32_t         state;       /* 28: bit 0 = iter active (resume detect);
-                                *     bits 24-31 = trace depth (debug only) */
+                                *     bits 24-31 = trace_obj_depth (debug builds only; unrelated to indent_depth) */
 } VjStackFrame;
 
 _Static_assert(sizeof(VjStackFrame) == 32, "VjStackFrame must be 32 bytes");
@@ -444,13 +444,14 @@ enum VjYieldReason {
   VJ_YIELD_MAP_HANDOFF = 3,  /* map encoding handoff to Go */
 };
 
-/* FallbackReason — encoded in OP_FALLBACK's operand_b by the Go compiler.
- * Describes WHY this field was delegated to Go-side encoding.
- * Only used by debug trace; zero cost in release builds.
+/* FallbackReason — Go-side diagnostic codes kept in sync with fbReason*
+ * constants in vj_encvm.go.
+ * Describes why a field was delegated to Go-side encoding.
  * Values: 0=unknown, 1=json.Marshaler, 2=encoding.TextMarshaler,
- *         3=`,string` tag, 4=[]byte, 5=[N]byte, 6=map+omitempty.
- * Authoritative definition: fbReason* constants in vj_encvm.go.
- * C trace writes "YIELD(fb:N)"; Go post-processes to human labels. */
+ *         3=`,string` tag, 4=[]byte, 5=[N]byte, 6=map+omitempty,
+ *         7=key pool full.
+ * Used by Go-side debug/diagnostic tooling when fallback metadata carries
+ * an associated reason code. */
 
 /* ================================================================
  *  Interface Cache Entry — 24 bytes
@@ -512,7 +513,7 @@ typedef struct VjExecCtx {
   const uint8_t   *key_pool_base;     /*  88: global key pool base pointer */
 
   /* ===== Unified Stack (96-2143) ===== */
-  VjStackFrame     stack[VJ_MAX_DEPTH]; /*  96: 64 x 32 = 2048 bytes */
+  VjStackFrame     stack[VJ_MAX_STACK_DEPTH]; /*  96: 64 x 32 = 2048 bytes */
 
   /* Debug trace (always present for layout stability; only written when
    * VJ_ENCVM_DEBUG is defined and the pointer is non-NULL). */

@@ -139,8 +139,9 @@ vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend, const void *ptr,
     break;
   }
   default:
-    /* Should not happen — Go compiler only emits known types. */
-    return (VjPtrEncResult){NULL, VJ_EXIT_BUF_FULL};
+    /* Defensive fallback: an unknown cached primitive tag should hand control
+     * back to Go instead of looking like a retryable BUF_FULL condition. */
+    return (VjPtrEncResult){NULL, VJ_EXIT_GO_FALLBACK};
   }
   return (VjPtrEncResult){buf, 0};
 }
@@ -194,6 +195,8 @@ VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend,
     if (__builtin_expect(r.buf == NULL, 0)) {
       if (r.exit_code == VJ_EXIT_NAN_INF)
         return (VjIfaceResult){NULL, NULL, NULL, NULL, VJ_IFACE_NAN_INF};
+      if (r.exit_code == VJ_EXIT_GO_FALLBACK)
+        return (VjIfaceResult){buf, NULL, NULL, NULL, VJ_IFACE_YIELD};
       return (VjIfaceResult){NULL, NULL, NULL, NULL, VJ_IFACE_BUF_FULL};
     }
     return (VjIfaceResult){r.buf, NULL, NULL, NULL, VJ_IFACE_DONE};

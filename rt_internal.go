@@ -80,6 +80,17 @@ func makeDirtyBytes(len, cap int) []byte {
 	return b
 }
 
+// SwissMapLayoutOK indicates whether the Go runtime's Swiss Map memory layout
+// matches what our C code expects. If false, map[string]string encoding
+// falls back to the generic Go-based map iteration (OP_MAP_BEGIN/END).
+//
+// Set by verifySwissMapLayout during init. May be false if:
+//   - The Go runtime's Swiss Map implementation has changed
+//   - This is a new Go version with different map internals
+//
+// When false, map[string]string is still correctly encoded, just slower.
+var SwissMapLayoutOK bool
+
 func init() {
 	// Verify our sliceHeader layout assumption matches the Go runtime.
 	s := make([]byte, 1, 2)
@@ -92,6 +103,8 @@ func init() {
 	// round-trip: init an iterator on a 1-element map and check it works.
 	// If mapsIterSize is too small, the Init/Next calls will corrupt the
 	// stack — this test catches that during startup.
+	//
+	// This MUST succeed — there is no fallback for broken maps.Iter layout.
 	m := map[string]string{"__vjson_init_check__": "ok"}
 	mt := rtypePtr(reflect.TypeFor[map[string]string]())
 	mp := *(*unsafe.Pointer)(unsafe.Pointer(&m))
@@ -103,39 +116,46 @@ func init() {
 
 	// Verify Swiss Map memory layout for C-native map[string]string iteration.
 	// C code (OP_MAP_STR_STR) directly reads these structs — any layout change
-	// in the Go runtime would silently corrupt output. Panic early if mismatched.
-	verifySwissMapLayout()
+	// in the Go runtime would silently corrupt output.
+	//
+	// Unlike the mapsIter check above, this is NOT fatal — we can fall back
+	// to Go-based map iteration (OP_MAP_BEGIN/END) if the layout doesn't match.
+	SwissMapLayoutOK = verifySwissMapLayout()
 }
 
 // verifySwissMapLayout checks that the Go runtime's Swiss Map struct offsets
 // match what our C code assumes (GoSwissMap/GoSwissTable in types.h).
-func verifySwissMapLayout() {
+// Returns true if the layout matches, false otherwise.
+//
+// When this returns false, map[string]string encoding will fall back to
+// the generic Go-based map iteration path (slower but correct).
+func verifySwissMapLayout() bool {
 	m := map[string]string{"a": "b"}
 	mp := *(*unsafe.Pointer)(unsafe.Pointer(&m)) // *maps.Map
 
 	// Map.used at offset 0 should be 1
 	used := *(*uint64)(mp)
 	if used != 1 {
-		panic("vjson: Swiss Map layout mismatch — Map.used not at offset 0")
+		return false
 	}
 
 	// Map.dirLen at offset 24 should be 0 (small map with 1 entry)
 	dirLen := *(*int64)(unsafe.Add(mp, 24))
 	if dirLen != 0 {
-		panic("vjson: Swiss Map layout mismatch — Map.dirLen not at offset 24 or unexpected value")
+		return false
 	}
 
 	// Map.dirPtr at offset 16 is the group pointer (small map)
 	dirPtr := *(*unsafe.Pointer)(unsafe.Add(mp, 16))
 	if dirPtr == nil {
-		panic("vjson: Swiss Map layout mismatch — Map.dirPtr is nil for non-empty map")
+		return false
 	}
 
 	// Group: ctrl bytes at offset 0, slots at offset 8.
 	// Find the full slot (ctrl byte with bit 7 clear).
 	ctrls := *(*uint64)(dirPtr)
 	foundSlot := -1
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		ctrl := byte(ctrls >> (i * 8))
 		if ctrl&0x80 == 0 { // full slot
 			foundSlot = i
@@ -143,7 +163,7 @@ func verifySwissMapLayout() {
 		}
 	}
 	if foundSlot < 0 {
-		panic("vjson: Swiss Map layout mismatch — no full slot found in group ctrl bytes")
+		return false
 	}
 
 	// Read key GoString from slot: group + 8 + slot*32
@@ -152,15 +172,13 @@ func verifySwissMapLayout() {
 	keyPtr := unsafe.Add(dirPtr, 8+uintptr(foundSlot)*slotSize)
 	key := *(*string)(keyPtr)
 	if key != "a" {
-		panic("vjson: Swiss Map layout mismatch — key at slot offset doesn't match")
+		return false
 	}
 
 	// Read elem GoString from slot: group + 8 + slot*32 + 16
 	elemPtr := unsafe.Add(dirPtr, 8+uintptr(foundSlot)*slotSize+elemOff)
 	elem := *(*string)(elemPtr)
-	if elem != "b" {
-		panic("vjson: Swiss Map layout mismatch — elem at slot offset doesn't match")
-	}
+	return elem == "b"
 }
 
 // ---- Low-level map iteration via go:linkname ----

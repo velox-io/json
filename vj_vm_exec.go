@@ -64,7 +64,7 @@ func (m *Marshaler) encodeArrayNative(dec *ArrayCodec, base unsafe.Pointer) erro
 // and interface cache management.
 //
 // Uses the reusable m.vmCtx to avoid per-call stack zeroing of the
-// 1448-byte VjExecCtx. IfaceCache is already set by getMarshaler.
+// 2152-byte VjExecCtx. IfaceCache is already set by getMarshaler.
 func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	// WARNING: execVM must NOT be called re-entrantly. m.vmCtx is a single
 	// shared context; a nested execVM call would corrupt its state (PC, stack,
@@ -127,14 +127,14 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 		}
 	}
 
-	err := m.execVMLoop(ctx, bp, kpSnap, vmExec)
+	err := m.execVMLoop(ctx, bp, vmExec)
 	m.inVM = false
 	return err
 }
 
 // execVMLoop is the inner VM execution loop, factored out of execVM so that
 // the inVM flag can be cleared without defer overhead on the hot path.
-func (m *Marshaler) execVMLoop(ctx *VjExecCtx, bp *Blueprint, _ *keyPoolSnapshot, vmExec func(unsafe.Pointer)) error {
+func (m *Marshaler) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(unsafe.Pointer)) error {
 	for {
 		// In streaming mode, flush accumulated data from Go-side yield
 		// handlers before re-entering C. This keeps memory bounded and
@@ -195,7 +195,7 @@ func (m *Marshaler) execVMLoop(ctx *VjExecCtx, bp *Blueprint, _ *keyPoolSnapshot
 			// Sync Go-side indent depth from C VM state so that Go-driven
 			// encoding (maps, any-typed values) uses the correct depth.
 			if ctx.IndentStep > 0 {
-				m.depth = int(ctx.IndentDepth)
+				m.indentDepth = int(ctx.IndentDepth)
 			}
 
 			switch vmstateGetYield(ctx.VMState) {
@@ -250,7 +250,7 @@ func (m *Marshaler) execVMLoop(ctx *VjExecCtx, bp *Blueprint, _ *keyPoolSnapshot
 
 		case vjExitStackOvfl:
 			return fmt.Errorf("vjson: nesting depth exceeds limit (depth=%d/%d)",
-				vmstateGetDepth(ctx.VMState), VJ_MAX_DEPTH)
+				vmstateGetStackDepth(ctx.VMState), VJ_MAX_STACK_DEPTH)
 
 		case vjExitNanInf:
 			return &UnsupportedValueError{Str: "NaN or Inf float value"}
@@ -273,7 +273,7 @@ func (m *Marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 	rtype := typeFromRTypePtr(typePtr)
 
 	// Get or create the TypeInfo for this type.
-	ti := GetCodec(rtype)
+	ti := getCodec(rtype)
 
 	// Determine tag for primitives or compile Blueprint for complex types.
 	// Tag = opcode directly (all primitive opcodes >= 1, so tag=0 means "no tag").

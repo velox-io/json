@@ -183,7 +183,7 @@ var (
 
 func marshalGoOnly[T any](v *T) ([]byte, error) {
 	m := getMarshaler()
-	ti := GetCodec(reflect.TypeFor[T]())
+	ti := getCodec(reflect.TypeFor[T]())
 
 	hint := ti.HintBytes
 	if hint > cap(m.buf) {
@@ -507,7 +507,7 @@ func BenchmarkMarshal_Slice100_StdJSON(b *testing.B) {
 // via encodeStructGo (velox Go struct encoder).
 func marshalSliceGoOnly[T any](sl *[]T) ([]byte, error) {
 	m := getMarshaler()
-	ti := GetCodec(reflect.TypeFor[T]())
+	ti := getCodec(reflect.TypeFor[T]())
 	dec := ti.Codec.(*StructCodec)
 
 	hint := ti.HintBytes * len(*sl)

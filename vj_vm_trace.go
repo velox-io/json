@@ -27,8 +27,8 @@ func allocTraceBuf() *VjTraceBuf {
 	return new(VjTraceBuf)
 }
 
-// fbReasonLabels maps FallbackReason numeric codes to human-readable labels.
-// C writes "YIELD(fb:N)" to the ring buffer; Go replaces it with "YIELD(<label>)".
+// fbReasonLabels maps fallback reason codes to human-readable labels.
+// When trace output contains "YIELD(fb:N)", Go replaces it with "YIELD(<label>)".
 var fbReasonLabels = [...]string{
 	fbReasonUnknown:       "fallback",
 	fbReasonMarshaler:     "marshaler",
@@ -37,10 +37,11 @@ var fbReasonLabels = [...]string{
 	fbReasonByteSlice:     "byte_slice",
 	fbReasonByteArray:     "byte_array",
 	fbReasonMapOmitempty:  "map_omitempty",
+	fbReasonKeyPoolFull:   "keypool_full",
 }
 
-// expandFallbackReasons replaces "YIELD(fb:N)" tokens in trace output with
-// human-readable "YIELD(<reason>)" labels using fbReasonLabels.
+// expandFallbackReasons replaces any "YIELD(fb:N)" tokens in trace output
+// with human-readable "YIELD(<reason>)" labels using fbReasonLabels.
 func expandFallbackReasons(data []byte) []byte {
 	prefix := []byte("YIELD(fb:")
 	for {
@@ -233,7 +234,7 @@ var opcodeName = map[uint16]string{
 	opNumber:     "NUMBER",
 	opByteSlice:  "BYTE_SLICE",
 	opSkipIfZero: "SKIP_IF_ZERO",
-	opCall:        "CALL",
+	opCall:       "CALL",
 	opPtrDeref:   "PTR_DEREF",
 	opPtrEnd:     "PTR_END",
 	opSliceBegin: "SLICE_BEGIN",
@@ -250,7 +251,6 @@ var opcodeName = map[uint16]string{
 	opKInt:       "KINT",
 	opKInt64:     "KINT64",
 }
-
 
 // dumpBlueprint prints one blueprint's instruction listing to stderr
 // with indentation that reflects structural nesting (OBJ_OPEN/CLOSE,
@@ -311,7 +311,29 @@ func dumpBlueprint(bp *Blueprint) {
 				ann = " <" + a + ">"
 			}
 		}
-		if hdr.KeyLen > 0 {
+		if code == opFallback && bp.Fallbacks != nil {
+			if fb, ok := bp.Fallbacks[int(pc)]; ok {
+				reason := "fallback"
+				if int(fb.Reason) < len(fbReasonLabels) && fbReasonLabels[fb.Reason] != "" {
+					reason = fbReasonLabels[fb.Reason]
+				}
+				if hdr.KeyLen > 0 {
+					// Key stored in pool (normal fallback, e.g. marshaler/quoted).
+					key := keyPoolBytes(hdr.KeyOff, hdr.KeyLen)
+					fmt.Fprintf(&buf, "[%s] %s(%s) %s%s\n", sizeTag, label, reason, key, ann)
+				} else if fb.TI != nil && fb.TI.Ext != nil && len(fb.TI.Ext.KeyBytes) > 0 {
+					// Key NOT in pool (overflow); read from TypeInfo.
+					fmt.Fprintf(&buf, "[%s] %s(%s) %s%s\n", sizeTag, label, reason, fb.TI.Ext.KeyBytes, ann)
+				} else {
+					fmt.Fprintf(&buf, "[%s] %s(%s)%s\n", sizeTag, label, reason, ann)
+				}
+			} else if hdr.KeyLen > 0 {
+				key := keyPoolBytes(hdr.KeyOff, hdr.KeyLen)
+				fmt.Fprintf(&buf, "[%s] %s %s%s\n", sizeTag, label, key, ann)
+			} else {
+				fmt.Fprintf(&buf, "[%s] %s%s\n", sizeTag, label, ann)
+			}
+		} else if hdr.KeyLen > 0 {
 			key := keyPoolBytes(hdr.KeyOff, hdr.KeyLen)
 			fmt.Fprintf(&buf, "[%s] %s %s%s\n", sizeTag, label, key, ann)
 		} else {

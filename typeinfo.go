@@ -44,6 +44,16 @@ const (
 	KindArray      // Codec: *ArrayCodec
 )
 
+// MapVariant represents specialized map types for fast path optimization.
+type MapVariant uint8
+
+const (
+	MapVariantGeneric  MapVariant = iota // generic map (default)
+	MapVariantStrStr                     // map[string]string
+	MapVariantStrInt                     // map[string]int
+	MapVariantStrInt64                   // map[string]int64
+)
+
 // tiFlag is a bitmask for hot-path checks in scanValue / encodeValue.
 type tiFlag uint16
 
@@ -117,7 +127,7 @@ func (ti *TypeInfo) resolveCodec() any {
 		return c
 	}
 	if ti.Ext != nil && ti.Ext.Type != nil {
-		full := GetCodec(ti.Ext.Type)
+		full := getCodec(ti.Ext.Type)
 		c := full.Codec
 		ti.Codec = c // cache for next call; benign race: idempotent write
 		return c
@@ -136,8 +146,11 @@ type codecEntry struct {
 	done chan struct{}
 }
 
-// KindForType maps reflect.Kind to ElemTypeKind.
-func KindForType(t reflect.Type) ElemTypeKind {
+// kindForType maps reflect.Kind to ElemTypeKind.
+// Returns 0 (invalid) for unsupported types (chan, func, non-empty interface, etc.).
+// The caller should handle 0 as an unsupported type — encodeValueSlow's default
+// branch returns UnsupportedTypeError in that case.
+func kindForType(t reflect.Type) ElemTypeKind {
 	switch t.Kind() {
 	case reflect.Bool:
 		return KindBool
@@ -177,13 +190,13 @@ func KindForType(t reflect.Type) ElemTypeKind {
 		if t.NumMethod() == 0 {
 			return KindAny
 		}
-		panic("vjson: non-empty interface types not supported: " + t.String())
+		return 0 // non-empty interface: unsupported
 	case reflect.Map:
 		return KindMap
 	case reflect.Array:
 		return KindArray
 	default:
-		panic("vjson: unsupported type: " + t.String())
+		return 0 // chan, func, complex, uintptr, etc.: unsupported
 	}
 }
 
@@ -200,9 +213,9 @@ func isQuotableKind(k ElemTypeKind) bool {
 	return false
 }
 
-// GetCodec returns the cached *TypeInfo for the given type.
+// getCodec returns the cached *TypeInfo for the given type.
 // Thread-safe; blocks until the codec is fully initialized.
-func GetCodec(t reflect.Type) *TypeInfo {
+func getCodec(t reflect.Type) *TypeInfo {
 	if v, ok := codecCache.Load(t); ok {
 		switch e := v.(type) {
 		case *TypeInfo:
@@ -230,7 +243,7 @@ func getCodecForCycle(t reflect.Type) *TypeInfo {
 
 func getCodecSlow(t reflect.Type, wait bool) *TypeInfo {
 	e := &codecEntry{
-		ti:   &TypeInfo{Kind: KindForType(t), Size: t.Size(), Ext: &TypeInfoExt{Type: t}},
+		ti:   &TypeInfo{Kind: kindForType(t), Size: t.Size(), Ext: &TypeInfoExt{Type: t}},
 		done: make(chan struct{}),
 	}
 
@@ -621,13 +634,8 @@ type StructCodec struct {
 	EncodeSteps []structEncodeStep
 
 	// Tiered lookup — set by buildLookup at construction time.
-	LookupFn     func(dec *StructCodec, key string) *TypeInfo
-	LookupMode   uint8
-	HashSeed     uint64
-	HashShift    uint8
-	HashTable    []uint8              // indices into Fields[]; 0xFF = empty
-	FieldMap     map[string]*TypeInfo // fallback for 33+ fields
-	HasMixedCase bool                 // true if any JSONName differs from JSONNameLower
+	Lookup       fieldLookup // polymorphic field lookup strategy
+	HasMixedCase bool        // true if any JSONName differs from JSONNameLower
 
 	// Native C encoder VM cache — lazily initialized by getBlueprint().
 	vm atomic.Pointer[encvmCache]
@@ -774,7 +782,7 @@ type MapCodec struct {
 	ValTI   *TypeInfo
 	KeyTI   *TypeInfo // key type info (for TextMarshaler on non-string keys)
 
-	ValIsString bool           // true for map[string]string fast path (encoder)
+	MapKind     MapVariant     // specialized map type for fast path
 	mapRType    unsafe.Pointer // cached *abi.MapType for mapsIterInit
 	isStringKey bool           // KeyType.Kind() == reflect.String
 	ScanMapFn   func(sc *Parser, src []byte, idx int, ptr unsafe.Pointer) (int, error)
@@ -791,7 +799,7 @@ func BuildMapCodec(t reflect.Type) *MapCodec {
 		ValSize:     t.Elem().Size(),
 		ValTI:       valTI,
 		KeyTI:       keyTI,
-		ValIsString: valTI.Kind == KindString && isStringKey,
+		MapKind:     MapVariantGeneric,
 		mapRType:    rtypePtr(t),
 		isStringKey: isStringKey,
 	}
@@ -799,10 +807,13 @@ func BuildMapCodec(t reflect.Type) *MapCodec {
 		switch valTI.Kind {
 		case KindString:
 			mc.ScanMapFn = (*Parser).scanMapStringString
+			mc.MapKind = MapVariantStrStr
 		case KindInt:
 			mc.ScanMapFn = (*Parser).scanMapStringInt
+			mc.MapKind = MapVariantStrInt
 		case KindInt64:
 			mc.ScanMapFn = (*Parser).scanMapStringInt64
+			mc.MapKind = MapVariantStrInt64
 		}
 	}
 	return mc

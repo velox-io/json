@@ -69,7 +69,7 @@ func kindToOpcode(k ElemTypeKind) uint16 {
 	case k == KindNumber:
 		return opNumber
 	default:
-		panic(fmt.Sprintf("kindToOpcode: no direct opcode for ElemTypeKind %d", k))
+		panic(fmt.Sprintf("kindToOpcode: no direct opcode for ElemTypeKind %d", k)) // internal bug: callers guard with kind checks
 	}
 }
 
@@ -103,11 +103,10 @@ const (
 	yieldMapHandoff uint32 = 3 // map encoding handoff — Go takes over full map field encoding
 )
 
-// FallbackReason constants — stored in fbInfo for OP_FALLBACK.
-// Mirrors enum FallbackReason in native/encvm/impl/types.h.
-// Used by Go-side debug trace to display why a field was delegated to Go.
-// Note: with variable-length instructions, FALLBACK is 8-byte (no operands);
-// the reason is tracked via Blueprint.Fallbacks[pc].Reason instead.
+// FallbackReason constants — stored in fbInfo.Reason for fallback metadata.
+// Kept in sync with the documentation in native/encvm/impl/types.h.
+// Used by Go-side diagnostics/debug code to describe why a field was
+// delegated to Go.
 const (
 	fbReasonUnknown       int32 = 0 // unspecified / unknown kind
 	fbReasonMarshaler     int32 = 1 // implements json.Marshaler
@@ -116,13 +115,14 @@ const (
 	fbReasonByteSlice     int32 = 4 // []byte — base64 encoding
 	fbReasonByteArray     int32 = 5 // [N]byte — base64 encoding
 	fbReasonMapOmitempty  int32 = 6 // map with omitempty (needs Go len check)
+	fbReasonKeyPoolFull   int32 = 7 // global key pool exhausted (>64KB); key read from fbInfo.TI.Ext.KeyBytes
 )
 
 // ================================================================
 //  VMState — packed 64-bit VM state register (mirrors C layout)
 //
 //  Layout:
-//    bits [0..7]   = depth        (unified stack depth)
+//    bits [0..7]   = stack_depth (VM call/iter stack depth; NOT JSON nesting depth)
 //    bits [8..15]  = reserved
 //    bit  [16]     = first        (comma latch: 0 => write ',' before next item)
 //    bits [17..31] = enc_flags    (encoding config: escape, float fmt)
@@ -132,11 +132,11 @@ const (
 // ================================================================
 
 const (
-	vjStDepthMask  = uint64(0x000000FF)
-	vjStFirstBit   = uint64(1) << 16
-	vjStFlagsShift = 17
-	vjStExitShift  = 32
-	vjStYieldShift = 40
+	vjStStackDepthMask = uint64(0x000000FF)
+	vjStFirstBit       = uint64(1) << 16
+	vjStFlagsShift     = 17
+	vjStExitShift      = 32
+	vjStYieldShift     = 40
 )
 
 func vmstateGetExit(st uint64) int32 {
@@ -152,8 +152,8 @@ func vmstateGetFirst(st uint64) bool {
 	return (st & vjStFirstBit) != 0
 }
 
-func vmstateGetDepth(st uint64) int32 {
-	return int32(st & vjStDepthMask)
+func vmstateGetStackDepth(st uint64) int32 {
+	return int32(st & vjStStackDepthMask)
 }
 
 // vmstateBuildInitial builds the initial vmstate for VM entry.
@@ -242,6 +242,7 @@ type Blueprint struct {
 type fbInfo struct {
 	TI     *TypeInfo // field's TypeInfo (for EncodeFn dispatch)
 	Offset uintptr   // field offset from current struct base
+	Reason int32     // fallback reason code for diagnostics/debug metadata
 }
 
 // encvmCache holds compiled encoder VM data for a StructCodec.
@@ -252,11 +253,11 @@ type encvmCache struct {
 	blueprint *Blueprint // compiled Blueprint (flat instruction stream)
 }
 
-// VJ_MAX_DEPTH matches the C VJ_MAX_DEPTH.
-const VJ_MAX_DEPTH = 64 //nolint
+// VJ_MAX_STACK_DEPTH matches the C VJ_MAX_STACK_DEPTH.
+const VJ_MAX_STACK_DEPTH = 64 //nolint
 
 // maxIndentDepth is the combined max nesting for indent template sizing.
-const maxIndentDepth = VJ_MAX_DEPTH
+const maxIndentDepth = VJ_MAX_STACK_DEPTH
 
 // VjStackFrame mirrors the C VjStackFrame (32 bytes).
 // Unified frame for all stack-using ops: ptr_deref, interface/switch_ops,
@@ -335,8 +336,8 @@ type VjExecCtx struct {
 	KeyPoolBase     unsafe.Pointer //  88: global key pool base pointer
 
 	// Unified stack + debug trace
-	Stack    [VJ_MAX_DEPTH]VjStackFrame //  96: 64 x 32 = 2048 bytes
-	TraceBuf unsafe.Pointer             // 2144: Go-allocated VjTraceBuf
+	Stack    [VJ_MAX_STACK_DEPTH]VjStackFrame //  96: 64 x 32 = 2048 bytes
+	TraceBuf unsafe.Pointer                   // 2144: Go-allocated VjTraceBuf
 }
 
 var _ [2152]byte = [unsafe.Sizeof(VjExecCtx{})]byte{}
@@ -434,14 +435,19 @@ type keyPoolEntry struct {
 }
 
 // globalKeyPoolInsert adds key bytes to the global pool (with deduplication).
-// Returns the pool offset and length. Thread-safe via COW + mutex.
-// Panics if the pool would exceed 65535 bytes (virtually impossible with dedup).
-func globalKeyPoolInsert(keyBytes []byte) (off uint16, klen uint8) {
+// Returns the pool offset, length, and whether the insert succeeded.
+// Thread-safe via COW + mutex.
+//
+// Returns ok=false if the pool would exceed 65535 bytes (uint16 address space).
+// Dedup hits always succeed (ok=true) even when the pool is full — only
+// genuinely new keys that don't fit will return ok=false.
+// The caller (compiler) should fall back to Go-driven encoding for that field.
+func globalKeyPoolInsert(keyBytes []byte) (off uint16, klen uint8, ok bool) {
 	if len(keyBytes) == 0 {
-		return 0, 0
+		return 0, 0, true
 	}
 	if len(keyBytes) > 255 {
-		panic("vjson: key too long for uint8 key_len (>255 bytes)")
+		panic("vjson: key too long for uint8 key_len (>255 bytes)") // internal bug: compiler falls back before reaching here
 	}
 
 	key := string(keyBytes)
@@ -449,8 +455,8 @@ func globalKeyPoolInsert(keyBytes []byte) (off uint16, klen uint8) {
 	// Fast path: check existing snapshot (lock-free).
 	snap := globalKeyPool.current.Load()
 	if snap != nil {
-		if entry, ok := snap.idx[key]; ok {
-			return entry.off, entry.len
+		if entry, found := snap.idx[key]; found {
+			return entry.off, entry.len, true
 		}
 	}
 
@@ -459,14 +465,14 @@ func globalKeyPoolInsert(keyBytes []byte) (off uint16, klen uint8) {
 	defer globalKeyPool.mu.Unlock()
 
 	snap = globalKeyPool.current.Load()
-	if entry, ok := snap.idx[key]; ok {
-		return entry.off, entry.len
+	if entry, found := snap.idx[key]; found {
+		return entry.off, entry.len, true
 	}
 
 	// Validate pool capacity.
 	newOff := len(snap.data)
 	if newOff+len(keyBytes) > 65535 {
-		panic("vjson: global key pool overflow (>65535 bytes)")
+		return 0, 0, false // pool full: caller should emit Go fallback for this field
 	}
 
 	// COW: copy data + extend.
@@ -482,7 +488,7 @@ func globalKeyPoolInsert(keyBytes []byte) (off uint16, klen uint8) {
 	newIdx[key] = entry
 
 	globalKeyPool.current.Store(&keyPoolSnapshot{data: newData, idx: newIdx})
-	return entry.off, entry.len
+	return entry.off, entry.len, true
 }
 
 func loadKeyPoolSnapshot() *keyPoolSnapshot {
@@ -604,5 +610,5 @@ func activeBlueprint(ctx *VjExecCtx, rootBP *Blueprint) *Blueprint {
 	if bp != nil {
 		return bp
 	}
-	panic("vjson: activeBlueprint: unknown ops pointer (SWITCH_OPS without registry entry)")
+	panic("vjson: activeBlueprint: unknown ops pointer (SWITCH_OPS without registry entry)") // internal bug: registry and SWITCH_OPS are always in sync
 }

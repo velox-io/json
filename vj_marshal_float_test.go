@@ -6,18 +6,7 @@ import (
 	"math/rand"
 	"strconv"
 	"testing"
-
-	"github.com/velox-io/json/native/encvm"
 )
-
-// ---------------------------------------------------------------------------
-// Helper: marshal a float via a struct field to exercise the native C VM
-// (uscale) path rather than Go's strconv.AppendFloat.
-//
-// When encvm.Available is true and the struct has no special features
-// (no custom marshalers, no indent), Marshal dispatches to the native
-// encoder which calls us_write_float64 / us_write_float32 in C.
-// ---------------------------------------------------------------------------
 
 type wrapF64 struct {
 	V float64 `json:"v"`
@@ -81,10 +70,6 @@ func extractNumber(t *testing.T, s string) string {
 // ---------------------------------------------------------------------------
 
 func TestNativeFloat64(t *testing.T) {
-	if !encvm.Available {
-		t.Skip("native encoder not available on this platform")
-	}
-
 	cases := []struct {
 		name string
 		val  float64
@@ -208,9 +193,6 @@ func TestNativeFloat64(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNativeFloat32(t *testing.T) {
-	if !encvm.Available {
-		t.Skip("native encoder not available on this platform")
-	}
 
 	cases := []struct {
 		name string
@@ -308,9 +290,6 @@ func TestNativeFloat32(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNativeFloat_SpecialValues(t *testing.T) {
-	if !encvm.Available {
-		t.Skip("native encoder not available on this platform")
-	}
 
 	t.Run("float64_NaN", func(t *testing.T) {
 		w := wrapF64{V: math.NaN()}
@@ -359,9 +338,6 @@ func TestNativeFloat_SpecialValues(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNativeFloat64_Roundtrip(t *testing.T) {
-	if !encvm.Available {
-		t.Skip("native encoder not available on this platform")
-	}
 
 	values := []float64{
 		0, 1, -1, 0.1, 0.2, 0.3,
@@ -396,9 +372,6 @@ func TestNativeFloat64_Roundtrip(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNativeFloat32_Roundtrip(t *testing.T) {
-	if !encvm.Available {
-		t.Skip("native encoder not available on this platform")
-	}
 
 	values := []float32{
 		0, 1, -1, 0.1, 0.2, 0.3,
@@ -432,9 +405,6 @@ func TestNativeFloat32_Roundtrip(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNativeFloat64_Random(t *testing.T) {
-	if !encvm.Available {
-		t.Skip("native encoder not available on this platform")
-	}
 
 	rng := rand.New(rand.NewSource(20260227))
 	const N = 10000
@@ -467,9 +437,6 @@ func TestNativeFloat64_Random(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNativeFloat32_Random(t *testing.T) {
-	if !encvm.Available {
-		t.Skip("native encoder not available on this platform")
-	}
 
 	rng := rand.New(rand.NewSource(20260227))
 	const N = 10000
@@ -502,9 +469,6 @@ func TestNativeFloat32_Random(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNativeFloat_InStruct(t *testing.T) {
-	if !encvm.Available {
-		t.Skip("native encoder not available on this platform")
-	}
 
 	type FloatStruct struct {
 		F64     float64  `json:"f64"`
@@ -560,9 +524,6 @@ func TestNativeFloat_InStruct(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNativeFloat64_AllPowersOfTwo(t *testing.T) {
-	if !encvm.Available {
-		t.Skip("native encoder not available on this platform")
-	}
 
 	for exp := -1074; exp <= 1023; exp++ {
 		val := math.Ldexp(1.0, exp)
@@ -582,9 +543,6 @@ func TestNativeFloat64_AllPowersOfTwo(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNativeFloat64_AllPowersOfTen(t *testing.T) {
-	if !encvm.Available {
-		t.Skip("native encoder not available on this platform")
-	}
 
 	for exp := -323; exp <= 308; exp++ {
 		val := math.Pow(10, float64(exp))
@@ -604,9 +562,6 @@ func TestNativeFloat64_AllPowersOfTen(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNativeFloat64_BoundaryBits(t *testing.T) {
-	if !encvm.Available {
-		t.Skip("native encoder not available on this platform")
-	}
 
 	const smallestNormalBits uint64 = 0x0010000000000000
 	for delta := uint64(0); delta <= 10; delta++ {
@@ -629,9 +584,6 @@ func TestNativeFloat64_BoundaryBits(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNativeFloat64_Sequential(t *testing.T) {
-	if !encvm.Available {
-		t.Skip("native encoder not available on this platform")
-	}
 
 	regions := []struct {
 		name  string
@@ -679,9 +631,6 @@ func TestNativeFloat64_Sequential(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNativeFloat32_BoundaryBits(t *testing.T) {
-	if !encvm.Available {
-		t.Skip("native encoder not available on this platform")
-	}
 
 	const smallestNormalBits uint32 = 0x00800000
 	for delta := uint32(0); delta <= 10; delta++ {
@@ -704,9 +653,6 @@ func TestNativeFloat32_BoundaryBits(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNativeFloat64_Integers(t *testing.T) {
-	if !encvm.Available {
-		t.Skip("native encoder not available on this platform")
-	}
 
 	values := []float64{
 		0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
@@ -733,9 +679,6 @@ func TestNativeFloat64_Integers(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNativeFloat_ValidJSON(t *testing.T) {
-	if !encvm.Available {
-		t.Skip("native encoder not available on this platform")
-	}
 
 	values := []float64{
 		0, -0, 1, -1, 0.5, -0.5,

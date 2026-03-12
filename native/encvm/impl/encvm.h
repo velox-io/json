@@ -85,26 +85,27 @@ VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
   #define VM_PIN_VMSTATE() __asm__ volatile("" : "+r"(vmstate))
   VM_PIN_VMSTATE();
 
-/* Combined depth for trace output and indent calculations. */
+/* Trace-only depth: VM stack depth + OBJ_OPEN/CLOSE count for debug output indentation.
+ * NOT used for JSON indent — that uses indent_depth separately. */
 #ifdef VJ_ENCVM_DEBUG
-  /* obj_depth tracks OBJ_OPEN/CLOSE nesting for trace indentation only.
+  /* trace_obj_depth tracks OBJ_OPEN/CLOSE nesting for trace indentation only.
    * On resume, derive from indent_depth which is saved across yields. */
 #ifdef VJ_COMPACT_INDENT
-  int obj_depth = 0;
+  int trace_obj_depth = 0;
 #else
-  int obj_depth = (int)ctx->indent_depth - VJ_ST_GET_DEPTH(vmstate);
+  int trace_obj_depth = (int)ctx->indent_depth - VJ_ST_GET_STACK_DEPTH(vmstate);
 #endif
   VjTraceBuf *tbuf = ctx->trace_buf;
-  #define VM_DEPTH() (VJ_ST_GET_DEPTH(vmstate) + obj_depth)
+  #define VM_TRACE_DEPTH() (VJ_ST_GET_STACK_DEPTH(vmstate) + trace_obj_depth)
   /* Save/restore trace depth in state bits [24..31] across push/pop.
    * Bit 0 of state is the iter-active flag (used by C-native loops). */
   #define VM_SAVE_TRACE_DEPTH(frame) \
-    ((frame)->state = ((frame)->state & 0xFF) | (obj_depth << 24))
+    ((frame)->state = ((frame)->state & 0xFF) | (trace_obj_depth << 24))
   #define VM_RESTORE_TRACE_DEPTH(frame) \
-    (obj_depth = (int32_t)((frame)->state >> 24))
+    (trace_obj_depth = (int32_t)((frame)->state >> 24))
   VM_TRACE_MSG("VM_ENTER");
 #else
-  #define VM_DEPTH() (VJ_ST_GET_DEPTH(vmstate))
+  #define VM_TRACE_DEPTH() (VJ_ST_GET_STACK_DEPTH(vmstate))
   #define VM_SAVE_TRACE_DEPTH(frame) ((void)0)
   #define VM_RESTORE_TRACE_DEPTH(frame) ((void)0)
 #endif
@@ -356,7 +357,7 @@ vj_op_obj_open: {
   VM_WRITE_INDENT(); /* indent for first child field */
   VM_TRACE_KEY("OBJ_OPEN");
 #ifdef VJ_ENCVM_DEBUG
-  obj_depth++;
+  trace_obj_depth++;
 #endif
   VJ_ST_SET_FIRST_1(vmstate);
   VM_NEXT_SHORT();
@@ -365,7 +366,10 @@ vj_op_obj_open: {
 vj_op_slice_begin: {
   const GoSlice *sl = (const GoSlice *)(base + op->field_off);
   const VjOpExt *ext = VJ_OP_EXT(op);
-  /* ext->operand_a = elem_size, ext->operand_b = body byte length (excl SLICE_END) */
+  /* SLICE_BEGIN operands:
+   *   operand_a = elem_size
+   *   operand_b = body byte length (excluding SLICE_END)
+   * This lets nil/empty slices jump over the whole loop body in one step. */
 
   VM_CHECK(op->key_len + 1 + 4 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE + VM_INDENT_PAD(indent_depth + 1));
   VM_WRITE_KEY();
@@ -391,16 +395,16 @@ vj_op_slice_begin: {
   VM_WRITE_INDENT(); /* indent for first element */
 
   /* Push iter frame */
-  if (__builtin_expect(VJ_ST_GET_DEPTH(vmstate) >= VJ_MAX_DEPTH, 0)) {
+  if (__builtin_expect(VJ_ST_GET_STACK_DEPTH(vmstate) >= VJ_MAX_STACK_DEPTH, 0)) {
     VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);
   }
-  VjStackFrame *frame = &ctx->stack[VJ_ST_GET_DEPTH(vmstate)];
+  VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)];
   frame->ret_base = base;
   frame->seq.iter_data = sl->data;
   frame->seq.iter_count = sl->len;
   frame->seq.iter_idx = 0;
   VM_SAVE_TRACE_DEPTH(frame);
-  VJ_ST_INC_DEPTH(vmstate);
+  VJ_ST_INC_STACK_DEPTH(vmstate);
 
   base = sl->data; /* base = &elem[0] */
   VM_TRACE_ELEM_IDX(0);
@@ -490,7 +494,7 @@ vj_op_kint64: {
 
 vj_op_obj_close: {
 #ifdef VJ_ENCVM_DEBUG
-  if (obj_depth > 0) obj_depth--;
+  if (trace_obj_depth > 0) trace_obj_depth--;
 #endif
   VM_TRACE("OBJ_CLOSE");
   /* Lightweight nested struct close: write indent + '}', set first=0.
@@ -517,13 +521,16 @@ vj_op_skip_if_zero: {
 /* --- slice/array loop body --- */
 
 vj_op_slice_end: {
-  VjStackFrame *frame = &ctx->stack[VJ_ST_GET_DEPTH(vmstate) - 1];
+  VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
   frame->seq.iter_idx++;
   const VjOpExt *ext = VJ_OP_EXT(op);
 
   if (frame->seq.iter_idx < frame->seq.iter_count) {
     /* More elements: write comma + indent, advance base, jump back.
-     * body byte offset and elem_size are compile-time constants. */
+     * SLICE_END intentionally flips the operand layout used by SLICE_BEGIN:
+     *   operand_a = relative jump back to body start
+     *   operand_b = elem_size
+     * so the hot loop can use operand_b directly for base advance. */
     VM_CHECK(1 + VM_INDENT_PAD(indent_depth));
     *buf++ = ',';
     VM_WRITE_INDENT();
@@ -539,7 +546,7 @@ vj_op_slice_end: {
   VM_CHECK(1 + VM_INDENT_PAD(indent_depth));
   VM_WRITE_INDENT();
   *buf++ = ']';
-  VJ_ST_DEC_DEPTH(vmstate);
+  VJ_ST_DEC_STACK_DEPTH(vmstate);
   VM_RESTORE_TRACE_DEPTH(frame);
   VM_TRACE("SLICE_END");
   base = frame->ret_base;
@@ -668,16 +675,15 @@ vj_op_ptr_deref: {
   VM_CHECK(op->key_len + 1 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
 
-  /* Push call frame — only ret_base is needed.
-   * PTR_END always pops this frame (never vj_op_end), so ret_ops and
-   * ret_pc are dead stores: PTR_END restores base from ret_base,
-   * hardcodes first=0 in vmstate, and advances with VM_NEXT_SHORT(). */
-  if (__builtin_expect(VJ_ST_GET_DEPTH(vmstate) >= VJ_MAX_DEPTH, 0)) {
+  /* Push ptr frame — only ret_base is needed.
+   * PTR_END restores base from ret_base, sets first=0 in vmstate,
+   * and advances with VM_NEXT_SHORT(), so no ret_ops/ret_pc state is stored. */
+  if (__builtin_expect(VJ_ST_GET_STACK_DEPTH(vmstate) >= VJ_MAX_STACK_DEPTH, 0)) {
     VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);
   }
-  ctx->stack[VJ_ST_GET_DEPTH(vmstate)].ret_base = base;
-  VM_SAVE_TRACE_DEPTH(&ctx->stack[VJ_ST_GET_DEPTH(vmstate)]);
-  VJ_ST_INC_DEPTH(vmstate);
+  ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)].ret_base = base;
+  VM_SAVE_TRACE_DEPTH(&ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)]);
+  VJ_ST_INC_STACK_DEPTH(vmstate);
 
   base = (const uint8_t *)ptr;
   VJ_ST_SET_FIRST_1(vmstate); /* deref body is a "value" context — no leading comma */
@@ -686,8 +692,8 @@ vj_op_ptr_deref: {
 
 vj_op_ptr_end: {
   /* Pop the ptr-deref frame, restore parent base */
-  VJ_ST_DEC_DEPTH(vmstate);
-  VjStackFrame *frame = &ctx->stack[VJ_ST_GET_DEPTH(vmstate)];
+  VJ_ST_DEC_STACK_DEPTH(vmstate);
+  VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)];
   VM_RESTORE_TRACE_DEPTH(frame);
   VM_TRACE("PTR_END");
   base = frame->ret_base;
@@ -699,15 +705,15 @@ vj_op_ptr_end: {
 
 vj_op_call: {
   VM_TRACE("CALL");
-  if (__builtin_expect(VJ_ST_GET_DEPTH(vmstate) >= VJ_MAX_DEPTH, 0)) {
+  if (__builtin_expect(VJ_ST_GET_STACK_DEPTH(vmstate) >= VJ_MAX_STACK_DEPTH, 0)) {
     VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);
   }
-  VjStackFrame *frame = &ctx->stack[VJ_ST_GET_DEPTH(vmstate)];
+  VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)];
   frame->call.ret_ops = ops;
   frame->call.ret_pc = (int32_t)((const uint8_t *)op - ops) + 16; /* CALL is always 16 bytes */
   frame->ret_base = base;
   VM_SAVE_TRACE_DEPTH(frame);
-  VJ_ST_INC_DEPTH(vmstate);
+  VJ_ST_INC_STACK_DEPTH(vmstate);
 
   const VjOpExt *ext = VJ_OP_EXT(op);
   base = base + op->field_off;
@@ -717,10 +723,10 @@ vj_op_call: {
 }
 
 vj_op_ret: {
-  if (VJ_ST_GET_DEPTH(vmstate) > 0) {
+  if (VJ_ST_GET_STACK_DEPTH(vmstate) > 0) {
     /* Subroutine return: pop CALL frame, restore ops/pc/base. */
-    VJ_ST_DEC_DEPTH(vmstate);
-    VjStackFrame *frame = &ctx->stack[VJ_ST_GET_DEPTH(vmstate)];
+    VJ_ST_DEC_STACK_DEPTH(vmstate);
+    VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)];
     VM_RESTORE_TRACE_DEPTH(frame);
     VM_TRACE("RET");
     ops = frame->call.ret_ops;
@@ -830,16 +836,16 @@ vj_op_array_begin: {
   VM_INDENT_INC();
   VM_WRITE_INDENT();
 
-  if (__builtin_expect(VJ_ST_GET_DEPTH(vmstate) >= VJ_MAX_DEPTH, 0)) {
+  if (__builtin_expect(VJ_ST_GET_STACK_DEPTH(vmstate) >= VJ_MAX_STACK_DEPTH, 0)) {
     VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);
   }
-  VjStackFrame *frame = &ctx->stack[VJ_ST_GET_DEPTH(vmstate)];
+  VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)];
   frame->ret_base = base;
   frame->seq.iter_data = arr_data;
   frame->seq.iter_count = array_len;
   frame->seq.iter_idx = 0;
   VM_SAVE_TRACE_DEPTH(frame);
-  VJ_ST_INC_DEPTH(vmstate);
+  VJ_ST_INC_STACK_DEPTH(vmstate);
 
   VM_TRACE_KEY_LEN("ARRAY_BEGIN", array_len);
   base = arr_data;
@@ -875,7 +881,7 @@ vj_op_map_str_str: {
 
   /* Resume detection: check state bit 0 (iter active flag).
    * Set on BUF_FULL push, cleared on completion or pop. */
-  int32_t _depth = VJ_ST_GET_DEPTH(vmstate);
+  int32_t _depth = VJ_ST_GET_STACK_DEPTH(vmstate);
   int is_resume = (_depth > 0 && (ctx->stack[_depth - 1].state & 1));
 
   const GoSwissMap *m;
@@ -929,7 +935,7 @@ vj_op_map_str_str: {
 
   /* ---- Delegate iteration to out-of-line function ---- */
   {
-    if (__builtin_expect(VJ_ST_GET_DEPTH(vmstate) >= VJ_MAX_DEPTH, 0)) {
+    if (__builtin_expect(VJ_ST_GET_STACK_DEPTH(vmstate) >= VJ_MAX_STACK_DEPTH, 0)) {
       VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);
     }
     VjStackFrame *f = &ctx->stack[is_resume ? (_depth - 1) : _depth];
@@ -952,7 +958,7 @@ vj_op_map_str_str: {
       VM_SAVE_TRACE_DEPTH(f);
       f->state |= 1;
       if (!is_resume) {
-        VJ_ST_INC_DEPTH(vmstate);
+        VJ_ST_INC_STACK_DEPTH(vmstate);
       }
       VM_SAVE_AND_RETURN(VJ_EXIT_BUF_FULL);
     }
@@ -965,7 +971,7 @@ vj_op_map_str_str: {
 
     if (is_resume) {
       f->state &= ~1;
-      VJ_ST_DEC_DEPTH(vmstate);
+      VJ_ST_DEC_STACK_DEPTH(vmstate);
       VM_RESTORE_TRACE_DEPTH(f);
     }
     VJ_ST_SET_FIRST_0(vmstate);
@@ -1024,18 +1030,18 @@ vj_op_interface: {
      * resolve the correct Blueprint via ctx->ops_ptr, so yields
      * inside the child ops (fallback, map, buf_full) are handled
      * correctly with the child's Fallbacks table. */
-    if (__builtin_expect(VJ_ST_GET_DEPTH(vmstate) >= VJ_MAX_DEPTH, 0)) {
+    if (__builtin_expect(VJ_ST_GET_STACK_DEPTH(vmstate) >= VJ_MAX_STACK_DEPTH, 0)) {
       buf = iface_saved_buf;
       vmstate = iface_saved_vmstate;
       VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);
     }
 
-    VjStackFrame *frame = &ctx->stack[VJ_ST_GET_DEPTH(vmstate)];
+    VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)];
     frame->call.ret_ops = ops;
     frame->call.ret_pc = (int32_t)((const uint8_t *)op - ops) + 8; /* INTERFACE is always 8 bytes */
     frame->ret_base = base;
     VM_SAVE_TRACE_DEPTH(frame);
-    VJ_ST_INC_DEPTH(vmstate);
+    VJ_ST_INC_STACK_DEPTH(vmstate);
 
     /* Switch to child Blueprint's ops.
      * The speculative key write stays — child ops produce the value. */
