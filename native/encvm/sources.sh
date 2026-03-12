@@ -23,6 +23,7 @@ EXTRA_SOURCES="
   native/encvm/impl/uscale.c
   native/encvm/impl/log.c
   native/encvm/impl/number.c
+  native/encvm/impl/base64.c
 "
 
 TARGET_DIR="native/encvm"

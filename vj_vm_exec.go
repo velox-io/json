@@ -66,22 +66,14 @@ func (m *Marshaler) encodeArrayNative(dec *ArrayCodec, base unsafe.Pointer) erro
 // Uses the reusable m.vmCtx to avoid per-call stack zeroing of the
 // 1448-byte VjExecCtx. IfaceCache is already set by getMarshaler.
 func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
-	if !encvm.Available {
-		return fmt.Errorf("vjson: native encoder not available")
-	}
-
-	// Guard against re-entrant VM calls. This can happen when a cycle-
-	// detected struct falls back to Go encoding which then calls
-	// encodeStruct → encodeStructNative → execVM. Since m.vmCtx is
-	// a single shared context, re-entrant calls would corrupt state.
-	if m.inVM {
-		panic("vjson: re-entrant execVM call (likely circular type fallback bug)")
-	}
+	// WARNING: execVM must NOT be called re-entrantly. m.vmCtx is a single
+	// shared context; a nested execVM call would corrupt its state (PC, stack,
+	// depth, etc.). Callers (e.g. encodeStruct) must check m.inVM and fall
+	// back to the Go path when it is true.
 	m.inVM = true
-	defer func() { m.inVM = false }()
 
-	m.traceRecordBlueprint(bp)
 	if vjTraceEnabled {
+		m.traceRecordBlueprint(bp)
 		defer m.traceFlushBlueprints()
 	}
 
@@ -93,6 +85,15 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	// Build initial vmstate: first=1, flags from m.flags,
 	// depth=0, exit=0, yield=0.
 	ctx.VMState = vmstateBuildInitial(m.flags)
+
+	// Load interface cache snapshot (deferred from getMarshaler for types
+	// that don't use the VM, e.g. primitives encoded via EncodeFn).
+	initPrimitiveIfaceCacheOnce.Do(initPrimitiveIfaceCache)
+	snap := loadIfaceCacheSnapshot()
+	if len(snap.entries) > 0 {
+		ctx.IfaceCachePtr = unsafe.Pointer(&snap.entries[0])
+		ctx.IfaceCacheCount = int32(len(snap.entries))
+	}
 
 	// Set key pool base pointer for C VM.
 	kpSnap := loadKeyPoolSnapshot()
@@ -118,11 +119,7 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 		ctx.IndentDepth = 0
 		vmExec = encvm.VMExec
 	} else {
-		// Compact mode: no indent setup needed.
-		ctx.IndentTpl = nil
-		ctx.IndentStep = 0
-		ctx.IndentPrefixLen = 0
-		ctx.IndentDepth = 0
+		// Compact mode: indent fields are already zero from pool recycling.
 		if m.flags&uint32(escapeStringFlags) != 0 {
 			vmExec = encvm.VMExecCompact
 		} else {
@@ -130,6 +127,14 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 		}
 	}
 
+	err := m.execVMLoop(ctx, bp, kpSnap, vmExec)
+	m.inVM = false
+	return err
+}
+
+// execVMLoop is the inner VM execution loop, factored out of execVM so that
+// the inVM flag can be cleared without defer overhead on the hot path.
+func (m *Marshaler) execVMLoop(ctx *VjExecCtx, bp *Blueprint, _ *keyPoolSnapshot, vmExec func(unsafe.Pointer)) error {
 	for {
 		// In streaming mode, flush accumulated data from Go-side yield
 		// handlers before re-entering C. This keeps memory bounded and
@@ -205,7 +210,7 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 				}
 				// Reload key pool: the newly compiled Blueprint may have
 				// inserted keys that weren't in the snapshot loaded at VM entry.
-				kpSnap = loadKeyPoolSnapshot()
+				kpSnap := loadKeyPoolSnapshot()
 				if kpSnap != nil && len(kpSnap.data) > 0 {
 					ctx.KeyPoolBase = unsafe.Pointer(&kpSnap.data[0])
 				}

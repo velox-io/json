@@ -25,6 +25,7 @@
 #include "iface.h"
 #include "trace.h"
 #include "swissmap.h"
+#include "base64.h"
 
 /* ================================================================
  *  VM Implementation — threaded-code interpreter for variable-length ops
@@ -173,7 +174,7 @@ VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
       [OP_INTERFACE] = DT_ENTRY(vj_op_interface),
       [OP_RAW_MESSAGE] = DT_ENTRY(vj_op_raw_message),
       [OP_NUMBER] = DT_ENTRY(vj_op_number),
-      [OP_BYTE_SLICE] = DT_ENTRY(vj_op_yield),
+      [OP_BYTE_SLICE] = DT_ENTRY(vj_op_byte_slice),
 
       /* Structural control-flow (33-46) */
       [OP_SKIP_IF_ZERO] = DT_ENTRY(vj_op_skip_if_zero),
@@ -247,9 +248,18 @@ VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
     VM_PIN_VMSTATE();                                                          \
     int _was_first;                                                            \
     VJ_ST_BTR_FIRST(vmstate, _was_first);                                      \
-    if (!_was_first) {                                                         \
-      *buf++ = ',';                                                            \
-      VM_WRITE_INDENT();                                                       \
+    if (indent_step) {                                                         \
+      /* Indent mode: branch needed for newline + prefix + indent. */          \
+      if (!_was_first) {                                                       \
+        *buf++ = ',';                                                          \
+        VM_WRITE_INDENT();                                                     \
+      }                                                                        \
+    } else {                                                                   \
+      /* Compact mode: branchless comma.  Always write ',', then               \
+       * advance by (1 - was_first).  First element: key overwrites            \
+       * the comma; subsequent elements: buf skips past it. */                 \
+      *buf = ',';                                                              \
+      buf += 1 - _was_first;                                                   \
     }                                                                          \
     if (op->key_len > 0) {                                                     \
       vj_copy_key(buf, (const char *)(key_pool + op->key_off), op->key_len);   \
@@ -258,26 +268,32 @@ VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
     }                                                                          \
   } while (0)
 
-/* ---- Dispatch macro (ADR/LEA trick for PIC computed goto) ---- */
+/* ---- Dispatch macro (ADR/LEA trick for PIC computed goto) ----
+ *
+ * Anti-tail-merge: The "r"(op) input operand forces the compiler to
+ * treat each expansion as depending on a unique op value, preventing
+ * clang -O3 from merging identical dispatch tails across handlers.
+ * This keeps each handler's indirect jump at a distinct address for
+ * optimal CPU indirect branch prediction (BTB per-site history). */
 #if defined(__aarch64__)
 #define VM_DISPATCH()                                                          \
   do {                                                                         \
-    uint16_t _opc = op->op_type;                                               \
-    if (__builtin_expect(_opc >= OP_DISPATCH_COUNT, 0))                        \
-      goto vj_op_halt;                                                          \
+    uint16_t i = op->op_type;                                               \
     char *_base;                                                               \
-    __asm__ volatile("adr %0, %c1" : "=r"(_base) : "i"(&&vj_dispatch_base));   \
-    goto *(void *)(_base + dispatch_table[_opc]);                              \
+    __asm__ volatile("adr %0, %c1"                                             \
+                     : "=r"(_base)                                             \
+                     : "i"(&&vj_dispatch_base), "r"(op));                      \
+    goto *(void *)(_base + dispatch_table[i]);                              \
   } while (0)
 #elif defined(__x86_64__)
 #define VM_DISPATCH()                                                          \
   do {                                                                         \
-    uint16_t _opc = op->op_type;                                               \
-    if (__builtin_expect(_opc >= OP_DISPATCH_COUNT, 0))                        \
-      goto vj_op_halt;                                                          \
+    uint16_t i = op->op_type;                                               \
     char *_base;                                                               \
-    __asm__("lea %c1(%%rip), %0" : "=r"(_base) : "i"(&&vj_dispatch_base));     \
-    goto *(void *)(_base + dispatch_table[_opc]);                              \
+    __asm__ volatile("lea %c1(%%rip), %0"                                      \
+                     : "=r"(_base)                                             \
+                     : "i"(&&vj_dispatch_base), "r"(op));                      \
+    goto *(void *)(_base + dispatch_table[i]);                              \
   } while (0)
 #else
 #error "VM_DISPATCH: unsupported architecture (need aarch64 or x86_64)"
@@ -489,6 +505,40 @@ vj_op_number: {
   VM_NEXT_SHORT();
 }
 
+vj_op_byte_slice: {
+  VM_TRACE_KEY("BYTE_SLICE");
+  const GoSlice *sl = (const GoSlice *)(base + op->field_off);
+
+  if (sl->data == NULL) {
+    /* nil → "null" */
+    VM_CHECK(op->key_len + 1 + 4 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
+    VM_WRITE_KEY();
+    __builtin_memcpy(buf, "null", 4);
+    buf += 4;
+    VM_NEXT_SHORT();
+  }
+
+  /* Non-nil: base64 encode into quoted string.
+   * Empty slice → '""' (matching encoding/json behavior). */
+  if (sl->len == 0) {
+    VM_CHECK(op->key_len + 1 + 2 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
+    VM_WRITE_KEY();
+    *buf++ = '"';
+    *buf++ = '"';
+    VM_NEXT_SHORT();
+  }
+
+  /* Worst-case: key + comma + indent + '"' + ceil(len/3)*4 + '"' */
+  VM_CHECK(op->key_len + 1 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
+  VM_WRITE_KEY();
+  uint8_t *result = vj_encode_base64(buf, bend, sl->data, sl->len);
+  if (__builtin_expect(result == NULL, 0)) {
+    VM_SAVE_AND_RETURN(VJ_EXIT_BUF_FULL);
+  }
+  buf = result;
+  VM_NEXT_SHORT();
+}
+
   /* ---- Structural control-flow (33-46) ---- */
 
 vj_op_skip_if_zero: {
@@ -624,7 +674,7 @@ vj_op_slice_end: {
     *buf++ = ',';
     VM_WRITE_INDENT();
     base = frame->seq.iter_data + (int64_t)frame->seq.iter_idx * ext->operand_b;
-    op = (const VjOpHdr *)(ops + ext->operand_a); /* jump to body start (byte offset) */
+    op = (const VjOpHdr *)((const uint8_t *)op + ext->operand_a); /* relative jump back to body start */
     VM_TRACE_ELEM_IDX(frame->seq.iter_idx);
     VJ_ST_SET_FIRST_1(vmstate); /* reset for element-level encoding (no struct comma) */
     VM_DISPATCH();
@@ -950,19 +1000,6 @@ vj_op_ret: {
   }
 
   /* Top-level done */
-  VM_TRACE("HALT");
-  ctx->buf_cur = buf;
-  VJ_ST_SET_EXIT(vmstate, VJ_EXIT_OK);
-  ctx->vmstate = vmstate;
-  return;
-}
-
-vj_op_halt: {
-  if (__builtin_expect(op->op_type != OP_HALT, 0)) {
-    goto vj_op_yield;
-  }
-
-  /* Top-level done (explicit halt sentinel) */
   VM_TRACE("HALT");
   ctx->buf_cur = buf;
   VJ_ST_SET_EXIT(vmstate, VJ_EXIT_OK);

@@ -246,8 +246,8 @@ var opcodeName = map[uint16]string{
 	opMapStrStr:  "MAP_STR_STR",
 	opRet:        "RET",
 	opFallback:   "FALLBACK",
-	opHalt:       "HALT",
 }
+
 
 // dumpBlueprint prints one blueprint's instruction listing to stderr
 // with indentation that reflects structural nesting (OBJ_OPEN/CLOSE,
@@ -301,11 +301,18 @@ func dumpBlueprint(bp *Blueprint) {
 		if opIsLong[hdr.OpType] {
 			sizeTag = "L"
 		}
+		// Build annotation suffix (type name for OBJ_OPEN/CALL).
+		ann := ""
+		if bp.Annotations != nil {
+			if a, ok := bp.Annotations[int(pc)]; ok {
+				ann = " <" + a + ">"
+			}
+		}
 		if hdr.KeyLen > 0 {
 			key := keyPoolBytes(hdr.KeyOff, hdr.KeyLen)
-			fmt.Fprintf(&buf, "[%s] %s %s\n", sizeTag, label, key)
+			fmt.Fprintf(&buf, "[%s] %s %s%s\n", sizeTag, label, key, ann)
 		} else {
-			fmt.Fprintf(&buf, "[%s] %s\n", sizeTag, label)
+			fmt.Fprintf(&buf, "[%s] %s%s\n", sizeTag, label, ann)
 		}
 
 		// Opening ops increase depth after printing.

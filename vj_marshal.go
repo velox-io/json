@@ -99,13 +99,18 @@ func WithFastEscape() MarshalOption {
 
 // Marshaler is a pooled JSON encoder.
 type Marshaler struct {
+	// vmCtx MUST be the first field: VjExecCtx.Stack (at offset 96 within
+	// VjExecCtx) requires 32-byte alignment relative to the struct base.
+	// Placing vmCtx at offset 0 guarantees this (96 % 32 == 0), regardless
+	// of what fields follow. Do not reorder.
+	vmCtx VjExecCtx // reusable C VM context (avoids per-call stack zeroing)
+
 	buf    []byte
 	indent string
 	prefix string
 	depth  int
-	flags  uint32    // escapeFlags (bits 0-2) | vjEncFloatExpAuto (bit 3)
-	vmCtx  VjExecCtx // reusable C VM context (avoids per-call stack zeroing of 1448 bytes)
-	inVM   bool      // true while execVM is active; prevents re-entrant VM calls
+	flags  uint32 // escapeFlags (bits 0-2) | vjEncFloatExpAuto (bit 3)
+	inVM   bool   // true while execVM is active; prevents re-entrant VM calls
 
 	// indentTpl holds the precomputed "\n" + prefix + indent×MAX_DEPTH template
 	// for the C VM indent path. Only used when isSimpleIndent returns true.
@@ -117,6 +122,11 @@ type Marshaler struct {
 	// Used by Encoder for bounded O(bufCap) memory.
 	flushFn func([]byte) error
 }
+
+// Compile-time assertion: vmCtx must be at offset 0 in Marshaler so that
+// VjExecCtx.Stack (offset 96) is 32-byte aligned relative to the struct base.
+// If this fails, someone reordered the Marshaler fields — fix the layout.
+var _ [0]byte = [unsafe.Offsetof(Marshaler{}.vmCtx)]byte{}
 
 var marshalerPool = sync.Pool{
 	New: func() any {
@@ -140,7 +150,12 @@ func getMarshaler() *Marshaler {
 	m.depth = 0
 	m.flags = 0
 	m.flushFn = nil
-	initMarshalerVMCtx(m)
+	// Zero indent fields on vmCtx so execVM's compact path can skip them.
+	// These may be non-zero if the previous use was MarshalIndent.
+	m.vmCtx.IndentTpl = nil
+	m.vmCtx.IndentStep = 0
+	m.vmCtx.IndentPrefixLen = 0
+	m.vmCtx.IndentDepth = 0
 	m.setupVMTrace()
 	return m
 }
@@ -918,11 +933,11 @@ func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
 		return m.encodeStructGo(dec, base)
 	}
 
-	// Native VM path: flat linear instruction stream with yield protocol.
-	// This handles ALL struct types (including those with custom marshalers,
-	// maps, slices, etc.) by yielding to Go for unsupported fields.
 	if encvm.Available {
-		return m.encodeStructNative(dec, base)
+		bp := dec.getBlueprint()
+		if bp != nil && len(bp.Ops) > 0 {
+			return m.execVM(bp, base)
+		}
 	}
 
 	// Go fallback: no native encoder available on this platform.

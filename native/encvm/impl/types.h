@@ -87,9 +87,6 @@ enum OpType {
 
   /* --- Go-only fallback --- */
   OP_FALLBACK    = 0x40, /* custom marshalers, ,string, complex structs */
-
-  /* --- Sentinel --- */
-  OP_HALT = 0xFF, /* end of top-level instruction stream; VM done */
 };
 
 /* Dispatch table size — must cover all opcodes up to OP_FALLBACK (0x40). */

@@ -52,13 +52,8 @@ const (
 
 	// Go-only fallback (0x40).
 	opFallback uint16 = 0x40 // custom marshalers, ,string, complex structs
-
-	// Sentinel (not emitted by compiler; used as C dispatch bounds-check target).
-	opHalt uint16 = 0xFF //nolint:unused
 )
 
-// kindToOpcode maps an ElemTypeKind to its VM opcode.
-// Panics if k has no single-instruction opcode.
 func kindToOpcode(k ElemTypeKind) uint16 {
 	switch {
 	case k <= KindString:
@@ -140,30 +135,25 @@ const (
 	vjStYieldShift = 40
 )
 
-// vmstateGetExit extracts the VM exit code from vmstate.
 func vmstateGetExit(st uint64) int32 {
 	return int32((st >> vjStExitShift) & 0xFF)
 }
 
-// vmstateGetYield extracts the yield reason from vmstate.
-// Only meaningful when vmstateGetExit(st) == vjExitYieldToGo.
+// Only meaningful when exit code == vjExitYieldToGo.
 func vmstateGetYield(st uint64) uint32 {
 	return uint32((st >> vjStYieldShift) & 0xFF)
 }
 
-// vmstateGetFirst extracts the first-field flag from vmstate.
 func vmstateGetFirst(st uint64) bool {
 	return (st & vjStFirstBit) != 0
 }
 
-// vmstateGetDepth extracts the unified stack depth from vmstate.
 func vmstateGetDepth(st uint64) int32 {
 	return int32(st & vjStDepthMask)
 }
 
 // vmstateBuildInitial builds the initial vmstate for VM entry.
 // flags contains escape flags (bits 0-2) and vjEncFloatExpAuto (bit 3).
-// The first bit is set. depth=0, exit=0, yield=0.
 func vmstateBuildInitial(flags uint32) uint64 {
 	return vjStFirstBit | (uint64(flags) << vjStFlagsShift)
 }
@@ -237,9 +227,10 @@ func opSizeAt(ops []byte, pc int32) int32 { //nolint:unused
 // It is immutable after construction and safe for concurrent use.
 // Keys are stored in the global key pool (globalKeyPool), not per-Blueprint.
 type Blueprint struct {
-	Name      string          // type name (debug/trace only)
-	Ops       []byte          // linear instruction byte stream, terminated by opRet (8-byte aligned via alignedOps)
-	Fallbacks map[int]*fbInfo // byte offset → fallback field info (only for OP_FALLBACK instructions)
+	Name        string          // type name (debug/trace only)
+	Ops         []byte          // linear instruction byte stream, terminated by opRet (8-byte aligned via alignedOps)
+	Fallbacks   map[int]*fbInfo // byte offset → fallback field info (only for OP_FALLBACK instructions)
+	Annotations map[int]string  // byte offset → debug annotation (type names for OBJ_OPEN/CALL); nil in non-debug builds
 }
 
 // fbInfo describes a fallback field that requires Go encoding.
@@ -273,32 +264,40 @@ const maxIndentDepth = VJ_MAX_DEPTH
 // NOTE: 'first' is tracked in VMState bit 16 (set on object entry,
 // test-and-clear when writing a key). Stack frames do not store/restore it.
 //
+// _union layout (20 bytes) — overlapping branches:
+//
+//	CALL frame:  [0..7] ret_ops (*byte), [8..11] ret_pc (int32)
+//	ITER frame:  [0..7] data (ptr to current elem), [8..15] count (int64), [16..19] idx (int32)
+//	MAP  frame:  [0..7] data (ptr), [8..15] count (int64), [16..19] idx (int32)
+//
 // ret_ops/ret_pc are only used by CALL frames and live inside the call
 // union branch.  Go never reads them (only C does on OP_RET).
 type VjStackFrame struct {
 	RetBase unsafe.Pointer //  0: parent data base (all frame types)
-	_union  [20]byte       //  8-27: call/seq/map iteration state
+	_union  [20]byte       //  8-27: see union layout above
 	State   int32          // 28: bit 0 = iter active; bits 24-31 = trace depth
 }
 
 var _ [32]byte = [unsafe.Sizeof(VjStackFrame{})]byte{}
 
-// Frame type constants matching C VJ_FRAME_* defines.
-// Used for documentation/debug only; not stored in vmstate.
-const (
-	_ = int32(0) // VJ_FRAME_CALL: subroutine call (recurse / ptr deref / iface switch-ops)
-	_ = int32(1) // VJ_FRAME_ITER: linear iteration (slice / array)
-	_ = int32(2) // VJ_FRAME_ITER_STR_STR_LEAF: map[string]string iteration
-)
+// Frame types matching C VJ_FRAME_* defines (not stored in vmstate):
+//   0 = VJ_FRAME_CALL:              subroutine call (recurse / ptr deref / iface switch-ops)
+//   1 = VJ_FRAME_ITER:              linear iteration (slice / array)
+//   2 = VJ_FRAME_ITER_STR_STR_LEAF: map[string]string iteration
 
-// --- seq iter frame helpers (read-only from Go side) ---
+// --- ITER frame field accessors (read-only from Go side) ---
 
+// iterData returns the pointer to the current slice/array element base (_union[0..7]).
 func (f *VjStackFrame) iterData() unsafe.Pointer {
 	return *(*unsafe.Pointer)(unsafe.Pointer(&f._union[0]))
 }
+
+// iterCount returns the total number of elements (_union[8..15]).
 func (f *VjStackFrame) iterCount() int64 {
 	return *(*int64)(unsafe.Pointer(&f._union[8]))
 }
+
+// iterIdx returns the current iteration index (_union[16..19]).
 func (f *VjStackFrame) iterIdx() int64 {
 	return int64(*(*int32)(unsafe.Pointer(&f._union[16])))
 }
@@ -379,7 +378,6 @@ var globalIfaceCache struct {
 	mu      sync.Mutex
 }
 
-// loadIfaceCacheSnapshot returns the current immutable cache snapshot.
 func loadIfaceCacheSnapshot() *ifaceCacheSnapshot {
 	return globalIfaceCache.current.Load()
 }
@@ -388,8 +386,7 @@ func loadIfaceCacheSnapshot() *ifaceCacheSnapshot {
 // When the C VM switches to a cached Blueprint's ops, Go yield handlers use
 // this registry to resolve the active Blueprint (for Fallbacks/KeyPool lookup).
 //
-// Read via atomic.Load (lock-free); write under globalIfaceCache.mu.
-// Immutable after publish (COW), same lifetime as ifaceCacheSnapshot.
+// Read via atomic.Load (lock-free); write under globalIfaceCache.mu (COW).
 var blueprintRegistry atomic.Pointer[map[unsafe.Pointer]*Blueprint]
 
 func init() {
@@ -484,7 +481,6 @@ func globalKeyPoolInsert(keyBytes []byte) (off uint16, klen uint8) {
 	return entry.off, entry.len
 }
 
-// loadKeyPoolSnapshot returns the current immutable key pool snapshot.
 func loadKeyPoolSnapshot() *keyPoolSnapshot {
 	return globalKeyPool.current.Load()
 }
@@ -553,6 +549,7 @@ func insertIfaceCache(typePtr unsafe.Pointer, bp *Blueprint, tag uint8) {
 
 // initPrimitiveIfaceCache seeds the interface cache with all primitive types
 // so the C VM can inline-encode bool/int/string etc. without yielding.
+// Called once via initPrimitiveIfaceCacheOnce at the first VM execution.
 func initPrimitiveIfaceCache() {
 	entries := []struct {
 		t   reflect.Type
@@ -588,21 +585,6 @@ func initPrimitiveIfaceCache() {
 }
 
 var initPrimitiveIfaceCacheOnce sync.Once
-
-// initMarshalerVMCtx sets up the interface cache snapshot on the pooled
-// Marshaler's VjExecCtx. Called once per getMarshaler() so that execVM
-// doesn't need a per-call atomic.Load + sync.Once check.
-func initMarshalerVMCtx(m *Marshaler) {
-	initPrimitiveIfaceCacheOnce.Do(initPrimitiveIfaceCache)
-	snap := loadIfaceCacheSnapshot()
-	if len(snap.entries) > 0 {
-		m.vmCtx.IfaceCachePtr = unsafe.Pointer(&snap.entries[0])
-		m.vmCtx.IfaceCacheCount = int32(len(snap.entries))
-	} else {
-		m.vmCtx.IfaceCachePtr = nil
-		m.vmCtx.IfaceCacheCount = 0
-	}
-}
 
 // activeBlueprint returns the Blueprint whose ops the VM is currently executing.
 // Hot path (no SWITCH_OPS): single pointer compare against the root Blueprint.

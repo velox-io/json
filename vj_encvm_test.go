@@ -1348,3 +1348,266 @@ func TestNativeSliceInStructField(t *testing.T) {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
 }
+
+// ================================================================
+// []byte base64 encoding tests (VM path, verified against encoding/json)
+// ================================================================
+
+func TestNativeEncode_ByteSlice_StdlibCompat(t *testing.T) {
+	if !encvm.Available {
+		t.Skip("native encoder not available")
+	}
+
+	type S struct {
+		ID   int    `json:"id"`
+		Data []byte `json:"data"`
+		Name string `json:"name"`
+	}
+
+	tests := []struct {
+		name string
+		val  S
+	}{
+		{"basic", S{ID: 1, Data: []byte("hello world"), Name: "a"}},
+		{"nil", S{ID: 2, Data: nil, Name: "b"}},
+		{"empty", S{ID: 3, Data: []byte{}, Name: "c"}},
+		{"binary", S{ID: 4, Data: []byte{0x00, 0xFF, 0x80, 0x01}, Name: "d"}},
+		{"single byte", S{ID: 5, Data: []byte{42}, Name: "e"}},
+		{"two bytes", S{ID: 6, Data: []byte{0xDE, 0xAD}, Name: "f"}},
+		{"padding=1", S{ID: 7, Data: []byte("ab"), Name: "g"}},    // base64 len%3==2 → 1 pad
+		{"padding=2", S{ID: 8, Data: []byte("a"), Name: "h"}},     // base64 len%3==1 → 2 pad
+		{"no padding", S{ID: 9, Data: []byte("abc"), Name: "i"}},  // base64 len%3==0 → no pad
+		{"large", S{ID: 10, Data: make([]byte, 1024), Name: "j"}}, // triggers buffer growth
+	}
+
+	// Fill large test data with non-zero pattern.
+	for i := range tests[len(tests)-1].val.Data {
+		tests[len(tests)-1].val.Data[i] = byte(i % 251)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Marshal(&tt.val)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, _ := json.Marshal(&tt.val)
+			if string(got) != string(want) {
+				t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, want)
+			}
+		})
+	}
+}
+
+func TestNativeEncode_ByteSlice_Omitempty(t *testing.T) {
+	if !encvm.Available {
+		t.Skip("native encoder not available")
+	}
+
+	type S struct {
+		ID   int    `json:"id"`
+		Data []byte `json:"data,omitempty"`
+		Name string `json:"name"`
+	}
+
+	tests := []struct {
+		name string
+		val  S
+	}{
+		{"nil omit", S{ID: 1, Data: nil, Name: "a"}},
+		{"empty omit", S{ID: 2, Data: []byte{}, Name: "b"}},
+		{"non-empty present", S{ID: 3, Data: []byte("x"), Name: "c"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Marshal(&tt.val)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, _ := json.Marshal(&tt.val)
+			if string(got) != string(want) {
+				t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, want)
+			}
+		})
+	}
+}
+
+func TestNativeEncode_ByteSlice_OnlyField(t *testing.T) {
+	if !encvm.Available {
+		t.Skip("native encoder not available")
+	}
+
+	type S struct {
+		Data []byte `json:"data"`
+	}
+
+	tests := []struct {
+		name string
+		val  S
+	}{
+		{"basic", S{Data: []byte("test")}},
+		{"nil", S{Data: nil}},
+		{"empty", S{Data: []byte{}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Marshal(&tt.val)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, _ := json.Marshal(&tt.val)
+			if string(got) != string(want) {
+				t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, want)
+			}
+		})
+	}
+}
+
+func TestNativeEncode_ByteSlice_MultipleFields(t *testing.T) {
+	if !encvm.Available {
+		t.Skip("native encoder not available")
+	}
+
+	type S struct {
+		A []byte `json:"a"`
+		B []byte `json:"b"`
+		C []byte `json:"c"`
+	}
+
+	v := S{
+		A: []byte("first"),
+		B: nil,
+		C: []byte{0x01, 0x02, 0x03},
+	}
+
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := json.Marshal(&v)
+	if string(got) != string(want) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, want)
+	}
+}
+
+func TestNativeEncode_ByteSlice_Nested(t *testing.T) {
+	if !encvm.Available {
+		t.Skip("native encoder not available")
+	}
+
+	type Inner struct {
+		Payload []byte `json:"payload"`
+	}
+	type Outer struct {
+		ID    int   `json:"id"`
+		Inner Inner `json:"inner"`
+	}
+
+	v := Outer{ID: 1, Inner: Inner{Payload: []byte("nested data")}}
+
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := json.Marshal(&v)
+	if string(got) != string(want) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, want)
+	}
+}
+
+func TestNativeEncode_ByteSlice_InSlice(t *testing.T) {
+	if !encvm.Available {
+		t.Skip("native encoder not available")
+	}
+
+	type Item struct {
+		Data []byte `json:"data"`
+	}
+	type S struct {
+		Items []Item `json:"items"`
+	}
+
+	v := S{Items: []Item{
+		{Data: []byte("aaa")},
+		{Data: nil},
+		{Data: []byte{}},
+		{Data: []byte{0xFF}},
+	}}
+
+	got, err := Marshal(&v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := json.Marshal(&v)
+	if string(got) != string(want) {
+		t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, want)
+	}
+}
+
+func TestNativeEncode_ByteSlice_BehindPointer(t *testing.T) {
+	if !encvm.Available {
+		t.Skip("native encoder not available")
+	}
+
+	type S struct {
+		Data *[]byte `json:"data"`
+	}
+
+	data := []byte("ptr data")
+	tests := []struct {
+		name string
+		val  S
+	}{
+		{"non-nil ptr", S{Data: &data}},
+		{"nil ptr", S{Data: nil}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Marshal(&tt.val)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, _ := json.Marshal(&tt.val)
+			if string(got) != string(want) {
+				t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, want)
+			}
+		})
+	}
+}
+
+func TestNativeEncode_ByteSlice_MultiLevelPointer(t *testing.T) {
+	if !encvm.Available {
+		t.Skip("native encoder not available")
+	}
+
+	type S struct {
+		Data ***[]byte `json:"data"`
+	}
+
+	data := []byte("deep ptr")
+	p1 := &data
+	p2 := &p1
+	tests := []struct {
+		name string
+		val  S
+	}{
+		{"non-nil", S{Data: &p2}},
+		{"nil outer", S{Data: nil}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Marshal(&tt.val)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, _ := json.Marshal(&tt.val)
+			if string(got) != string(want) {
+				t.Errorf("mismatch:\n  vjson:  %s\n  stdlib: %s", got, want)
+			}
+		})
+	}
+}
