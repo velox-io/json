@@ -10,14 +10,12 @@
 #ifndef VJ_ENCODER_STRING_H
 #define VJ_ENCODER_STRING_H
 
-/* ================================================================
- *  Section 8 — Helper: String escape (JSON)
+/* ---- String escape (JSON) ----
  *
- *  Writes the string content (WITHOUT surrounding quotes) to buf.
- *  Returns number of bytes written.
+ * Writes the string content (WITHOUT surrounding quotes) to buf.
+ * Returns number of bytes written.
  *
- *  The caller must ensure buf has enough space (worst case 6x + overhead).
- * ================================================================ */
+ * The caller must ensure buf has enough space (worst case 6x + overhead). */
 
 static const char hex_digits[16] = "0123456789abcdef";
 

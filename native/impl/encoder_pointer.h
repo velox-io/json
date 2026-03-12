@@ -2,7 +2,7 @@
  * encoder_pointer.h — Velox JSON C Engine: Pointer Primitive Encoder
  *
  * Out-of-line encoder for dereferenced pointer values (*bool, *int, etc.).
- * Marked noinline to keep vj_encode_struct's code footprint small
+ * Marked noinline to keep the VM's code footprint small
  * and avoid icache pressure on the hot dispatch loop.
  *
  * Depends on: encoder_types.h, encoder_number.h, encoder_string.h, ryu.h.
@@ -11,12 +11,10 @@
 #ifndef VJ_ENCODER_POINTER_H
 #define VJ_ENCODER_POINTER_H
 
-/* ================================================================
- *  Section 9b — Out-of-line pointer-primitive encoder
+/* ---- Out-of-line pointer-primitive encoder ----
  *
- *  Encodes a single dereferenced primitive value (bool, int*, uint*,
- *  float*, string, raw_message, number) into the buffer.
- * ================================================================ */
+ * Encodes a single dereferenced primitive value (bool, int*, uint*,
+ * float*, string, raw_message, number) into the buffer. */
 
 typedef struct {
   uint8_t *buf;  /* advanced buffer pointer; NULL on error */

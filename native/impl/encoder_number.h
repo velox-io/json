@@ -8,12 +8,10 @@
 #ifndef VJ_ENCODER_NUMBER_H
 #define VJ_ENCODER_NUMBER_H
 
-/* ================================================================
- *  Section 7 — Helper: Fast integer to ASCII
+/* ---- Fast integer to ASCII ----
  *
- *  write_uint64 / write_int64 convert to decimal ASCII in buf.
- *  They return the number of bytes written. buf must have >= 20 bytes.
- * ================================================================ */
+ * write_uint64 / write_int64 convert to decimal ASCII in buf.
+ * They return the number of bytes written. buf must have >= 20 bytes. */
 
 static const char digit_pairs[201] = "00010203040506070809"
                                      "10111213141516171819"

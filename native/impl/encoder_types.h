@@ -23,9 +23,20 @@
 #endif
 #endif
 
+/* Platform-specific symbol naming:
+ * macOS Mach-O: C symbols have _ prefix (_memcpy, _memset)
+ * Linux ELF:    C symbols have no prefix (memcpy, memset) */
+#if defined(__APPLE__)
+  #define VJ_MEMCPY_SYM "_memcpy"
+  #define VJ_MEMSET_SYM "_memset"
+#else
+  #define VJ_MEMCPY_SYM "memcpy"
+  #define VJ_MEMSET_SYM "memset"
+#endif
+
 __attribute__((visibility("hidden"))) void *
 vj_memcpy_impl(void *__restrict dst, const void *__restrict src,
-               size_t n) __asm__("_memcpy");
+               size_t n) __asm__(VJ_MEMCPY_SYM);
 
 __attribute__((visibility("hidden"))) void *
 vj_memcpy_impl(void *__restrict dst, const void *__restrict src, size_t n) {
@@ -63,7 +74,7 @@ vj_memcpy_impl(void *__restrict dst, const void *__restrict src, size_t n) {
 }
 
 __attribute__((visibility("hidden"))) void *
-vj_memset_impl(void *dst, int c, size_t n) __asm__("_memset");
+vj_memset_impl(void *dst, int c, size_t n) __asm__(VJ_MEMSET_SYM);
 
 __attribute__((visibility("hidden"))) void *
 vj_memset_impl(void *dst, int c, size_t n) {
@@ -257,89 +268,104 @@ vj_copy_var(uint8_t *dst, const void *src, size_t n) {
 #endif /* ISA check */
 
 /* ================================================================
- *  Section 1 — Operation Codes (OpType)
+ *  OpType — VM instruction opcodes
  *
- *  Values 0-13 are intentionally aligned with Go-side ElemTypeKind
- *  (typeinfo.go) for the primitive and string types so that the
- *  pre-compiler can use a direct cast for simple fields.
+ *  0-13:  Primitives (aligned with Go ElemTypeKind for direct cast)
+ *  16-19: Non-primitive data ops (interface, raw, number, byte_slice)
+ *  32-40: Structural control-flow (skip, struct, ptr, slice, map)
+ *  0x3F:  Go-only fallback
+ *  0xFF:  End sentinel
  *
- *  Go ElemTypeKind iota mapping:
- *    0=Bool 1=Int 2=Int8 3=Int16 4=Int32 5=Int64
- *    6=Uint 7=Uint8 8=Uint16 9=Uint32 10=Uint64
- *    11=Float32 12=Float64 13=String
- *    14=Struct 15=Slice 16=Pointer 17=Any 18=Map
- *    19=RawMessage 20=Number
+ *  Sparse layout — gaps between groups allow future expansion.
+ *  Dispatch table is 0x40 entries; unused slots caught by bounds check.
  * ================================================================ */
 
 enum OpType {
-  /* --- Primitives (match ElemTypeKind 0-13) --- */
-  OP_BOOL = 0,
-  OP_INT = 1, /* Go int  — 8 bytes on 64-bit */
-  OP_INT8 = 2,
-  OP_INT16 = 3,
-  OP_INT32 = 4,
-  OP_INT64 = 5,
-  OP_UINT = 6, /* Go uint — 8 bytes on 64-bit */
-  OP_UINT8 = 7,
-  OP_UINT16 = 8,
-  OP_UINT32 = 9,
-  OP_UINT64 = 10,
+  /* --- Primitives (0-13, match ElemTypeKind) --- */
+  OP_BOOL    = 0,
+  OP_INT     = 1,  /* Go int  — 8 bytes on 64-bit */
+  OP_INT8    = 2,
+  OP_INT16   = 3,
+  OP_INT32   = 4,
+  OP_INT64   = 5,
+  OP_UINT    = 6,  /* Go uint — 8 bytes on 64-bit */
+  OP_UINT8   = 7,
+  OP_UINT16  = 8,
+  OP_UINT32  = 9,
+  OP_UINT64  = 10,
   OP_FLOAT32 = 11,
   OP_FLOAT64 = 12,
-  OP_STRING = 13, /* Go string {ptr, len} */
+  OP_STRING  = 13, /* Go string {ptr, len} */
 
-  /* --- Composite / special (match ElemTypeKind 14-20) --- */
-  OP_STRUCT = 14,      /* nested struct — sub_ops points to child OpStep[] */
-  OP_SLICE = 15,       /* slice — fallback to Go */
-  OP_POINTER = 16,     /* pointer deref + dispatch */
-  OP_INTERFACE = 17,   /* interface{} — fallback to Go */
-  OP_MAP = 18,         /* map — fallback to Go */
-  OP_RAW_MESSAGE = 19, /* json.RawMessage — direct byte copy */
-  OP_NUMBER = 20,      /* json.Number — direct string copy */
+  /* --- Non-primitive data ops (16-19) --- */
+  OP_INTERFACE   = 16, /* interface{} — noinline C encoder or yield */
+  OP_RAW_MESSAGE = 17, /* json.RawMessage — direct byte copy */
+  OP_NUMBER      = 18, /* json.Number — direct string copy */
+  OP_BYTE_SLICE  = 19, /* []byte — base64 encode, yield to Go */
 
-  /* --- Extended ops (beyond ElemTypeKind range) --- */
-  OP_BYTE_SLICE = 21, /* []byte — base64 encode, fallback to Go */
+  /* --- Structural control-flow opcodes (32-40) --- */
+  OP_SKIP_IF_ZERO = 32, /* conditional forward jump (omitempty) */
+  OP_STRUCT_BEGIN = 33, /* push frame, write '{' */
+  OP_STRUCT_END   = 34, /* write '}', pop frame */
+  OP_PTR_DEREF    = 35, /* deref pointer, nil→null+jump */
+  OP_PTR_END      = 36, /* pop ptr-deref frame, restore base */
+  OP_SLICE_BEGIN  = 37, /* slice loop start */
+  OP_SLICE_END    = 38, /* slice loop end / back-edge */
+  OP_MAP_BEGIN    = 39, /* map iteration start (yield-driven) */
+  OP_MAP_END      = 40, /* map iteration end */
 
-  /* Go-only fallback: fields with custom marshalers, ,string tags,
-   * or complex nested structs that cannot be natively encoded.
-   * Always routes to vj_op_fallback — never reads field memory.
-   * Distinct from OP_INTERFACE which reads the GoEface layout. */
-  OP_FALLBACK = 22,
+  /* --- Go-only fallback --- */
+  OP_FALLBACK    = 0x3F, /* custom marshalers, ,string, complex structs */
 
   /* --- Sentinel --- */
   OP_END = 0xFF, /* end of instruction stream */
 };
 
-/* Total number of dispatchable opcodes (excluding OP_END). */
-#define OP_COUNT 23
+/* Dispatch table size — must cover all opcodes up to OP_FALLBACK (0x3F). */
+#define OP_DISPATCH_COUNT 0x40
 
-/* Flag bit stored in OpStep.op_type to indicate omitempty semantics.
- * When set, the VM checks if the field is its zero value and skips
- * encoding (no key, no value, no comma) if so.  The lower byte holds
- * the real opcode; the flag is stripped before dispatch-table lookup. */
+/* omitempty flag: OR-ed into op_type high bits.
+ * Lower byte = real opcode, stripped before dispatch-table lookup. */
 #define OP_FLAG_OMITEMPTY 0x8000
 #define OP_TYPE_MASK      0x00FF
 
 /* ================================================================
- *  Section 2 — Instruction Descriptor (OpStep)
+ *  ZeroCheckTag — omitempty zero-value check tags
+ *
+ *  Encoded in the high byte of OP_SKIP_IF_ZERO's op_type field.
+ *  Values match Go ElemTypeKind (0-22) so Go can cast directly.
+ *  Separate from OpType: Struct/Slice/Pointer/Map have zero-check
+ *  tags but no corresponding instruction opcodes.
  * ================================================================ */
 
-typedef struct OpStep {
-  uint16_t op_type;
-  uint16_t key_len;
-  uint32_t field_off;
-  const char *key_ptr;
-  void *sub_ops;
-} OpStep;
-
-_Static_assert(sizeof(OpStep) <= 32, "OpStep exceeds 32-byte cache budget");
-_Static_assert(offsetof(OpStep, key_ptr) == 8,
-               "OpStep.key_ptr must be at offset 8");
-_Static_assert(offsetof(OpStep, sub_ops) == 16,
-               "OpStep.sub_ops must be at offset 16");
+enum ZeroCheckTag {
+  ZCT_BOOL    = 0,
+  ZCT_INT     = 1,
+  ZCT_INT8    = 2,
+  ZCT_INT16   = 3,
+  ZCT_INT32   = 4,
+  ZCT_INT64   = 5,
+  ZCT_UINT    = 6,
+  ZCT_UINT8   = 7,
+  ZCT_UINT16  = 8,
+  ZCT_UINT32  = 9,
+  ZCT_UINT64  = 10,
+  ZCT_FLOAT32 = 11,
+  ZCT_FLOAT64 = 12,
+  ZCT_STRING  = 13,
+  ZCT_STRUCT  = 14,
+  ZCT_SLICE   = 15,
+  ZCT_POINTER = 16,
+  ZCT_INTERFACE = 17,
+  ZCT_MAP     = 18,
+  ZCT_RAW_MESSAGE = 19,
+  ZCT_NUMBER  = 20,
+  ZCT_BYTE_SLICE = 21,
+  ZCT_FALLBACK = 22,
+};
 
 /* ================================================================
- *  Section 3 — Go Runtime Type Layouts
+ *  Go Runtime Type Layouts
  * ================================================================ */
 
 typedef struct {
@@ -360,71 +386,85 @@ _Static_assert(sizeof(GoSlice) == 24,
                "GoSlice must be 24 bytes (matching Go slice layout)");
 
 /* ================================================================
- *  Section 3b — omitempty Zero-Value Check
+ *  vj_is_zero — omitempty zero-value check
  *
- *  Matches Go's makeIsZeroFn (typeinfo.go) exactly.
- *  Uses typed comparison so that float -0.0 compares equal to 0
- *  (matching Go's `*(*float64)(ptr) == 0` semantics).
+ *  Matches Go's semantics: float -0.0 == 0, nil pointer/interface,
+ *  empty string/slice, nil map.  Struct/fallback always return false.
  * ================================================================ */
 
-static inline int vj_is_zero(const uint8_t *ptr, uint16_t op_type) {
-  switch (op_type) {
-  case OP_BOOL:
+static inline int vj_is_zero(const uint8_t *ptr, uint16_t zct) {
+  switch (zct) {
+  case ZCT_BOOL:
     return *(const uint8_t *)ptr == 0;
-  case OP_INT8:
+  case ZCT_INT8:
     return *(const int8_t *)ptr == 0;
-  case OP_UINT8:
+  case ZCT_UINT8:
     return *(const uint8_t *)ptr == 0;
-  case OP_INT16:
+  case ZCT_INT16:
     return *(const int16_t *)ptr == 0;
-  case OP_UINT16:
+  case ZCT_UINT16:
     return *(const uint16_t *)ptr == 0;
-  case OP_INT32:
+  case ZCT_INT32:
     return *(const int32_t *)ptr == 0;
-  case OP_UINT32:
+  case ZCT_UINT32:
     return *(const uint32_t *)ptr == 0;
-  case OP_FLOAT32: {
+  case ZCT_FLOAT32: {
     float v;
     vj_memcpy(&v, ptr, 4);
     return v == 0;
   }
-  case OP_INT:
-  case OP_INT64:
+  case ZCT_INT:
+  case ZCT_INT64:
     return *(const int64_t *)ptr == 0;
-  case OP_UINT:
-  case OP_UINT64:
+  case ZCT_UINT:
+  case ZCT_UINT64:
     return *(const uint64_t *)ptr == 0;
-  case OP_FLOAT64: {
+  case ZCT_FLOAT64: {
     double v;
     vj_memcpy(&v, ptr, 8);
     return v == 0;
   }
-  case OP_STRING:
+  case ZCT_STRING:
     return ((const GoString *)ptr)->len == 0;
-  case OP_NUMBER:
+  case ZCT_NUMBER:
     /* json.Number is a Go string — zero means empty string. */
     return ((const GoString *)ptr)->len == 0;
-  case OP_RAW_MESSAGE: {
+  case ZCT_RAW_MESSAGE: {
     /* json.RawMessage is a Go []byte — zero means nil or len==0. */
     const GoSlice *s = (const GoSlice *)ptr;
     return s->data == NULL || s->len == 0;
   }
-  case OP_POINTER:
+  case ZCT_POINTER:
     return *(const void *const *)ptr == NULL;
-  case OP_INTERFACE:
+  case ZCT_INTERFACE:
     /* nil interface = zero value (eface.type_ptr == NULL). */
     return *(const void *const *)ptr == NULL;
-  case OP_FALLBACK:
+  case ZCT_SLICE:
+  case ZCT_BYTE_SLICE: {
+    /* Slice is "empty" for omitempty when len == 0. */
+    const GoSlice *s = (const GoSlice *)ptr;
+    return s->len == 0;
+  }
+  case ZCT_MAP: {
+    /* Map header is a single pointer; nil map → zero. */
+    return *(const void *const *)ptr == NULL;
+  }
+  case ZCT_STRUCT: {
+    /* Struct is never considered "zero" for omitempty by stdlib.
+     * The Go fallback handles struct omitempty via IsZeroFn. */
+    return 0;
+  }
+  case ZCT_FALLBACK:
     /* Go-only fallback: the memory layout is unknown to C.
      * Never skip — the Go fallback handler checks omitempty. */
     return 0;
   default:
-    return 0; /* unknown type — never skip */
+    return 0; /* unknown tag — never skip */
   }
 }
 
 /* ================================================================
- *  Section 4 — Error Codes
+ *  Error Codes
  * ================================================================ */
 
 enum VjError {
@@ -437,7 +477,7 @@ enum VjError {
 };
 
 /* ================================================================
- *  Section 5 — Encoding Flags
+ *  Encoding Flags
  * ================================================================ */
 
 enum VjEncFlags {
@@ -459,59 +499,146 @@ enum VjEncFlags {
 #define VJ_ENC_STD_COMPAT (VJ_ENC_DEFAULT | VJ_ENC_ESCAPE_HTML)
 
 /* ================================================================
- *  Section 6 — Stack Frame & Encoding Context
+ *  Constants
  * ================================================================ */
 
 #define VJ_MAX_DEPTH 16
 
-/* ---- Interface type tag table entry ----
- *
- * Maps a Go *abi.Type pointer to a primitive opcode tag.
- * Used by vj_op_interface to inline-encode simple interface{} values
- * without returning to Go.  The table is built once by Go at init time
- * and sorted by type_ptr for binary search in C. */
-typedef struct {
-  const void *type_ptr; /* Go *abi.Type (address-comparable) */
-  uint8_t tag;          /* OP_BOOL..OP_STRING, or 0 = unknown → fallback */
-  uint8_t _pad[7];
-} VjIfaceTypeEntry;
+/* ================================================================
+ *  OpStep — 24-byte VM instruction
+ * ================================================================ */
 
-_Static_assert(sizeof(VjIfaceTypeEntry) == 16, "VjIfaceTypeEntry must be 16 bytes");
+typedef struct VjOpStep {
+  uint16_t op_type;     /*  0: opcode | flags (high byte = ZeroCheckTag for OP_SKIP_IF_ZERO) */
+  uint16_t key_len;     /*  2: pre-encoded key length */
+  uint32_t field_off;   /*  4: field offset in struct */
+  const char *key_ptr;  /*  8: pointer to pre-encoded key bytes */
+  int32_t  operand_a;   /* 16: jump offset / elem_size / field_idx */
+  int32_t  operand_b;   /* 20: body length / reserved */
+} VjOpStep;
 
-typedef struct {
-  const OpStep *ret_op;
-  const uint8_t *ret_base;
-  int32_t first;
-  int32_t _pad;
+_Static_assert(sizeof(VjOpStep) == 24, "VjOpStep must be 24 bytes");
+_Static_assert(offsetof(VjOpStep, key_ptr) == 8, "VjOpStep.key_ptr offset");
+_Static_assert(offsetof(VjOpStep, operand_a) == 16, "VjOpStep.operand_a offset");
+_Static_assert(offsetof(VjOpStep, operand_b) == 20, "VjOpStep.operand_b offset");
+
+/* ================================================================
+ *  Stack Frame Types & Layout
+ * ================================================================ */
+
+enum VjFrameType {
+  VJ_FRAME_STRUCT = 0,
+  VJ_FRAME_SLICE  = 1,
+  VJ_FRAME_IFACE  = 2,
+};
+
+typedef struct VjStackFrame {
+  /* Common fields (all frame types) */
+  const VjOpStep  *ret_op;      /*  0: return instruction pointer */
+  const uint8_t   *ret_base;    /*  8: parent struct/elem base address */
+  int32_t  first;               /* 16: parent first-field flag */
+  int32_t  frame_type;          /* 20: VJ_FRAME_STRUCT / SLICE / IFACE */
+
+  /* Interface call (VJ_FRAME_IFACE only) */
+  const VjOpStep  *ret_ops;     /* 24: parent ops base address */
+
+  /* Loop fields (VJ_FRAME_SLICE) */
+  const uint8_t   *iter_data;   /* 32: slice data start */
+  int64_t  iter_count;          /* 40: total elements */
+  int64_t  iter_idx;            /* 48: current index */
+  int32_t  elem_size;           /* 56: element size in bytes */
+  int32_t  _pad;                /* 60: alignment */
+  const VjOpStep  *loop_pc_op;  /* 64: loop body first instruction */
 } VjStackFrame;
 
-_Static_assert(sizeof(VjStackFrame) == 24, "VjStackFrame must be 24 bytes");
+_Static_assert(sizeof(VjStackFrame) == 72, "VjStackFrame must be 72 bytes");
 
-typedef struct {
-  uint8_t *buf_cur;
-  uint8_t *buf_end;
-  const OpStep *cur_op;
-  const uint8_t *cur_base;
-  int32_t depth;
-  int32_t error_code;
-  uint32_t enc_flags;
-  uint32_t esc_op_idx;
-  const VjIfaceTypeEntry *iface_type_table; /* sorted by type_ptr */
-  int32_t iface_type_count;
-  int32_t _pad2;
-  VjStackFrame stack[VJ_MAX_DEPTH];
-} VjEncodingCtx;
+/* ================================================================
+ *  Yield Codes
+ * ================================================================ */
 
-_Static_assert(offsetof(VjEncodingCtx, buf_cur) == 0, "buf_cur offset");
-_Static_assert(offsetof(VjEncodingCtx, buf_end) == 8, "buf_end offset");
-_Static_assert(offsetof(VjEncodingCtx, cur_op) == 16, "cur_op offset");
-_Static_assert(offsetof(VjEncodingCtx, cur_base) == 24, "cur_base offset");
-_Static_assert(offsetof(VjEncodingCtx, depth) == 32, "depth offset");
-_Static_assert(offsetof(VjEncodingCtx, error_code) == 36, "error_code offset");
-_Static_assert(offsetof(VjEncodingCtx, enc_flags) == 40, "enc_flags offset");
-_Static_assert(offsetof(VjEncodingCtx, esc_op_idx) == 44, "esc_op_idx offset");
-_Static_assert(offsetof(VjEncodingCtx, iface_type_table) == 48, "iface_type_table offset");
-_Static_assert(offsetof(VjEncodingCtx, iface_type_count) == 56, "iface_type_count offset");
-_Static_assert(offsetof(VjEncodingCtx, stack) == 64, "stack offset");
+enum {
+  VJ_ERR_YIELD = 6,  /* VM yielded to Go */
+};
+
+enum VjYieldReason {
+  VJ_YIELD_FALLBACK   = 1,  /* custom marshaler / unsupported */
+  VJ_YIELD_IFACE_MISS = 2,  /* interface cache miss */
+  VJ_YIELD_MAP_NEXT   = 3,  /* map iteration */
+};
+
+/* ================================================================
+ *  Interface Cache Entry — 24 bytes
+ * ================================================================ */
+
+typedef struct VjIfaceCacheEntry {
+  const void      *type_ptr;  /*  0: Go *abi.Type address */
+  const VjOpStep  *ops;       /*  8: Blueprint.Ops[0], or NULL */
+  uint8_t          tag;       /* 16: primitive tag (OP_BOOL..OP_STRING) or 0 */
+  uint8_t          _pad[7];   /* 17: alignment */
+} VjIfaceCacheEntry;
+
+_Static_assert(sizeof(VjIfaceCacheEntry) == 24,
+               "VjIfaceCacheEntry must be 24 bytes");
+
+/* ================================================================
+ *  ExecCtx — per-Marshal runtime context (1248 bytes)
+ * ================================================================ */
+
+typedef struct VjExecCtx {
+  /* Output buffer */
+  uint8_t         *buf_cur;           /*   0: current write position */
+  uintptr_t        buf_end;           /*   8: one past last byte (not a GC ptr) */
+
+  /* Instruction pointer */
+  int32_t          pc;                /*  16: current instruction index */
+  int32_t          _pad1;             /*  20: alignment */
+
+  /* Data source */
+  const uint8_t   *cur_base;         /*  24: current struct/elem base */
+
+  /* State */
+  int32_t          depth;             /*  32: stack depth */
+  int32_t          error_code;        /*  36: VjError value */
+  uint32_t         enc_flags;         /*  40: VjEncFlags bitmask */
+  uint32_t         yield_info;        /*  44: VjYieldReason */
+
+  /* Instruction reference (read-only) */
+  const VjOpStep  *ops_ptr;          /*  48: &Blueprint.Ops[0] */
+  uintptr_t        _reserved56;      /*  56: reserved */
+
+  /* Interface cache */
+  const VjIfaceCacheEntry *iface_cache_ptr;  /*  64: sorted array */
+  int32_t          iface_cache_count;        /*  72: count */
+  int32_t          _pad2;                    /*  76: alignment */
+
+  /* Yield metadata */
+  const void      *yield_type_ptr;   /*  80: eface.type_ptr on iface miss */
+  int32_t          yield_field_idx;   /*  88: field index for fallback */
+  int32_t          _pad3;             /*  92: alignment */
+
+  /* Stack */
+  VjStackFrame     stack[VJ_MAX_DEPTH]; /*  96: stack frames */
+} VjExecCtx;
+
+_Static_assert(sizeof(VjExecCtx) == 1248, "VjExecCtx must be 1248 bytes");
+_Static_assert(offsetof(VjExecCtx, buf_cur) == 0, "buf_cur offset");
+_Static_assert(offsetof(VjExecCtx, buf_end) == 8, "buf_end offset");
+_Static_assert(offsetof(VjExecCtx, pc) == 16, "pc offset");
+_Static_assert(offsetof(VjExecCtx, cur_base) == 24, "cur_base offset");
+_Static_assert(offsetof(VjExecCtx, depth) == 32, "depth offset");
+_Static_assert(offsetof(VjExecCtx, error_code) == 36, "error_code offset");
+_Static_assert(offsetof(VjExecCtx, enc_flags) == 40, "enc_flags offset");
+_Static_assert(offsetof(VjExecCtx, yield_info) == 44, "yield_info offset");
+_Static_assert(offsetof(VjExecCtx, ops_ptr) == 48, "ops_ptr offset");
+_Static_assert(offsetof(VjExecCtx, iface_cache_ptr) == 64,
+               "iface_cache_ptr offset");
+_Static_assert(offsetof(VjExecCtx, iface_cache_count) == 72,
+               "iface_cache_count offset");
+_Static_assert(offsetof(VjExecCtx, yield_type_ptr) == 80,
+               "yield_type_ptr offset");
+_Static_assert(offsetof(VjExecCtx, yield_field_idx) == 88,
+               "yield_field_idx offset");
+_Static_assert(offsetof(VjExecCtx, stack) == 96, "stack offset");
 
 #endif /* VJ_ENCODER_TYPES_H */

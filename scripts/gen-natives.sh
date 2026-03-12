@@ -102,6 +102,7 @@ get_zig_target() {
 
     case "$arch" in
         amd64)  arch="x86_64" ;;
+        arm64)  arch="aarch64" ;;
     esac
 
     case "$os" in
@@ -128,42 +129,20 @@ fi
 
 # ============================================================
 #  Platform-ISA constraints
-#  darwin: only arm64 + neon
-#  linux: amd64 (sse42/avx512) or arm64 (neon)
-#  windows: amd64 (sse42/avx512)
+#  The encoder does not have multi-ISA runtime dispatch (unlike the
+#  scanner in simd project), so each platform compiles a single ISA.
+#  darwin: arm64 + neon
+#  linux:  arm64 (neon) or amd64 (sse42)
 # ============================================================
 
 get_available_isas() {
     local os=$1
     local arch=$2
 
-    case "$os" in
-        darwin)
-            if [ "$arch" = "arm64" ]; then
-                echo "neon"
-            else
-                echo ""
-            fi
-            ;;
-        linux)
-            case "$arch" in
-                arm64) echo "neon" ;;
-                amd64) echo "sse42 avx512" ;;
-            esac
-            ;;
-        windows)
-            if [ "$arch" = "amd64" ]; then
-                echo "sse42 avx512"
-            else
-                echo ""
-            fi
-            ;;
-        *)
-            case "$arch" in
-                arm64) echo "neon" ;;
-                amd64) echo "sse42 avx512" ;;
-            esac
-            ;;
+    case "$arch" in
+        arm64) echo "neon" ;;
+        amd64) echo "sse42" ;;
+        *)     echo "" ;;
     esac
 }
 
@@ -190,6 +169,14 @@ get_isa_flags() {
         *)      echo "" ;;
     esac
 }
+
+# Architecture-specific compiler flags
+ARCH_FLAGS=""
+if [ "$TARGET_ARCH" = "arm64" ]; then
+    # -mno-outline: prevent compiler from outlining code sequences into
+    # separate functions, which would create additional relocations.
+    ARCH_FLAGS="-mno-outline"
+fi
 
 # ============================================================
 #  Main build process
@@ -240,12 +227,12 @@ for isa in $ISAS; do
 
         # Step 2: Compile to object
         echo "  Compiling $(basename "$OFILE")"
-        $CC -O3 -fPIC -g0 -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset -mno-outline $ISA_FLAGS -c "$CFILE" -o "$OFILE"
+        $CC -O3 -fPIC -g0 -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset $ARCH_FLAGS $ISA_FLAGS -c "$CFILE" -o "$OFILE"
         ALL_OBJS="$ALL_OBJS $OFILE"
 
         # Step 3: Generate assembly for reference (strip debug info)
         echo "  Generating $(basename "$SFILE")"
-        $CC -S -O3 -g0 -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset -mno-outline -fno-asynchronous-unwind-tables $ISA_FLAGS "$CFILE" -o "$SFILE"
+        $CC -S -O3 -g0 -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset $ARCH_FLAGS -fno-asynchronous-unwind-tables $ISA_FLAGS "$CFILE" -o "$SFILE"
 
         # Remove debug directives
         sed -i '/^[[:space:]]*\.file[[:space:]]/d' "$SFILE"
@@ -300,43 +287,18 @@ if [ "$TARGET_OS" = "linux" ] && [ "$TARGET_ARCH" = "amd64" ]; then
     # Linux amd64: use prelink.sh (Go internal linker cannot handle R_X86_64_PC32)
     ZIG_TARGET=$(get_zig_target "$TARGET_OS" "$TARGET_ARCH")
     "$REPO_ROOT/hack/prelink.sh" -l -o "$SYSO_PATH" -t "$ZIG_TARGET" $ALL_OBJS
-
-# Darwin arm64: use dylib prelink to produce zero-relocation syso.
-# Go's internal linker cannot handle ARM64_RELOC_UNSIGNED in data sections,
-# and the dylib prelink eliminates ALL relocations (including PAGE21/PAGEOFF12)
-# by pre-resolving them in a dylib and patching ADRP+ADD to ADR+NOP.
-# if [ "$TARGET_OS" = "darwin" ] && [ "$TARGET_ARCH" = "arm64" ]; then
-elif [ "$TARGET_OS" = "darwin" ] && [ "$TARGET_ARCH" = "arm64" ]; then
-    :
-    # NEEDS_PRELINK=true
-    #
-    # # Darwin arm64: dylib prelink pipeline
-    # # 1. Link all .o into a single dylib (resolves all relocations)
-    # DYLIB_PATH="${OUTPUT_DIR}/${BASENAME}_${TARGET_OS}_${TARGET_ARCH}.dylib"
-    # echo "  Creating dylib (resolving all relocations)..."
-    # echo "    ${DYLIB_PATH}"
-    # clang -dynamiclib -nostdlib -lSystem -Wl,-no_compact_unwind \
-    #     -target arm64-apple-macos15.0 \
-    #     -o "$DYLIB_PATH" $ALL_OBJS
-    #
-    # # 2. Extract zero-relocation MH_OBJECT with ADRP→ADR patching
-    # echo "  Extracting zero-relocation syso..."
-    # python3 "$REPO_ROOT/scripts/dylib_to_obj.py" "$DYLIB_PATH" "$SYSO_PATH"
-    #
-    # # 3. Verify zero relocations
-    # RELOC_COUNT=$(otool -rv "$SYSO_PATH" 2>/dev/null | grep -c "^[0-9a-fA-F]" || true)
-    # if [ "$RELOC_COUNT" -gt 0 ]; then
-    #     echo "  WARNING: syso has $RELOC_COUNT relocations (expected 0)"
-    # else
-    #     echo "  Verified: zero relocations in syso"
-    # fi
 fi
 
 if [ "$NEEDS_PRELINK" != true ]; then
     echo "Create syso without pre-linking..."
-    # Other platforms: use ld -r directly
     if [ "$NEEDS_CROSS_COMPILE" = true ]; then
-        $CC -r $ALL_OBJS -o "$SYSO_PATH"
+        # Cross-compile: use zig's bundled lld for relocatable link.
+        # "zig cc -r" on older zig versions produces ET_EXEC instead of ET_REL,
+        # so we invoke ld.lld directly which correctly produces ET_REL.
+        zig ld.lld -r $ALL_OBJS -o "$SYSO_PATH"
+    elif [ "$TARGET_OS" = "darwin" ]; then
+        # Native darwin: use system ld (Apple ld64) explicitly
+        /usr/bin/ld -r -arch "$TARGET_ARCH" -o "$SYSO_PATH" $ALL_OBJS
     else
         ld -r -o "$SYSO_PATH" $ALL_OBJS
     fi

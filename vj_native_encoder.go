@@ -4,184 +4,61 @@ import (
 	"reflect"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"unsafe"
-
-	"github.com/velox-io/json/native/encoder"
 )
 
 // ================================================================
-// Go mirror types for C engine data structures (native/impl/encoder.h)
+// OpCode constants — mirror native/impl/encoder_types.h enum OpType
 //
-// These structs have identical memory layouts to their C counterparts.
-// The C engine reads/writes these directly via pointer, so field
-// order, size, and alignment must match exactly.
+// Values 0-13 are primitives, aligned with ElemTypeKind so the
+// pre-compiler can map them directly via kindToOpcode().
+// Values 16-19 are non-primitive data ops (interface, raw, etc.).
+// Values 32-40 are structural control-flow instructions.
+// Value 0x3F is the Go-only fallback.
+//
+// All opcodes share a single sparse dispatch table in the C VM
+// (dispatch_table[0x40]).
 // ================================================================
-
-// COpStep mirrors C OpStep (encoder.h Section 2).
-//
-// Layout (64-bit, 24 bytes):
-//
-//	offset 0: OpType   uint16    (2 bytes)
-//	offset 2: KeyLen   uint16    (2 bytes)
-//	offset 4: FieldOff uint32    (4 bytes)
-//	offset 8: KeyPtr   pointer   (8 bytes) — pre-escaped key, e.g. "\"name\":"
-//	offset 16: SubOps  pointer   (8 bytes) — child COpStep[] for OP_STRUCT
-type COpStep struct {
-	OpType   uint16
-	KeyLen   uint16
-	FieldOff uint32
-	KeyPtr   unsafe.Pointer // points to pre-escaped key bytes
-	SubOps   unsafe.Pointer // *COpStep for nested structs, nil otherwise
-}
-
-// CVjStackFrame mirrors C VjStackFrame (encoder.h Section 6).
-//
-// 24 bytes with explicit padding for 8-byte alignment.
-type CVjStackFrame struct {
-	RetOp   unsafe.Pointer // *COpStep — resume point in parent
-	RetBase unsafe.Pointer // parent struct base address
-	First   int32          // was parent on its first field?
-	_pad    int32          // alignment padding
-}
-
-// CVjEncodingCtx mirrors C VjEncodingCtx (encoder_types.h Section 6).
-//
-// This is the sole state passed between Go and the C engine.
-// Total: 64 bytes header + 16 * 24 bytes stack = 448 bytes.
-type CVjEncodingCtx struct {
-	BufCur         unsafe.Pointer // current write position
-	BufEnd         unsafe.Pointer // one past last writable byte
-	CurOp          unsafe.Pointer // *COpStep — current instruction
-	CurBase        unsafe.Pointer // current struct base address
-	Depth          int32          // stack depth (0 = top-level)
-	ErrorCode      int32          // VjError enum value
-	EncFlags       uint32         // VjEncFlags bitmask
-	EscOpIdx       uint32         // index of op needing Go fallback
-	IfaceTypeTable unsafe.Pointer // *CIfaceTypeEntry sorted type tag table
-	IfaceTypeCount int32          // number of entries in type tag table
-	_pad2          int32          // alignment padding
-	Stack          [vjMaxDepth]CVjStackFrame
-}
-
-// ================================================================
-// Compile-time size assertions (must match C _Static_assert values)
-// ================================================================
-
-var _ [24]byte = [unsafe.Sizeof(COpStep{})]byte{}
-var _ [24]byte = [unsafe.Sizeof(CVjStackFrame{})]byte{}
-var _ [448]byte = [unsafe.Sizeof(CVjEncodingCtx{})]byte{}
-var _ [16]byte = [unsafe.Sizeof(CIfaceTypeEntry{})]byte{}
-
-// CVjArrayCtx mirrors C VjArrayCtx (encoder.h Section 11).
-//
-// Wraps VjEncodingCtx with array-specific fields so vj_encode_array
-// can loop over elements entirely in C.
-type CVjArrayCtx struct {
-	Enc      CVjEncodingCtx // offset 0
-	ArrData  unsafe.Pointer // offset 448 — array base pointer
-	ArrCount int64          // offset 456 — total element count
-	ArrIdx   int64          // offset 464 — current element index (for resume)
-	ElemSize int64          // offset 472 — sizeof(element)
-	ElemOps  unsafe.Pointer // offset 480 — *COpStep for each element
-}
-
-// Compile-time size assertion for CVjArrayCtx.
-// 448 (VjEncodingCtx) + 8 + 8 + 8 + 8 + 8 = 488 bytes.
-var _ [488]byte = [unsafe.Sizeof(CVjArrayCtx{})]byte{}
-
-// CIfaceTypeEntry mirrors C VjIfaceTypeEntry (encoder_types.h).
-//
-// Maps a Go *abi.Type pointer to a primitive opcode tag for inline
-// interface{} encoding in the C engine.  16 bytes with padding.
-type CIfaceTypeEntry struct {
-	TypePtr unsafe.Pointer // *abi.Type (address-comparable)
-	Tag     uint8          // OP_BOOL..OP_STRING, or 0 = unknown
-	_pad    [7]byte        // alignment padding
-}
-
-// ifaceTypeTable is a global sorted array of primitive type→tag mappings.
-// Built once at first use, then reused for all C engine calls.
-// Sorted by TypePtr (ascending) for binary search in C.
-var (
-	ifaceTypeTable     []CIfaceTypeEntry
-	ifaceTypeTableOnce sync.Once
-)
-
-func getIfaceTypeTable() []CIfaceTypeEntry {
-	ifaceTypeTableOnce.Do(func() {
-		entries := []struct {
-			t   reflect.Type
-			tag uint8
-		}{
-			{reflect.TypeOf(false), uint8(opBool)},
-			{reflect.TypeOf(int(0)), uint8(opInt)},
-			{reflect.TypeOf(int8(0)), uint8(opInt8)},
-			{reflect.TypeOf(int16(0)), uint8(opInt16)},
-			{reflect.TypeOf(int32(0)), uint8(opInt32)},
-			{reflect.TypeOf(int64(0)), uint8(opInt64)},
-			{reflect.TypeOf(uint(0)), uint8(opUint)},
-			{reflect.TypeOf(uint8(0)), uint8(opUint8)},
-			{reflect.TypeOf(uint16(0)), uint8(opUint16)},
-			{reflect.TypeOf(uint32(0)), uint8(opUint32)},
-			{reflect.TypeOf(uint64(0)), uint8(opUint64)},
-			{reflect.TypeOf(float32(0)), uint8(opFloat32)},
-			{reflect.TypeOf(float64(0)), uint8(opFloat64)},
-			{reflect.TypeOf(""), uint8(opString)},
-		}
-		table := make([]CIfaceTypeEntry, len(entries))
-		for i, e := range entries {
-			table[i] = CIfaceTypeEntry{
-				TypePtr: rtypePtr(e.t),
-				Tag:     e.tag,
-			}
-		}
-		// Sort by TypePtr for binary search in C.
-		sort.Slice(table, func(i, j int) bool {
-			return uintptr(table[i].TypePtr) < uintptr(table[j].TypePtr)
-		})
-		ifaceTypeTable = table
-	})
-	return ifaceTypeTable
-}
-
-// setIfaceTypeTable populates the interface type tag table in a VjEncodingCtx.
-func setIfaceTypeTable(ctx *CVjEncodingCtx) {
-	table := getIfaceTypeTable()
-	ctx.IfaceTypeTable = unsafe.Pointer(&table[0])
-	ctx.IfaceTypeCount = int32(len(table))
-}
-
-// ================================================================
-// C engine constants — mirror native/impl/encoder.h enums
-// ================================================================
-
-// OpType codes. Values 0-20 are intentionally equal to ElemTypeKind
-// so the pre-compiler can cast directly for simple fields.
 const (
-	opBool       uint16 = 0
-	opInt        uint16 = 1
-	opInt8       uint16 = 2
-	opInt16      uint16 = 3
-	opInt32      uint16 = 4
-	opInt64      uint16 = 5
-	opUint       uint16 = 6
-	opUint8      uint16 = 7
-	opUint16     uint16 = 8
-	opUint32     uint16 = 9
-	opUint64     uint16 = 10
-	opFloat32    uint16 = 11
-	opFloat64    uint16 = 12
-	opString     uint16 = 13
-	opStruct     uint16 = 14
-	opSlice      uint16 = 15
-	opPointer    uint16 = 16
-	opInterface  uint16 = 17
-	opMap        uint16 = 18
-	opRawMessage uint16 = 19
-	opNumber     uint16 = 20
-	opByteSlice  uint16 = 21
-	opFallback   uint16 = 22 // Go-only fallback (marshalers, complex structs)
-	opEnd        uint16 = 0xFF
+	// Primitive types (0-13), aligned with ElemTypeKind.
+	opBool    uint16 = 0
+	opInt     uint16 = 1
+	opInt8    uint16 = 2
+	opInt16   uint16 = 3
+	opInt32   uint16 = 4
+	opInt64   uint16 = 5
+	opUint    uint16 = 6
+	opUint8   uint16 = 7
+	opUint16  uint16 = 8
+	opUint32  uint16 = 9
+	opUint64  uint16 = 10
+	opFloat32 uint16 = 11
+	opFloat64 uint16 = 12
+	opString  uint16 = 13
+
+	// Non-primitive data ops (16-19).
+	opInterface  uint16 = 16 // interface{} — noinline C encoder or yield
+	opRawMessage uint16 = 17 // json.RawMessage — direct byte copy
+	opNumber     uint16 = 18 // json.Number — direct string copy
+	opByteSlice  uint16 = 19 // []byte — base64, yield to Go
+
+	// Structural control-flow instructions (32-40).
+	opSkipIfZero  uint16 = 32 // conditional forward jump (omitempty)
+	opStructBegin uint16 = 33 // push frame, write '{'
+	opStructEnd   uint16 = 34 // write '}', pop frame
+	opPtrDeref    uint16 = 35 // deref pointer, nil→null+jump
+	opPtrEnd      uint16 = 36 // pop ptr-deref frame, restore base
+	opSliceBegin  uint16 = 37 // slice loop start
+	opSliceEnd    uint16 = 38 // slice loop end / back-edge
+	opMapBegin    uint16 = 39 // map iteration start (yield-driven)
+	opMapEnd      uint16 = 40 // map iteration end (yield)
+
+	// Go-only fallback (0x3F).
+	opFallback uint16 = 0x3F // custom marshalers, ,string, complex structs
+
+	// Sentinel.
+	opEnd uint16 = 0xFF
 
 	// Flag bit OR-ed into OpType to indicate omitempty semantics.
 	// The C engine strips this flag before dispatch-table lookup and
@@ -189,505 +66,358 @@ const (
 	opFlagOmitempty uint16 = 0x8000
 )
 
-// VjError codes returned in CVjEncodingCtx.ErrorCode.
+// opTypeMask extracts the opcode from OpType, stripping flags and
+// the high byte used by opSkipIfZero to encode the ZeroCheckTag.
+const opTypeMask = uint16(0x00FF)
+
+// kindToOpcode maps an ElemTypeKind to the corresponding VM instruction
+// opcode.  Primitives 0-13 map 1:1; other kinds map to their actual
+// instruction opcode (which differs from the Kind value).
+//
+// Panics for kinds that have no corresponding single instruction
+// (KindStruct, KindSlice, KindPointer, KindMap — these use structural
+// opcodes like opStructBegin/opPtrDeref/opSliceBegin/opMapBegin instead).
+func kindToOpcode(k ElemTypeKind) uint16 {
+	switch {
+	case k <= KindString:
+		// Primitives: 1:1 mapping with ElemTypeKind.
+		return uint16(k)
+	case k == KindAny:
+		return opInterface
+	case k == KindRawMessage:
+		return opRawMessage
+	case k == KindNumber:
+		return opNumber
+	default:
+		panic("kindToOpcode: no direct opcode for this ElemTypeKind")
+	}
+}
+
+// ================================================================
+// Error codes returned in ExecCtx.ErrCode.
+// ================================================================
 const (
-	vjOK            int32 = 0
-	vjErrBufFull    int32 = 1
-	vjErrGoFallback int32 = 2
-	vjErrStackOvfl  int32 = 3
-	vjErrCycle      int32 = 4
-	vjErrNanInf     int32 = 5
+	vjOK           int32 = 0
+	vjErrBufFull   int32 = 1
+	vjErrStackOvfl int32 = 3
+	vjErrNanInf    int32 = 5
+	vjErrYield     int32 = 6 // VM yielded to Go (interface miss, fallback, map iter)
 )
 
-// VjEncFlags bitmask — matches Go escapeFlags (vj_escape.go).
+// ================================================================
+// Encoding flags (VjEncFlags bitmask).
+// ================================================================
 const (
-	vjEncEscapeHTML        uint32 = 1 << 0
-	vjEncEscapeLineTerms   uint32 = 1 << 1
-	vjEncEscapeInvalidUTF8 uint32 = 1 << 2
+	vjEncEscapeHTML uint32 = 1 << 0
 
 	// Hot resume flags for re-entering C after Go handles a fallback field.
 	vjEncResume      uint32 = 1 << 7 // skip opening '{'; resume mid-struct
 	vjEncResumeFirst uint32 = 1 << 8 // with RESUME: no field written yet (first=1)
 )
 
-// Bitmask constants for decoding esc_op_idx (packed by C on fallback).
-// Bits [0:30] = op index relative to CurOp, bit 31 = first flag.
+// Bitmask constant for decoding esc_op_idx (packed by C on fallback).
+// Bit 31 = first flag.
+const escOpFirstBit uint32 = 0x80000000
+
+// ================================================================
+// Yield reason values stored in ExecCtx.YieldInfo.
+// ================================================================
 const (
-	escOpIdxMask  uint32 = 0x7FFFFFFF
-	escOpFirstBit uint32 = 0x80000000
+	yieldFallback  uint32 = 1 // custom marshaler / ,string / unsupported type
+	yieldIfaceMiss uint32 = 2 // interface{} cache miss — need Go compilation
+	yieldMapNext   uint32 = 3 // map iteration — need Go to provide next k/v
 )
 
-// vjMaxDepth matches C VJ_MAX_DEPTH.
-const vjMaxDepth = 16
-
 // ================================================================
-// Pre-compiler: StructCodec → COpStep[]
+// Types — OpStep, Blueprint, StackFrame, ExecCtx, IfaceCache
 // ================================================================
 
-// compiledOps holds the result of compiling a StructCodec for the C engine.
-type compiledOps struct {
-	ops     []COpStep // instruction stream, terminated by opEnd
-	keyRefs [][]byte  // keeps key byte slices alive for GC
-}
-
-// compileStructOps translates a StructCodec into a COpStep instruction stream.
+// VjOpStep mirrors the C OpStep.
 //
-// The returned ops slice is terminated by an opEnd sentinel. keyRefs holds
-// references to all pre-escaped key byte slices so they are not garbage
-// collected while the C engine holds raw pointers to them.
-func compileStructOps(dec *StructCodec) compiledOps {
-	n := len(dec.Fields)
-	ops := make([]COpStep, 0, n+1)
-	keyRefs := make([][]byte, 0, n)
-
-	for i := range dec.Fields {
-		fi := &dec.Fields[i]
-
-		op := COpStep{
-			OpType:   uint16(fi.Kind), // ElemTypeKind values == OpType values
-			KeyLen:   uint16(len(fi.Ext.KeyBytes)),
-			FieldOff: uint32(fi.Offset),
-		}
-
-		// Fields with custom marshalers or ,string tag need Go encoding.
-		// Mark them as opFallback to trigger vj_op_fallback in C.
-		// Note: opInterface (17) is reserved for actual interface{} fields
-		// where the C engine can attempt inline encoding of primitive values.
-		if fi.Flags&(tiFlagHasMarshalFn|tiFlagHasTextMarshalFn|tiFlagQuoted) != 0 {
-			op.OpType = opFallback
-		}
-
-		// Set omitempty flag so the C engine skips zero-valued fields.
-		// For opInterface/opFallback fields, vj_is_zero returns 0 (never skip),
-		// so the Go-side fallback handler checks omitempty instead.
-		if fi.Flags&tiFlagOmitEmpty != 0 {
-			op.OpType |= opFlagOmitempty
-		}
-
-		// Pin key bytes via keyRefs and set the raw pointer.
-		keyBytes := fi.Ext.KeyBytes
-		keyRefs = append(keyRefs, keyBytes)
-		if len(keyBytes) > 0 {
-			op.KeyPtr = unsafe.Pointer(&keyBytes[0])
-		}
-
-		// Nested struct: recursively compile sub-instructions only if
-		// the sub-struct is fully native-encodable. If not, mark this
-		// field as a fallback op (opFallback) so the C engine triggers
-		// a top-level fallback — Go handles the entire nested struct.
-		// This ensures fallback always occurs at depth=0, keeping the
-		// hot resume logic simple (no nested stack reconstruction).
-		if fi.Kind == KindStruct {
-			subDec := fi.Codec.(*StructCodec)
-			if canNativeEncode(subDec) {
-				sub := compileStructOps(subDec)
-				keyRefs = append(keyRefs, sub.keyRefs...)
-				if len(sub.ops) > 0 {
-					op.SubOps = unsafe.Pointer(&sub.ops[0])
-				}
-				// Keep the sub.ops slice alive for GC. The GC only
-				// traces typed pointers; an unsafe.Pointer in
-				// COpStep.SubOps won't keep sub.ops alive. Store the
-				// backing array as a []byte alias.
-				subOpsBytes := unsafe.Slice(
-					(*byte)(unsafe.Pointer(&sub.ops[0])),
-					len(sub.ops)*int(unsafe.Sizeof(COpStep{})),
-				)
-				keyRefs = append(keyRefs, subOpsBytes)
-			} else {
-				// Sub-struct has unsupported fields — use opFallback
-				// to route to vj_op_fallback in the C engine.
-				op.OpType = opFallback
-			}
-		}
-
-		// Pointer field: compile sub-ops describing the element type.
-		// Only proceed if op.OpType is still opPointer (not overridden
-		// by marshalers/quoted check above which sets opFallback).
-		if fi.Kind == KindPointer && op.OpType&opTypeMask == opPointer {
-			keyRefs = compilePointerSubOps(&op, fi, keyRefs)
-		}
-
-		ops = append(ops, op)
-	}
-
-	// Append END sentinel.
-	ops = append(ops, COpStep{OpType: opEnd})
-	return compiledOps{ops: ops, keyRefs: keyRefs}
-}
-
-// opTypeMask extracts the opcode from op_type, stripping the omitempty flag.
-const opTypeMask = uint16(0x00FF)
-
-// isNativeElemKind reports whether a KindXxx value represents a type
-// that the C engine can encode natively as a pointer element.
-func isNativeElemKind(k ElemTypeKind) bool {
-	switch k {
-	case KindBool,
-		KindInt, KindInt8, KindInt16, KindInt32, KindInt64,
-		KindUint, KindUint8, KindUint16, KindUint32, KindUint64,
-		KindFloat32, KindFloat64,
-		KindString,
-		KindRawMessage, KindNumber:
-		return true
-	}
-	return false
-}
-
-// canNativeEncodePointerElem reports whether a pointer element type can
-// be natively encoded by the C engine. The element type must not have
-// custom marshalers (which bypass field-level flag detection for pointer
-// types since the marshaler check is skipped for reflect.Pointer kinds).
-func canNativeEncodePointerElem(elemTI *TypeInfo) bool {
-	// Element with custom marshalers must use Go encoding.
-	if elemTI.Flags&(tiFlagHasMarshalFn|tiFlagHasTextMarshalFn) != 0 {
-		return false
-	}
-
-	switch elemTI.Kind {
-	case KindBool,
-		KindInt, KindInt8, KindInt16, KindInt32, KindInt64,
-		KindUint, KindUint8, KindUint16, KindUint32, KindUint64,
-		KindFloat32, KindFloat64,
-		KindString,
-		KindRawMessage, KindNumber:
-		return true
-	case KindStruct:
-		subDec := elemTI.Codec.(*StructCodec)
-		return canNativeEncode(subDec)
-	}
-	return false
-}
-
-// compilePointerSubOps compiles the sub-ops for a pointer field and
-// updates the COpStep in-place. Returns the (possibly extended) keyRefs.
-func compilePointerSubOps(op *COpStep, fi *TypeInfo, keyRefs [][]byte) [][]byte {
-	pDec := fi.Codec.(*PointerCodec)
-	elemTI := pDec.ElemTI
-
-	if !canNativeEncodePointerElem(elemTI) {
-		op.OpType = opFallback
-		return keyRefs
-	}
-
-	switch elemTI.Kind {
-	case KindStruct:
-		subDec := elemTI.Codec.(*StructCodec)
-		sub := compileStructOps(subDec)
-		keyRefs = append(keyRefs, sub.keyRefs...)
-		// Wrapper: [{OP_STRUCT, sub_ops=inner_ops}, {OP_END}]
-		elemOps := make([]COpStep, 2)
-		elemOps[0] = COpStep{OpType: opStruct}
-		if len(sub.ops) > 0 {
-			elemOps[0].SubOps = unsafe.Pointer(&sub.ops[0])
-		}
-		elemOps[1] = COpStep{OpType: opEnd}
-		op.SubOps = unsafe.Pointer(&elemOps[0])
-		// Pin elemOps and sub.ops for GC.
-		keyRefs = append(keyRefs, unsafe.Slice(
-			(*byte)(unsafe.Pointer(&elemOps[0])),
-			len(elemOps)*int(unsafe.Sizeof(COpStep{})),
-		))
-		keyRefs = append(keyRefs, unsafe.Slice(
-			(*byte)(unsafe.Pointer(&sub.ops[0])),
-			len(sub.ops)*int(unsafe.Sizeof(COpStep{})),
-		))
-
-	default:
-		// Primitive: single-element sub_ops.
-		elemOps := make([]COpStep, 2)
-		elemOps[0] = COpStep{OpType: uint16(elemTI.Kind)}
-		elemOps[1] = COpStep{OpType: opEnd}
-		op.SubOps = unsafe.Pointer(&elemOps[0])
-		keyRefs = append(keyRefs, unsafe.Slice(
-			(*byte)(unsafe.Pointer(&elemOps[0])),
-			len(elemOps)*int(unsafe.Sizeof(COpStep{})),
-		))
-	}
-
-	return keyRefs
-}
-
-// canNativeEncode reports whether all fields of a StructCodec can be
-// handled entirely by the C engine (no Go fallback required).
+// Layout (64-bit, 24 bytes):
 //
-// omitempty is supported for primitive types, strings, and pointers
-// (nil check). Struct-level omitempty (recursive zero-check) still
-// requires Go.
-func canNativeEncode(dec *StructCodec) bool {
-	for i := range dec.Fields {
-		fi := &dec.Fields[i]
-
-		// Custom marshalers require Go callbacks.
-		if fi.Flags&(tiFlagHasMarshalFn|tiFlagHasTextMarshalFn) != 0 {
-			return false
-		}
-
-		// ,string tag requires quoted encoding logic.
-		if fi.Flags&tiFlagQuoted != 0 {
-			return false
-		}
-
-		switch fi.Kind {
-		case KindBool,
-			KindInt, KindInt8, KindInt16, KindInt32, KindInt64,
-			KindUint, KindUint8, KindUint16, KindUint32, KindUint64,
-			KindFloat32, KindFloat64,
-			KindString,
-			KindRawMessage, KindNumber:
-			// Supported by C engine (including omitempty).
-
-		case KindStruct:
-			// omitempty on a struct field requires recursive zero-check
-			// which the C engine cannot do — reject.
-			if fi.Flags&tiFlagOmitEmpty != 0 {
-				return false
-			}
-			// Recurse: nested struct must also be fully native-encodable.
-			subDec := fi.Codec.(*StructCodec)
-			if !canNativeEncode(subDec) {
-				return false
-			}
-
-		case KindPointer:
-			// Pointer to a native-eligible type — the C engine handles
-			// nil check + deref + inline encode (or nested struct entry).
-			// omitempty is OK: vj_is_zero checks *(void**)ptr == NULL.
-			pDec := fi.Codec.(*PointerCodec)
-			if !canNativeEncodePointerElem(pDec.ElemTI) {
-				return false
-			}
-
-		default:
-			// KindSlice, KindMap, KindAny — not supported.
-			return false
-		}
-	}
-	return true
+//	offset  0: OpType    uint16  (2 bytes)
+//	offset  2: KeyLen    uint16  (2 bytes)
+//	offset  4: FieldOff  uint32  (4 bytes)
+//	offset  8: KeyPtr    pointer (8 bytes) — pre-escaped key in KeyPool
+//	offset 16: OperandA  int32   (4 bytes) — jump offset / elem_size
+//	offset 20: OperandB  int32   (4 bytes) — body length / reserved
+type VjOpStep struct {
+	OpType   uint16
+	KeyLen   uint16
+	FieldOff uint32
+	KeyPtr   unsafe.Pointer // points into Blueprint.KeyPool
+	OperandA int32          // jump offset, elem_size, etc.
+	OperandB int32          // loop body len, reserved
 }
 
-// ================================================================
-// StructCodec integration: lazy-init native ops cache
-// ================================================================
+// Compile-time size assertion: VjOpStep must be exactly 24 bytes.
+var _ [24]byte = [unsafe.Sizeof(VjOpStep{})]byte{}
 
-// canPartialNativeEncode reports whether a StructCodec has at least one
-// field that the C engine can handle natively. This is used to decide
-// whether the hot-resume path is worthwhile for mixed structs.
-//
-// Returns false if all fields require Go (no benefit from C engine).
-func canPartialNativeEncode(dec *StructCodec) bool {
-	for i := range dec.Fields {
-		fi := &dec.Fields[i]
-
-		// Fields with custom marshalers or ,string tag always need Go.
-		if fi.Flags&(tiFlagHasMarshalFn|tiFlagHasTextMarshalFn|tiFlagQuoted) != 0 {
-			continue
-		}
-
-		switch fi.Kind {
-		case KindBool,
-			KindInt, KindInt8, KindInt16, KindInt32, KindInt64,
-			KindUint, KindUint8, KindUint16, KindUint32, KindUint64,
-			KindFloat32, KindFloat64,
-			KindString,
-			KindRawMessage, KindNumber:
-			return true // at least one native-encodable field
-
-		case KindStruct:
-			// Even if sub-struct isn't fully native, the struct field
-			// itself is a native type (we'll mark non-native sub-structs
-			// as fallback ops in compileStructOps).
-			return true
-
-		case KindPointer:
-			// Pointer to native-eligible element is handled by C.
-			pDec := fi.Codec.(*PointerCodec)
-			if canNativeEncodePointerElem(pDec.ElemTI) {
-				return true
-			}
-		}
-	}
-	return false
+// Blueprint holds the compiled instruction stream for a type.
+// It is immutable after construction and safe for concurrent use.
+type Blueprint struct {
+	Ops       []VjOpStep      // linear instruction stream, terminated by opEnd
+	KeyPool   []byte          // contiguous storage for all pre-encoded keys
+	Fallbacks map[int]*fbInfo // PC index → fallback field info (only for OP_FALLBACK instructions)
 }
 
-// nativeMode indicates the level of native encoder support for a struct.
-type nativeMode int
-
-const (
-	nativeNone    nativeMode = iota // no native encoding possible
-	nativeFull                      // all fields handled by C engine
-	nativePartial                   // some fields need Go fallback (hot resume)
-)
+// fbInfo describes a fallback field that requires Go encoding.
+// Stored in Blueprint.Fallbacks, indexed by the PC of the OP_FALLBACK instruction.
+type fbInfo struct {
+	TI     *TypeInfo // field's TypeInfo (for EncodeFn dispatch)
+	Offset uintptr   // field offset from current struct base
+}
 
 // nativeEncoderCache holds compiled native encoder data for a StructCodec.
 // Stored as a separate struct to avoid bloating the StructCodec with
 // fields that are only relevant when the native encoder is available.
 type nativeEncoderCache struct {
-	once    sync.Once
-	mode    nativeMode // nativeNone / nativeFull / nativePartial
-	ops     []COpStep  // compiled instruction stream
-	keyRefs [][]byte   // GC anchors for key strings and sub-op slices
+	once      sync.Once  // once for Blueprint compilation
+	blueprint *Blueprint // compiled Blueprint (flat instruction stream)
 }
 
-// getNativeOps returns the compiled COpStep stream for this StructCodec.
-// The returned nativeMode indicates whether native encoding is possible:
-//   - nativeNone: no native encoding, use pure Go
-//   - nativeFull: all fields handled by C, no fallback possible
-//   - nativePartial: some fields need Go fallback (hot resume path)
+// maxStackDepth matches the C VJ_MAX_DEPTH.
+const maxStackDepth = 16
+
+// VjStackFrame mirrors the C VjStackFrame.
 //
-// Results are cached after the first call (thread-safe).
-func (dec *StructCodec) getNativeOps() ([]COpStep, nativeMode) {
-	cache := dec.nativeCache()
-	cache.once.Do(func() {
-		if canNativeEncode(dec) {
-			cache.mode = nativeFull
-		} else if canPartialNativeEncode(dec) {
-			cache.mode = nativePartial
-		} else {
-			cache.mode = nativeNone
-			return
+// Layout (72 bytes):
+//
+//	offset  0: RetOp      pointer (8) — return instruction pointer
+//	offset  8: RetBase    pointer (8) — parent struct/elem base
+//	offset 16: First      int32   (4) — parent first-field flag
+//	offset 20: FrameType  int32   (4) — FRAME_STRUCT/FRAME_SLICE/FRAME_IFACE
+//	offset 24: RetOps     pointer (8) — parent ops base (FRAME_IFACE only)
+//	offset 32: IterData   pointer (8) — slice data start
+//	offset 40: IterCount  int64   (8) — total elements
+//	offset 48: IterIdx    int64   (8) — current index
+//	offset 56: ElemSize   int32   (4) — element size in bytes
+//	offset 60: _pad       int32   (4)
+//	offset 64: LoopPcOp   pointer (8) — loop body first instruction
+type VjStackFrame struct {
+	RetOp     unsafe.Pointer
+	RetBase   unsafe.Pointer
+	First     int32
+	FrameType int32
+	RetOps    unsafe.Pointer
+	IterData  unsafe.Pointer
+	IterCount int64
+	IterIdx   int64
+	ElemSize  int32
+	_pad      int32
+	LoopPcOp  unsafe.Pointer
+}
+
+// Compile-time size assertion: VjStackFrame must be 72 bytes.
+var _ [72]byte = [unsafe.Sizeof(VjStackFrame{})]byte{}
+
+// VjExecCtx mirrors the C VjExecCtx (runtime context per Marshal call).
+//
+// Layout:
+//
+//	offset   0: BufCur          pointer   (8)
+//	offset   8: BufEnd          uintptr   (8)  — NOT a GC pointer
+//	offset  16: PC              int32     (4)
+//	offset  20: _pad1           int32     (4)
+//	offset  24: CurBase         pointer   (8)
+//	offset  32: Depth           int32     (4)
+//	offset  36: ErrorCode       int32     (4)
+//	offset  40: EncFlags        uint32    (4)
+//	offset  44: YieldInfo       uint32    (4)  — yield reason
+//	offset  48: OpsPtr          pointer   (8)  — &Blueprint.Ops[0]
+//	offset  56: _reserved56     uintptr   (8)  — reserved (KeyPoolPtr)
+//	offset  64: IfaceCachePtr   pointer   (8)  — *VjIfaceCacheEntry sorted array
+//	offset  72: IfaceCacheCount int32     (4)
+//	offset  76: _pad2           int32     (4)
+//	offset  80: YieldTypePtr    pointer   (8)  — eface.type_ptr on iface miss
+//	offset  88: YieldFieldIdx   int32     (4)
+//	offset  92: _pad3           int32     (4)
+//	offset  96: Stack           [16]VjStackFrame (16*72 = 1152)
+//
+// Total: 96 + 1152 = 1248 bytes
+type VjExecCtx struct {
+	BufCur    unsafe.Pointer // current write position
+	BufEnd    uintptr        // one past last writable byte (NOT GC-traced)
+	PC        int32          // current instruction index (relative to OpsPtr)
+	_pad1     int32
+	CurBase   unsafe.Pointer // current struct/elem base address
+	Depth     int32          // stack depth (0 = top-level)
+	ErrCode   int32          // VjError enum value
+	EncFlags  uint32         // VjEncFlags bitmask
+	YieldInfo uint32         // yield reason (yieldFallback, yieldIfaceMiss, etc.)
+
+	OpsPtr      unsafe.Pointer // &Blueprint.Ops[0] (current active instruction stream)
+	_reserved56 uintptr        // reserved for KeyPoolPtr
+
+	IfaceCachePtr   unsafe.Pointer // *VjIfaceCacheEntry sorted array
+	IfaceCacheCount int32          // number of entries
+	_pad2           int32
+
+	YieldTypePtr  unsafe.Pointer // interface cache miss: eface.type_ptr
+	YieldFieldIdx int32          // fallback: field index for Go to handle
+	_pad3         int32
+
+	Stack [maxStackDepth]VjStackFrame
+}
+
+// Compile-time size assertion for VjExecCtx.
+// Header: 96 bytes, Stack: 16 * 72 = 1152 bytes, Total: 1248 bytes.
+var _ [1248]byte = [unsafe.Sizeof(VjExecCtx{})]byte{}
+
+// VjIfaceCacheEntry maps a Go *abi.Type to its compiled Blueprint ops.
+//
+// Layout (24 bytes):
+//
+//	offset  0: TypePtr  pointer (8) — Go *abi.Type address
+//	offset  8: OpsPtr   pointer (8) — &Blueprint.Ops[0], or nil
+//	offset 16: Tag      uint8   (1) — quick tag: opBool..opString, or 0
+//	offset 17: _pad     [7]byte (7)
+type VjIfaceCacheEntry struct {
+	TypePtr unsafe.Pointer // *abi.Type (address-comparable)
+	OpsPtr  unsafe.Pointer // &Blueprint.Ops[0], nil if not compilable by C
+	Tag     uint8          // opBool..opString for primitives, 0 for complex
+	_pad    [7]byte
+}
+
+// Compile-time size assertion for VjIfaceCacheEntry.
+var _ [24]byte = [unsafe.Sizeof(VjIfaceCacheEntry{})]byte{}
+
+// ifaceCacheSnapshot is an immutable sorted array of cache entries.
+// Once published, it is never modified — new entries produce a new snapshot.
+type ifaceCacheSnapshot struct {
+	entries []VjIfaceCacheEntry // sorted by TypePtr (ascending)
+}
+
+// ================================================================
+// Global state
+// ================================================================
+
+// globalIfaceCache is the process-wide interface type cache.
+// Updated via COW: readers get a snapshot pointer, writers create
+// a new snapshot under mu and atomically publish it.
+var globalIfaceCache struct {
+	current atomic.Pointer[ifaceCacheSnapshot]
+	mu      sync.Mutex
+}
+
+var initPrimitiveIfaceCacheOnce sync.Once
+
+// ================================================================
+// Functions
+// ================================================================
+
+func init() {
+	// Initialize with an empty snapshot so Load() never returns nil.
+	globalIfaceCache.current.Store(&ifaceCacheSnapshot{})
+}
+
+// lookup returns the entry for typePtr via binary search, or nil.
+func (s *ifaceCacheSnapshot) lookup(typePtr unsafe.Pointer) *VjIfaceCacheEntry {
+	tp := uintptr(typePtr)
+	lo, hi := 0, len(s.entries)-1
+	for lo <= hi {
+		mid := (lo + hi) >> 1
+		midTP := uintptr(s.entries[mid].TypePtr)
+		if midTP == tp {
+			return &s.entries[mid]
 		}
-		compiled := compileStructOps(dec)
-		cache.ops = compiled.ops
-		cache.keyRefs = compiled.keyRefs
+		if midTP < tp {
+			lo = mid + 1
+		} else {
+			hi = mid - 1
+		}
+	}
+	return nil
+}
+
+// loadIfaceCacheSnapshot returns the current immutable cache snapshot.
+func loadIfaceCacheSnapshot() *ifaceCacheSnapshot {
+	return globalIfaceCache.current.Load()
+}
+
+// insertIfaceCache adds a new type→blueprint mapping to the global cache.
+// Thread-safe via mutex; uses COW to avoid interfering with concurrent readers.
+func insertIfaceCache(typePtr unsafe.Pointer, bp *Blueprint, tag uint8) {
+	globalIfaceCache.mu.Lock()
+	defer globalIfaceCache.mu.Unlock()
+
+	// Double-check: another goroutine may have already inserted it.
+	cur := globalIfaceCache.current.Load()
+	if cur.lookup(typePtr) != nil {
+		return
+	}
+
+	entry := VjIfaceCacheEntry{
+		TypePtr: typePtr,
+		Tag:     tag,
+	}
+	if bp != nil && len(bp.Ops) > 0 {
+		entry.OpsPtr = unsafe.Pointer(&bp.Ops[0])
+	}
+
+	// COW: create new sorted array = old + new entry.
+	newEntries := make([]VjIfaceCacheEntry, len(cur.entries)+1)
+	copy(newEntries, cur.entries)
+	newEntries[len(cur.entries)] = entry
+	sort.Slice(newEntries, func(i, j int) bool {
+		return uintptr(newEntries[i].TypePtr) < uintptr(newEntries[j].TypePtr)
 	})
-	return cache.ops, cache.mode
+
+	globalIfaceCache.current.Store(&ifaceCacheSnapshot{entries: newEntries})
 }
 
-// ================================================================
-// Native encoder call path: Go → Assembly → C → Go
-// ================================================================
-
-// nativeResult holds the result of a C engine invocation.
-type nativeResult struct {
-	written  int   // bytes written to buffer
-	errCode  int32 // VjError enum value
-	escOpIdx int   // absolute index in ops[] of the fallback field (-1 if N/A)
-	cFirst   bool  // was C still on its first field when fallback occurred
-	depth    int32 // C nesting depth at return (0 = top-level)
+// initPrimitiveIfaceCache seeds the interface cache with all primitive types
+// so the C VM can inline-encode bool/int/string etc. without yielding.
+func initPrimitiveIfaceCache() {
+	entries := []struct {
+		t   reflect.Type
+		tag uint8
+	}{
+		{reflect.TypeOf(false), uint8(opBool)},
+		{reflect.TypeOf(int(0)), uint8(opInt)},
+		{reflect.TypeOf(int8(0)), uint8(opInt8)},
+		{reflect.TypeOf(int16(0)), uint8(opInt16)},
+		{reflect.TypeOf(int32(0)), uint8(opInt32)},
+		{reflect.TypeOf(int64(0)), uint8(opInt64)},
+		{reflect.TypeOf(uint(0)), uint8(opUint)},
+		{reflect.TypeOf(uint8(0)), uint8(opUint8)},
+		{reflect.TypeOf(uint16(0)), uint8(opUint16)},
+		{reflect.TypeOf(uint32(0)), uint8(opUint32)},
+		{reflect.TypeOf(uint64(0)), uint8(opUint64)},
+		{reflect.TypeOf(float32(0)), uint8(opFloat32)},
+		{reflect.TypeOf(float64(0)), uint8(opFloat64)},
+		{reflect.TypeOf(""), uint8(opString)},
+	}
+	table := make([]VjIfaceCacheEntry, len(entries))
+	for i, e := range entries {
+		table[i] = VjIfaceCacheEntry{
+			TypePtr: rtypePtr(e.t),
+			Tag:     e.tag,
+		}
+	}
+	sort.Slice(table, func(i, j int) bool {
+		return uintptr(table[i].TypePtr) < uintptr(table[j].TypePtr)
+	})
+	globalIfaceCache.current.Store(&ifaceCacheSnapshot{entries: table})
 }
 
-// nativeEncodeStruct encodes a struct using the C engine via the
-// assembly bridge. It sets up CVjEncodingCtx on the goroutine stack,
-// calls into C, and returns the result.
-//
-// Parameters:
-//   - buf: destination buffer (must have sufficient capacity)
-//   - base: pointer to the Go struct instance
-//   - ops: compiled COpStep instruction stream (full, unsliced)
-//   - startIdx: index in ops[] to start encoding from (0 for initial call)
-//   - flags: escapeFlags cast to uint32, may include vjEncResume bits
-//
-// The startIdx parameter supports hot resume: after Go handles a fallback
-// field, it re-enters C at ops[startIdx] with VJ_ENC_RESUME set in flags.
-func nativeEncodeStruct(buf []byte, base unsafe.Pointer, ops []COpStep, startIdx int, flags uint32) nativeResult {
-	if !encoder.Available {
-		return nativeResult{errCode: vjErrGoFallback, escOpIdx: -1}
-	}
-
-	if len(buf) == 0 {
-		return nativeResult{errCode: vjErrBufFull, escOpIdx: -1}
-	}
-
-	// CVjEncodingCtx lives on the goroutine stack (432 bytes).
-	// No heap allocation, no runtime.Pinner needed.
-	//
-	// Safety: the assembly trampoline is NOSPLIT, so from the moment we
-	// enter C until it returns there are no GC safe-points. The GC
-	// cannot relocate the goroutine stack or any heap objects that C
-	// references (buf, ops, base, key pointers) during this window.
-	// This is the same pattern used by the jsonmarker scanner.
-	var ctx CVjEncodingCtx
-
-	bufStart := unsafe.Pointer(&buf[0])
-	ctx.BufCur = bufStart
-	ctx.BufEnd = unsafe.Add(bufStart, len(buf))
-	ctx.CurOp = unsafe.Pointer(&ops[startIdx])
-	ctx.CurBase = base
-	ctx.EncFlags = flags
-	setIfaceTypeTable(&ctx)
-
-	encoder.Encode(unsafe.Pointer(&ctx))
-
-	r := nativeResult{
-		written:  int(uintptr(ctx.BufCur) - uintptr(bufStart)),
-		errCode:  ctx.ErrorCode,
-		escOpIdx: -1,
-		depth:    ctx.Depth,
-	}
-
-	if ctx.ErrorCode == vjErrGoFallback {
-		rawEsc := ctx.EscOpIdx
-		r.escOpIdx = startIdx + int(rawEsc&escOpIdxMask)
-		r.cFirst = (rawEsc & escOpFirstBit) != 0
-	}
-
-	return r
+// ensureIfaceCache initializes the primitive type cache on first use.
+func ensureIfaceCache() {
+	initPrimitiveIfaceCacheOnce.Do(initPrimitiveIfaceCache)
 }
 
-// nativeEncodeStructFast is the lean path for fully-native structs.
-// It always starts at ops[0] and returns only (written, errCode) as a
-// register-friendly tuple, avoiding the overhead of constructing a
-// nativeResult struct. Use this when no hot resume is needed.
-func nativeEncodeStructFast(buf []byte, base unsafe.Pointer, ops []COpStep, flags uint32) (written int, errCode int32) {
-	if !encoder.Available {
-		return 0, vjErrGoFallback
+// initMarshalerVMCtx sets up the interface cache snapshot on the pooled
+// Marshaler's VjExecCtx. Called once per getMarshaler() so that execVM
+// doesn't need a per-call atomic.Load + sync.Once check.
+func initMarshalerVMCtx(m *Marshaler) {
+	ensureIfaceCache()
+	snap := loadIfaceCacheSnapshot()
+	if len(snap.entries) > 0 {
+		m.vmCtx.IfaceCachePtr = unsafe.Pointer(&snap.entries[0])
+		m.vmCtx.IfaceCacheCount = int32(len(snap.entries))
+	} else {
+		m.vmCtx.IfaceCachePtr = nil
+		m.vmCtx.IfaceCacheCount = 0
 	}
-
-	if len(buf) == 0 {
-		return 0, vjErrBufFull
-	}
-
-	var ctx CVjEncodingCtx
-
-	bufStart := unsafe.Pointer(&buf[0])
-	ctx.BufCur = bufStart
-	ctx.BufEnd = unsafe.Add(bufStart, len(buf))
-	ctx.CurOp = unsafe.Pointer(&ops[0])
-	ctx.CurBase = base
-	ctx.EncFlags = flags
-	setIfaceTypeTable(&ctx)
-
-	encoder.Encode(unsafe.Pointer(&ctx))
-
-	written = int(uintptr(ctx.BufCur) - uintptr(bufStart))
-	errCode = ctx.ErrorCode
-	return
-}
-
-// nativeEncodeArray batch-encodes a []NativeStruct slice using the C engine.
-// The C function loops over elements calling vj_encode_struct per element.
-// Returns bytes written, error code, and current array index (for BUF_FULL resume).
-//
-// The caller is responsible for writing '[' before and ']' after.
-// startIdx allows resuming after a BUF_FULL — elements [0, startIdx) are skipped.
-func nativeEncodeArray(buf []byte, data unsafe.Pointer, count int,
-	elemSize uintptr, ops []COpStep, flags uint32, startIdx int) (written int, errCode int32, arrIdx int) {
-	if !encoder.Available {
-		return 0, vjErrGoFallback, 0
-	}
-
-	if len(buf) == 0 {
-		return 0, vjErrBufFull, startIdx
-	}
-
-	var actx CVjArrayCtx
-
-	bufStart := unsafe.Pointer(&buf[0])
-	actx.Enc.BufCur = bufStart
-	actx.Enc.BufEnd = unsafe.Add(bufStart, len(buf))
-	actx.Enc.EncFlags = flags
-	setIfaceTypeTable(&actx.Enc)
-	actx.ArrData = data
-	actx.ArrCount = int64(count)
-	actx.ArrIdx = int64(startIdx)
-	actx.ElemSize = int64(elemSize)
-	actx.ElemOps = unsafe.Pointer(&ops[0])
-
-	encoder.EncodeArray(unsafe.Pointer(&actx))
-
-	written = int(uintptr(actx.Enc.BufCur) - uintptr(bufStart))
-	errCode = actx.Enc.ErrorCode
-	arrIdx = int(actx.ArrIdx)
-	return
 }

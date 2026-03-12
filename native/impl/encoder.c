@@ -15,5 +15,5 @@
   #error "ISA must be defined (use -DISA_neon, -DISA_sse42, or -DISA_avx512)"
 #endif
 
-/* ---------- Engine implementation (includes VM) ---------- */
+/* ---------- Engine implementation ---------- */
 #include "encoder.h"

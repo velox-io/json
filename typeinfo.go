@@ -542,7 +542,7 @@ type StructCodec struct {
 	FieldMap     map[string]*TypeInfo // fallback for 33+ fields
 	HasMixedCase bool                 // true if any JSONName differs from JSONNameLower
 
-	// Native C encoder cache — lazily initialized by getNativeOps().
+	// Native C encoder cache — lazily initialized by getBlueprint().
 	native *nativeEncoderCache
 }
 
