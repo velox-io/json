@@ -16,7 +16,7 @@ const (
 
 // LookupFieldBytes looks up a struct field by JSON key.
 // It tries an exact match first (fast path), then falls back to
-// case-insensitive matching (strings.EqualFold) per encoding/json semantics.
+// case-insensitive matching per encoding/json semantics.
 func (dec *StructCodec) LookupFieldBytes(key []byte) *TypeInfo {
 	k := unsafe.String(unsafe.SliceData(key), len(key))
 
@@ -36,7 +36,6 @@ func (dec *StructCodec) LookupFieldBytes(key []byte) *TypeInfo {
 	case lookupModeMap:
 		fi = lookupMap(dec, k)
 	default:
-		// Safety fallback for unexpected mode values.
 		fi = dec.LookupFn(dec, k)
 	}
 	if fi != nil {
@@ -48,9 +47,11 @@ func (dec *StructCodec) LookupFieldBytes(key []byte) *TypeInfo {
 		return nil
 	}
 
-	// Slow path: Unicode case-insensitive linear scan (strings.EqualFold).
+	// Slow path: case-insensitive linear scan.
+	// Use fast ASCII fold first; fall back to strings.EqualFold only
+	// when a non-ASCII byte is detected.
 	for i := range dec.Fields {
-		if strings.EqualFold(dec.Fields[i].JSONName, k) {
+		if equalFoldASCII(dec.Fields[i].JSONName, k) {
 			return &dec.Fields[i]
 		}
 	}
@@ -280,6 +281,35 @@ func fnv1aMixer(s string, seed uint64) uint64 {
 	h *= 0xff51afd7ed558ccd
 	h ^= h >> 33
 	return h
+}
+
+// equalFoldASCII is a fast ASCII-only case-insensitive string comparison.
+// For pure-ASCII strings (the common case for JSON field names), this is
+// significantly faster than strings.EqualFold which handles full Unicode.
+// Falls back to strings.EqualFold when any byte is >= 0x80.
+func equalFoldASCII(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		ca, cb := a[i], b[i]
+		if ca == cb {
+			continue
+		}
+		// Non-ASCII byte → delegate to full Unicode fold.
+		if ca >= 0x80 || cb >= 0x80 {
+			return strings.EqualFold(a, b)
+		}
+		// ASCII case fold: OR 0x20 maps A-Z to a-z.
+		if ca|0x20 != cb|0x20 {
+			return false
+		}
+		// Verify both are actually letters (not e.g. '@' vs '`').
+		if ca|0x20 < 'a' || ca|0x20 > 'z' {
+			return false
+		}
+	}
+	return true
 }
 
 // ASCII case conversion.

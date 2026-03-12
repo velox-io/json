@@ -13,8 +13,10 @@
 
 // clang-format off
 
+#include <stdint.h>
 #include "tables.h"
 #include "util.h"
+#include "memfn.h"
 
 /* ---- SSE2 constants for itoa8 ---- */
 
@@ -157,10 +159,11 @@ ALWAYS_INLINE int vj_u32toa_medium(uint8_t *out, uint32_t val) {
 
 /* ---- Top-level entry: write_uint64 / write_int64 ----
  *
- * Forward-write with range-based dispatch.
+ * Force-inlined at every call site to eliminate function-call overhead
+ * for the hot integer-encoding path.
  * buf must have >= 20 bytes available. */
 
-static inline int write_uint64(uint8_t *buf, uint64_t v) {
+ALWAYS_INLINE int write_uint64(uint8_t *buf, uint64_t v) {
   if (v < 10000) {
     return vj_u32toa_small(buf, (uint32_t)v);
   }
@@ -198,7 +201,7 @@ static inline int write_uint64(uint8_t *buf, uint64_t v) {
 #endif
 }
 
-static inline int write_int64(uint8_t *buf, int64_t v) {
+ALWAYS_INLINE int write_int64(uint8_t *buf, int64_t v) {
   if (v >= 0) {
     return write_uint64(buf, (uint64_t)v);
   }
@@ -207,5 +210,7 @@ static inline int write_int64(uint8_t *buf, int64_t v) {
   uint64_t uv = (uint64_t)(-(v + 1)) + 1;
   return 1 + write_uint64(buf + 1, uv);
 }
+
+// clang-format on
 
 #endif /* VJ_ENCVM_NUMBER_H */

@@ -571,15 +571,19 @@ type StructCodec struct {
 	HasMixedCase bool                 // true if any JSONName differs from JSONNameLower
 
 	// Native C encoder VM cache — lazily initialized by getBlueprint().
-	vm *encvmCache
+	vm atomic.Pointer[encvmCache]
 }
 
 // vmCache returns the (lazily allocated) encoder VM cache.
 func (dec *StructCodec) vmCache() *encvmCache {
-	if dec.vm == nil {
-		dec.vm = &encvmCache{}
+	if p := dec.vm.Load(); p != nil {
+		return p
 	}
-	return dec.vm
+	p := &encvmCache{}
+	if dec.vm.CompareAndSwap(nil, p) {
+		return p
+	}
+	return dec.vm.Load()
 }
 
 func BuildStructCodec(t reflect.Type) *StructCodec {

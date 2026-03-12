@@ -11,7 +11,8 @@
 #
 # Arguments:
 #   sources.sh  - Build configuration file (relative to repo root). Defines:
-#                    SOURCE_FILE, STDLIB_SOURCES, EXTRA_SOURCES, TARGET_DIR
+#                    SOURCE_FILE, STDLIB_SOURCES, EXTRA_SOURCES, TARGET_DIR,
+#                    MODES, MODE_FLAGS_<mode>, EXPORT_SYMBOL_PREFIX
 #   target_os   - Target OS (linux, darwin, windows). Default: host OS.
 #   target_arch - Target architecture (arm64, amd64). Default: host arch.
 #
@@ -64,7 +65,8 @@ if [ ! -f "$REPO_ROOT/$SOURCES_FILE" ]; then
     exit 1
 fi
 
-# Source the configuration (sets SOURCE_FILE, STDLIB_SOURCES, EXTRA_SOURCES, TARGET_DIR)
+# Source the configuration (sets SOURCE_FILE, STDLIB_SOURCES, EXTRA_SOURCES, TARGET_DIR,
+# MODES, MODE_FLAGS_*, EXPORT_SYMBOL_PREFIX)
 source "$REPO_ROOT/$SOURCES_FILE"
 
 # Validate required variables
@@ -258,8 +260,8 @@ if [ -z "$ISAS" ]; then
     exit 1
 fi
 
-# Modes
-ALL_MODES="${MODES:-default compact fast}"
+# Modes (from sources.sh; default to single "default" mode if not set)
+ALL_MODES="${MODES:-default}"
 
 # ============================================================
 #  LTO support
@@ -353,7 +355,7 @@ done
 #
 #  Each extra source is compiled once and linked with all ISA objects.
 #  Uses the minimum (first) ISA's flags so that intrinsics like SSSE3's
-#  _mm_shuffle_epi8 (used in number.h) compile correctly.
+#  _mm_shuffle_epi8 compile correctly.
 # ============================================================
 
 # Get minimum ISA flags (first ISA in the list is the baseline)
@@ -382,17 +384,10 @@ for isa in $ISAS; do
     ISA_FLAGS=$(get_isa_flags "$isa")
 
     for mode in $ALL_MODES; do
-        # Determine mode suffix and compiler flag
+        # Determine mode suffix and compiler flag (from sources.sh MODE_FLAGS_<mode>)
         MODE_SUFFIX="_${mode}"
-        MODE_FLAG=""
-        if [ "$mode" = "default" ]; then
-            MODE_FLAG="-DMODE_DEFAULT"
-        elif [ "$mode" = "compact" ]; then
-            MODE_FLAG="-DMODE_COMPACT"
-        elif [ "$mode" = "fast" ]; then
-            MODE_FLAG="-DMODE_FAST"
-        fi
-        # full: no MODE_FLAG needed, SJ_MODE defaults to SJ_MODE_FULL
+        MODE_FLAG_VAR="MODE_FLAGS_${mode}"
+        MODE_FLAG="${!MODE_FLAG_VAR:-}"
 
         # File names
         OFILE="${OUTPUT_DIR}/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.o"
@@ -413,7 +408,7 @@ for isa in $ISAS; do
         # Capture flags for .clangd from the first ISA/mode combination
         if [ "$CLANGD_FLAGS_COLLECTED" = false ]; then
             CLANGD_FLAGS_COLLECTED=true
-            CLANGD_ADD_FLAGS="-DOS=${TARGET_OS} -DARCH=${TARGET_ARCH} $MODE_FLAG -I$REPO_ROOT/native/include -I$REPO_ROOT/native"
+            CLANGD_ADD_FLAGS="$ISA_MACRO $MODE_FLAG -DOS=${TARGET_OS} -DARCH=${TARGET_ARCH} -I$REPO_ROOT/native/include -I$REPO_ROOT/native"
         fi
 
         # Step 2: Generate assembly for debugging (optional)
@@ -484,13 +479,13 @@ if needs_prelink; then
         PRELINK_FLAGS="-l $PRELINK_FLAGS"
     fi
 
-    # Darwin needs export symbol list
-    if [ "$TARGET_OS" = "darwin" ]; then
+    # Darwin export symbol list (from EXPORT_SYMBOL_PREFIX in sources.sh)
+    if [ "$TARGET_OS" = "darwin" ] && [ -n "${EXPORT_SYMBOL_PREFIX:-}" ]; then
         EXPORT_LIST="$OUTPUT_DIR/_exports.txt"
         > "$EXPORT_LIST"
         for isa in $ISAS; do
             for mode in $ALL_MODES; do
-                echo "_vj_vm_exec_${mode}_${isa}" >> "$EXPORT_LIST"
+                echo "_${EXPORT_SYMBOL_PREFIX}_${mode}_${isa}" >> "$EXPORT_LIST"
             done
         done
         PRELINK_FLAGS="$PRELINK_FLAGS -e $EXPORT_LIST"

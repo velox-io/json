@@ -3,6 +3,7 @@ package vjson
 import (
 	"fmt"
 	"reflect"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/velox-io/json/native/encvm"
@@ -11,6 +12,10 @@ import (
 // native VM — Go-side execution loop.
 // execVM calls C (encvm.VMExec) in a loop, handling buffer growth,
 // yield events (fallback/interface/map/slice), and interface cache misses.
+
+// testExecVMCount is incremented each time execVM is called.
+// Used by tests to assert the native C VM path was actually taken.
+var testExecVMCount atomic.Int64
 
 // vmWriteIndent appends newline + indent whitespace for the current VM
 // indent depth. No-op in compact mode (IndentStep == 0).
@@ -48,6 +53,7 @@ func (m *Marshaler) encodeStructNative(dec *StructCodec, base unsafe.Pointer) er
 // Uses the reusable m.vmCtx to avoid per-call stack zeroing of the
 // 992-byte VjExecCtx. IfaceCache is already set by getMarshaler.
 func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
+	testExecVMCount.Add(1)
 	if !encvm.Available {
 		return fmt.Errorf("vjson: native encoder not available")
 	}

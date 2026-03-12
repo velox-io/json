@@ -158,20 +158,20 @@ var _ [56]byte = [unsafe.Sizeof(VjStackFrame{})]byte{}
 
 // --- STRUCT/PTR frame helpers (ctrl) ---
 
-func (f *VjStackFrame) retOp() unsafe.Pointer {
+func (f *VjStackFrame) retOp() unsafe.Pointer { //nolint:unused
 	return *(*unsafe.Pointer)(unsafe.Pointer(&f._union[0]))
 }
-func (f *VjStackFrame) setRetOp(p unsafe.Pointer) {
+func (f *VjStackFrame) setRetOp(p unsafe.Pointer) { //nolint:unused
 	*(*unsafe.Pointer)(unsafe.Pointer(&f._union[0])) = p
 }
 
 // --- IFACE frame helpers ---
 // retOp/setRetOp shared with ctrl (same offset)
 
-func (f *VjStackFrame) retOps() unsafe.Pointer {
+func (f *VjStackFrame) retOps() unsafe.Pointer { //nolint:unused
 	return *(*unsafe.Pointer)(unsafe.Pointer(&f._union[8]))
 }
-func (f *VjStackFrame) setRetOps(p unsafe.Pointer) {
+func (f *VjStackFrame) setRetOps(p unsafe.Pointer) { //nolint:unused
 	*(*unsafe.Pointer)(unsafe.Pointer(&f._union[8])) = p
 }
 
@@ -192,17 +192,17 @@ func (f *VjStackFrame) elemSize() int32 {
 
 // VjExecCtx mirrors the C VjExecCtx (96-byte header + 16×56 stack = 992 bytes).
 type VjExecCtx struct {
-	BufCur      unsafe.Pointer // current write position
-	BufEnd      uintptr        // one past last writable byte (NOT GC-traced)
-	PC          int32          // current instruction index (relative to OpsPtr)
-	IndentDepth int16          // logical nesting depth for indent
-	IndentStep      uint8 // bytes per indent level (0 = compact)
-	IndentPrefixLen uint8 // bytes of prefix before indent repetitions
-	CurBase     unsafe.Pointer // current struct/elem base address
-	Depth       int32          // stack depth (0 = top-level)
-	ErrCode     int32          // VjError enum value
-	EncFlags    uint32         // VjEncFlags bitmask
-	YieldInfo   uint32         // yield reason (yieldFallback, yieldIfaceMiss, etc.)
+	BufCur          unsafe.Pointer // current write position
+	BufEnd          uintptr        // one past last writable byte (NOT GC-traced)
+	PC              int32          // current instruction index (relative to OpsPtr)
+	IndentDepth     int16          // logical nesting depth for indent
+	IndentStep      uint8          // bytes per indent level (0 = compact)
+	IndentPrefixLen uint8          // bytes of prefix before indent repetitions
+	CurBase         unsafe.Pointer // current struct/elem base address
+	Depth           int32          // stack depth (0 = top-level)
+	ErrCode         int32          // VjError enum value
+	EncFlags        uint32         // VjEncFlags bitmask
+	YieldInfo       uint32         // yield reason (yieldFallback, yieldIfaceMiss, etc.)
 
 	OpsPtr    unsafe.Pointer // &Blueprint.Ops[0] (current active instruction stream)
 	IndentTpl unsafe.Pointer // precomputed "\n" + indent×depth template

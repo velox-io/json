@@ -3,6 +3,10 @@
 #include "uscale.h"
 #include "tables.h"
 
+#ifndef ALWAYS_INLINE
+#define ALWAYS_INLINE static __attribute__((always_inline)) inline
+#endif
+
 /*
  *  Each entry {hi, lo} represents a 128-bit mantissa pm = hi*2^64 - lo
  *  approximating 10^p, scaled so the high bit of hi is always set.
@@ -272,7 +276,7 @@ static inline int us_write_mantissa_digits(uint8_t *buf, uint64_t mantissa, uint
     return (int)olength;
 }
 
-static inline int us_format_fixed(uint8_t *buf, uint64_t mantissa, int32_t exponent, int sign) {
+ALWAYS_INLINE int us_format_fixed(uint8_t *buf, uint64_t mantissa, int32_t exponent, int sign) {
     int idx = 0;
     if (sign) buf[idx++] = '-';
     if (mantissa == 0) { buf[idx++] = '0'; return idx; }
@@ -312,7 +316,7 @@ static inline int us_format_fixed(uint8_t *buf, uint64_t mantissa, int32_t expon
  * If d has only 1 digit, omit the decimal point (e.g. "1e+21").
  * Exponent never has leading zeros (e.g. "e-9" not "e-09").
  */
-static inline int us_format_exp(uint8_t *buf, uint64_t mantissa, int32_t exponent, int sign) {
+ALWAYS_INLINE int us_format_exp(uint8_t *buf, uint64_t mantissa, int32_t exponent, int sign) {
     int idx = 0;
     if (sign) buf[idx++] = '-';
     if (mantissa == 0) { buf[idx++] = '0'; return idx; }

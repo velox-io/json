@@ -1322,19 +1322,19 @@ func skipString(src []byte, idx int) (int, error) {
 }
 
 // skipContainer skips a JSON object or array using depth counting.
+// Optimized with multi-match SWAR processing and inline string skipping.
 func skipContainer(src []byte, idx int) (int, error) {
 	depth := 1
 	i := idx + 1
 	n := len(src)
 
+outer:
 	for i < n && depth > 0 {
 		// Fast path: SWAR scan 8 bytes at a time for { } [ ] "
 		if i+8 <= n {
 			w := *(*uint64)(unsafe.Pointer(&src[i]))
 
 			// Fold bit 0x20 so '{' and '[' share 0x5B, '}' and ']' share 0x5D.
-			// This reduces brace checks from 4 probes to 2 while preserving exact
-			// classification via the original byte read below.
 			wNoCase := w & ^(lo64 * 0x20)
 			m := hasZeroByte(wNoCase ^ (lo64 * 0x5B)) // '{' or '['
 			m |= hasZeroByte(wNoCase ^ (lo64 * 0x5D)) // '}' or ']'
@@ -1345,24 +1345,63 @@ func skipContainer(src []byte, idx int) (int, error) {
 				continue
 			}
 
-			off := firstMarkedByteIndex(m)
-			c := src[i+off]
-			i += off
+			// Process ALL structural chars in this 8-byte word.
+			for m != 0 {
+				off := firstMarkedByteIndex(m)
+				c := src[i+off]
 
-			switch c {
-			case '{', '[':
-				depth++
-				i++
-			case '}', ']':
-				depth--
-				i++
-			case '"':
-				var err error
-				i, err = skipString(src, i)
-				if err != nil {
-					return i, err
+				switch c {
+				case '{', '[':
+					depth++
+				case '}', ']':
+					depth--
+					if depth == 0 {
+						return i + off + 1, nil
+					}
+				case '"':
+					// Inline string skip: find closing quote, handling \" escapes.
+					j := i + off + 1
+					for {
+						if j+8 <= n {
+							sw := *(*uint64)(unsafe.Pointer(&src[j]))
+							sq := hasZeroByte(sw ^ (lo64 * 0x22)) // '"'
+							sb := hasZeroByte(sw ^ (lo64 * 0x5C)) // '\\'
+							sc := sq | sb
+							if sc == 0 {
+								j += 8
+								continue
+							}
+							soff := firstMarkedByteIndex(sc)
+							if src[j+soff] == '"' {
+								j += soff + 1
+								break
+							}
+							// Backslash: skip the escape sequence
+							j += soff + 2
+							continue
+						}
+						// Tail: byte-at-a-time
+						if j >= n {
+							return j, errUnexpectedEOF
+						}
+						if src[j] == '"' {
+							j++
+							break
+						}
+						if src[j] == '\\' {
+							j += 2
+							continue
+						}
+						j++
+					}
+					i = j
+					continue outer
 				}
+
+				// Clear this byte's marker.
+				m &^= 0x80 << (off * 8)
 			}
+			i += 8
 			continue
 		}
 
@@ -1371,17 +1410,28 @@ func skipContainer(src []byte, idx int) (int, error) {
 		switch c {
 		case '{', '[':
 			depth++
+			i++
 		case '}', ']':
 			depth--
+			i++
 		case '"':
-			var err error
-			i, err = skipString(src, i)
-			if err != nil {
-				return i, err
+			// Inline string skip for tail bytes
+			i++
+			for i < n {
+				if src[i] == '"' {
+					i++
+					continue outer
+				}
+				if src[i] == '\\' {
+					i += 2
+					continue
+				}
+				i++
 			}
-			continue
+			return i, errUnexpectedEOF
+		default:
+			i++
 		}
-		i++
 	}
 
 	if depth > 0 {
