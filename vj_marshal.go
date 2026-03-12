@@ -89,6 +89,12 @@ func putMarshaler(m *Marshaler) {
 
 // estimateDataSize pre-scans data to estimate JSON output size.
 func estimateDataSize(ti *TypeInfo, ptr unsafe.Pointer) int {
+	if ti.Flags&tiFlagHasMarshalFn != 0 {
+		return 64
+	}
+	if ti.Flags&tiFlagHasTextMarshalFn != 0 {
+		return 64
+	}
 	switch ti.Kind {
 	case KindBool:
 		return 5 // "false"
@@ -131,12 +137,15 @@ func estimateStructDataSize(dec *ReflectStructDecoder, base unsafe.Pointer) int 
 		fi := &dec.Fields[i]
 		fieldPtr := unsafe.Add(base, fi.Offset)
 
-		if fi.OmitEmpty && fi.IsZeroFn != nil && fi.IsZeroFn(fieldPtr) {
+		if fi.Flags&tiFlagOmitEmpty != 0 && fi.Ext.IsZeroFn != nil && fi.Ext.IsZeroFn(fieldPtr) {
 			continue
 		}
 
-		n += len(fi.KeyBytes)
+		n += len(fi.Ext.KeyBytes)
 		n += estimateDataSize(fi, fieldPtr)
+		if fi.Flags&tiFlagQuoted != 0 {
+			n += 2 // wrapping quotes
+		}
 		n++ // comma
 	}
 	return n
@@ -278,6 +287,22 @@ func (m *Marshaler) appendNewlineIndent() {
 }
 
 func (m *Marshaler) encodeValue(ti *TypeInfo, ptr unsafe.Pointer) error {
+	if ti.Flags&tiFlagHasMarshalFn != 0 {
+		data, err := ti.Ext.MarshalFn(ptr)
+		if err != nil {
+			return err
+		}
+		m.buf = append(m.buf, data...)
+		return nil
+	}
+	if ti.Flags&tiFlagHasTextMarshalFn != 0 {
+		text, err := ti.Ext.TextMarshalFn(ptr)
+		if err != nil {
+			return err
+		}
+		m.encodeString(string(text))
+		return nil
+	}
 	switch ti.Kind {
 	case KindBool:
 		if *(*bool)(ptr) {
@@ -330,12 +355,91 @@ func (m *Marshaler) encodeValue(ti *TypeInfo, ptr unsafe.Pointer) error {
 		return m.encodeAny(ptr)
 
 	default:
-		return fmt.Errorf("vjson: unsupported type kind %v for marshal", ti.Kind)
+		return &UnsupportedTypeError{Type: ti.Ext.Type}
 	}
 }
 
 func (m *Marshaler) encodeString(s string) {
 	m.buf = appendEscapedString(m.buf, s, m.flags)
+}
+
+// encodeQuotedString double-encodes a string: Go "hello" → JSON "\"hello\"".
+func (m *Marshaler) encodeQuotedString(s string) {
+	inner := appendEscapedString(nil, s, m.flags)
+	m.buf = appendEscapedString(m.buf, UnsafeString(inner), m.flags)
+}
+
+// encodeValueQuoted encodes a value wrapped in a JSON string (for `,string` tag).
+func (m *Marshaler) encodeValueQuoted(ti *TypeInfo, ptr unsafe.Pointer) error {
+	switch ti.Kind {
+	case KindBool:
+		if *(*bool)(ptr) {
+			m.buf = append(m.buf, `"true"`...)
+		} else {
+			m.buf = append(m.buf, `"false"`...)
+		}
+	case KindInt:
+		m.appendQuotedInt64(int64(*(*int)(ptr)))
+	case KindInt8:
+		m.appendQuotedInt64(int64(*(*int8)(ptr)))
+	case KindInt16:
+		m.appendQuotedInt64(int64(*(*int16)(ptr)))
+	case KindInt32:
+		m.appendQuotedInt64(int64(*(*int32)(ptr)))
+	case KindInt64:
+		m.appendQuotedInt64(*(*int64)(ptr))
+	case KindUint:
+		m.appendQuotedUint64(uint64(*(*uint)(ptr)))
+	case KindUint8:
+		m.appendQuotedUint64(uint64(*(*uint8)(ptr)))
+	case KindUint16:
+		m.appendQuotedUint64(uint64(*(*uint16)(ptr)))
+	case KindUint32:
+		m.appendQuotedUint64(uint64(*(*uint32)(ptr)))
+	case KindUint64:
+		m.appendQuotedUint64(*(*uint64)(ptr))
+	case KindFloat32:
+		f := float64(*(*float32)(ptr))
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
+		}
+		m.buf = append(m.buf, '"')
+		m.buf = strconv.AppendFloat(m.buf, f, 'f', -1, 32)
+		m.buf = append(m.buf, '"')
+	case KindFloat64:
+		f := *(*float64)(ptr)
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
+		}
+		m.buf = append(m.buf, '"')
+		m.buf = strconv.AppendFloat(m.buf, f, 'f', -1, 64)
+		m.buf = append(m.buf, '"')
+	case KindString:
+		m.encodeQuotedString(*(*string)(ptr))
+	case KindPointer:
+		dec := ti.Decoder.(*ReflectPointerDecoder)
+		elemPtr := *(*unsafe.Pointer)(ptr)
+		if elemPtr == nil {
+			m.buf = append(m.buf, litNull...)
+			return nil
+		}
+		return m.encodeValueQuoted(dec.ElemTI, elemPtr)
+	default:
+		return m.encodeValue(ti, ptr)
+	}
+	return nil
+}
+
+func (m *Marshaler) appendQuotedInt64(v int64) {
+	m.buf = append(m.buf, '"')
+	m.buf = strconv.AppendInt(m.buf, v, 10)
+	m.buf = append(m.buf, '"')
+}
+
+func (m *Marshaler) appendQuotedUint64(v uint64) {
+	m.buf = append(m.buf, '"')
+	m.buf = strconv.AppendUint(m.buf, v, 10)
+	m.buf = append(m.buf, '"')
 }
 
 func (m *Marshaler) appendInt64(v int64) error {
@@ -359,7 +463,7 @@ func (m *Marshaler) appendUint64(v uint64) error {
 func (m *Marshaler) encodeFloat32(ptr unsafe.Pointer) error {
 	f := float64(*(*float32)(ptr))
 	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return fmt.Errorf("vjson: unsupported float value: %v", f)
+		return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
 	}
 	m.buf = strconv.AppendFloat(m.buf, f, 'f', -1, 32)
 	return nil
@@ -368,7 +472,7 @@ func (m *Marshaler) encodeFloat32(ptr unsafe.Pointer) error {
 func (m *Marshaler) encodeFloat64(ptr unsafe.Pointer) error {
 	f := *(*float64)(ptr)
 	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return fmt.Errorf("vjson: unsupported float value: %v", f)
+		return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
 	}
 	m.buf = strconv.AppendFloat(m.buf, f, 'f', -1, 64)
 	return nil
@@ -386,7 +490,7 @@ func (m *Marshaler) encodeStruct(dec *ReflectStructDecoder, base unsafe.Pointer)
 		fi := &dec.Fields[i]
 		fieldPtr := unsafe.Add(base, fi.Offset)
 
-		if fi.OmitEmpty && fi.IsZeroFn != nil && fi.IsZeroFn(fieldPtr) {
+		if fi.Flags&tiFlagOmitEmpty != 0 && fi.Ext.IsZeroFn != nil && fi.Ext.IsZeroFn(fieldPtr) {
 			continue
 		}
 
@@ -397,12 +501,16 @@ func (m *Marshaler) encodeStruct(dec *ReflectStructDecoder, base unsafe.Pointer)
 
 		if m.indent != "" {
 			m.appendNewlineIndent()
-			m.buf = append(m.buf, fi.KeyBytesIndent...)
+			m.buf = append(m.buf, fi.Ext.KeyBytesIndent...)
 		} else {
-			m.buf = append(m.buf, fi.KeyBytes...)
+			m.buf = append(m.buf, fi.Ext.KeyBytes...)
 		}
 
-		if err := m.encodeValue(fi, fieldPtr); err != nil {
+		if fi.Flags&tiFlagQuoted != 0 {
+			if err := m.encodeValueQuoted(fi, fieldPtr); err != nil {
+				return err
+			}
+		} else if err := m.encodeValue(fi, fieldPtr); err != nil {
 			return err
 		}
 	}
@@ -534,6 +642,29 @@ func (m *Marshaler) encodeMapStringString(ptr unsafe.Pointer) error {
 	return nil
 }
 
+// resolveMapKey converts a map key to its JSON string representation.
+func resolveMapKey(k reflect.Value, keyTI *TypeInfo) (string, error) {
+	if k.Kind() == reflect.String {
+		return k.String(), nil
+	}
+	if keyTI.Flags&tiFlagHasTextMarshalFn != 0 {
+		tmp := reflect.New(k.Type())
+		tmp.Elem().Set(k)
+		text, err := keyTI.Ext.TextMarshalFn(tmp.UnsafePointer())
+		if err != nil {
+			return "", err
+		}
+		return string(text), nil
+	}
+	switch k.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(k.Int(), 10), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return strconv.FormatUint(k.Uint(), 10), nil
+	}
+	return "", &UnsupportedTypeError{Type: k.Type()}
+}
+
 func (m *Marshaler) encodeMapGeneric(dec *ReflectMapDecoder, ptr unsafe.Pointer) error {
 	mapPtr := reflect.NewAt(dec.MapType, ptr)
 	mapVal := mapPtr.Elem()
@@ -564,7 +695,10 @@ func (m *Marshaler) encodeMapGeneric(dec *ReflectMapDecoder, ptr unsafe.Pointer)
 			m.appendNewlineIndent()
 		}
 
-		key := iter.Key().String()
+		key, err := resolveMapKey(iter.Key(), dec.KeyTI)
+		if err != nil {
+			return err
+		}
 		m.encodeString(key)
 		if m.indent != "" {
 			m.buf = append(m.buf, ':', ' ')
@@ -626,12 +760,12 @@ func (m *Marshaler) encodeAny(ptr unsafe.Pointer) error {
 	case float32:
 		f := float64(val)
 		if math.IsNaN(f) || math.IsInf(f, 0) {
-			return fmt.Errorf("vjson: unsupported float value: %v", f)
+			return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
 		}
 		m.buf = strconv.AppendFloat(m.buf, f, 'f', -1, 32)
 	case float64:
 		if math.IsNaN(val) || math.IsInf(val, 0) {
-			return fmt.Errorf("vjson: unsupported float value: %v", val)
+			return &UnsupportedValueError{Str: fmt.Sprintf("%v", val)}
 		}
 		m.buf = strconv.AppendFloat(m.buf, val, 'f', -1, 64)
 	case string:

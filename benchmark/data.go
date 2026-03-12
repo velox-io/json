@@ -4,6 +4,10 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"strings"
+	"sync"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 var SmallJSON = []byte(`{
@@ -23,6 +27,19 @@ var PodsJSON []byte
 //go:embed testdata/twitter.json
 var TwitterJSON []byte
 
+//go:embed testdata/log.json.zst
+var logJSONZst []byte
+var logJSONLoadOnce sync.Once
+var logJSONData []byte
+
+// LoadLogNDJSONL decompresses NDJSON log stream (~90K lines).
+func LoadLogNDJSON() []byte {
+	logJSONLoadOnce.Do(func() {
+		logJSONData = mustDecompressZstd(logJSONZst)
+	})
+	return logJSONData
+}
+
 // Compact (whitespace-stripped) versions of all JSON test data.
 var (
 	SmallCompactJSON       []byte
@@ -39,9 +56,125 @@ func compact(src []byte) []byte {
 	return buf.Bytes()
 }
 
+func mustDecompressZstd(src []byte) []byte {
+	dec, err := zstd.NewReader(nil)
+	if err != nil {
+		panic(err)
+	}
+	defer dec.Close()
+	out, err := dec.DecodeAll(src, nil)
+	if err != nil {
+		panic(err)
+	}
+	return out
+}
+
 func init() {
 	SmallCompactJSON = compact(SmallJSON)
 	EscapeHeavyCompactJSON = compact(EscapeHeavyJSON)
 	PodsCompactJSON = compact(PodsJSON)
 	TwitterCompactJSON = compact(TwitterJSON)
+
+	SpikyNDJSON = buildSpikyNDJSON()
+	HalfBufNDJSON = buildHalfBufNDJSON()
+	ThirdBufNDJSON = buildThirdBufNDJSON()
+}
+
+// buildSpikyNDJSON constructs an NDJSON stream with periodic large spikes.
+//
+// Pattern per cycle: [spikyGap small values] + [1 large spike].
+// The gap between spikes is large enough that the decoder's prediction
+// window (average of last 2 value sizes) fully converges on the small
+// size before each spike arrives.
+//
+// Knobs:
+//   - spikySmallItems / spikySmallPayloadLen  → ~300 byte values
+//   - spikyLargeItems / spikyLargePayloadLen  → ~2 MB values
+//   - spikyGap                                → small values between spikes
+//   - spikyCycles                             → number of spike events
+const (
+	spikySmallItems      = 2
+	spikySmallPayloadLen = 32
+	spikyLargeItems      = 2000
+	spikyLargePayloadLen = 512
+	spikyGap             = 20
+	spikyCycles          = 5
+)
+
+var SpikyNDJSON []byte
+
+func makeSpikyPayload(kind string, seq, nItems, payloadLen int) SpikyPayload {
+	filler := strings.Repeat("x", payloadLen)
+	items := make([]SpikyItem, nItems)
+	for i := range items {
+		items[i] = SpikyItem{ID: i, Name: "item", Payload: filler}
+	}
+	return SpikyPayload{Kind: kind, Seq: seq, Items: items}
+}
+
+func buildSpikyNDJSON() []byte {
+	var buf bytes.Buffer
+	seq := 0
+	for cycle := range spikyCycles {
+		_ = cycle
+		for range spikyGap {
+			v := makeSpikyPayload("small", seq, spikySmallItems, spikySmallPayloadLen)
+			b, _ := json.Marshal(v)
+			buf.Write(b)
+			buf.WriteByte('\n')
+			seq++
+		}
+		v := makeSpikyPayload("spike", seq, spikyLargeItems, spikyLargePayloadLen)
+		b, _ := json.Marshal(v)
+		buf.Write(b)
+		buf.WriteByte('\n')
+		seq++
+	}
+	return buf.Bytes()
+}
+
+// buildHalfBufNDJSON constructs an NDJSON stream where every value is
+// ~65 KB — just over half the default 128 KB buffer. This forces the
+// decoder to allocate a new buffer for almost every value, since the
+// remaining capacity after decoding one value cannot hold the next.
+const (
+	halfBufItems      = 120
+	halfBufPayloadLen = 512
+	halfBufCount      = 50
+)
+
+var HalfBufNDJSON []byte
+
+func buildHalfBufNDJSON() []byte {
+	var buf bytes.Buffer
+	for i := range halfBufCount {
+		v := makeSpikyPayload("half", i, halfBufItems, halfBufPayloadLen)
+		b, _ := json.Marshal(v)
+		buf.Write(b)
+		buf.WriteByte('\n')
+	}
+	return buf.Bytes()
+}
+
+// buildThirdBufNDJSON constructs an NDJSON stream where every value is
+// ~86 KB — about one-third of the 256 KB buffer that maybeNewBuffer
+// allocates after seeing ~65 KB predictions. The 256 KB buffer fits
+// exactly 2 values but not 3, so buffer switches happen every 2 values.
+const (
+	thirdBufItems      = 160
+	thirdBufPayloadLen = 512
+	thirdBufCount      = 50
+)
+
+var ThirdBufNDJSON []byte
+
+func buildThirdBufNDJSON() []byte {
+	var buf bytes.Buffer
+	for i := range thirdBufCount {
+		v := makeSpikyPayload("third", i, thirdBufItems, thirdBufPayloadLen)
+		b, _ := json.Marshal(v)
+		buf.Write(b)
+		buf.WriteByte('\n')
+	}
+	return buf.Bytes()
 }

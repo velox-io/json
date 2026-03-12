@@ -287,3 +287,36 @@ type EscapeHeavyPayload struct {
 	Pod     PodFull `json:"pod"`
 	Cluster Cluster `json:"cluster"`
 }
+
+// --- SpikyPayload: variable-size struct for spike prediction benchmarks ---
+// By varying len(Items) and string field lengths, the same type produces
+// JSON from ~300 bytes (small) to multi-MB (spike).
+
+type SpikyItem struct {
+	ID      int    `json:"id"`
+	Name    string `json:"name"`
+	Payload string `json:"payload"`
+}
+
+type SpikyPayload struct {
+	Kind    string      `json:"kind"`
+	Seq     int         `json:"seq"`
+	Items   []SpikyItem `json:"items"`
+}
+
+// --- LogRecord: matches testdata/log.json.zst structure (OTEL-style log lines) ---
+
+type LogResource struct {
+	Name   string `json:"name"`
+	Module string `json:"module"`
+}
+
+type LogRecord struct {
+	SeverityText   string            `json:"SeverityText"`
+	Timestamp      string            `json:"Timestamp"`
+	Caller         string            `json:"caller"`
+	Message        string            `json:"Message"`
+	Resource       LogResource       `json:"Resource"`
+	SeverityNumber int               `json:"SeverityNumber"`
+	Attributes     map[string]string `json:"Attributes"`
+}

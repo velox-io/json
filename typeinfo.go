@@ -1,6 +1,8 @@
 package vjson
 
 import (
+	"encoding"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"sync"
@@ -32,20 +34,56 @@ const (
 	KindMap     // map type - Decoder field holds *ReflectMapDecoder
 )
 
+// tiFlag is a bitmask for hot-path checks in scanValue / encodeValue.
+type tiFlag uint8
+
+const (
+	tiFlagHasUnmarshalFn     tiFlag = 1 << iota // Ext.UnmarshalFn != nil
+	tiFlagHasTextUnmarshalFn                     // Ext.TextUnmarshalFn != nil
+	tiFlagQuoted                                 // `,string` tag
+	tiFlagHasMarshalFn                           // Ext.MarshalFn != nil
+	tiFlagHasTextMarshalFn                       // Ext.TextMarshalFn != nil
+	tiFlagOmitEmpty                              // omitempty
+)
+
 // TypeInfo holds pre-computed metadata for a type.
+// Hot-path fields (accessed per-field during scan/encode) live here;
+// cold fields (marshal key bytes, custom marshal/unmarshal funcs) live in Ext.
 type TypeInfo struct {
 	Kind          ElemTypeKind
+	Flags         tiFlag
 	Size          uintptr
 	Offset        uintptr
 	JSONName      string
 	JSONNameLower string
 	Decoder       any
+	Ext           *TypeInfoExt // cold marshal/unmarshal metadata (nil when not needed)
+}
+
+// TypeInfoExt holds infrequently-accessed per-field metadata.
+type TypeInfoExt struct {
+	Type reflect.Type // Go type (used only in error paths)
 
 	// Marshal metadata
 	KeyBytes       []byte // pre-encoded `"name":` (compact)
 	KeyBytesIndent []byte // pre-encoded `"name": ` (indented)
-	OmitEmpty      bool
 	IsZeroFn       func(ptr unsafe.Pointer) bool
+
+	// Custom JSON marshaling/unmarshaling via json.Marshaler/json.Unmarshaler.
+	MarshalFn   func(ptr unsafe.Pointer) ([]byte, error)
+	UnmarshalFn func(ptr unsafe.Pointer, data []byte) error
+
+	// Custom text marshaling/unmarshaling via encoding.TextMarshaler/TextUnmarshaler.
+	TextMarshalFn   func(ptr unsafe.Pointer) ([]byte, error)
+	TextUnmarshalFn func(ptr unsafe.Pointer, data []byte) error
+}
+
+// getOrAllocExt returns Ext, allocating it if nil.
+func (ti *TypeInfo) getOrAllocExt() *TypeInfoExt {
+	if ti.Ext == nil {
+		ti.Ext = &TypeInfoExt{}
+	}
+	return ti.Ext
 }
 
 // decoderCache maps reflect.Type → *TypeInfo (steady-state) or
@@ -108,6 +146,19 @@ func KindForType(t reflect.Type) ElemTypeKind {
 	}
 }
 
+// isQuotableKind reports whether the given kind supports the `,string` tag option.
+func isQuotableKind(k ElemTypeKind) bool {
+	switch k {
+	case KindBool,
+		KindInt, KindInt8, KindInt16, KindInt32, KindInt64,
+		KindUint, KindUint8, KindUint16, KindUint32, KindUint64,
+		KindFloat32, KindFloat64,
+		KindString:
+		return true
+	}
+	return false
+}
+
 // GetDecoder returns the cached *TypeInfo for the given type.
 // Thread-safe; blocks until the decoder is fully initialized.
 func GetDecoder(t reflect.Type) *TypeInfo {
@@ -138,7 +189,7 @@ func getDecoderForCycle(t reflect.Type) *TypeInfo {
 
 func getDecoderSlow(t reflect.Type, wait bool) *TypeInfo {
 	e := &decoderEntry{
-		ti:   &TypeInfo{Kind: KindForType(t), Size: t.Size()},
+		ti:   &TypeInfo{Kind: KindForType(t), Size: t.Size(), Ext: &TypeInfoExt{Type: t}},
 		done: make(chan struct{}),
 	}
 
@@ -165,6 +216,69 @@ func getDecoderSlow(t reflect.Type, wait bool) *TypeInfo {
 		e.ti.Decoder = BuildPointerDecoder(t)
 	case reflect.Map:
 		e.ti.Decoder = BuildMapDecoder(t)
+	}
+
+	// Detect json.Marshaler / json.Unmarshaler interfaces.
+	// Skip for pointer types: pointer handling (scanPointer/encodePointer)
+	// dereferences to the element type, which has its own MarshalFn/UnmarshalFn.
+	if t.Kind() != reflect.Pointer {
+		marshalerType := reflect.TypeFor[json.Marshaler]()
+		unmarshalerType := reflect.TypeFor[json.Unmarshaler]()
+		ptrType := reflect.PointerTo(t)
+
+		ext := e.ti.getOrAllocExt()
+
+		if t.Implements(marshalerType) {
+			ext.MarshalFn = func(ptr unsafe.Pointer) ([]byte, error) {
+				return reflect.NewAt(t, ptr).Elem().Interface().(json.Marshaler).MarshalJSON()
+			}
+			e.ti.Flags |= tiFlagHasMarshalFn
+		} else if ptrType.Implements(marshalerType) {
+			ext.MarshalFn = func(ptr unsafe.Pointer) ([]byte, error) {
+				return reflect.NewAt(t, ptr).Interface().(json.Marshaler).MarshalJSON()
+			}
+			e.ti.Flags |= tiFlagHasMarshalFn
+		}
+
+		if t.Implements(unmarshalerType) {
+			ext.UnmarshalFn = func(ptr unsafe.Pointer, data []byte) error {
+				return reflect.NewAt(t, ptr).Elem().Interface().(json.Unmarshaler).UnmarshalJSON(data)
+			}
+			e.ti.Flags |= tiFlagHasUnmarshalFn
+		} else if ptrType.Implements(unmarshalerType) {
+			ext.UnmarshalFn = func(ptr unsafe.Pointer, data []byte) error {
+				return reflect.NewAt(t, ptr).Interface().(json.Unmarshaler).UnmarshalJSON(data)
+			}
+			e.ti.Flags |= tiFlagHasUnmarshalFn
+		}
+
+		// Detect encoding.TextMarshaler / encoding.TextUnmarshaler.
+		textMarshalerType := reflect.TypeFor[encoding.TextMarshaler]()
+		textUnmarshalerType := reflect.TypeFor[encoding.TextUnmarshaler]()
+
+		if t.Implements(textMarshalerType) {
+			ext.TextMarshalFn = func(ptr unsafe.Pointer) ([]byte, error) {
+				return reflect.NewAt(t, ptr).Elem().Interface().(encoding.TextMarshaler).MarshalText()
+			}
+			e.ti.Flags |= tiFlagHasTextMarshalFn
+		} else if ptrType.Implements(textMarshalerType) {
+			ext.TextMarshalFn = func(ptr unsafe.Pointer) ([]byte, error) {
+				return reflect.NewAt(t, ptr).Interface().(encoding.TextMarshaler).MarshalText()
+			}
+			e.ti.Flags |= tiFlagHasTextMarshalFn
+		}
+
+		if t.Implements(textUnmarshalerType) {
+			ext.TextUnmarshalFn = func(ptr unsafe.Pointer, data []byte) error {
+				return reflect.NewAt(t, ptr).Elem().Interface().(encoding.TextUnmarshaler).UnmarshalText(data)
+			}
+			e.ti.Flags |= tiFlagHasTextUnmarshalFn
+		} else if ptrType.Implements(textUnmarshalerType) {
+			ext.TextUnmarshalFn = func(ptr unsafe.Pointer, data []byte) error {
+				return reflect.NewAt(t, ptr).Interface().(encoding.TextUnmarshaler).UnmarshalText(data)
+			}
+			e.ti.Flags |= tiFlagHasTextUnmarshalFn
+		}
 	}
 
 	close(e.done)
@@ -204,6 +318,7 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 		// Parse json tag
 		jsonName := sf.Name
 		omitEmpty := false
+		quoted := false
 		if tag := sf.Tag.Get("json"); tag != "" {
 			if tag == "-" {
 				continue
@@ -211,6 +326,7 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 			if before, opts, ok := strings.Cut(tag, ","); ok {
 				jsonName = before
 				omitEmpty = strings.Contains(opts, "omitempty")
+				quoted = strings.Contains(opts, "string")
 			} else {
 				jsonName = tag
 			}
@@ -220,17 +336,51 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 		}
 
 		cached := getDecoderForCycle(sf.Type)
+
+		// `,string` is only meaningful for bool, int*, uint*, float*, string, and
+		// pointer-to-those kinds. encoding/json silently ignores it for other types.
+		if quoted {
+			switch cached.Kind {
+			case KindPointer:
+				pDec := cached.Decoder.(*ReflectPointerDecoder)
+				if !isQuotableKind(pDec.ElemTI.Kind) {
+					quoted = false
+				}
+			default:
+				if !isQuotableKind(cached.Kind) {
+					quoted = false
+				}
+			}
+		}
+
 		fi := TypeInfo{
-			Kind:           cached.Kind,
-			Size:           cached.Size,
-			Offset:         baseOffset + sf.Offset,
-			JSONName:       jsonName,
-			JSONNameLower:  toLowerASCII(jsonName),
-			Decoder:        cached.Decoder,
-			KeyBytes:       encodeKeyBytes(jsonName),
-			KeyBytesIndent: encodeKeyBytesIndent(jsonName),
-			OmitEmpty:      omitEmpty,
-			IsZeroFn:       makeIsZeroFn(sf.Type),
+			Kind:          cached.Kind,
+			Flags:         cached.Flags,
+			Size:          cached.Size,
+			Offset:        baseOffset + sf.Offset,
+			JSONName:      jsonName,
+			JSONNameLower: toLowerASCII(jsonName),
+			Decoder:       cached.Decoder,
+		}
+
+		// Build Ext with marshal metadata.
+		ext := fi.getOrAllocExt()
+		ext.Type = sf.Type
+		ext.KeyBytes = encodeKeyBytes(jsonName)
+		ext.KeyBytesIndent = encodeKeyBytesIndent(jsonName)
+		ext.IsZeroFn = makeIsZeroFn(sf.Type)
+		if cachedExt := cached.Ext; cachedExt != nil {
+			ext.MarshalFn = cachedExt.MarshalFn
+			ext.UnmarshalFn = cachedExt.UnmarshalFn
+			ext.TextMarshalFn = cachedExt.TextMarshalFn
+			ext.TextUnmarshalFn = cachedExt.TextUnmarshalFn
+		}
+
+		if omitEmpty {
+			fi.Flags |= tiFlagOmitEmpty
+		}
+		if quoted {
+			fi.Flags |= tiFlagQuoted
 		}
 
 		if !seen[jsonName] {
@@ -341,26 +491,29 @@ func typeContainsPointer(t reflect.Type) bool {
 	}
 }
 
-// ReflectMapDecoder handles map[string]T decoding.
+// ReflectMapDecoder handles map[K]V decoding.
 type ReflectMapDecoder struct {
 	MapType reflect.Type
 	KeyType reflect.Type
 	ValType reflect.Type
 	ValSize uintptr
 	ValTI   *TypeInfo
+	KeyTI   *TypeInfo // key type info (for TextMarshaler on non-string keys)
 
 	ValIsString bool // true for map[string]string fast path
 }
 
 func BuildMapDecoder(t reflect.Type) *ReflectMapDecoder {
 	valTI := getDecoderForCycle(t.Elem())
+	keyTI := getDecoderForCycle(t.Key())
 	return &ReflectMapDecoder{
 		MapType:     t,
 		KeyType:     t.Key(),
 		ValType:     t.Elem(),
 		ValSize:     t.Elem().Size(),
 		ValTI:       valTI,
-		ValIsString: valTI.Kind == KindString,
+		KeyTI:       keyTI,
+		ValIsString: valTI.Kind == KindString && t.Key().Kind() == reflect.String,
 	}
 }
 

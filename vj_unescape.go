@@ -24,6 +24,23 @@ func isHexChar(c byte) bool {
 	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
+// hexToRune parses exactly 4 hex digits into a rune without allocation.
+func hexToRune(hex []byte) rune {
+	var r rune
+	for _, c := range hex[:4] {
+		r <<= 4
+		switch {
+		case c >= '0' && c <= '9':
+			r |= rune(c - '0')
+		case c >= 'a' && c <= 'f':
+			r |= rune(c - 'a' + 10)
+		case c >= 'A' && c <= 'F':
+			r |= rune(c - 'A' + 10)
+		}
+	}
+	return r
+}
+
 // isHighSurrogate returns true if r is a UTF-16 high surrogate (D800-DBFF)
 func isHighSurrogate(r rune) bool {
 	return r >= 0xD800 && r <= 0xDBFF
@@ -46,7 +63,7 @@ func decodeSurrogatePair(high, low rune) rune {
 func unescapeSequence(data []byte, n int, i int, dst []byte, pos int) (int, int, error) {
 	// Found backslash
 	if i+1 >= n {
-		return i, pos, fmt.Errorf("vjson: trailing backslash in string at offset %d", i)
+		return i, pos, errUnexpectedEOF
 	}
 
 	next := data[i+1]
@@ -94,8 +111,11 @@ func unescapeSequence(data []byte, n int, i int, dst []byte, pos int) (int, int,
 				return i + 6, pos, nil
 			}
 		}
-		// Invalid or incomplete unicode escape
-		return i, pos, fmt.Errorf("vjson: invalid unicode escape in string at offset %d", i)
+		// Incomplete or invalid unicode escape
+		if i+5 >= n {
+			return i, pos, errUnexpectedEOF
+		}
+		return i, pos, newSyntaxError(fmt.Sprintf("vjson: invalid unicode escape in string at offset %d", i), i)
 	}
 
 	// Lookup table for common escapes
@@ -105,7 +125,7 @@ func unescapeSequence(data []byte, n int, i int, dst []byte, pos int) (int, int,
 	}
 
 	// Unknown escape — RFC 8259 only allows " \\ / b f n r t uXXXX
-	return i, pos, fmt.Errorf("vjson: invalid escape '\\%c' in string at offset %d", next, i)
+	return i, pos, newSyntaxError(fmt.Sprintf("vjson: invalid escape '\\%c' in string at offset %d", next, i), i)
 }
 
 // unescapeSinglePass scans src from firstEscIdx for the closing '"', unescaping
@@ -124,7 +144,7 @@ func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, [
 		buf = sc.arenaData[sc.arenaOff:]
 		decodingInArena = true
 	} else {
-		buf = sc.buf[:]
+		buf = sc.scratchBuf[:]
 	}
 	overflowed := false
 
@@ -209,7 +229,7 @@ func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, [
 		}
 
 		if c < 0x20 {
-			return i, nil, fmt.Errorf("vjson: control character in string at offset %d", i)
+			return i, nil, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", i), i)
 		}
 
 		// c == '\\': process escape inline
@@ -223,7 +243,7 @@ func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, [
 					continue
 				}
 				// Unknown escape — RFC 8259 only allows " \\ / b f n r t uXXXX
-				return i, nil, fmt.Errorf("vjson: invalid escape '\\%c' in string at offset %d", next, i)
+				return i, nil, newSyntaxError(fmt.Sprintf("vjson: invalid escape '\\%c' in string at offset %d", next, i), i)
 			}
 			// \uXXXX path — may write up to 4 bytes
 			grow(4)
@@ -233,7 +253,7 @@ func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, [
 				return i, nil, unescErr
 			}
 		} else {
-			return i, nil, fmt.Errorf("vjson: trailing backslash in string at offset %d", i)
+			return i, nil, errUnexpectedEOF
 		}
 	}
 
@@ -255,7 +275,7 @@ func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, [
 						continue
 					}
 					// Unknown escape — RFC 8259 only allows " \\ / b f n r t uXXXX
-					return i, nil, fmt.Errorf("vjson: invalid escape '\\%c' in string at offset %d", next, i)
+					return i, nil, newSyntaxError(fmt.Sprintf("vjson: invalid escape '\\%c' in string at offset %d", next, i), i)
 				}
 				grow(4)
 				var unescErr error
@@ -264,12 +284,12 @@ func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, [
 					return i, nil, unescErr
 				}
 			} else {
-				return i, nil, fmt.Errorf("vjson: trailing backslash in string at offset %d", i)
+				return i, nil, errUnexpectedEOF
 			}
 			continue
 		}
 		if c < 0x20 {
-			return i, nil, fmt.Errorf("vjson: control character in string at offset %d", i)
+			return i, nil, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", i), i)
 		}
 		grow(1)
 		buf[pos] = c
@@ -318,7 +338,7 @@ func (sc *Parser) processEscapedString(src []byte, start, firstEscIdx int, ti *T
 	case KindAny:
 		*(*any)(ptr) = s
 	default:
-		return endIdx, fmt.Errorf("vjson: cannot assign string to %v field", ti.Kind)
+		return endIdx, newUnmarshalTypeError("string", ti.Ext.Type, endIdx)
 	}
 	return endIdx, nil
 }

@@ -1,6 +1,7 @@
 package vjson
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"unsafe"
@@ -197,7 +198,7 @@ func TestUnescapeSequenceDirect(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for trailing backslash")
 		}
-		if !strings.Contains(err.Error(), "trailing backslash") {
+		if err != errUnexpectedEOF {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})
@@ -308,7 +309,7 @@ func TestUnescapeTrailingBackslashInSWARLoop(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for trailing backslash in SWAR loop")
 	}
-	if !strings.Contains(err.Error(), "trailing backslash") {
+	if !strings.Contains(err.Error(), "unexpected end of input") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -434,13 +435,13 @@ func TestProcessEscapedStringKinds(t *testing.T) {
 
 	t.Run("KindInt returns error", func(t *testing.T) {
 		sc.arenaOff = 0
-		ti := &TypeInfo{Kind: KindInt}
+		ti := &TypeInfo{Kind: KindInt, Ext: &TypeInfoExt{Type: reflect.TypeOf(0)}}
 		var dummy int
 		_, err := sc.processEscapedString(src, 0, 5, ti, unsafe.Pointer(&dummy))
 		if err == nil {
 			t.Fatal("expected error for KindInt")
 		}
-		if !strings.Contains(err.Error(), "cannot assign string") {
+		if !strings.Contains(err.Error(), "cannot unmarshal string") {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})

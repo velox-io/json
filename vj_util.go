@@ -2,6 +2,16 @@ package vjson
 
 import "unsafe"
 
+// UnsafeString converts a byte slice to a string without copying.
+// The caller must ensure the byte slice is not modified during the
+// lifetime of the returned string.
+func UnsafeString(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	return unsafe.String(&b[0], len(b))
+}
+
 // wsLUT is a lookup table for JSON whitespace characters.
 // Indexed by byte value; non-zero means whitespace.
 var wsLUT [256]byte
@@ -120,4 +130,44 @@ func parseUint64(src []byte, start, end int) uint64 {
 		n = n*10 + uint64(src[i]-'0')
 	}
 	return n
+}
+
+var internedFloats = func() [256]any {
+	var arr [256]any
+	for i := range arr {
+		arr[i] = float64(i)
+	}
+	return arr
+}()
+
+// WriteIntValue writes an int64 value to the pointer based on the element type kind.
+func WriteIntValue(ptr unsafe.Pointer, kind ElemTypeKind, v int64) {
+	switch kind {
+	case KindInt:
+		*(*int)(ptr) = int(v)
+	case KindInt8:
+		*(*int8)(ptr) = int8(v)
+	case KindInt16:
+		*(*int16)(ptr) = int16(v)
+	case KindInt32:
+		*(*int32)(ptr) = int32(v)
+	case KindInt64:
+		*(*int64)(ptr) = v
+	}
+}
+
+// WriteUintValue writes a uint64 value to the pointer based on the element type kind.
+func WriteUintValue(ptr unsafe.Pointer, kind ElemTypeKind, v uint64) {
+	switch kind {
+	case KindUint:
+		*(*uint)(ptr) = uint(v)
+	case KindUint8:
+		*(*uint8)(ptr) = uint8(v)
+	case KindUint16:
+		*(*uint16)(ptr) = uint16(v)
+	case KindUint32:
+		*(*uint32)(ptr) = uint32(v)
+	case KindUint64:
+		*(*uint64)(ptr) = v
+	}
 }

@@ -1,6 +1,7 @@
 package vjson
 
 import (
+	"fmt"
 	"reflect"
 	"sync"
 	"unsafe"
@@ -72,10 +73,10 @@ func Unmarshal[T any](data []byte, v *T) error {
 func unmarshalInto(sc *Parser, data []byte, v any) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		return errNotPointer
+		return &InvalidUnmarshalError{Type: reflect.TypeOf(v)}
 	}
 	if len(data) == 0 {
-		return errEmptyInput
+		return newSyntaxError("vjson: unexpected end of JSON input", 0)
 	}
 
 	elemType := rv.Elem().Type()
@@ -85,13 +86,16 @@ func unmarshalInto(sc *Parser, data []byte, v any) error {
 	idx := skipWS(data, 0)
 	newIdx, err := sc.scanValue(data, idx, ti, ptr)
 	if err != nil {
+		if err == errUnexpectedEOF {
+			return newSyntaxError("vjson: unexpected end of input", len(data))
+		}
 		return err
 	}
 
 	// Verify no trailing non-whitespace
 	newIdx = skipWS(data, newIdx)
 	if newIdx < len(data) {
-		return errSyntax
+		return newSyntaxError(fmt.Sprintf("vjson: invalid character %q after top-level value", data[newIdx]), newIdx)
 	}
 	_ = newIdx
 	return nil
@@ -99,10 +103,10 @@ func unmarshalInto(sc *Parser, data []byte, v any) error {
 
 // Parser is a reusable single-pass JSON scanner.
 type Parser struct {
-	buf       [scratchBufSize]byte               // reusable scratch for decoding
-	arenaData []byte                             // current arena block for string
-	arenaOff  int                                // next free offset in arenaData
-	ptrAllocs map[unsafe.Pointer]*rtypeAllocator // per-type batch allocators for pointer fields
+	scratchBuf [scratchBufSize]byte               // reusable scratch for decoding
+	arenaData  []byte                             // current arena block
+	arenaOff   int                                // next free offset in arenaData
+	ptrAllocs  map[unsafe.Pointer]*rtypeAllocator // per-type batch allocators for pointer fields
 }
 
 // arenaAlloc allocates size bytes from the arena.

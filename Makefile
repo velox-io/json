@@ -9,7 +9,7 @@ fmt:
 	goimports -w .
 
 test:
-	go test -race -cover .
+	go test -race .
 
 test-coverage:
 	go test -race -coverprofile=coverage.out .

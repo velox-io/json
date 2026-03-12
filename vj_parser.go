@@ -19,6 +19,9 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 	if ti.Kind == KindPointer {
 		return sc.scanPointer(src, idx, ti, ptr)
 	}
+	if ti.Flags != 0 {
+		return sc.scanValueSpecial(src, idx, ti, ptr)
+	}
 	if idx >= len(src) {
 		return idx, errUnexpectedEOF
 	}
@@ -42,7 +45,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 		if (src[idx] >= '0' && src[idx] <= '9') || src[idx] == '-' {
 			return sc.scanNumber(src, idx, ti, ptr)
 		}
-		return idx, fmt.Errorf("vjson: unexpected character %q at offset %d", src[idx], idx)
+		return idx, newSyntaxError(fmt.Sprintf("vjson: unexpected character %q at offset %d", src[idx], idx), idx)
 	}
 }
 
@@ -95,7 +98,7 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 			case KindAny:
 				*(*any)(ptr) = s
 			default:
-				return foundPos + 1, fmt.Errorf("vjson: cannot assign string to %v field", ti.Kind)
+				return foundPos + 1, newUnmarshalTypeError("string", ti.Ext.Type, foundPos+1)
 			}
 			return foundPos + 1, nil
 		}
@@ -106,7 +109,7 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 		}
 
 		// Control character
-		return foundPos, fmt.Errorf("vjson: control character in string at offset %d", foundPos)
+		return foundPos, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", foundPos), foundPos)
 	}
 
 	// Handle remaining bytes (tail)
@@ -125,7 +128,7 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 			case KindAny:
 				*(*any)(ptr) = s
 			default:
-				return pos + 1, fmt.Errorf("vjson: cannot assign string to %v field", ti.Kind)
+				return pos + 1, newUnmarshalTypeError("string", ti.Ext.Type, pos+1)
 			}
 			return pos + 1, nil
 		}
@@ -133,7 +136,7 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 			return sc.processEscapedString(src, start, pos, ti, ptr)
 		}
 		if c < 0x20 {
-			return pos, fmt.Errorf("vjson: control character in string at offset %d", pos)
+			return pos, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", pos), pos)
 		}
 		pos++
 	}
@@ -166,7 +169,7 @@ func (sc *Parser) scanStringKey(src []byte, idx int) (int, []byte, error) {
 			if c == '\\' {
 				return sc.unescapeSinglePass(src, start, foundIdx)
 			}
-			return foundIdx, nil, fmt.Errorf("vjson: control character in string at offset %d", foundIdx)
+			return foundIdx, nil, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", foundIdx), foundIdx)
 		}
 		pos += 8
 	}
@@ -180,7 +183,7 @@ func (sc *Parser) scanStringKey(src []byte, idx int) (int, []byte, error) {
 			return sc.unescapeSinglePass(src, start, pos)
 		}
 		if c < 0x20 {
-			return pos, nil, fmt.Errorf("vjson: control character in string at offset %d", pos)
+			return pos, nil, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", pos), pos)
 		}
 		pos++
 	}
@@ -215,7 +218,7 @@ func (sc *Parser) scanString(src []byte, idx int) (int, string, error) {
 				}
 				return endIdx, unsafe.String(unsafe.SliceData(result), len(result)), nil
 			}
-			return foundIdx, "", fmt.Errorf("vjson: control character in string at offset %d", foundIdx)
+			return foundIdx, "", newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", foundIdx), foundIdx)
 		}
 		pos += 8
 	}
@@ -233,7 +236,7 @@ func (sc *Parser) scanString(src []byte, idx int) (int, string, error) {
 			return endIdx, unsafe.String(unsafe.SliceData(result), len(result)), nil
 		}
 		if c < 0x20 {
-			return pos, "", fmt.Errorf("vjson: control character in string at offset %d", pos)
+			return pos, "", newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", pos), pos)
 		}
 		pos++
 	}
@@ -255,13 +258,13 @@ func scanNumberSpan(src []byte, idx int) (int, bool, error) {
 
 	// Integer part (required)
 	if i >= n || src[i] < '0' || src[i] > '9' {
-		return i, false, fmt.Errorf("vjson: invalid number at offset %d", idx)
+		return i, false, newSyntaxError(fmt.Sprintf("vjson: invalid number at offset %d", idx), idx)
 	}
 	if src[i] == '0' {
 		i++
 		// Leading zeros forbidden: "0" must not be followed by another digit
 		if i < n && src[i] >= '0' && src[i] <= '9' {
-			return i, false, fmt.Errorf("vjson: leading zeros in number at offset %d", idx)
+			return i, false, newSyntaxError(fmt.Sprintf("vjson: leading zeros in number at offset %d", idx), idx)
 		}
 	} else {
 		// 1-9 followed by any digits
@@ -279,7 +282,7 @@ func scanNumberSpan(src []byte, idx int) (int, bool, error) {
 		i++
 		// Must have at least one digit after '.'
 		if i >= n || src[i] < '0' || src[i] > '9' {
-			return i, true, fmt.Errorf("vjson: invalid fraction in number at offset %d", idx)
+			return i, true, newSyntaxError(fmt.Sprintf("vjson: invalid fraction in number at offset %d", idx), idx)
 		}
 		i++
 		for i < n && src[i] >= '0' && src[i] <= '9' {
@@ -297,7 +300,7 @@ func scanNumberSpan(src []byte, idx int) (int, bool, error) {
 		}
 		// Must have at least one digit after exponent marker
 		if i >= n || src[i] < '0' || src[i] > '9' {
-			return i, true, fmt.Errorf("vjson: invalid exponent in number at offset %d", idx)
+			return i, true, newSyntaxError(fmt.Sprintf("vjson: invalid exponent in number at offset %d", idx), idx)
 		}
 		i++
 		for i < n && src[i] >= '0' && src[i] <= '9' {
@@ -317,37 +320,37 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 	switch ti.Kind {
 	case KindInt, KindInt8, KindInt16, KindInt32, KindInt64:
 		if isFloat {
-			return end, fmt.Errorf("vjson: cannot unmarshal number %q into integer field", src[idx:end])
+			return end, newUnmarshalTypeError("number", ti.Ext.Type, end)
 		}
 		v := parseInt64(src, idx, end)
 		WriteIntValue(ptr, ti.Kind, v)
 	case KindUint, KindUint8, KindUint16, KindUint32, KindUint64:
 		if isFloat {
-			return end, fmt.Errorf("vjson: cannot unmarshal number %q into unsigned integer field", src[idx:end])
+			return end, newUnmarshalTypeError("number", ti.Ext.Type, end)
 		}
 		v := parseUint64(src, idx, end)
 		WriteUintValue(ptr, ti.Kind, v)
 	case KindFloat32:
 		v, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 32)
 		if err != nil {
-			return end, fmt.Errorf("vjson: invalid float %q: %w", src[idx:end], err)
+			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
 		}
 		*(*float32)(ptr) = float32(v)
 	case KindFloat64:
 		v, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 64)
 		if err != nil {
-			return end, fmt.Errorf("vjson: invalid float %q: %w", src[idx:end], err)
+			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
 		}
 		*(*float64)(ptr) = v
 	case KindAny:
 		// encoding/json compatible: all numbers → float64 for interface{}
 		v, err := strconv.ParseFloat(UnsafeString(src[idx:end]), 64)
 		if err != nil {
-			return end, fmt.Errorf("vjson: invalid number %q: %w", src[idx:end], err)
+			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid number %q: %v", src[idx:end], err), end, err)
 		}
 		*(*any)(ptr) = v
 	default:
-		return end, fmt.Errorf("vjson: cannot assign number to %v field", ti.Kind)
+		return end, newUnmarshalTypeError("number", ti.Ext.Type, end)
 	}
 	return end, nil
 }
@@ -373,13 +376,13 @@ func (sc *Parser) scanNumberAny(src []byte, idx int) (int, any, error) {
 			val = val*10 + int(span[j]-'0')
 		}
 		if allDigits && val < 256 {
-			return end, InternedFloats[val], nil
+			return end, internedFloats[val], nil
 		}
 	}
 
 	v, err := strconv.ParseFloat(UnsafeString(span), 64)
 	if err != nil {
-		return end, nil, fmt.Errorf("vjson: invalid number %q: %w", span, err)
+		return end, nil, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid number %q: %v", span, err), end, err)
 	}
 	return end, v, nil
 }
@@ -389,7 +392,7 @@ func (sc *Parser) scanTrue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer
 		return idx, errUnexpectedEOF
 	}
 	if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32True {
-		return idx, fmt.Errorf("vjson: invalid literal at offset %d", idx)
+		return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 	}
 	switch ti.Kind {
 	case KindBool:
@@ -397,7 +400,7 @@ func (sc *Parser) scanTrue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer
 	case KindAny:
 		*(*any)(ptr) = true
 	default:
-		return idx + 4, fmt.Errorf("vjson: cannot assign bool to %v field", ti.Kind)
+		return idx + 4, newUnmarshalTypeError("bool", ti.Ext.Type, idx+4)
 	}
 	return idx + 4, nil
 }
@@ -407,7 +410,7 @@ func (sc *Parser) scanFalse(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 		return idx, errUnexpectedEOF
 	}
 	if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "else" suffix; 'f' already matched by caller's switch
-		return idx, fmt.Errorf("vjson: invalid literal at offset %d", idx)
+		return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 	}
 	switch ti.Kind {
 	case KindBool:
@@ -415,7 +418,7 @@ func (sc *Parser) scanFalse(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 	case KindAny:
 		*(*any)(ptr) = false
 	default:
-		return idx + 5, fmt.Errorf("vjson: cannot assign bool to %v field", ti.Kind)
+		return idx + 5, newUnmarshalTypeError("bool", ti.Ext.Type, idx+5)
 	}
 	return idx + 5, nil
 }
@@ -425,7 +428,7 @@ func (sc *Parser) scanNull(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer
 		return idx, errUnexpectedEOF
 	}
 	if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null {
-		return idx, fmt.Errorf("vjson: invalid literal at offset %d", idx)
+		return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 	}
 	newIdx := idx + 4
 
@@ -472,7 +475,7 @@ func (sc *Parser) scanObjectValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 		*(*any)(ptr) = m
 		return newIdx, nil
 	default:
-		return idx, fmt.Errorf("vjson: cannot assign object to %v field", ti.Kind)
+		return idx, newUnmarshalTypeError("object", ti.Ext.Type, idx)
 	}
 }
 
@@ -490,8 +493,11 @@ func (sc *Parser) scanStruct(src []byte, idx int, dec *ReflectStructDecoder, bas
 
 	for {
 		// Key
-		if idx >= len(src) || src[idx] != '"' {
-			return idx, errSyntax
+		if idx >= len(src) {
+			return idx, errUnexpectedEOF
+		}
+		if src[idx] != '"' {
+			return idx, newSyntaxError("vjson: syntax error", idx)
 		}
 		var keyBytes []byte
 		var err error
@@ -502,8 +508,11 @@ func (sc *Parser) scanStruct(src []byte, idx int, dec *ReflectStructDecoder, bas
 
 		// Colon
 		idx = skipWS(src, idx)
-		if idx >= len(src) || src[idx] != ':' {
-			return idx, errSyntax
+		if idx >= len(src) {
+			return idx, errUnexpectedEOF
+		}
+		if src[idx] != ':' {
+			return idx, newSyntaxError("vjson: syntax error", idx)
 		}
 		idx++ // consume ':'
 		idx = skipWS(src, idx)
@@ -537,7 +546,7 @@ func (sc *Parser) scanStruct(src []byte, idx int, dec *ReflectStructDecoder, bas
 		if src[idx] == '}' {
 			return idx + 1, nil
 		}
-		return idx, fmt.Errorf("vjson: expected ',' or '}' in object, got %q", src[idx])
+		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in object, got %q", src[idx]), idx)
 	}
 }
 
@@ -565,8 +574,11 @@ func (sc *Parser) scanMap(src []byte, idx int, mDec *ReflectMapDecoder, ptr unsa
 
 	for {
 		// Key (need string for map key, not []byte)
-		if idx >= len(src) || src[idx] != '"' {
-			return idx, errSyntax
+		if idx >= len(src) {
+			return idx, errUnexpectedEOF
+		}
+		if src[idx] != '"' {
+			return idx, newSyntaxError("vjson: syntax error", idx)
 		}
 		var key string
 		var err error
@@ -577,8 +589,11 @@ func (sc *Parser) scanMap(src []byte, idx int, mDec *ReflectMapDecoder, ptr unsa
 
 		// Colon
 		idx = skipWS(src, idx)
-		if idx >= len(src) || src[idx] != ':' {
-			return idx, errSyntax
+		if idx >= len(src) {
+			return idx, errUnexpectedEOF
+		}
+		if src[idx] != ':' {
+			return idx, newSyntaxError("vjson: syntax error", idx)
 		}
 		idx++
 		idx = skipWS(src, idx)
@@ -590,7 +605,12 @@ func (sc *Parser) scanMap(src []byte, idx int, mDec *ReflectMapDecoder, ptr unsa
 		if err != nil {
 			return idx, err
 		}
-		mapVal.SetMapIndex(reflect.ValueOf(key), valRV.Elem())
+
+		keyRV, err := resolveMapKeyValue(key, mDec.KeyType, mDec.KeyTI)
+		if err != nil {
+			return idx, err
+		}
+		mapVal.SetMapIndex(keyRV, valRV.Elem())
 
 		// Comma or closing brace
 		idx = skipWS(src, idx)
@@ -605,7 +625,7 @@ func (sc *Parser) scanMap(src []byte, idx int, mDec *ReflectMapDecoder, ptr unsa
 		if src[idx] == '}' {
 			return idx + 1, nil
 		}
-		return idx, fmt.Errorf("vjson: expected ',' or '}' in map, got %q", src[idx])
+		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in map, got %q", src[idx]), idx)
 	}
 }
 
@@ -630,8 +650,11 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 
 	for {
 		// Key (need string for map key, not []byte)
-		if idx >= len(src) || src[idx] != '"' {
-			return idx, errSyntax
+		if idx >= len(src) {
+			return idx, errUnexpectedEOF
+		}
+		if src[idx] != '"' {
+			return idx, newSyntaxError("vjson: syntax error", idx)
 		}
 		var key string
 		var err error
@@ -642,8 +665,11 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 
 		// Colon
 		idx = skipWS(src, idx)
-		if idx >= len(src) || src[idx] != ':' {
-			return idx, errSyntax
+		if idx >= len(src) {
+			return idx, errUnexpectedEOF
+		}
+		if src[idx] != ':' {
+			return idx, newSyntaxError("vjson: syntax error", idx)
 		}
 		idx++
 		idx = skipWS(src, idx)
@@ -669,7 +695,7 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 		if src[idx] == '}' {
 			return idx + 1, nil
 		}
-		return idx, fmt.Errorf("vjson: expected ',' or '}' in map, got %q", src[idx])
+		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in map, got %q", src[idx]), idx)
 	}
 }
 
@@ -687,8 +713,11 @@ func (sc *Parser) scanMapAny(src []byte, idx int) (int, map[string]any, error) {
 	}
 
 	for {
-		if idx >= len(src) || src[idx] != '"' {
-			return idx, nil, errSyntax
+		if idx >= len(src) {
+			return idx, nil, errUnexpectedEOF
+		}
+		if src[idx] != '"' {
+			return idx, nil, newSyntaxError("vjson: syntax error", idx)
 		}
 		var key string
 		var err error
@@ -698,8 +727,11 @@ func (sc *Parser) scanMapAny(src []byte, idx int) (int, map[string]any, error) {
 		}
 
 		idx = skipWS(src, idx)
-		if idx >= len(src) || src[idx] != ':' {
-			return idx, nil, errSyntax
+		if idx >= len(src) {
+			return idx, nil, errUnexpectedEOF
+		}
+		if src[idx] != ':' {
+			return idx, nil, newSyntaxError("vjson: syntax error", idx)
 		}
 		idx++
 		idx = skipWS(src, idx)
@@ -723,7 +755,7 @@ func (sc *Parser) scanMapAny(src []byte, idx int) (int, map[string]any, error) {
 		if src[idx] == '}' {
 			return idx + 1, m, nil
 		}
-		return idx, nil, fmt.Errorf("vjson: expected ',' or '}' in any object, got %q", src[idx])
+		return idx, nil, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in any object, got %q", src[idx]), idx)
 	}
 }
 
@@ -739,7 +771,7 @@ func (sc *Parser) scanArrayValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.P
 		*(*any)(ptr) = arr
 		return newIdx, nil
 	default:
-		return idx, fmt.Errorf("vjson: cannot assign array to %v field", ti.Kind)
+		return idx, newUnmarshalTypeError("array", ti.Ext.Type, idx)
 	}
 }
 
@@ -830,7 +862,7 @@ func (sc *Parser) scanArray(src []byte, idx int, sDec *ReflectSliceDecoder, ptr 
 			sh.Cap = sliceCap
 			return idx + 1, nil
 		}
-		return idx, fmt.Errorf("vjson: expected ',' or ']' in array, got %q", src[idx])
+		return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in array, got %q", src[idx]), idx)
 	}
 }
 
@@ -868,11 +900,14 @@ func (sc *Parser) scanArrayAny(src []byte, idx int) (int, []any, error) {
 		if src[idx] == ']' {
 			return idx + 1, arr, nil
 		}
-		return idx, nil, fmt.Errorf("vjson: expected ',' or ']' in any array, got %q", src[idx])
+		return idx, nil, newSyntaxError(fmt.Sprintf("vjson: expected ',' or ']' in any array, got %q", src[idx]), idx)
 	}
 }
 
 func (sc *Parser) scanPointer(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
+	if ti.Flags&tiFlagQuoted != 0 {
+		return sc.scanPointerQuoted(src, idx, ti, ptr)
+	}
 	pDec := ti.Decoder.(*ReflectPointerDecoder)
 
 	idx = skipWS(src, idx)
@@ -949,7 +984,7 @@ func (sc *Parser) scanValueAny(src []byte, idx int) (int, any, error) {
 			return idx, nil, errUnexpectedEOF
 		}
 		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32True {
-			return idx, nil, fmt.Errorf("vjson: invalid literal at offset %d", idx)
+			return idx, nil, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 		}
 		return idx + 4, true, nil
 	case 'f':
@@ -957,7 +992,7 @@ func (sc *Parser) scanValueAny(src []byte, idx int) (int, any, error) {
 			return idx, nil, errUnexpectedEOF
 		}
 		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "else" suffix; 'f' already matched by caller's switch
-			return idx, nil, fmt.Errorf("vjson: invalid literal at offset %d", idx)
+			return idx, nil, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 		}
 		return idx + 5, false, nil
 	case 'n':
@@ -965,14 +1000,14 @@ func (sc *Parser) scanValueAny(src []byte, idx int) (int, any, error) {
 			return idx, nil, errUnexpectedEOF
 		}
 		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null {
-			return idx, nil, fmt.Errorf("vjson: invalid literal at offset %d", idx)
+			return idx, nil, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 		}
 		return idx + 4, nil, nil
 	default:
 		if (src[idx] >= '0' && src[idx] <= '9') || src[idx] == '-' {
 			return sc.scanNumberAny(src, idx)
 		}
-		return idx, nil, fmt.Errorf("vjson: unexpected character %q in any value", src[idx])
+		return idx, nil, newSyntaxError(fmt.Sprintf("vjson: unexpected character %q in any value", src[idx]), idx)
 	}
 }
 
@@ -990,7 +1025,7 @@ func skipValue(src []byte, idx int) (int, error) {
 			return idx, errUnexpectedEOF
 		}
 		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32True {
-			return idx, fmt.Errorf("vjson: invalid literal at offset %d", idx)
+			return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 		}
 		return idx + 4, nil
 	case 'f':
@@ -998,7 +1033,7 @@ func skipValue(src []byte, idx int) (int, error) {
 			return idx, errUnexpectedEOF
 		}
 		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "else" suffix; 'f' already matched by caller's switch
-			return idx, fmt.Errorf("vjson: invalid literal at offset %d", idx)
+			return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 		}
 		return idx + 5, nil
 	case 'n':
@@ -1006,7 +1041,7 @@ func skipValue(src []byte, idx int) (int, error) {
 			return idx, errUnexpectedEOF
 		}
 		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null {
-			return idx, fmt.Errorf("vjson: invalid literal at offset %d", idx)
+			return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 		}
 		return idx + 4, nil
 	case '{', '[':
@@ -1019,7 +1054,7 @@ func skipValue(src []byte, idx int) (int, error) {
 			}
 			return end, nil
 		}
-		return idx, fmt.Errorf("vjson: unexpected character %q", src[idx])
+		return idx, newSyntaxError(fmt.Sprintf("vjson: unexpected character %q", src[idx]), idx)
 	}
 }
 
@@ -1055,23 +1090,23 @@ func skipString(src []byte, idx int) (int, error) {
 				if next == 'u' {
 					// \uXXXX — need 4 hex digits
 					if escIdx+5 >= n {
-						return escIdx, fmt.Errorf("vjson: invalid unicode escape in string at offset %d", escIdx)
+						return escIdx, errUnexpectedEOF
 					}
 					for k := escIdx + 2; k < escIdx+6; k++ {
 						if !isHexChar(src[k]) {
-							return escIdx, fmt.Errorf("vjson: invalid unicode escape in string at offset %d", escIdx)
+							return escIdx, newSyntaxError(fmt.Sprintf("vjson: invalid unicode escape in string at offset %d", escIdx), escIdx)
 						}
 					}
 					i = escIdx + 6
 				} else if escapeTable[next] != 0 {
 					i = escIdx + 2
 				} else {
-					return escIdx, fmt.Errorf("vjson: invalid escape '\\%c' in string at offset %d", next, escIdx)
+					return escIdx, newSyntaxError(fmt.Sprintf("vjson: invalid escape '\\%c' in string at offset %d", next, escIdx), escIdx)
 				}
 				continue
 			}
 			// control character
-			return i + off, fmt.Errorf("vjson: control character in string at offset %d", i+off)
+			return i + off, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", i+off), i+off)
 		}
 
 		// Tail: byte-at-a-time
@@ -1086,23 +1121,23 @@ func skipString(src []byte, idx int) (int, error) {
 			next := src[i+1]
 			if next == 'u' {
 				if i+5 >= n {
-					return i, fmt.Errorf("vjson: invalid unicode escape in string at offset %d", i)
+					return i, errUnexpectedEOF
 				}
 				for k := i + 2; k < i+6; k++ {
 					if !isHexChar(src[k]) {
-						return i, fmt.Errorf("vjson: invalid unicode escape in string at offset %d", i)
+						return i, newSyntaxError(fmt.Sprintf("vjson: invalid unicode escape in string at offset %d", i), i)
 					}
 				}
 				i += 6
 			} else if escapeTable[next] != 0 {
 				i += 2
 			} else {
-				return i, fmt.Errorf("vjson: invalid escape '\\%c' in string at offset %d", next, i)
+				return i, newSyntaxError(fmt.Sprintf("vjson: invalid escape '\\%c' in string at offset %d", next, i), i)
 			}
 			continue
 		}
 		if c < 0x20 {
-			return i, fmt.Errorf("vjson: control character in string at offset %d", i)
+			return i, newSyntaxError(fmt.Sprintf("vjson: control character in string at offset %d", i), i)
 		}
 		i++
 	}

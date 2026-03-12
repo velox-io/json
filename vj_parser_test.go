@@ -3,8 +3,13 @@ package vjson
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"math/big"
+	"net"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ---------- Types for testing ----------
@@ -205,7 +210,7 @@ func TestScanStringValue_DefaultKind_SWAR(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for string-to-int assignment")
 	}
-	if !strings.Contains(err.Error(), "cannot assign string") {
+	if !strings.Contains(err.Error(), "cannot unmarshal string") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -1385,5 +1390,818 @@ func TestUnmarshal_ByteSlice_Roundtrip(t *testing.T) {
 	}
 	if !bytes.Equal(original.Data, roundtripped.Data) {
 		t.Errorf("roundtrip mismatch: got %v, want %v", roundtripped.Data, original.Data)
+	}
+}
+
+// ---------- json.Marshaler / json.Unmarshaler interface support ----------
+
+// customMarshalType implements json.Marshaler with a value receiver.
+type customMarshalType struct {
+	Value string
+}
+
+func (c customMarshalType) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf(`"custom:%s"`, c.Value)), nil
+}
+
+// customUnmarshalType implements json.Unmarshaler with a pointer receiver.
+type customUnmarshalType struct {
+	Value string
+}
+
+func (c *customUnmarshalType) UnmarshalJSON(data []byte) error {
+	// Expect data like `"custom:xxx"`
+	s := string(data)
+	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+		return fmt.Errorf("customUnmarshalType: expected quoted string, got %s", s)
+	}
+	s = s[1 : len(s)-1]
+	if !strings.HasPrefix(s, "custom:") {
+		return fmt.Errorf("customUnmarshalType: expected custom: prefix, got %s", s)
+	}
+	c.Value = strings.TrimPrefix(s, "custom:")
+	return nil
+}
+
+// ptrMarshalType implements json.Marshaler with a pointer receiver.
+type ptrMarshalType struct {
+	N int
+}
+
+func (p *ptrMarshalType) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf(`"ptr:%d"`, p.N)), nil
+}
+
+// ptrUnmarshalType implements json.Unmarshaler with a pointer receiver.
+type ptrUnmarshalType struct {
+	N int
+}
+
+func (p *ptrUnmarshalType) UnmarshalJSON(data []byte) error {
+	s := string(data)
+	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+		return fmt.Errorf("ptrUnmarshalType: expected quoted string, got %s", s)
+	}
+	s = s[1 : len(s)-1]
+	if !strings.HasPrefix(s, "ptr:") {
+		return fmt.Errorf("ptrUnmarshalType: expected ptr: prefix, got %s", s)
+	}
+	_, err := fmt.Sscanf(s, "ptr:%d", &p.N)
+	return err
+}
+
+func TestMarshal_JSONMarshaler(t *testing.T) {
+	v := customMarshalType{Value: "hello"}
+	data, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != `"custom:hello"` {
+		t.Errorf("got %s, want %s", data, `"custom:hello"`)
+	}
+}
+
+func TestUnmarshal_JSONUnmarshaler(t *testing.T) {
+	var v customUnmarshalType
+	err := Unmarshal([]byte(`"custom:world"`), &v)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v.Value != "world" {
+		t.Errorf("got %q, want %q", v.Value, "world")
+	}
+}
+
+func TestRoundtrip_JSONMarshaler(t *testing.T) {
+	original := customMarshalType{Value: "roundtrip"}
+	data, err := Marshal(&original)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	// customMarshalType also implements Unmarshaler (via *customUnmarshalType won't work,
+	// but customMarshalType outputs "custom:xxx" which customUnmarshalType can parse).
+	// We use a separate struct to test the roundtrip.
+	var result customUnmarshalType
+	err = Unmarshal(data, &result)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if result.Value != "roundtrip" {
+		t.Errorf("got %q, want %q", result.Value, "roundtrip")
+	}
+}
+
+func TestMarshal_JSONMarshaler_PointerReceiver(t *testing.T) {
+	v := ptrMarshalType{N: 42}
+	data, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != `"ptr:42"` {
+		t.Errorf("got %s, want %s", data, `"ptr:42"`)
+	}
+}
+
+func TestUnmarshal_JSONUnmarshaler_PointerReceiver(t *testing.T) {
+	var v ptrUnmarshalType
+	err := Unmarshal([]byte(`"ptr:99"`), &v)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v.N != 99 {
+		t.Errorf("got %d, want %d", v.N, 99)
+	}
+}
+
+func TestMarshal_TimeTime(t *testing.T) {
+	ts := time.Date(2024, 6, 15, 12, 30, 0, 0, time.UTC)
+	data, err := Marshal(&ts)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	// encoding/json marshals time.Time as RFC3339Nano quoted string
+	want, _ := json.Marshal(ts)
+	if string(data) != string(want) {
+		t.Errorf("got %s, want %s", data, want)
+	}
+
+	// Roundtrip: unmarshal back
+	var result time.Time
+	err = Unmarshal(data, &result)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if !result.Equal(ts) {
+		t.Errorf("roundtrip: got %v, want %v", result, ts)
+	}
+}
+
+func TestMarshal_JSONMarshaler_Null(t *testing.T) {
+	// nil pointer to a Marshaler type → "null"
+	type S struct {
+		T *time.Time `json:"t"`
+	}
+	s := S{T: nil}
+	data, err := Marshal(&s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != `{"t":null}` {
+		t.Errorf("got %s, want %s", data, `{"t":null}`)
+	}
+}
+
+func TestUnmarshal_JSONMarshaler_InStruct(t *testing.T) {
+	type Event struct {
+		Name string    `json:"name"`
+		At   time.Time `json:"at"`
+	}
+
+	input := `{"name":"deploy","at":"2024-06-15T12:30:00Z"}`
+	var ev Event
+	err := Unmarshal([]byte(input), &ev)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ev.Name != "deploy" {
+		t.Errorf("name: got %q, want %q", ev.Name, "deploy")
+	}
+	expected := time.Date(2024, 6, 15, 12, 30, 0, 0, time.UTC)
+	if !ev.At.Equal(expected) {
+		t.Errorf("at: got %v, want %v", ev.At, expected)
+	}
+
+	// Marshal roundtrip
+	data, err := Marshal(&ev)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	var ev2 Event
+	err = Unmarshal(data, &ev2)
+	if err != nil {
+		t.Fatalf("roundtrip unmarshal error: %v", err)
+	}
+	if ev2.Name != ev.Name || !ev2.At.Equal(ev.At) {
+		t.Errorf("roundtrip mismatch: got %+v, want %+v", ev2, ev)
+	}
+}
+
+// ---------- encoding.TextMarshaler / encoding.TextUnmarshaler interface support ----------
+
+// textMarshalType implements encoding.TextMarshaler with a value receiver.
+type textMarshalType struct {
+	Value string
+}
+
+func (t textMarshalType) MarshalText() ([]byte, error) {
+	return []byte("text:" + t.Value), nil
+}
+
+func (t *textMarshalType) UnmarshalText(data []byte) error {
+	s := string(data)
+	if !strings.HasPrefix(s, "text:") {
+		return fmt.Errorf("textMarshalType: expected text: prefix, got %s", s)
+	}
+	t.Value = strings.TrimPrefix(s, "text:")
+	return nil
+}
+
+// ptrTextMarshalType implements encoding.TextMarshaler with a pointer receiver.
+type ptrTextMarshalType struct {
+	N int
+}
+
+func (p *ptrTextMarshalType) MarshalText() ([]byte, error) {
+	return []byte(fmt.Sprintf("ptrtext:%d", p.N)), nil
+}
+
+func (p *ptrTextMarshalType) UnmarshalText(data []byte) error {
+	_, err := fmt.Sscanf(string(data), "ptrtext:%d", &p.N)
+	return err
+}
+
+// bothMarshalerType implements both json.Marshaler and encoding.TextMarshaler.
+// json.Marshaler should take precedence for value encoding.
+type bothMarshalerType struct {
+	Value string
+}
+
+func (b bothMarshalerType) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf(`"json:%s"`, b.Value)), nil
+}
+
+func (b bothMarshalerType) MarshalText() ([]byte, error) {
+	return []byte("text:" + b.Value), nil
+}
+
+func TestMarshal_TextMarshaler(t *testing.T) {
+	v := textMarshalType{Value: "hello"}
+	data, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != `"text:hello"` {
+		t.Errorf("got %s, want %s", data, `"text:hello"`)
+	}
+}
+
+func TestUnmarshal_TextUnmarshaler(t *testing.T) {
+	var v textMarshalType
+	err := Unmarshal([]byte(`"text:world"`), &v)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v.Value != "world" {
+		t.Errorf("got %q, want %q", v.Value, "world")
+	}
+}
+
+func TestRoundtrip_TextMarshaler(t *testing.T) {
+	original := textMarshalType{Value: "roundtrip"}
+	data, err := Marshal(&original)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var result textMarshalType
+	err = Unmarshal(data, &result)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if result.Value != "roundtrip" {
+		t.Errorf("got %q, want %q", result.Value, "roundtrip")
+	}
+}
+
+func TestMarshal_TextMarshaler_PointerReceiver(t *testing.T) {
+	v := ptrTextMarshalType{N: 42}
+	data, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != `"ptrtext:42"` {
+		t.Errorf("got %s, want %s", data, `"ptrtext:42"`)
+	}
+}
+
+func TestUnmarshal_TextUnmarshaler_PointerReceiver(t *testing.T) {
+	var v ptrTextMarshalType
+	err := Unmarshal([]byte(`"ptrtext:99"`), &v)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v.N != 99 {
+		t.Errorf("got %d, want %d", v.N, 99)
+	}
+}
+
+func TestMarshal_TextMarshaler_Priority(t *testing.T) {
+	// json.Marshaler should take precedence over TextMarshaler for value encoding
+	v := bothMarshalerType{Value: "test"}
+	data, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != `"json:test"` {
+		t.Errorf("got %s, want %s (json.Marshaler should win over TextMarshaler)", data, `"json:test"`)
+	}
+}
+
+func TestMarshal_MapIntString(t *testing.T) {
+	m := map[int]string{1: "one", 2: "two"}
+	data, err := Marshal(&m)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify it's valid JSON by unmarshaling with stdlib
+	var got map[string]string
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("stdlib unmarshal failed: %v (data: %s)", err, data)
+	}
+	if got["1"] != "one" || got["2"] != "two" {
+		t.Errorf("unexpected result: %v", got)
+	}
+}
+
+func TestUnmarshal_MapIntString(t *testing.T) {
+	var m map[int]string
+	err := Unmarshal([]byte(`{"1":"a","2":"b"}`), &m)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m[1] != "a" || m[2] != "b" {
+		t.Errorf("got %v, want map[1:a 2:b]", m)
+	}
+}
+
+func TestRoundtrip_MapIntString(t *testing.T) {
+	original := map[int]string{10: "ten", 20: "twenty"}
+	data, err := Marshal(&original)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var result map[int]string
+	err = Unmarshal(data, &result)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if result[10] != "ten" || result[20] != "twenty" {
+		t.Errorf("roundtrip mismatch: got %v, want %v", result, original)
+	}
+}
+
+func TestMarshal_MapUintKey(t *testing.T) {
+	m := map[uint64]string{100: "hundred"}
+	data, err := Marshal(&m)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var got map[string]string
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("stdlib unmarshal failed: %v (data: %s)", err, data)
+	}
+	if got["100"] != "hundred" {
+		t.Errorf("unexpected result: %v", got)
+	}
+}
+
+func TestUnmarshal_MapUintKey(t *testing.T) {
+	var m map[uint64]string
+	err := Unmarshal([]byte(`{"100":"hundred"}`), &m)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m[100] != "hundred" {
+		t.Errorf("got %v, want map[100:hundred]", m)
+	}
+}
+
+// textKeyType is a custom type for map keys that implements TextMarshaler.
+type textKeyType struct {
+	A, B string
+}
+
+func (k textKeyType) MarshalText() ([]byte, error) {
+	return []byte(k.A + "/" + k.B), nil
+}
+
+func (k *textKeyType) UnmarshalText(data []byte) error {
+	parts := strings.SplitN(string(data), "/", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("textKeyType: expected a/b format, got %s", data)
+	}
+	k.A = parts[0]
+	k.B = parts[1]
+	return nil
+}
+
+func TestMarshal_MapTextMarshalerKey(t *testing.T) {
+	m := map[textKeyType]string{
+		{A: "x", B: "y"}: "val1",
+	}
+	data, err := Marshal(&m)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var got map[string]string
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("stdlib unmarshal failed: %v (data: %s)", err, data)
+	}
+	if got["x/y"] != "val1" {
+		t.Errorf("unexpected result: %v", got)
+	}
+}
+
+func TestUnmarshal_MapTextUnmarshalerKey(t *testing.T) {
+	var m map[textKeyType]string
+	err := Unmarshal([]byte(`{"x/y":"val1"}`), &m)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := textKeyType{A: "x", B: "y"}
+	if m[expected] != "val1" {
+		t.Errorf("got %v, want map[{x y}:val1]", m)
+	}
+}
+
+func TestRoundtrip_MapTextMarshalerKey(t *testing.T) {
+	original := map[textKeyType]int{
+		{A: "foo", B: "bar"}: 42,
+	}
+	data, err := Marshal(&original)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var result map[textKeyType]int
+	err = Unmarshal(data, &result)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	expected := textKeyType{A: "foo", B: "bar"}
+	if result[expected] != 42 {
+		t.Errorf("roundtrip mismatch: got %v, want %v", result, original)
+	}
+}
+
+func TestMarshal_TextMarshaler_InStruct(t *testing.T) {
+	type S struct {
+		Name string          `json:"name"`
+		Val  textMarshalType `json:"val"`
+	}
+
+	s := S{Name: "test", Val: textMarshalType{Value: "hello"}}
+	data, err := Marshal(&s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify the output
+	var got map[string]string
+	if err = json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("stdlib unmarshal failed: %v (data: %s)", err, data)
+	}
+	if got["name"] != "test" || got["val"] != "text:hello" {
+		t.Errorf("unexpected result: %v", got)
+	}
+
+	// Unmarshal back
+	var s2 S
+	err = Unmarshal(data, &s2)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if s2.Name != "test" || s2.Val.Value != "hello" {
+		t.Errorf("roundtrip mismatch: got %+v, want %+v", s2, s)
+	}
+}
+
+func TestUnmarshal_TextUnmarshaler_Null(t *testing.T) {
+	type S struct {
+		Val *textMarshalType `json:"val"`
+	}
+	s := S{Val: &textMarshalType{Value: "existing"}}
+	err := Unmarshal([]byte(`{"val":null}`), &s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.Val != nil {
+		t.Errorf("got %v, want nil", s.Val)
+	}
+}
+
+func TestUnmarshal_TextUnmarshaler_NonString(t *testing.T) {
+	// TextUnmarshaler expects a JSON string, passing a number should error
+	var v textMarshalType
+	err := Unmarshal([]byte(`123`), &v)
+	if err == nil {
+		t.Fatal("expected error for non-string input to TextUnmarshaler")
+	}
+}
+
+func TestMarshal_MapIntInt(t *testing.T) {
+	m := map[int]int{1: 10, 2: 20}
+	data, err := Marshal(&m)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Roundtrip
+	var result map[int]int
+	err = Unmarshal(data, &result)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if result[1] != 10 || result[2] != 20 {
+		t.Errorf("roundtrip mismatch: got %v", result)
+	}
+}
+
+// Verify stdlib compatibility for map[int]string
+func TestMarshal_MapIntString_StdlibCompat(t *testing.T) {
+	m := map[int]string{1: "a", 2: "b"}
+
+	vjsonData, err := Marshal(&m)
+	if err != nil {
+		t.Fatalf("vjson marshal error: %v", err)
+	}
+
+	stdlibData, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("stdlib marshal error: %v", err)
+	}
+
+	// Both should produce valid JSON that round-trips via stdlib
+	var vjsonResult, stdlibResult map[int]string
+	if err := json.Unmarshal(vjsonData, &vjsonResult); err != nil {
+		t.Fatalf("stdlib unmarshal of vjson data failed: %v", err)
+	}
+	if err := json.Unmarshal(stdlibData, &stdlibResult); err != nil {
+		t.Fatalf("stdlib unmarshal of stdlib data failed: %v", err)
+	}
+	if vjsonResult[1] != stdlibResult[1] || vjsonResult[2] != stdlibResult[2] {
+		t.Errorf("vjson result %v differs from stdlib result %v", vjsonResult, stdlibResult)
+	}
+}
+
+// ---------- stdlib types: net.IP (pure TextMarshaler, no json.Marshaler) ----------
+
+func TestRoundtrip_NetIP(t *testing.T) {
+	ip := net.ParseIP("192.168.1.1")
+	data, err := Marshal(&ip)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	stdData, _ := json.Marshal(ip)
+	if string(data) != string(stdData) {
+		t.Errorf("vjson %s != stdlib %s", data, stdData)
+	}
+
+	var got net.IP
+	if err := Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if !ip.Equal(got) {
+		t.Errorf("roundtrip: got %v, want %v", got, ip)
+	}
+}
+
+func TestRoundtrip_NetIP_IPv6(t *testing.T) {
+	ip := net.ParseIP("::1")
+	data, err := Marshal(&ip)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	stdData, _ := json.Marshal(ip)
+	if string(data) != string(stdData) {
+		t.Errorf("vjson %s != stdlib %s", data, stdData)
+	}
+
+	var got net.IP
+	if err := Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if !ip.Equal(got) {
+		t.Errorf("roundtrip: got %v, want %v", got, ip)
+	}
+}
+
+func TestUnmarshal_NetIP_InStruct(t *testing.T) {
+	type Host struct {
+		Name string `json:"name"`
+		Addr net.IP `json:"addr"`
+	}
+	input := `{"name":"gw","addr":"10.0.0.1"}`
+
+	var got Host
+	if err := Unmarshal([]byte(input), &got); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	var std Host
+	json.Unmarshal([]byte(input), &std)
+
+	if got.Name != std.Name || !got.Addr.Equal(std.Addr) {
+		t.Errorf("got %+v, stdlib got %+v", got, std)
+	}
+}
+
+// ---------- stdlib types: big.Int (*T has json.Marshaler + TextMarshaler) ----------
+
+func TestRoundtrip_BigInt(t *testing.T) {
+	v := new(big.Int).SetInt64(123456789012345)
+	data, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	stdData, _ := json.Marshal(v)
+	if string(data) != string(stdData) {
+		t.Errorf("vjson %s != stdlib %s", data, stdData)
+	}
+
+	var got big.Int
+	if err := Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if v.Cmp(&got) != 0 {
+		t.Errorf("roundtrip: got %v, want %v", &got, v)
+	}
+}
+
+func TestRoundtrip_BigInt_Negative(t *testing.T) {
+	v := new(big.Int).SetInt64(-99999999999)
+	data, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	stdData, _ := json.Marshal(v)
+	if string(data) != string(stdData) {
+		t.Errorf("vjson %s != stdlib %s", data, stdData)
+	}
+
+	var got big.Int
+	if err := Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if v.Cmp(&got) != 0 {
+		t.Errorf("roundtrip: got %v, want %v", &got, v)
+	}
+}
+
+func TestRoundtrip_BigInt_InStruct(t *testing.T) {
+	type Wallet struct {
+		Owner   string   `json:"owner"`
+		Balance *big.Int `json:"balance"`
+	}
+	w := Wallet{Owner: "alice", Balance: new(big.Int).SetInt64(42)}
+	data, err := Marshal(&w)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	stdData, _ := json.Marshal(w)
+	if string(data) != string(stdData) {
+		t.Errorf("vjson %s != stdlib %s", data, stdData)
+	}
+
+	var got Wallet
+	if err := Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if got.Owner != "alice" || got.Balance.Cmp(new(big.Int).SetInt64(42)) != 0 {
+		t.Errorf("roundtrip mismatch: %+v", got)
+	}
+}
+
+// ---------- stdlib types: big.Float (pure TextMarshaler on *T) ----------
+
+func TestRoundtrip_BigFloat(t *testing.T) {
+	v := new(big.Float).SetFloat64(3.14159265358979)
+	data, err := Marshal(&v)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	stdData, _ := json.Marshal(v)
+	if string(data) != string(stdData) {
+		t.Errorf("vjson %s != stdlib %s", data, stdData)
+	}
+
+	var got big.Float
+	if err := Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	// Compare via text: Parse from decimal may yield different precision than SetFloat64,
+	// but the string representation must match.
+	if got.Text('g', -1) != v.Text('g', -1) {
+		t.Errorf("roundtrip: got %s, want %s", got.Text('g', -1), v.Text('g', -1))
+	}
+}
+
+// ---------- stdlib types: time.Time as map key ----------
+
+func TestRoundtrip_MapTimeKey(t *testing.T) {
+	t1 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	t2 := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	m := map[time.Time]string{t1: "new year", t2: "mid year"}
+
+	data, err := Marshal(&m)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	stdData, _ := json.Marshal(m)
+
+	// Verify vjson output parses identically via stdlib
+	var vjsonResult, stdResult map[time.Time]string
+	if err := json.Unmarshal(data, &vjsonResult); err != nil {
+		t.Fatalf("stdlib cannot parse vjson output: %v (data: %s)", err, data)
+	}
+	json.Unmarshal(stdData, &stdResult)
+
+	for k, v := range stdResult {
+		if vjsonResult[k] != v {
+			t.Errorf("key %v: vjson %q != stdlib %q", k, vjsonResult[k], v)
+		}
+	}
+
+	// Roundtrip via vjson
+	var got map[time.Time]string
+	if err := Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if got[t1] != "new year" || got[t2] != "mid year" {
+		t.Errorf("roundtrip mismatch: %v", got)
+	}
+}
+
+// ---------- stdlib types: net.IP as map key ----------
+
+func TestRoundtrip_MapNetIPKey(t *testing.T) {
+	m := map[string]int{"10.0.0.1": 80, "10.0.0.2": 443}
+
+	// net.IP is a slice, not usable as map key directly.
+	// Use string representation and verify TextMarshaler path via struct.
+	type Entry struct {
+		Addr net.IP `json:"addr"`
+		Port int    `json:"port"`
+	}
+	entries := []Entry{
+		{Addr: net.ParseIP("10.0.0.1"), Port: 80},
+		{Addr: net.ParseIP("10.0.0.2"), Port: 443},
+	}
+	data, err := Marshal(&entries)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	stdData, _ := json.Marshal(entries)
+	if string(data) != string(stdData) {
+		t.Errorf("vjson %s != stdlib %s", data, stdData)
+	}
+
+	var got []Entry
+	if err := Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	for i, e := range entries {
+		if !got[i].Addr.Equal(e.Addr) || got[i].Port != e.Port {
+			t.Errorf("[%d] got %+v, want %+v", i, got[i], e)
+		}
+	}
+	_ = m // silence unused
+}
+
+// ---------- stdlib types: time.Time roundtrip vs stdlib ----------
+
+func TestMarshal_TimeTime_StdlibCompat(t *testing.T) {
+	times := []time.Time{
+		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2024, 6, 15, 12, 30, 45, 123456789, time.UTC),
+		time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC),
+		{}, // zero value
+	}
+	for _, ts := range times {
+		vjsonData, err := Marshal(&ts)
+		if err != nil {
+			t.Fatalf("marshal %v: %v", ts, err)
+		}
+		stdData, _ := json.Marshal(ts)
+		if string(vjsonData) != string(stdData) {
+			t.Errorf("time %v: vjson %s != stdlib %s", ts, vjsonData, stdData)
+		}
+
+		var got time.Time
+		if err := Unmarshal(vjsonData, &got); err != nil {
+			t.Fatalf("unmarshal %s: %v", vjsonData, err)
+		}
+		var std time.Time
+		json.Unmarshal(stdData, &std)
+		if !got.Equal(std) {
+			t.Errorf("time %v: vjson got %v, stdlib got %v", ts, got, std)
+		}
 	}
 }

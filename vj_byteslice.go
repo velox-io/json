@@ -12,7 +12,7 @@ import (
 func (sc *Parser) scanStringToSlice(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
 	sDec := ti.Decoder.(*ReflectSliceDecoder)
 	if sDec.ElemTI.Kind != KindUint8 || sDec.ElemSize != 1 {
-		return idx, fmt.Errorf("vjson: cannot assign string to slice field")
+		return idx, newUnmarshalTypeError("string", ti.Ext.Type, idx)
 	}
 
 	newIdx, raw, err := sc.scanStringKey(src, idx)
@@ -32,7 +32,7 @@ func (sc *Parser) scanStringToSlice(src []byte, idx int, ti *TypeInfo, ptr unsaf
 	dbuf := make([]byte, base64.StdEncoding.DecodedLen(len(raw)))
 	n, err := base64.StdEncoding.Decode(dbuf, raw)
 	if err != nil {
-		return newIdx, fmt.Errorf("vjson: invalid base64 in []byte field: %w", err)
+		return newIdx, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid base64 in []byte field: %v", err), newIdx, err)
 	}
 	dbuf = dbuf[:n]
 
