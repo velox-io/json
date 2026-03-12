@@ -20,6 +20,8 @@ func init() {
 	for i := range smallInts {
 		smallInts[i] = strconv.Itoa(i)
 	}
+	// Pre-warm pool so the first Marshal call avoids allocation.
+	marshalerPool.Put(&Marshaler{buf: make([]byte, 0, marshalBufInitSize)})
 }
 
 var (
@@ -104,19 +106,17 @@ type Marshaler struct {
 	depth    int
 	flags    escapeFlags
 	encFlags uint32    // extra VjEncFlags bits (float format, etc.) ORed with flags for VM
-	vmCtx    VjExecCtx // reusable C VM context (avoids per-call stack zeroing of 1248 bytes)
+	vmCtx    VjExecCtx // reusable C VM context (avoids per-call stack zeroing of 992 bytes)
 	inVM     bool      // true while execVM is active; prevents re-entrant VM calls
 
-	// flushFn, when non-nil, enables streaming mode: instead of growing
-	// the buffer indefinitely, the marshaler flushes accumulated data
-	// through this callback whenever the buffer fills up. This is used
-	// by Encoder to write chunks directly to the underlying io.Writer,
-	// keeping memory usage bounded at O(bufCap) instead of O(output_size).
-	//
-	// Future optimization: if the io.Writer implements writev-style
-	// scatter-gather (e.g. net.Buffers / *net.TCPConn), the flush
-	// callback could batch multiple iovec entries for a single syscall
-	// instead of one Write per flush.
+	// indentTpl holds the precomputed "\n" + prefix + indent×MAX_DEPTH template
+	// for the C VM indent path. Only used when isSimpleIndent returns true.
+	// Pointer to pool-allocated array; nil in compact mode (zero overhead).
+	indentTpl *[1 + 255 + maxStackDepth*8]byte
+
+	// flushFn enables streaming mode: flush accumulated data through
+	// this callback instead of growing the buffer indefinitely.
+	// Used by Encoder for bounded O(bufCap) memory.
 	flushFn func([]byte) error
 }
 
@@ -128,8 +128,10 @@ var marshalerPool = sync.Pool{
 	},
 }
 
-func init() {
-	marshalerPool.Put(&Marshaler{buf: make([]byte, 0, marshalBufInitSize)})
+var indentTplPool = sync.Pool{
+	New: func() any {
+		return new([1 + 255 + maxStackDepth*8]byte)
+	},
 }
 
 func getMarshaler() *Marshaler {
@@ -149,8 +151,12 @@ func putMarshaler(m *Marshaler) {
 	if cap(m.buf) > marshalBufPoolLimit {
 		m.buf = nil // discard oversized buffer, let GC reclaim
 	}
+	if m.indentTpl != nil {
+		indentTplPool.Put(m.indentTpl)
+		m.indentTpl = nil
+	}
 	m.flushFn = nil      // clear closure reference before pooling
-	marshalerPool.Put(m) // always recycle the struct (vmCtx is 1248 bytes)
+	marshalerPool.Put(m) // always recycle the struct (vmCtx is 992 bytes)
 }
 
 // flush writes all buffered data through flushFn and resets the buffer.
@@ -164,9 +170,7 @@ func (m *Marshaler) flush() error {
 	return err
 }
 
-// ---------------------------------------------------------------------------
 // Per-Kind encode functions (package-level) for EncodeFn dispatch.
-// ---------------------------------------------------------------------------
 
 func encodeBool(m *Marshaler, ptr unsafe.Pointer) error {
 	if *(*bool)(ptr) {
@@ -462,10 +466,8 @@ func buildStructEncodeSteps(dec *StructCodec) {
 }
 
 // computeHintBytes returns a static byte-count estimate for the JSON encoding
-// of the type described by ti. Unlike the old estimateDataSize, this is
-// computed ONCE at codec construction time and costs nothing at marshal time.
-// For data-dependent types (strings, slices, maps) it uses a conservative
-// fixed estimate; underestimates are safe because the buffer grows via append.
+// of ti, computed once at codec construction time. Conservative for
+// data-dependent types; underestimates are safe (buffer grows via append).
 func computeHintBytes(ti *TypeInfo, depth int) int {
 	if depth > 8 {
 		return 32 // prevent unbounded recursion for deeply nested/recursive types
@@ -582,17 +584,7 @@ func AppendMarshal[T any](dst []byte, v *T, opts ...MarshalOption) ([]byte, erro
 	return result, nil
 }
 
-// finalize returns the encoded JSON as a standalone byte slice and recycles
-// the Marshaler back to the pool.
-//
-// The result is always a newly allocated slice (via makeDirtyBytes — no
-// zeroing, since copy overwrites all bytes). The pool buffer is preserved
-// for reuse, keeping its "warmth" — if it grew during encoding, the next
-// Marshal call of a similar type reuses it without re-allocation.
-//
-// For oversized buffers (cap > marshalBufPoolLimit), putMarshaler will
-// discard the buffer to prevent pool memory bloat; the struct is still
-// recycled.
+// finalize copies the result to a new slice and recycles the Marshaler.
 func (m *Marshaler) finalize() []byte {
 	n := len(m.buf)
 	result := makeDirtyBytes(n, n)
@@ -606,6 +598,39 @@ func (m *Marshaler) appendNewlineIndent() {
 	m.buf = append(m.buf, m.prefix...)
 	for range m.depth {
 		m.buf = append(m.buf, m.indent...)
+	}
+}
+
+// isSimpleIndent returns the indent step (bytes per level) if the indent
+// string is a uniform repetition of spaces or tabs and prefix fits in uint8.
+// Returns 0 if the indent is not suitable for the native VM fast path.
+func isSimpleIndent(prefix, indent string) int {
+	if len(prefix) > 255 || len(indent) == 0 || len(indent) > 8 {
+		return 0
+	}
+	ch := indent[0]
+	if ch != ' ' && ch != '\t' {
+		return 0
+	}
+	for i := 1; i < len(indent); i++ {
+		if indent[i] != ch {
+			return 0
+		}
+	}
+	return len(indent)
+}
+
+// buildIndentTpl fills m.indentTpl with "\n" + prefix + indent×MAX_DEPTH.
+// Allocates the template array from indentTplPool on first use.
+func (m *Marshaler) buildIndentTpl(prefix, indent string) {
+	if m.indentTpl == nil {
+		m.indentTpl = indentTplPool.Get().(*[1 + 255 + maxStackDepth*8]byte)
+	}
+	m.indentTpl[0] = '\n'
+	off := 1
+	off += copy(m.indentTpl[off:], prefix)
+	for range maxStackDepth {
+		off += copy(m.indentTpl[off:], indent)
 	}
 }
 
@@ -865,9 +890,14 @@ func (m *Marshaler) encodeFloat64(ptr unsafe.Pointer) error {
 }
 
 func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
-	// Indent mode: use Go implementation
+	// Indent mode: check if we can use the native VM fast path.
+	// Simple indents (uniform spaces/tabs, no prefix) can be handled
+	// by the C VM; exotic indents fall through to the Go path.
 	if m.indent != "" {
-		return m.encodeStructIndent(dec, base)
+		if m.inVM || !encvm.Available || isSimpleIndent(m.prefix, m.indent) == 0 {
+			return m.encodeStructIndent(dec, base)
+		}
+		return m.encodeStructNative(dec, base)
 	}
 
 	// If we're inside a VM yield handler (e.g. cycle-detected struct fallback),
@@ -1154,18 +1184,9 @@ func (m *Marshaler) encodeAny(ptr unsafe.Pointer) error {
 }
 
 // encodeAnyVal encodes an arbitrary Go value stored in an interface{}.
-// It handles all concrete types that can appear as a JSON value:
-//   - Common JSON types inline: string, float64, bool, []any, map[string]any
-//   - Numeric types: int/int8/../int64, uint/uint8/../uint64, float32
-//   - Special types: []byte (base64), json.Number
-//   - Everything else falls back to encodeAnyReflect (reflect-based)
-//
-// NOTE: encodeAnyMap and encodeAnySlice duplicate the 6 hot cases as an
-// inline type switch in their own loop bodies, then call encodeAnyVal only
-// for the cold default branch. This keeps hot-path code in the same
-// function body as the loop, preserving icache locality and avoiding a
-// function call per iteration. Benchmarks show ~4% regression on
-// map[string]any workloads without this duplication. See encodeAnyMap.
+// Hot types (string, float64, bool, []any, map[string]any) are handled
+// inline; numeric types, []byte, json.Number follow; everything else
+// falls back to encodeAnyReflect.
 func (m *Marshaler) encodeAnyVal(v any) error {
 	if v == nil {
 		m.buf = append(m.buf, litNull...)
@@ -1241,9 +1262,7 @@ func (m *Marshaler) encodeAnyVal(v any) error {
 }
 
 // encodeAnySlice encodes a []any as a JSON array.
-// Hot value types are handled inline to avoid per-element function call
-// overhead; cold types fall through to encodeAnyVal. See encodeAnyVal for
-// rationale.
+// Hot types are inlined for icache locality; cold types fall through to encodeAnyVal.
 func (m *Marshaler) encodeAnySlice(arr []any) error {
 	if arr == nil {
 		m.buf = append(m.buf, litNull...)
@@ -1310,11 +1329,7 @@ func (m *Marshaler) encodeAnySlice(arr []any) error {
 }
 
 // encodeAnyMap encodes a map[string]any as a JSON object.
-// Hot value types (string, float64, bool, nil, []any, map[string]any) are
-// dispatched inline within the loop body to keep the tight iteration code
-// in a single function -- this preserves icache locality and avoids a
-// function call per map entry. Only cold/rare types fall through to
-// encodeAnyVal.
+// Hot types are inlined for icache locality; cold types fall through to encodeAnyVal.
 func (m *Marshaler) encodeAnyMap(mp map[string]any) error {
 	if mp == nil {
 		m.buf = append(m.buf, litNull...)

@@ -1,6 +1,8 @@
 #ifndef VJ_ENCVM_STRING_H
 #define VJ_ENCVM_STRING_H
 
+#include "memfn.h"
+#include "types.h"
 #include "util.h"
 
 // clang-format off
@@ -12,16 +14,16 @@
  *
  * The caller must ensure buf has enough space (worst case 6x + overhead). */
 
-static const char hex_digits[] = "0123456789abcdef";
+static const char HEX_DIGITS[] = "0123456789abcdef";
 
 /* ---- Escape lookup table ----
  *
  * For bytes that need escaping (c < 0x20, '"', '\\'), this table gives:
- *   escape_lut[c] = replacement char for the \X form (e.g. 'n' for \n)
+ *   ESCAPE_LUT[c] = replacement char for the \X form (e.g. 'n' for \n)
  *   0 means use \u00XX form (control chars without a short escape).
  *
  * Entries for safe bytes (>= 0x20, not " or \) are unused and zero. */
-static const uint8_t escape_lut[256] = {
+static const uint8_t ESCAPE_LUT[256] = {
     /* 0x00-0x07: \u00XX */ 0, 0, 0, 0, 0, 0, 0, 0,
     /* 0x08 \b */ 'b',
     /* 0x09 \t */ 't',
@@ -44,7 +46,7 @@ static const uint8_t escape_lut[256] = {
  * for the remaining control characters (0x00-0x1F without a short form).
  * Returns number of bytes written (2 or 6). */
 ALWAYS_INLINE int escape_byte(uint8_t *buf, uint8_t c) {
-  uint8_t repl = escape_lut[c];
+  uint8_t repl = ESCAPE_LUT[c];
   if (__builtin_expect(repl != 0, 1)) {
     buf[0] = '\\';
     buf[1] = repl;
@@ -55,8 +57,8 @@ ALWAYS_INLINE int escape_byte(uint8_t *buf, uint8_t c) {
   buf[1] = 'u';
   buf[2] = '0';
   buf[3] = '0';
-  buf[4] = hex_digits[c >> 4];
-  buf[5] = hex_digits[c & 0x0F];
+  buf[4] = HEX_DIGITS[c >> 4];
+  buf[5] = HEX_DIGITS[c & 0x0F];
   return 6;
 }
 
@@ -64,10 +66,10 @@ ALWAYS_INLINE int escape_byte(uint8_t *buf, uint8_t c) {
 static inline int write_unicode_escape(uint8_t *buf, uint32_t cp) {
   buf[0] = '\\';
   buf[1] = 'u';
-  buf[2] = hex_digits[(cp >> 12) & 0xF];
-  buf[3] = hex_digits[(cp >> 8) & 0xF];
-  buf[4] = hex_digits[(cp >> 4) & 0xF];
-  buf[5] = hex_digits[cp & 0xF];
+  buf[2] = HEX_DIGITS[(cp >> 12) & 0xF];
+  buf[3] = HEX_DIGITS[(cp >> 8) & 0xF];
+  buf[4] = HEX_DIGITS[(cp >> 4) & 0xF];
+  buf[5] = HEX_DIGITS[cp & 0xF];
   return 6;
 }
 
@@ -484,7 +486,7 @@ ALWAYS_INLINE int64_t vj_escape_nonascii_run(uint8_t **out_ptr, const uint8_t *s
  * For non-ASCII (>= 0x80): delegates to vj_escape_nonascii_run which
  * batch-processes the entire contiguous non-ASCII segment.
  *
- * Uses the escape_lut lookup table for branchless escape selection.
+ * Uses the ESCAPE_LUT lookup table for branchless escape selection.
  * The `html` parameter must be a compile-time constant. */
 #define ESCAPE_ONE_INLINE(html)                                                \
   do {                                                                         \

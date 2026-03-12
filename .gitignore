@@ -36,3 +36,4 @@ testdata/fuzz/
 .DS_Store
 Thumbs.db
 
+*.bck.yml

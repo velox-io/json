@@ -240,8 +240,8 @@ func (sc *Parser) scanNumberToString(src []byte, idx int, ptr unsafe.Pointer) (i
 	if idx >= len(src) {
 		return idx, errUnexpectedEOF
 	}
-	switch {
-	case src[idx] == '"':
+	switch src[idx] {
+	case '"':
 		// Quoted number: "123" → json.Number("123")
 		newIdx, s, err := sc.scanString(src, idx)
 		if err != nil {
@@ -249,7 +249,7 @@ func (sc *Parser) scanNumberToString(src []byte, idx int, ptr unsafe.Pointer) (i
 		}
 		*(*string)(ptr) = s
 		return newIdx, nil
-	case src[idx] == 'n':
+	case 'n':
 		// null → empty json.Number (zero value)
 		if idx+4 > len(src) {
 			return idx, errUnexpectedEOF

@@ -16,8 +16,15 @@ func vjVMExecDefaultNeon(ctx unsafe.Pointer)
 //go:nosplit
 func vjVMExecFastNeon(ctx unsafe.Pointer)
 
+// ---- Compact mode ----
+
+//go:noescape
+//go:nosplit
+func vjVMExecCompactNeon(ctx unsafe.Pointer)
+
 func init() {
 	vmExec = vjVMExecDefaultNeon
 	vmExecFast = vjVMExecFastNeon
+	vmExecCompact = vjVMExecCompactNeon
 	Available = true
 }

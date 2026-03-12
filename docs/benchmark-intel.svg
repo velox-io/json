@@ -12,6 +12,7 @@
     .badge-ratio { font-size: 9.5px; fill: #e74c3c; font-weight: bold; }
     .dim { fill: #95a5a6; }
   </style>
+  <rect width="960" height="7558" fill="#fdf6e3"/>
   <text x="480" y="54" text-anchor="middle" class="title">Benchmark Results</text>
   <text x="480" y="74" text-anchor="middle" class="subtitle">goos: linux  |  goarch: amd64  |  cpu: Intel(R) Xeon(R) Gold 6133 CPU @ 2.50GHz</text>
   <rect x="264" y="89" width="14" height="14" rx="3" fill="#e67e22" opacity="0.85"/>

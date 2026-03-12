@@ -126,19 +126,9 @@ func unescapeSequence(data []byte, n int, i int, dst []byte, pos int) (int, int,
 }
 
 // unescapeSinglePass scans src from firstEscIdx for the closing '"', unescaping
-// escape sequences as it goes. src[start:firstEscIdx] is the prefix before the
-// first backslash (copied verbatim).
-//
+// as it goes. src[start:firstEscIdx] is the prefix before the first backslash.
 // Returns (endIdx past closing quote, decoded []byte, error).
-//
-// Decoded bytes land in one of three storage tiers (chosen at the done: label):
-//
-//  1. Arena — when the result fits in the current arena block, it is decoded
-//     directly there (zero-copy, no extra allocation).
-//  2. Scratch → arena/heap — when the scratch buffer was used, the result is
-//     copied to the arena (if small) or a new heap slice (if large).
-//  3. Heap — when the scratch buffer overflowed into a heap-allocated slice,
-//     that slice is used directly.
+// Decoded bytes land in arena (zero-copy), scratch→arena/heap, or heap overflow.
 func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, []byte, error) {
 	n := len(src)
 

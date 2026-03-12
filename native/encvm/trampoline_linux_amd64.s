@@ -5,7 +5,7 @@
 // On Linux (ELF), C symbols have no underscore prefix — the Go linker
 // handles this automatically.
 //
-// Each ISA has two mode variants: default and fast.
+// Each ISA has three mode variants: default, compact, and fast.
 
 #include "textflag.h"
 
@@ -42,3 +42,20 @@ TEXT ·vjVMExecFastAVX2(SB), NOSPLIT, $0-8
 TEXT ·vjVMExecFastAVX512(SB), NOSPLIT, $0-8
 	MOVQ ctx+0(FP), DI
 	JMP  vj_vm_exec_fast_avx512(SB)
+
+// ---- Compact mode ----
+
+// func vjVMExecCompactSSE42(ctx unsafe.Pointer)
+TEXT ·vjVMExecCompactSSE42(SB), NOSPLIT, $0-8
+	MOVQ ctx+0(FP), DI
+	JMP  vj_vm_exec_compact_sse42(SB)
+
+// func vjVMExecCompactAVX2(ctx unsafe.Pointer)
+TEXT ·vjVMExecCompactAVX2(SB), NOSPLIT, $0-8
+	MOVQ ctx+0(FP), DI
+	JMP  vj_vm_exec_compact_avx2(SB)
+
+// func vjVMExecCompactAVX512(ctx unsafe.Pointer)
+TEXT ·vjVMExecCompactAVX512(SB), NOSPLIT, $0-8
+	MOVQ ctx+0(FP), DI
+	JMP  vj_vm_exec_compact_avx512(SB)

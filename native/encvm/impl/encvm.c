@@ -1,4 +1,3 @@
-#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -6,13 +5,15 @@
 
 /* ---------- Build configuration validation ---------- */
 #if !defined(OS)
-  #error "OS must be defined (linux, darwin, or windows)"
+#error "OS must be defined (linux, darwin, or windows)"
 #endif
 #if !defined(ARCH)
-  #error "ARCH must be defined (arm64 or amd64)"
+#error "ARCH must be defined (arm64 or amd64)"
 #endif
-#if !defined(ISA_NEON) && !defined(ISA_SSE42) && !defined(ISA_AVX2) && !defined(ISA_AVX512)
-  #error "ISA must be defined (use -DISA_NEON, -DISA_SSE42, -DISA_AVX2, or -DISA_AVX512)"
+#if !defined(ISA_NEON) && !defined(ISA_SSE42) && !defined(ISA_AVX2) &&         \
+    !defined(ISA_AVX512)
+#error                                                                         \
+    "ISA must be defined (use -DISA_NEON, -DISA_SSE42, -DISA_AVX2, or -DISA_AVX512)"
 #endif
 
 /* ---------- Mode configuration ----------
@@ -21,9 +22,16 @@
  * VJ_FAST_STRING_ESCAPE: when defined, the VM unconditionally uses
  *   the fast string escape path (no HTML/UTF-8/line-terminator
  *   checks).  All runtime flag dispatch for string escaping is
- *   eliminated at compile time. */
+ *   eliminated at compile time.
+ *
+ * VJ_COMPACT_INDENT: when defined, all indent-related variables are
+ *   replaced with compile-time constants (indent_step=0, etc.),
+ *   allowing the compiler to DCE all indent code paths. */
 #if defined(MODE_FAST)
-  #define VJ_FAST_STRING_ESCAPE
+#define VJ_FAST_STRING_ESCAPE
+#define VJ_COMPACT_INDENT
+#elif defined(MODE_COMPACT)
+#define VJ_COMPACT_INDENT
 #endif
 
 /* ---------- Engine implementation ---------- */
@@ -57,25 +65,29 @@
  * alignment, making it robust against any upstream layout changes. */
 
 #if defined(__x86_64__)
-  #define VJ_ALIGN_STACK __attribute__((force_align_arg_pointer))
+#define VJ_ALIGN_STACK __attribute__((force_align_arg_pointer))
 #else
-  #define VJ_ALIGN_STACK
+#define VJ_ALIGN_STACK
 #endif
 
 #if defined(MODE_FAST)
-  #define VJ_MODE_TAG fast
+#define VJ_MODE_TAG fast
+#elif defined(MODE_COMPACT)
+#define VJ_MODE_TAG compact
 #elif defined(MODE_DEFAULT)
-  #define VJ_MODE_TAG default
+#define VJ_MODE_TAG default
 #else
-  #define VJ_MODE_TAG default
+#define VJ_MODE_TAG default
 #endif
 
 /* Two-level expansion so VJ_MODE_TAG is expanded before pasting. */
 #define VJ_VM_EXEC_NAME2(mode, isa) vj_vm_exec_##mode##_##isa
-#define VJ_VM_EXEC_NAME(mode, isa)  VJ_VM_EXEC_NAME2(mode, isa)
+#define VJ_VM_EXEC_NAME(mode, isa) VJ_VM_EXEC_NAME2(mode, isa)
 
-#define GEN_VM_EXEC(isa) \
-  VJ_ALIGN_STACK void VJ_VM_EXEC_NAME(VJ_MODE_TAG, isa)(VjExecCtx *ctx) { vj_vm_exec(ctx); }
+#define GEN_VM_EXEC(isa)                                                       \
+  VJ_ALIGN_STACK void VJ_VM_EXEC_NAME(VJ_MODE_TAG, isa)(VjExecCtx * ctx) {     \
+    vj_vm_exec(ctx);                                                           \
+  }
 
 #if defined(ISA_NEON)
 GEN_VM_EXEC(neon)

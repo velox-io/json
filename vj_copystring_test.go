@@ -30,8 +30,8 @@ func corruptBuf(buf []byte) {
 
 func TestCopyTag_FieldLevel(t *testing.T) {
 	type S struct {
-		Copied  string `json:"copied,copy"`
-		NoCopy  string `json:"noCopy"`
+		Copied string `json:"copied,copy"`
+		NoCopy string `json:"noCopy"`
 	}
 	input := []byte(`{"copied":"hello","noCopy":"world"}`)
 	buf := make([]byte, len(input))

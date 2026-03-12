@@ -12,7 +12,7 @@ import (
 // *SyntaxError in the Unmarshal/Decode entry points.
 var errUnexpectedEOF = errors.New("vjson: unexpected end of input")
 
-// --- SyntaxError ---
+// SyntaxError
 
 // SyntaxError indicates that the input is not valid JSON.
 type SyntaxError struct {
@@ -42,7 +42,7 @@ func newSyntaxErrorWrap(msg string, offset int, err error) *SyntaxError {
 	return &SyntaxError{msg: msg, Offset: int64(offset), Err: err}
 }
 
-// --- UnmarshalTypeError ---
+// UnmarshalTypeError
 
 // UnmarshalTypeError describes a JSON value that cannot be assigned to a Go type.
 type UnmarshalTypeError struct {
@@ -80,7 +80,7 @@ func newUnmarshalTypeError(value string, t reflect.Type, offset int) *UnmarshalT
 	return &UnmarshalTypeError{Value: value, Type: t, Offset: int64(offset)}
 }
 
-// --- InvalidUnmarshalError ---
+// InvalidUnmarshalError
 
 // InvalidUnmarshalError describes an invalid argument passed to Unmarshal
 // (must be a non-nil pointer).
@@ -107,7 +107,7 @@ func (e *InvalidUnmarshalError) As(target any) bool {
 	return false
 }
 
-// --- UnsupportedTypeError ---
+// UnsupportedTypeError
 
 // UnsupportedTypeError indicates an attempt to marshal an unsupported type.
 type UnsupportedTypeError struct {
@@ -127,7 +127,7 @@ func (e *UnsupportedTypeError) As(target any) bool {
 	return false
 }
 
-// --- UnsupportedValueError ---
+// UnsupportedValueError
 
 // UnsupportedValueError indicates an attempt to marshal an unsupported value
 // (e.g. NaN or Inf floats).
@@ -149,7 +149,7 @@ func (e *UnsupportedValueError) As(target any) bool {
 	return false
 }
 
-// --- MarshalerError ---
+// MarshalerError
 
 // MarshalerError wraps an error returned by a custom MarshalJSON method.
 type MarshalerError struct {

@@ -649,9 +649,10 @@ func (r *fuzzReader) readSafeString() string {
 	for i, c := range b {
 		// Map to printable ASCII range [0x20, 0x7E], avoiding '"' and '\\'
 		c = c%0x5F + 0x20 // [0x20, 0x7E]
-		if c == '"' {
+		switch c {
+		case '"':
 			c = 'A'
-		} else if c == '\\' {
+		case '\\':
 			c = 'B'
 		}
 		b[i] = c

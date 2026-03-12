@@ -93,6 +93,9 @@ func RenderSVG(data *BenchData) string {
 		svgWidth, totalH, FontMono)
 	b.WriteString(svgStyles())
 
+	// Opaque background so the SVG is legible in dark-mode contexts.
+	fmt.Fprintf(&b, `  <rect width="%d" height="%d" fill="#fdf6e3"/>`+"\n", svgWidth, totalH)
+
 	// === Header ===
 	title := data.Title
 	if title == "" {

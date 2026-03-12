@@ -5,19 +5,8 @@ import (
 	"unsafe"
 )
 
-// ================================================================
-// Blueprint Compiler — Native VM
-//
-// Compiles a StructCodec (type metadata) into a flat, linear
-// instruction stream (Blueprint). The compiler recursively walks
-// the type tree and emits instructions into a single []VjOpStep.
-//
-// Key invariants:
-//   - One Blueprint per top-level struct type, cached in StructCodec
-//   - All nested structs, pointers, slices are inlined
-//   - No pointer-chasing at runtime (SubOps eliminated)
-//   - KeyPool is a contiguous []byte holding all pre-encoded keys
-// ================================================================
+// Blueprint Compiler — compiles a StructCodec into a flat, linear
+// instruction stream (Blueprint) with all nested types inlined.
 
 // blueprintBuilder accumulates instructions and key data during compilation.
 type blueprintBuilder struct {
@@ -25,12 +14,9 @@ type blueprintBuilder struct {
 	keyPool   []byte
 	fallbacks map[int]*fbInfo // PC index → fallback info
 
-	// visiting tracks struct types currently being compiled along the
-	// recursive call chain (through pointers). This prevents infinite
-	// recursion when two struct types form a cycle via pointer fields
-	// (e.g. type A struct { B *B }; type B struct { A *A }).
-	// When a cycle is detected, an OP_FALLBACK is emitted instead of
-	// inlining the struct body, deferring to the Go encoder.
+	// visiting tracks struct types on the current recursive call chain
+	// to detect pointer cycles (e.g. type A struct { B *B }; type B struct { A *A }).
+	// Cycles emit OP_FALLBACK instead of inlining.
 	visiting map[reflect.Type]bool
 }
 
@@ -41,9 +27,7 @@ func (b *blueprintBuilder) emit(op VjOpStep) int {
 	return idx
 }
 
-// addKey appends key bytes to the KeyPool and returns a pointer+length.
-// The returned pointer is only valid after the final KeyPool is allocated;
-// we use the index approach and fix up pointers at the end.
+// addKey appends key bytes to the KeyPool and returns pool offset + length.
 func (b *blueprintBuilder) addKey(keyBytes []byte) (poolOffset int, keyLen uint16) {
 	if len(keyBytes) == 0 {
 		return 0, 0
@@ -260,25 +244,19 @@ func emitNestedStruct(b *blueprintBuilder, fixups *[]keyFixup, fi *TypeInfo, fie
 	openIdx := b.emit(VjOpStep{
 		OpType: opObjOpen,
 		KeyLen: keyLen,
-		// FieldOff unused by OBJ_OPEN (no base switch)
 	})
 	if keyLen > 0 {
 		*fixups = append(*fixups, keyFixup{opIdx: openIdx, poolOffset: poolOff})
 	}
 
-	// Mark this struct type as visiting to detect cycles through pointers.
-	// For example: type A struct { B B }; type B struct { Back *B }
-	// Without this mark, *B → B → *B → B → ... would recurse forever.
+	// Mark type as visiting to detect cycles through pointers.
 	wasVisiting := b.visiting[subDec.Typ]
 	b.visiting[subDec.Typ] = true
 
-	// Emit child fields with accumulated offset (baseOff = fieldOff).
-	// Since OBJ_OPEN doesn't switch base, child field offsets must be
-	// absolute from the top-level struct.
+	// Emit child fields with accumulated offset (no base switch).
 	emitStructBody(b, fixups, subDec, fieldOff)
 
-	// Restore previous visiting state (don't unconditionally delete —
-	// the type might have been visiting from an outer scope).
+	// Restore previous visiting state.
 	if !wasVisiting {
 		delete(b.visiting, subDec.Typ)
 	}
@@ -638,10 +616,6 @@ func emitSkipIfZeroPlaceholder(b *blueprintBuilder, _ *[]keyFixup, _ *TypeInfo, 
 		OperandA: 0, // placeholder, patched by caller
 	})
 }
-
-// ================================================================
-// Blueprint cache integration with StructCodec
-// ================================================================
 
 // getBlueprint returns the compiled Blueprint for this StructCodec.
 // Results are cached after the first call (thread-safe).

@@ -57,7 +57,7 @@ func (dec *StructCodec) LookupFieldBytes(key []byte) *TypeInfo {
 	return nil
 }
 
-// --- Build phase (called once per struct type at initialization) ---
+// Build phase (called once per struct type at initialization).
 
 // buildLookup selects and constructs the optimal lookup strategy for a
 // StructCodec based on its field count. Called once at construction.
@@ -175,7 +175,7 @@ func buildMapFallback(dec *StructCodec) {
 	dec.LookupMode = lookupModeMap
 }
 
-// --- Lookup strategies (one is selected per struct by buildLookup) ---
+// Lookup strategies (one is selected per struct by buildLookup).
 
 // lookupEmpty always returns nil (zero-field struct).
 func lookupEmpty(_ *StructCodec, _ string) *TypeInfo {
@@ -220,7 +220,7 @@ func lookupMap(dec *StructCodec, key string) *TypeInfo {
 	return dec.FieldMap[key]
 }
 
-// --- Hash mixers ---
+// Hash mixers.
 
 // hashMixer is a hash function type used for perfect hash construction.
 type hashMixer func(s string, seed uint64) uint64
@@ -245,13 +245,9 @@ func simpleMixer(s string, seed uint64) uint64 {
 	return h
 }
 
-// mulaccMixer uses a multiply-accumulate chain over 5 positions:
-// first, last, middle, second, and penultimate bytes, seeded with length.
-// These positions capture prefix/suffix and interior to reduce collisions
-// for names with shared prefixes/suffixes (e.g. "profile_*").
-// The chained multiply makes each position's contribution dependent on prior ones,
-// providing stronger distribution than XOR-based mixers.
-// Still O(1) constant time, works well for 30-100+ fields.
+// mulaccMixer uses a multiply-accumulate chain over 5 byte positions
+// (first, last, mid, second, penultimate), seeded with length.
+// O(1) constant time, works well for 30-100+ fields.
 func mulaccMixer(s string, seed uint64) uint64 {
 	n := uint64(len(s))
 	if n == 0 {
@@ -286,7 +282,7 @@ func fnv1aMixer(s string, seed uint64) uint64 {
 	return h
 }
 
-// --- ASCII case conversion ---
+// ASCII case conversion.
 
 // toLowerASCII returns a lowercased version of s for ASCII letters.
 // If s contains no uppercase ASCII, returns s directly (common case, zero alloc).
@@ -321,10 +317,8 @@ const (
 	swarHi64 = uint64(0x8080808080808080)
 )
 
-// hasUpperASCII reports whether any byte in key is an uppercase ASCII letter (A-Z).
-// Uses SWAR range test: adding (0x80-0x5B) to a byte in [0x41,0x5A] sets the high
-// bit, while adding (0x80-0x41) does not overflow for the same range. XOR of the
-// two results has the high bit set only for bytes in [0x41,0x5A] (i.e. A-Z).
+// hasUpperASCII reports whether any byte in key is an uppercase ASCII letter.
+// Uses SWAR range test: bytes in [0x41,0x5A] (A-Z) set the high bit marker.
 func hasUpperASCII(key []byte) bool {
 	const (
 		addLo = (0x80 - 0x5B) * swarLo64 // 0x2525252525252525

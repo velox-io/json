@@ -1,33 +1,27 @@
 #!/usr/bin/env bash
 #
-# gen-natives.sh - Expand macros, compile, and generate Go integration files
+# gen-natives.sh - Compile C sources, generate Go integration files
 #
 # Usage:
-#   ./gen-natives.sh [--zig] [--asm] [target_os] [target_arch]
+#   ./gen-natives.sh [--zig] [--asm] <sources.sh> [target_os] [target_arch]
 #
 # Options:
 #   --zig         - Force using zig cc even for native (non-cross) builds.
 #   --asm         - Generate assembly files for debugging.
 #
 # Arguments:
+#   sources.sh  - Build configuration file (relative to repo root). Defines:
+#                    SOURCE_FILE, STDLIB_SOURCES, EXTRA_SOURCES, TARGET_DIR
 #   target_os   - Target OS (linux, darwin, windows). Default: host OS.
 #   target_arch - Target architecture (arm64, amd64). Default: host arch.
 #
-# Environment variables (required):
-#   SOURCE_FILE   - Source C file.
-#   TARGET_DIR    - Target directory for .syso/.s files.
-#   OUTPUT_DIR    - Output directory for .o files. Default: build/native
-#
 # Environment variables (optional):
-#   STDLIB_SOURCES - Space-separated list of stdlib .c files (e.g. memcpy/memset
-#                    implementations). Compiled with -fno-builtin-memcpy/memset.
-#   EXTRA_SOURCES  - Space-separated list of additional .c files to compile
-#                    and link.
+#   OUTPUT_DIR    - Output directory for intermediate .o files. Default: build/native
 #
 # Output:
 #   - {OUTPUT_DIR}/{basename}[_{mode}]_{os}_{arch}_{isa}.o
 #   - {TARGET_DIR}/{basename}_{os}_{arch}.syso  (all ISAs, all modes combined)
-#   - {TARGET_DIR}/asm/{basename}[_{mode}]_{os}_{arch}_{isa}.s (has disables)
+#   - {TARGET_DIR}/asm/{basename}[_{mode}]_{os}_{arch}_{isa}.s (if --asm)
 #
 # Cross-compilation terminology:
 #   HOST  - The machine running the compiler (current machine)
@@ -53,27 +47,61 @@ while [[ "${1:-}" == --* ]]; do
 done
 
 # ============================================================
-#  Configuration (required)
+#  Load build configuration from sources.sh
 # ============================================================
 
-if [ -z "$SOURCE_FILE" ]; then
-    echo "Error: SOURCE_FILE is required"
+SOURCES_FILE="${1:-}"
+shift || true
+
+if [ -z "$SOURCES_FILE" ]; then
+    echo "Error: sources.sh path is required as first argument"
+    echo "Usage: gen-natives.sh [--zig] [--asm] <sources.sh> [target_os] [target_arch]"
     exit 1
 fi
 
-if [ -z "$TARGET_DIR" ]; then
-    echo "Error: TARGET_DIR is required"
+if [ ! -f "$REPO_ROOT/$SOURCES_FILE" ]; then
+    echo "Error: sources file not found: $REPO_ROOT/$SOURCES_FILE"
     exit 1
 fi
+
+# Source the configuration (sets SOURCE_FILE, STDLIB_SOURCES, EXTRA_SOURCES, TARGET_DIR)
+source "$REPO_ROOT/$SOURCES_FILE"
+
+# Validate required variables
+if [ -z "$SOURCE_FILE" ]; then
+    echo "Error: SOURCE_FILE not defined in $SOURCES_FILE"
+    exit 1
+fi
+if [ -z "$TARGET_DIR" ]; then
+    echo "Error: TARGET_DIR not defined in $SOURCES_FILE"
+    exit 1
+fi
+
+# Convert relative paths to absolute
+SOURCE_FILE="$REPO_ROOT/$SOURCE_FILE"
+TARGET_DIR="$REPO_ROOT/$TARGET_DIR"
+
+# Convert space-separated relative paths to absolute
+_abs_paths() {
+    local result=""
+    for p in $1; do
+        p=$(echo "$p" | xargs)  # trim whitespace
+        [ -z "$p" ] && continue
+        result="$result $REPO_ROOT/$p"
+    done
+    echo "$result"
+}
+STDLIB_SOURCES=$(_abs_paths "$STDLIB_SOURCES")
+EXTRA_SOURCES=$(_abs_paths "$EXTRA_SOURCES")
 
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/build/native}"
+mkdir -p "$OUTPUT_DIR"
 
-VJ_LIB_DIR="native/encvm/impl"
+# Derive VJ_LIB_DIR from the source file's directory
+VJ_LIB_DIR=$(dirname "$SOURCE_FILE")
 
 # Derive base name from source file
 BASENAME=$(basename "$SOURCE_FILE" .c)
-
-# mkdir -p "$OUTPUT_DIR" "$TARGET_DIR/asm"
 
 # ============================================================
 #  Host platform detection
@@ -231,7 +259,27 @@ if [ -z "$ISAS" ]; then
 fi
 
 # Modes
-ALL_MODES="${MODES:-default fast}"
+ALL_MODES="${MODES:-default compact fast}"
+
+# ============================================================
+#  LTO support
+#
+#  zig cc does not support -flto when targeting darwin (Mach-O)
+#  because its LLD Mach-O backend lacks LTO. For darwin cross-builds
+#  we skip LTO; the native build on a real Mac with clang still uses
+#  full LTO.
+# ============================================================
+
+USE_LTO=true
+if [ "$USE_ZIG" = true ] && [ "$TARGET_OS" = "darwin" ]; then
+    USE_LTO=false
+    echo "Note: LTO disabled (zig cc does not support -flto for darwin targets)"
+fi
+
+LTO_FLAG=""
+if [ "$USE_LTO" = true ]; then
+    LTO_FLAG="-flto"
+fi
 
 # ============================================================
 #  ISA-specific compiler flags
@@ -301,18 +349,24 @@ for stdlib_src in $STDLIB_SOURCES; do
 done
 
 # ============================================================
-#  Compile extra sources (ISA-independent, compiled once per target)
+#  Compile extra sources (compiled once per target with minimum ISA)
 #
 #  Each extra source is compiled once and linked with all ISA objects.
+#  Uses the minimum (first) ISA's flags so that intrinsics like SSSE3's
+#  _mm_shuffle_epi8 (used in number.h) compile correctly.
 # ============================================================
+
+# Get minimum ISA flags (first ISA in the list is the baseline)
+MIN_ISA=$(echo $ISAS | awk '{print $1}')
+MIN_ISA_FLAGS=$(get_isa_flags "$MIN_ISA")
 
 for extra_src in $EXTRA_SOURCES; do
     if [ -f "$extra_src" ]; then
         extra_base=$(basename "$extra_src" .c)
         extra_obj="${OUTPUT_DIR}/${extra_base}_${TARGET_OS}_${TARGET_ARCH}.o"
-        echo "  Compiling $(basename "$extra_obj") (extra source)"
-        $CC -O3 -fPIC -g0 -fno-stack-protector $ARCH_FLAGS \
-            -I"$(dirname "$extra_src")" -I"$REPO_ROOT/native/include" \
+        echo "  Compiling $(basename "$extra_obj") (extra source,${USE_LTO:+ LTO,} min ISA: $MIN_ISA)"
+        $CC -O3 $LTO_FLAG -fPIC -g0 -fno-stack-protector $ARCH_FLAGS $MIN_ISA_FLAGS \
+            -I"$(dirname "$extra_src")" -I"$REPO_ROOT/native/include" -I"$REPO_ROOT/native" \
             -c "$extra_src" -o "$extra_obj"
         ALL_OBJS="$ALL_OBJS $extra_obj"
     else
@@ -333,6 +387,8 @@ for isa in $ISAS; do
         MODE_FLAG=""
         if [ "$mode" = "default" ]; then
             MODE_FLAG="-DMODE_DEFAULT"
+        elif [ "$mode" = "compact" ]; then
+            MODE_FLAG="-DMODE_COMPACT"
         elif [ "$mode" = "fast" ]; then
             MODE_FLAG="-DMODE_FAST"
         fi
@@ -345,11 +401,11 @@ for isa in $ISAS; do
         ISA_UPPER=$(printf '%s' "$isa" | tr '[:lower:]' '[:upper:]')
         ISA_MACRO="-DISA_${ISA_UPPER}"
         COMMON_DEFS="$ISA_MACRO $MODE_FLAG -DOS=${TARGET_OS} -DARCH=${TARGET_ARCH}"
-        COMMON_INCLUDES="-I$(dirname "$SOURCE_FILE") -I$REPO_ROOT/$VJ_LIB_DIR -I$REPO_ROOT/native/include -I$REPO_ROOT/native"
+        COMMON_INCLUDES="-I$(dirname "$SOURCE_FILE") -I$VJ_LIB_DIR -I$REPO_ROOT/native/include -I$REPO_ROOT/native"
 
-        # Step 1: Compile to object
+        # Step 1: Compile to object (with LTO when supported, for cross-TU inlining)
         echo "  Compiling $(basename "$OFILE")"
-        $CC -O3 -fPIC -g0 -fno-stack-protector $ARCH_FLAGS $ISA_FLAGS \
+        $CC -O3 $LTO_FLAG -fPIC -g0 -fno-stack-protector $ARCH_FLAGS $ISA_FLAGS \
             $COMMON_DEFS $COMMON_INCLUDES \
             -c "$SOURCE_FILE" -o "$OFILE"
         ALL_OBJS="$ALL_OBJS $OFILE"
@@ -400,10 +456,8 @@ done
 #  Link into single .syso
 #
 #  Strategy based on target platform:
-#  - Linux amd64: use prelink.sh (Go internal linker cannot handle R_X86_64_PC32)
-#  - Linux arm64: ld -r (NEON has no cross-section relocations)
-#  - Darwin arm64: dylib prelink (zero-relocation syso via dylib_to_obj.py)
-#  - Windows: ld -r
+#  - darwin, linux/amd64: prelink (LTO link → extract .text → zero-relocation object)
+#  - linux/arm64, windows: ld -r (simple relocatable link)
 # ============================================================
 
 SYSO_NAME="${BASENAME}_${TARGET_OS}_${TARGET_ARCH}.syso"
@@ -416,27 +470,40 @@ for obj in $ALL_OBJS; do
     echo "  $obj"
 done
 
-# Check if target platform needs prelink (ET_DYN → ET_REL conversion)
-NEEDS_PRELINK=false
-if [ "$TARGET_OS" = "linux" ] && [ "$TARGET_ARCH" = "amd64" ]; then
-    NEEDS_PRELINK=true
+# Check if target platform needs prelink (resolved relocations, zero-reloc output)
+needs_prelink() {
+    if [ "$TARGET_OS" = "darwin" ]; then return 0; fi
+    if [ "$TARGET_OS" = "linux" ] && [ "$TARGET_ARCH" = "amd64" ]; then return 0; fi
+    return 1
+}
 
-    # Linux amd64: use prelink.sh (Go internal linker cannot handle R_X86_64_PC32)
+if needs_prelink; then
     ZIG_TARGET=$(get_zig_target "$TARGET_OS" "$TARGET_ARCH")
-    "$REPO_ROOT/scripts/prelink.sh" -l -o "$SYSO_PATH" -t "$ZIG_TARGET" $ALL_OBJS
-fi
+    PRELINK_FLAGS="-o $SYSO_PATH -t $ZIG_TARGET"
+    if [ "$USE_LTO" = true ]; then
+        PRELINK_FLAGS="-l $PRELINK_FLAGS"
+    fi
 
-if [ "$NEEDS_PRELINK" != true ]; then
-    echo "Create syso without pre-linking..."
+    # Darwin needs export symbol list
+    if [ "$TARGET_OS" = "darwin" ]; then
+        EXPORT_LIST="$OUTPUT_DIR/_exports.txt"
+        > "$EXPORT_LIST"
+        for isa in $ISAS; do
+            for mode in $ALL_MODES; do
+                echo "_vj_vm_exec_${mode}_${isa}" >> "$EXPORT_LIST"
+            done
+        done
+        PRELINK_FLAGS="$PRELINK_FLAGS -e $EXPORT_LIST"
+    fi
+
+    "$REPO_ROOT/scripts/prelink.sh" $PRELINK_FLAGS $ALL_OBJS
+else
+    # Simple relocatable link (linux/arm64, windows, etc.)
     if [ "$USE_ZIG" = true ]; then
-        # Use zig's bundled lld for relocatable link.
-        # "zig cc -r" on older zig versions produces ET_EXEC instead of ET_REL,
-        # so we invoke ld.lld directly which correctly produces ET_REL.
+        echo "Create syso without pre-linking..."
         zig ld.lld -r $ALL_OBJS -o "$SYSO_PATH"
-    elif [ "$TARGET_OS" = "darwin" ]; then
-        # Native darwin: use system ld (Apple ld64) explicitly
-        /usr/bin/ld -r -arch "$TARGET_ARCH" -o "$SYSO_PATH" $ALL_OBJS
     else
+        echo "Create syso without pre-linking..."
         ld -r -o "$SYSO_PATH" $ALL_OBJS
     fi
 fi
@@ -450,7 +517,7 @@ fi
 #  when editing .h files directly.
 # ============================================================
 
-CLANGD_PATH="$REPO_ROOT/$VJ_LIB_DIR/.clangd"
+CLANGD_PATH="$VJ_LIB_DIR/.clangd"
 CLANG_TARGET=$(get_clang_target "$TARGET_OS" "$TARGET_ARCH")
 {
     echo "# Auto-generated by gen-natives.sh — do not edit manually."

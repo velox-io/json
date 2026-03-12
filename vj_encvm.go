@@ -9,18 +9,9 @@ import (
 	"unsafe"
 )
 
-// ================================================================
-// OpCode constants — mirror native/impl/encoder_types.h enum OpType
-//
-// Values 0-13 are primitives, aligned with ElemTypeKind so the
-// pre-compiler can map them directly via kindToOpcode().
-// Values 16-19 are non-primitive data ops (interface, raw, etc.).
-// Values 32-40 are structural control-flow instructions.
-// Value 0x3F is the Go-only fallback.
-//
-// All opcodes share a single sparse dispatch table in the C VM
-// (dispatch_table[0x40]).
-// ================================================================
+// OpCode constants — mirror native/impl/encoder_types.h enum OpType.
+// Primitives 0-13 align with ElemTypeKind; 16-19 are data ops;
+// 32-42 are structural control-flow; 0x3F is Go fallback.
 const (
 	// Primitive types (0-13), aligned with ElemTypeKind.
 	opBool    uint16 = 0
@@ -68,13 +59,8 @@ const (
 // the high byte used by opSkipIfZero to encode the ZeroCheckTag.
 const opTypeMask = uint16(0x00FF)
 
-// kindToOpcode maps an ElemTypeKind to the corresponding VM instruction
-// opcode.  Primitives 0-13 map 1:1; other kinds map to their actual
-// instruction opcode (which differs from the Kind value).
-//
-// Panics for kinds that have no corresponding single instruction
-// (KindStruct, KindSlice, KindPointer, KindMap — these use structural
-// opcodes like opStructBegin/opPtrDeref/opSliceBegin/opMapBegin instead).
+// kindToOpcode maps an ElemTypeKind to the corresponding VM opcode.
+// Primitives 0-13 map 1:1. Panics if k has no single-instruction opcode.
 func kindToOpcode(k ElemTypeKind) uint16 {
 	switch {
 	case k <= KindString:
@@ -91,9 +77,7 @@ func kindToOpcode(k ElemTypeKind) uint16 {
 	}
 }
 
-// ================================================================
 // Error codes returned in ExecCtx.ErrCode.
-// ================================================================
 const (
 	vjOK           int32 = 0
 	vjErrBufFull   int32 = 1
@@ -102,9 +86,7 @@ const (
 	vjErrYield     int32 = 6 // VM yielded to Go (interface miss, fallback, map iter)
 )
 
-// ================================================================
 // Encoding flags (VjEncFlags bitmask).
-// ================================================================
 const (
 	vjEncEscapeHTML   uint32 = 1 << 0
 	vjEncFloatExpAuto uint32 = 1 << 3 // scientific notation for |f|<1e-6 or |f|>=1e21
@@ -118,29 +100,14 @@ const (
 // Bit 31 = first flag.
 const escOpFirstBit uint32 = 0x80000000
 
-// ================================================================
 // Yield reason values stored in ExecCtx.YieldInfo.
-// ================================================================
 const (
 	yieldFallback  uint32 = 1 // custom marshaler / ,string / unsupported type
 	yieldIfaceMiss uint32 = 2 // interface{} cache miss — need Go compilation
 	yieldMapNext   uint32 = 3 // map iteration — need Go to provide next k/v
 )
 
-// ================================================================
-// Types — OpStep, Blueprint, StackFrame, ExecCtx, IfaceCache
-// ================================================================
-
-// VjOpStep mirrors the C OpStep.
-//
-// Layout (64-bit, 24 bytes):
-//
-//	offset  0: OpType    uint16  (2 bytes)
-//	offset  2: KeyLen    uint16  (2 bytes)
-//	offset  4: FieldOff  uint32  (4 bytes)
-//	offset  8: KeyPtr    pointer (8 bytes) — pre-escaped key in KeyPool
-//	offset 16: OperandA  int32   (4 bytes) — jump offset / elem_size
-//	offset 20: OperandB  int32   (4 bytes) — body length / reserved
+// VjOpStep mirrors the C OpStep (24 bytes).
 type VjOpStep struct {
 	OpType   uint16
 	KeyLen   uint16
@@ -150,7 +117,6 @@ type VjOpStep struct {
 	OperandB int32          // loop body len, reserved
 }
 
-// Compile-time size assertion: VjOpStep must be exactly 24 bytes.
 var _ [24]byte = [unsafe.Sizeof(VjOpStep{})]byte{}
 
 // Blueprint holds the compiled instruction stream for a type.
@@ -179,75 +145,67 @@ type encvmCache struct {
 // maxStackDepth matches the C VJ_MAX_DEPTH.
 const maxStackDepth = 16
 
-// VjStackFrame mirrors the C VjStackFrame.
-//
-// Layout (72 bytes):
-//
-//	offset  0: RetOp      pointer (8) — return instruction pointer
-//	offset  8: RetBase    pointer (8) — parent struct/elem base
-//	offset 16: First      int32   (4) — parent first-field flag
-//	offset 20: FrameType  int32   (4) — FRAME_STRUCT/FRAME_SLICE/FRAME_IFACE
-//	offset 24: RetOps     pointer (8) — parent ops base (FRAME_IFACE only)
-//	offset 32: IterData   pointer (8) — slice data start
-//	offset 40: IterCount  int64   (8) — total elements
-//	offset 48: IterIdx    int64   (8) — current index
-//	offset 56: ElemSize   int32   (4) — element size in bytes
-//	offset 60: _pad       int32   (4)
-//	offset 64: LoopPcOp   pointer (8) — loop body first instruction
+// VjStackFrame mirrors the C VjStackFrame (56 bytes).
+// The union portion is represented as [40]byte with accessor helpers.
 type VjStackFrame struct {
-	RetOp     unsafe.Pointer
-	RetBase   unsafe.Pointer
-	First     int32
-	FrameType int32
-	RetOps    unsafe.Pointer
-	IterData  unsafe.Pointer
-	IterCount int64
-	IterIdx   int64
-	ElemSize  int32
-	_pad      int32
-	LoopPcOp  unsafe.Pointer
+	RetBase   unsafe.Pointer //  0: all frames — parent base address
+	First     int32          //  8: all frames
+	FrameType int32          // 12: all frames
+	_union    [40]byte       // 16-55: per-frame-type fields (see helpers)
 }
 
-// Compile-time size assertion: VjStackFrame must be 72 bytes.
-var _ [72]byte = [unsafe.Sizeof(VjStackFrame{})]byte{}
+var _ [56]byte = [unsafe.Sizeof(VjStackFrame{})]byte{}
 
-// VjExecCtx mirrors the C VjExecCtx (runtime context per Marshal call).
-//
-// Layout:
-//
-//	offset   0: BufCur          pointer   (8)
-//	offset   8: BufEnd          uintptr   (8)  — NOT a GC pointer
-//	offset  16: PC              int32     (4)
-//	offset  20: _pad1           int32     (4)
-//	offset  24: CurBase         pointer   (8)
-//	offset  32: Depth           int32     (4)
-//	offset  36: ErrorCode       int32     (4)
-//	offset  40: EncFlags        uint32    (4)
-//	offset  44: YieldInfo       uint32    (4)  — yield reason
-//	offset  48: OpsPtr          pointer   (8)  — &Blueprint.Ops[0]
-//	offset  56: _reserved56     uintptr   (8)  — reserved (KeyPoolPtr)
-//	offset  64: IfaceCachePtr   pointer   (8)  — *VjIfaceCacheEntry sorted array
-//	offset  72: IfaceCacheCount int32     (4)
-//	offset  76: _pad2           int32     (4)
-//	offset  80: YieldTypePtr    pointer   (8)  — eface.type_ptr on iface miss
-//	offset  88: YieldFieldIdx   int32     (4)
-//	offset  92: _pad3           int32     (4)
-//	offset  96: Stack           [16]VjStackFrame (16*72 = 1152)
-//
-// Total: 96 + 1152 = 1248 bytes
+// --- STRUCT/PTR frame helpers (ctrl) ---
+
+func (f *VjStackFrame) retOp() unsafe.Pointer {
+	return *(*unsafe.Pointer)(unsafe.Pointer(&f._union[0]))
+}
+func (f *VjStackFrame) setRetOp(p unsafe.Pointer) {
+	*(*unsafe.Pointer)(unsafe.Pointer(&f._union[0])) = p
+}
+
+// --- IFACE frame helpers ---
+// retOp/setRetOp shared with ctrl (same offset)
+
+func (f *VjStackFrame) retOps() unsafe.Pointer {
+	return *(*unsafe.Pointer)(unsafe.Pointer(&f._union[8]))
+}
+func (f *VjStackFrame) setRetOps(p unsafe.Pointer) {
+	*(*unsafe.Pointer)(unsafe.Pointer(&f._union[8])) = p
+}
+
+// --- SLICE frame helpers ---
+
+func (f *VjStackFrame) iterData() unsafe.Pointer {
+	return *(*unsafe.Pointer)(unsafe.Pointer(&f._union[0]))
+}
+func (f *VjStackFrame) iterCount() int64 {
+	return *(*int64)(unsafe.Pointer(&f._union[8]))
+}
+func (f *VjStackFrame) iterIdx() int64 {
+	return *(*int64)(unsafe.Pointer(&f._union[16]))
+}
+func (f *VjStackFrame) elemSize() int32 {
+	return *(*int32)(unsafe.Pointer(&f._union[32]))
+}
+
+// VjExecCtx mirrors the C VjExecCtx (96-byte header + 16×56 stack = 992 bytes).
 type VjExecCtx struct {
-	BufCur    unsafe.Pointer // current write position
-	BufEnd    uintptr        // one past last writable byte (NOT GC-traced)
-	PC        int32          // current instruction index (relative to OpsPtr)
-	_pad1     int32
-	CurBase   unsafe.Pointer // current struct/elem base address
-	Depth     int32          // stack depth (0 = top-level)
-	ErrCode   int32          // VjError enum value
-	EncFlags  uint32         // VjEncFlags bitmask
-	YieldInfo uint32         // yield reason (yieldFallback, yieldIfaceMiss, etc.)
+	BufCur      unsafe.Pointer // current write position
+	BufEnd      uintptr        // one past last writable byte (NOT GC-traced)
+	PC          int32          // current instruction index (relative to OpsPtr)
+	IndentDepth int16          // logical nesting depth for indent
+	IndentStep      uint8 // bytes per indent level (0 = compact)
+	IndentPrefixLen uint8 // bytes of prefix before indent repetitions
+	CurBase     unsafe.Pointer // current struct/elem base address
+	Depth       int32          // stack depth (0 = top-level)
+	ErrCode     int32          // VjError enum value
+	EncFlags    uint32         // VjEncFlags bitmask
+	YieldInfo   uint32         // yield reason (yieldFallback, yieldIfaceMiss, etc.)
 
-	OpsPtr      unsafe.Pointer // &Blueprint.Ops[0] (current active instruction stream)
-	_reserved56 uintptr        // reserved for KeyPoolPtr
+	OpsPtr    unsafe.Pointer // &Blueprint.Ops[0] (current active instruction stream)
+	IndentTpl unsafe.Pointer // precomputed "\n" + indent×depth template
 
 	IfaceCachePtr   unsafe.Pointer // *VjIfaceCacheEntry sorted array
 	IfaceCacheCount int32          // number of entries
@@ -260,22 +218,10 @@ type VjExecCtx struct {
 	Stack [maxStackDepth]VjStackFrame
 }
 
-// Compile-time size assertion for VjExecCtx.
-// Header: 96 bytes, Stack: 16 * 72 = 1152 bytes, Total: 1248 bytes.
-var _ [1248]byte = [unsafe.Sizeof(VjExecCtx{})]byte{}
+var _ [992]byte = [unsafe.Sizeof(VjExecCtx{})]byte{}
 
-// VjIfaceCacheEntry maps a Go *abi.Type to its compiled Blueprint ops.
-//
-// Layout (24 bytes):
-//
-//	offset  0: TypePtr  pointer (8) — Go *abi.Type address
-//	offset  8: OpsPtr   pointer (8) — &Blueprint.Ops[0], or nil
-//	offset 16: Tag      uint8   (1) — (opcode+1) for primitives, 0 = none
-//	offset 17: _pad     [7]byte (7)
-//
-// Tag encoding: stored as (opcode + 1) so that tag=0 is an unambiguous
-// sentinel for "no primitive tag". OP_BOOL (opcode 0) → tag=1, etc.
-// C subtracts 1 before dispatching to vj_encode_ptr_value.
+// VjIfaceCacheEntry maps a Go *abi.Type to its compiled Blueprint ops (24 bytes).
+// Tag = opcode+1 for primitives (0 = none); C subtracts 1 before dispatch.
 type VjIfaceCacheEntry struct {
 	TypePtr unsafe.Pointer // *abi.Type (address-comparable)
 	OpsPtr  unsafe.Pointer // &Blueprint.Ops[0], nil if not compilable by C
@@ -283,7 +229,6 @@ type VjIfaceCacheEntry struct {
 	_pad    [7]byte
 }
 
-// Compile-time size assertion for VjIfaceCacheEntry.
 var _ [24]byte = [unsafe.Sizeof(VjIfaceCacheEntry{})]byte{}
 
 // ifaceCacheSnapshot is an immutable sorted array of cache entries.
@@ -292,23 +237,13 @@ type ifaceCacheSnapshot struct {
 	entries []VjIfaceCacheEntry // sorted by TypePtr (ascending)
 }
 
-// ================================================================
-// Global state
-// ================================================================
-
-// globalIfaceCache is the process-wide interface type cache.
-// Updated via COW: readers get a snapshot pointer, writers create
-// a new snapshot under mu and atomically publish it.
+// globalIfaceCache is the process-wide interface type cache (COW snapshots).
 var globalIfaceCache struct {
 	current atomic.Pointer[ifaceCacheSnapshot]
 	mu      sync.Mutex
 }
 
 var initPrimitiveIfaceCacheOnce sync.Once
-
-// ================================================================
-// Functions
-// ================================================================
 
 func init() {
 	// Initialize with an empty snapshot so Load() never returns nil.

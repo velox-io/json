@@ -20,31 +20,33 @@ const escapeStringFlags = escapeHTML | escapeLineTerms | escapeInvalidUTF8
 const escapeStdCompat = escapeStringFlags
 const escapeDefault escapeFlags = 0
 
-var needsEscape [256]bool
+var (
+	needsEscape          [256]bool
+	escapeReplacement    [256][2]byte
+	escapeHasReplacement [256]bool
+)
 
 func init() {
-	needsEscape['"'] = true
-	needsEscape['\\'] = true
+	// Control chars (0x00-0x1F) always need escaping per RFC 8259.
 	for i := range byte(0x20) {
 		needsEscape[i] = true
 	}
-}
+	needsEscape['"'] = true
+	needsEscape['\\'] = true
 
-var escapeReplacement [256][2]byte
-var escapeHasReplacement [256]bool
-
-func init() {
-	set := func(c byte, r0, r1 byte) {
-		escapeReplacement[c] = [2]byte{r0, r1}
-		escapeHasReplacement[c] = true
+	// Two-byte replacement sequences for common escapes.
+	for _, e := range [...][3]byte{
+		{'"', '\\', '"'},
+		{'\\', '\\', '\\'},
+		{'\b', '\\', 'b'},
+		{'\f', '\\', 'f'},
+		{'\n', '\\', 'n'},
+		{'\r', '\\', 'r'},
+		{'\t', '\\', 't'},
+	} {
+		escapeReplacement[e[0]] = [2]byte{e[1], e[2]}
+		escapeHasReplacement[e[0]] = true
 	}
-	set('"', '\\', '"')
-	set('\\', '\\', '\\')
-	set('\b', '\\', 'b')
-	set('\f', '\\', 'f')
-	set('\n', '\\', 'n')
-	set('\r', '\\', 'r')
-	set('\t', '\\', 't')
 }
 
 const hexDigits = "0123456789abcdef"

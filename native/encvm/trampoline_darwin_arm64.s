@@ -8,7 +8,7 @@
 // caller. NOSPLIT $0-8 means no local stack frame — the C function
 // allocates its own frame on the goroutine stack.
 //
-// Each ISA has two mode variants: default and fast.
+// Each ISA has three mode variants: default, compact, and fast.
 
 #include "textflag.h"
 
@@ -29,3 +29,12 @@ TEXT ·vjVMExecDefaultNeon(SB), NOSPLIT, $0-8
 TEXT ·vjVMExecFastNeon(SB), NOSPLIT, $0-8
 	MOVD ctx+0(FP), R0
 	B    vj_vm_exec_fast_neon(SB)
+
+// ---- Compact mode ----
+
+// func vjVMExecCompactNeon(ctx unsafe.Pointer)
+// C: void vj_vm_exec_compact_neon(VjExecCtx* ctx)
+// C ABI: ctx=X0
+TEXT ·vjVMExecCompactNeon(SB), NOSPLIT, $0-8
+	MOVD ctx+0(FP), R0
+	B    vj_vm_exec_compact_neon(SB)

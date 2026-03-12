@@ -8,22 +8,27 @@ import (
 	"github.com/velox-io/json/native/encvm"
 )
 
-// ================================================================
-// native VM — Go-side execution loop
-//
-// The execVM function drives the C VM engine in a loop:
-//   1. Set up ExecCtx with buffer, blueprint ops, base pointer
-//   2. Call into C (encvm.VMExec)
-//   3. Inspect error code:
-//      - vjOK: done
-//      - vjErrBufFull: grow buffer, re-enter
-//      - vjErrYield: handle yield reason, re-enter
-//      - vjErrNanInf: report error
-//
-// Interface cache miss: Go compiles the type's Blueprint, inserts
-// it into the global COW cache, updates the ExecCtx snapshot,
-// then re-enters C (PC unchanged — C retries OP_INTERFACE).
-// ================================================================
+// native VM — Go-side execution loop.
+// execVM calls C (encvm.VMExec) in a loop, handling buffer growth,
+// yield events (fallback/interface/map/slice), and interface cache misses.
+
+// vmWriteIndent appends newline + indent whitespace for the current VM
+// indent depth. No-op in compact mode (IndentStep == 0).
+func (m *Marshaler) vmWriteIndent(ctx *VjExecCtx) {
+	if ctx.IndentStep == 0 {
+		return
+	}
+	n := 1 + int(ctx.IndentPrefixLen) + int(ctx.IndentDepth)*int(ctx.IndentStep)
+	tpl := m.indentTpl
+	m.buf = append(m.buf, tpl[:n]...)
+}
+
+// vmWriteKeySpace appends a space after the key colon in indent mode.
+func (m *Marshaler) vmWriteKeySpace(ctx *VjExecCtx) {
+	if ctx.IndentStep != 0 {
+		m.buf = append(m.buf, ' ')
+	}
+}
 
 // encodeStructNative is the native VM entry point for struct encoding.
 // It compiles a Blueprint (if not cached), then runs the VM.
@@ -41,7 +46,7 @@ func (m *Marshaler) encodeStructNative(dec *StructCodec, base unsafe.Pointer) er
 // and interface cache management.
 //
 // Uses the reusable m.vmCtx to avoid per-call stack zeroing of the
-// 1248-byte VjExecCtx. IfaceCache is already set by getMarshaler.
+// 992-byte VjExecCtx. IfaceCache is already set by getMarshaler.
 func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	if !encvm.Available {
 		return fmt.Errorf("vjson: native encoder not available")
@@ -64,12 +69,32 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	ctx.EncFlags = uint32(m.flags) | m.encFlags
 	ctx.Depth = 0
 
-	// Select VM mode: fast mode when no string escape flags are active,
-	// default mode otherwise. Fast mode eliminates runtime flag dispatch
-	// for string escaping (compile-time fast path only).
-	vmExec := encvm.VMExecFast
-	if m.flags&escapeStringFlags != 0 {
+	// Select VM mode: three-way dispatch based on indent and escape flags.
+	//
+	// indent + any escape  → VMExec       (default: indent + flags at runtime)
+	// compact + escape flags → VMExecCompact (compact: no indent, has escape checks)
+	// compact + no escape  → VMExecFast   (fast: no indent, no escape checks)
+	var vmExec func(unsafe.Pointer)
+	if step := isSimpleIndent(m.prefix, m.indent); step > 0 {
+		// Indent mode: use default VM (with indent support).
+		// Default mode handles both indent and escape flags at runtime.
+		m.buildIndentTpl(m.prefix, m.indent)
+		ctx.IndentTpl = unsafe.Pointer(&m.indentTpl[0])
+		ctx.IndentStep = uint8(step)
+		ctx.IndentPrefixLen = uint8(len(m.prefix))
+		ctx.IndentDepth = 0
 		vmExec = encvm.VMExec
+	} else {
+		// Compact mode: no indent setup needed.
+		ctx.IndentTpl = nil
+		ctx.IndentStep = 0
+		ctx.IndentPrefixLen = 0
+		ctx.IndentDepth = 0
+		if m.flags&escapeStringFlags != 0 {
+			vmExec = encvm.VMExecCompact
+		} else {
+			vmExec = encvm.VMExecFast
+		}
 	}
 
 	for {
@@ -109,9 +134,6 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 			return nil
 
 		case vjErrBufFull:
-			// Absorb partial output.
-			// C already saved PC/depth/stack and packed first into enc_flags.
-			// On re-entry, C reads VJ_ENC_RESUME from enc_flags to restore first.
 			m.buf = m.buf[:len(m.buf)+written]
 
 			if m.flushFn != nil {
@@ -121,17 +143,20 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 					return err
 				}
 			} else {
-				// Batch mode (Marshal/AppendMarshal): grow the buffer to
-				// accumulate the entire output.
 				newCap := max(cap(m.buf)*2, len(m.buf)+4096)
 				newBuf := make([]byte, len(m.buf), newCap)
 				copy(newBuf, m.buf)
 				m.buf = newBuf
 			}
-			// ctx.EncFlags already has VJ_ENC_RESUME set by C's SAVE_AND_RETURN
 
 		case vjErrYield:
 			m.buf = m.buf[:len(m.buf)+written]
+
+			// Sync Go-side indent depth from C VM state so that Go-driven
+			// encoding (maps, any-typed values) uses the correct depth.
+			if ctx.IndentStep > 0 {
+				m.depth = int(ctx.IndentDepth)
+			}
 
 			switch ctx.YieldInfo {
 			case yieldIfaceMiss:
@@ -143,12 +168,11 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 					ctx.IfaceCachePtr = unsafe.Pointer(&snap.entries[0])
 					ctx.IfaceCacheCount = int32(len(snap.entries))
 				}
-				// ctx.EncFlags already has VJ_ENC_RESUME; PC unchanged for retry
+				// ctx.EncFlags has VJ_ENC_RESUME; PC unchanged for retry
 
 			case yieldFallback:
-				// Hot path: OP_INTERFACE yield (vast majority of fallbacks).
-				// Inline the interface handling to avoid map lookup + function
-				// call overhead in handleYieldFallback.
+				// Hot path: OP_INTERFACE yield. Inline to avoid
+				// map lookup + function call overhead.
 				op := bp.Ops[ctx.PC]
 				if op.OpType&opTypeMask == opInterface {
 					isFirst := (uint32(ctx.YieldFieldIdx) & escOpFirstBit) != 0
@@ -156,10 +180,12 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 
 					if !isFirst {
 						m.buf = append(m.buf, ',')
+						m.vmWriteIndent(ctx)
 					}
 					if op.KeyLen > 0 {
 						keyBytes := unsafe.Slice((*byte)(op.KeyPtr), op.KeyLen)
 						m.buf = append(m.buf, keyBytes...)
+						m.vmWriteKeySpace(ctx)
 					}
 
 					// Encode the current interface{} element.
@@ -167,16 +193,9 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 						return err
 					}
 
-					// Batch slice takeover: if this OP_INTERFACE is inside a
-					// []interface{} slice loop, encode the remaining elements
-					// in Go instead of returning to C for each one. This saves
-					// N-1 C↔Go round-trips per slice.
-					//
-					// Guard: only activate when we can verify the parent frame
-					// is a SLICE in the same ops stream (bp.Ops). When the VM
-					// is inside an IFACE-switched ops stream, ctx.PC is relative
-					// to a different Blueprint, so bp.Ops[ctx.PC-1] would be wrong.
-					// The SLICE_BEGIN check catches this safely.
+					// Batch slice takeover: encode remaining []interface{}
+					// elements in Go, saving N-1 C↔Go round-trips.
+					// Only safe when parent frame is a SLICE in bp.Ops.
 					const frameSlice = int32(1) // VJ_FRAME_SLICE
 					if ctx.Depth > 0 && ctx.PC > 0 {
 						frame := &ctx.Stack[ctx.Depth-1]
@@ -184,22 +203,23 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 							int(ctx.PC-1) < len(bp.Ops) &&
 							bp.Ops[ctx.PC-1].OpType&opTypeMask == opSliceBegin {
 							// Encode remaining slice elements in Go.
-							elemSize := uintptr(frame.ElemSize)
-							count := frame.IterCount
-							for idx := frame.IterIdx + 1; idx < count; idx++ {
+							elemSize := uintptr(frame.elemSize())
+							count := frame.iterCount()
+							for idx := frame.iterIdx() + 1; idx < count; idx++ {
 								m.buf = append(m.buf, ',')
-								elemPtr := unsafe.Add(frame.IterData, uintptr(idx)*elemSize)
+								m.vmWriteIndent(ctx)
+								elemPtr := unsafe.Add(frame.iterData(), uintptr(idx)*elemSize)
 								if err := m.encodeAnyIface(elemPtr); err != nil {
 									return err
 								}
 							}
-							// Close the array, pop the slice frame.
+							// Close array, pop slice frame.
+							// PC past SLICE_END = PC + body_len + 1.
+							ctx.IndentDepth--
+							m.vmWriteIndent(ctx)
 							m.buf = append(m.buf, ']')
 							ctx.Depth--
 							ctx.CurBase = frame.RetBase
-							// PC past SLICE_END: SLICE_BEGIN is at PC-1, body_len
-							// is in its OperandB. SLICE_END = PC + body_len,
-							// past SLICE_END = PC + body_len + 1.
 							bodyLen := bp.Ops[ctx.PC-1].OperandB
 							ctx.PC = ctx.PC + bodyLen + 1
 							ctx.EncFlags = uint32(m.flags) | m.encFlags | vjEncResume
@@ -210,7 +230,7 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 					ctx.PC++
 					ctx.EncFlags = uint32(m.flags) | m.encFlags | vjEncResume
 				} else {
-					// Cold path: table-based fallback (custom marshalers, ,string, etc.)
+					// Cold path: custom marshalers, ,string, etc.
 					if err := m.handleYieldFallback(ctx, bp); err != nil {
 						return err
 					}
@@ -252,8 +272,7 @@ func (m *Marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 	ti := GetCodec(rtype)
 
 	// Determine tag for primitives or compile Blueprint for complex types.
-	// Tag stored as (opcode + 1) so that tag=0 is unambiguous for "no tag"
-	// (needed because OP_BOOL == 0).
+	// Tag = (opcode + 1) so tag=0 means "no tag" (OP_BOOL == 0).
 	var tag uint8
 	var bp *Blueprint
 
@@ -340,11 +359,14 @@ func (m *Marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 	// Write comma if not the first field.
 	if !isFirst {
 		m.buf = append(m.buf, ',')
+		// Write indent after comma.
+		m.vmWriteIndent(ctx)
 	}
 
 	// Write key.
 	if fb.TI.Ext != nil && len(fb.TI.Ext.KeyBytes) > 0 {
 		m.buf = append(m.buf, fb.TI.Ext.KeyBytes...)
+		m.vmWriteKeySpace(ctx)
 	}
 
 	// Encode value.
@@ -389,12 +411,15 @@ func (m *Marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 	// Write comma if not the first field.
 	if !isFirst {
 		m.buf = append(m.buf, ',')
+		// Write indent after comma.
+		m.vmWriteIndent(ctx)
 	}
 
 	// Write key from the instruction's key data.
 	if op.KeyLen > 0 {
 		keyBytes := unsafe.Slice((*byte)(op.KeyPtr), op.KeyLen)
 		m.buf = append(m.buf, keyBytes...)
+		m.vmWriteKeySpace(ctx)
 	}
 
 	// Look up the MapCodec from the fallback table or Blueprint.
@@ -429,19 +454,13 @@ func (m *Marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 	return nil
 }
 
-// typeFromRTypePtr reconstructs a reflect.Type from a raw *abi.Type pointer.
-// This is the reverse of rtypePtr().
+// typeFromRTypePtr reconstructs a reflect.Type from a raw *abi.Type pointer
+// (reverse of rtypePtr).
 func typeFromRTypePtr(p unsafe.Pointer) reflect.Type {
-	// reflect.Type is an interface{itab, *rtype}.
-	// *rtype is the same as *abi.Type.
-	// We construct a reflect.Type by creating an eface with the known itab.
-	//
-	// Use the same trick as rtypePtr but in reverse: create a dummy
-	// reflect.Type and overwrite its data word.
+	// Construct reflect.Type by copying the itab from a donor and
+	// setting the data word to p.
 	var dummy reflect.Type
 	eface := (*[2]unsafe.Pointer)(unsafe.Pointer(&dummy))
-	// eface[0] is the itab for reflect.Type — keep it from the dummy
-	// We need a real reflect.Type to get the itab. Use int as donor.
 	donor := reflect.TypeFor[int]()
 	donorEface := (*[2]unsafe.Pointer)(unsafe.Pointer(&donor))
 	eface[0] = donorEface[0] // copy itab

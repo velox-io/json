@@ -13,11 +13,11 @@ import (
 
 // BenchResult holds a single benchmark measurement.
 type BenchResult struct {
-	Name    string  // full benchmark name (e.g. "Benchmark_Marshal_Tiny_StdJSON-16")
-	Group   string  // dataset group (e.g. "Marshal_Tiny")
-	Library string  // library name (e.g. "StdJSON", "Sonic", "Velox")
-	NsOp    float64 // nanoseconds per operation
-	BOp     float64 // bytes allocated per operation
+	Name     string  // full benchmark name (e.g. "Benchmark_Marshal_Tiny_StdJSON-16")
+	Group    string  // dataset group (e.g. "Marshal_Tiny")
+	Library  string  // library name (e.g. "StdJSON", "Sonic", "Velox")
+	NsOp     float64 // nanoseconds per operation
+	BOp      float64 // bytes allocated per operation
 	AllocsOp float64 // allocations per operation
 }
 
@@ -32,23 +32,21 @@ type GroupResult struct {
 
 // Section represents a top-level benchmark category (e.g. "Marshal", "Parallel Unmarshal").
 type Section struct {
-	Name    string   // display name (e.g. "Parallel Marshal")
-	Groups  []string // ordered group names belonging to this section
+	Name   string   // display name (e.g. "Parallel Marshal")
+	Groups []string // ordered group names belonging to this section
 }
 
 // BenchData holds all parsed and aggregated benchmark data.
 type BenchData struct {
-	Title    string        // from -title flag or auto-detected
-	Subtitle string       // goos/goarch/cpu metadata
-	Groups   []string      // ordered list of unique groups
-	Sections []Section     // ordered sections, each containing its groups
-	Libs     []string      // ordered list of unique libraries
+	Title    string                             // from -title flag or auto-detected
+	Subtitle string                             // goos/goarch/cpu metadata
+	Groups   []string                           // ordered list of unique groups
+	Sections []Section                          // ordered sections, each containing its groups
+	Libs     []string                           // ordered list of unique libraries
 	Results  map[string]map[string]*GroupResult // group -> library -> result
-	RunCount int           // number of runs per benchmark (from -count)
+	RunCount int                                // number of runs per benchmark (from -count)
 }
 
-// knownLibraries lists the recognized library suffixes in display order.
-var knownLibraries = []string{"StdJSON", "Sonic", "GoJSON", "EasyJSON", "Velox"}
 
 // splitGroupToSection splits a group name following the pattern "{Action}_{Dataset}".
 // Examples:
@@ -57,7 +55,8 @@ var knownLibraries = []string{"StdJSON", "Sonic", "GoJSON", "EasyJSON", "Velox"}
 //   - "Decoder_Small" -> section="Decoder", dataset="Small"
 //
 // This matches the naming convention used in benchmark functions:
-//   Benchmark_{Action}_{Dataset}_{Library}
+//
+//	Benchmark_{Action}_{Dataset}_{Library}
 func splitGroupToSection(group string) (section, dataset string) {
 	// Find the last underscore to identify dataset
 	idx := strings.LastIndex(group, "_")
@@ -65,14 +64,14 @@ func splitGroupToSection(group string) (section, dataset string) {
 		// No underscore or underscore at start: treat whole string as section
 		return group, group
 	}
-	
+
 	action := group[:idx]
 	dataset = group[idx+1:]
-	
+
 	// Format action name for display: insert space before capital letters in camelCase
 	// e.g., "ParallelMarshal" -> "Parallel Marshal"
 	section = formatActionName(action)
-	
+
 	return section, dataset
 }
 
@@ -82,7 +81,7 @@ func formatActionName(action string) string {
 	if action == "" {
 		return action
 	}
-	
+
 	var result strings.Builder
 	for i, r := range action {
 		// Insert space before uppercase letter (except at start)
@@ -91,7 +90,7 @@ func formatActionName(action string) string {
 		}
 		result.WriteRune(r)
 	}
-	
+
 	return result.String()
 }
 
@@ -115,10 +114,10 @@ func splitBenchName(name string) (group, library string) {
 	trimmed := strings.TrimPrefix(name, "Benchmark_")
 
 	// Try known suffixes
-	for _, lib := range knownLibraries {
+	for _, lib := range knownLibNames() {
 		suffix := "_" + lib
-		if strings.HasSuffix(trimmed, suffix) {
-			return strings.TrimSuffix(trimmed, suffix), lib
+		if before, ok := strings.CutSuffix(trimmed, suffix); ok {
+			return before, lib
 		}
 	}
 
@@ -217,7 +216,7 @@ func aggregateResults(results []BenchResult, meta map[string]string) *BenchData 
 
 	// Order libraries: known ones first (in defined order), then unknown alphabetically
 	var libs []string
-	for _, kl := range knownLibraries {
+	for _, kl := range knownLibNames() {
 		if libSet[kl] {
 			libs = append(libs, kl)
 			delete(libSet, kl)

@@ -10,7 +10,8 @@
 
 // clang-format off
 
-#include "memfn.h"
+#include <stddef.h>
+#include <stdint.h>
 
 #define VJ_MAX_DEPTH 16
 
@@ -251,6 +252,7 @@ enum VjEncFlags {
  *  OpStep — 24-byte VM instruction
  * ================================================================ */
 
+
 typedef struct VjOpStep {
   uint16_t op_type;     /*  0: opcode | flags (high byte = ZeroCheckTag for OP_SKIP_IF_ZERO) */
   uint16_t key_len;     /*  2: pre-encoded key length */
@@ -276,25 +278,36 @@ enum VjFrameType {
 };
 
 typedef struct VjStackFrame {
-  /* Common fields (all frame types) */
-  const VjOpStep  *ret_op;      /*  0: return instruction pointer */
-  const uint8_t   *ret_base;    /*  8: parent struct/elem base address */
-  int32_t  first;               /* 16: parent first-field flag */
-  int32_t  frame_type;          /* 20: VJ_FRAME_STRUCT / SLICE / IFACE */
+  /* Common (all frame types) */
+  const uint8_t  *ret_base;    /*  0: parent struct/elem base address */
+  int32_t         first;       /*  8: parent first-field flag */
+  int32_t         frame_type;  /* 12: VJ_FRAME_STRUCT / SLICE / IFACE */
 
-  /* Interface call (VJ_FRAME_IFACE only) */
-  const VjOpStep  *ret_ops;     /* 24: parent ops base address */
+  union {
+    /* STRUCT / PTR */
+    struct {
+      const VjOpStep *ret_op;    /* 16: return instruction pointer */
+    } ctrl;  /* 8 bytes */
 
-  /* Loop fields (VJ_FRAME_SLICE) */
-  const uint8_t   *iter_data;   /* 32: slice data start */
-  int64_t  iter_count;          /* 40: total elements */
-  int64_t  iter_idx;            /* 48: current index */
-  int32_t  elem_size;           /* 56: element size in bytes */
-  int32_t  _pad;                /* 60: alignment */
-  const VjOpStep  *loop_pc_op;  /* 64: loop body first instruction */
+    /* IFACE */
+    struct {
+      const VjOpStep *ret_op;    /* 16: return instruction pointer */
+      const VjOpStep *ret_ops;   /* 24: parent ops base address */
+    } iface;  /* 16 bytes */
+
+    /* SLICE */
+    struct {
+      const uint8_t  *iter_data;   /* 16: slice data start */
+      int64_t         iter_count;  /* 24: total elements */
+      int64_t         iter_idx;    /* 32: current index */
+      const VjOpStep *loop_pc_op;  /* 40: loop body first instruction */
+      int32_t         elem_size;   /* 48: element size in bytes */
+      int32_t         _pad;        /* 52: alignment */
+    } slice;  /* 40 bytes */
+  };
 } VjStackFrame;
 
-_Static_assert(sizeof(VjStackFrame) == 72, "VjStackFrame must be 72 bytes");
+_Static_assert(sizeof(VjStackFrame) == 56, "VjStackFrame must be 56 bytes");
 
 /* ================================================================
  *  YieldCodes
@@ -325,7 +338,7 @@ _Static_assert(sizeof(VjIfaceCacheEntry) == 24,
                "VjIfaceCacheEntry must be 24 bytes");
 
 /* ================================================================
- *  ExecCtx — per-Marshal runtime context (1248 bytes)
+ *  ExecCtx — per-Marshal runtime context (992 bytes)
  * ================================================================ */
 
 typedef struct VjExecCtx {
@@ -335,7 +348,9 @@ typedef struct VjExecCtx {
 
   /* Instruction pointer */
   int32_t          pc;                /*  16: current instruction index */
-  int32_t          _pad1;             /*  20: alignment */
+  int16_t          indent_depth;      /*  20: logical nesting depth for indent */
+  uint8_t          indent_step;       /*  22: bytes per indent level (0 = compact) */
+  uint8_t          indent_prefix_len; /*  23: bytes of prefix before indent */
 
   /* Data source */
   const uint8_t   *cur_base;         /*  24: current struct/elem base */
@@ -348,7 +363,7 @@ typedef struct VjExecCtx {
 
   /* Instruction reference (read-only) */
   const VjOpStep  *ops_ptr;          /*  48: &Blueprint.Ops[0] */
-  uintptr_t        _reserved56;      /*  56: reserved */
+  const uint8_t   *indent_tpl;       /*  56: precomputed "\n" + indent×depth template */
 
   /* Interface cache */
   const VjIfaceCacheEntry *iface_cache_ptr;  /*  64: sorted array */
@@ -364,16 +379,20 @@ typedef struct VjExecCtx {
   VjStackFrame     stack[VJ_MAX_DEPTH]; /*  96: stack frames */
 } VjExecCtx;
 
-_Static_assert(sizeof(VjExecCtx) == 1248, "VjExecCtx must be 1248 bytes");
+_Static_assert(sizeof(VjExecCtx) == 992, "VjExecCtx must be 992 bytes");
 _Static_assert(offsetof(VjExecCtx, buf_cur) == 0, "buf_cur offset");
 _Static_assert(offsetof(VjExecCtx, buf_end) == 8, "buf_end offset");
 _Static_assert(offsetof(VjExecCtx, pc) == 16, "pc offset");
+_Static_assert(offsetof(VjExecCtx, indent_depth) == 20, "indent_depth offset");
+_Static_assert(offsetof(VjExecCtx, indent_step) == 22, "indent_step offset");
+_Static_assert(offsetof(VjExecCtx, indent_prefix_len) == 23, "indent_prefix_len offset");
 _Static_assert(offsetof(VjExecCtx, cur_base) == 24, "cur_base offset");
 _Static_assert(offsetof(VjExecCtx, depth) == 32, "depth offset");
 _Static_assert(offsetof(VjExecCtx, error_code) == 36, "error_code offset");
 _Static_assert(offsetof(VjExecCtx, enc_flags) == 40, "enc_flags offset");
 _Static_assert(offsetof(VjExecCtx, yield_info) == 44, "yield_info offset");
 _Static_assert(offsetof(VjExecCtx, ops_ptr) == 48, "ops_ptr offset");
+_Static_assert(offsetof(VjExecCtx, indent_tpl) == 56, "indent_tpl offset");
 _Static_assert(offsetof(VjExecCtx, iface_cache_ptr) == 64,
                "iface_cache_ptr offset");
 _Static_assert(offsetof(VjExecCtx, iface_cache_count) == 72,

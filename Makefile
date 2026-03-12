@@ -40,37 +40,22 @@ clean:
 
 FUZZ_TIME ?= 30s
 FUZZ_PARALLEL ?= 4
+FUZZ_TARGETS := FuzzMarshalString FuzzMarshalStruct FuzzMarshalNoCrash \
+                FuzzUnmarshalAny FuzzUnmarshalStruct FuzzUnmarshalNested FuzzNoCrash
 
 fuzz:
-	go test -fuzz=FuzzMarshalString -fuzztime=$(FUZZ_TIME) .
-	go test -fuzz=FuzzMarshalStruct -fuzztime=$(FUZZ_TIME) .
-	go test -fuzz=FuzzMarshalNoCrash -fuzztime=$(FUZZ_TIME) .
-	go test -fuzz=FuzzUnmarshalAny -fuzztime=$(FUZZ_TIME) .
-	go test -fuzz=FuzzUnmarshalStruct -fuzztime=$(FUZZ_TIME) .
-	go test -fuzz=FuzzUnmarshalNested -fuzztime=$(FUZZ_TIME) .
-	go test -fuzz=FuzzNoCrash -fuzztime=$(FUZZ_TIME) .
+	@for t in $(FUZZ_TARGETS); do \
+		go test -fuzz=$$t -fuzztime=$(FUZZ_TIME) . || exit 1; \
+	done
 
-# Run all fuzz tests with parallel workers
 fuzz-parallel:
-	go test -fuzz=FuzzMarshalString -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) .
-	go test -fuzz=FuzzMarshalStruct -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) .
-	go test -fuzz=FuzzMarshalNoCrash -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) .
-	go test -fuzz=FuzzUnmarshalAny -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) .
-	go test -fuzz=FuzzUnmarshalStruct -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) .
-	go test -fuzz=FuzzUnmarshalNested -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) .
-	go test -fuzz=FuzzNoCrash -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) .
+	@for t in $(FUZZ_TARGETS); do \
+		go test -fuzz=$$t -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) . || exit 1; \
+	done
 
-# Run multiple fuzz targets concurrently in background
 fuzz-concurrent:
-	@echo "Running 7 fuzz targets concurrently..."
-	@go test -fuzz=FuzzMarshalString -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) . & \
-	 go test -fuzz=FuzzMarshalStruct -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) . & \
-	 go test -fuzz=FuzzMarshalNoCrash -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) . & \
-	 go test -fuzz=FuzzUnmarshalAny -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) . & \
-	 go test -fuzz=FuzzUnmarshalStruct -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) . & \
-	 go test -fuzz=FuzzUnmarshalNested -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) . & \
-	 go test -fuzz=FuzzNoCrash -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) . & \
-	 wait
+	@echo "Running $(words $(FUZZ_TARGETS)) fuzz targets concurrently..."
+	@$(foreach t,$(FUZZ_TARGETS),go test -fuzz=$(t) -parallel=$(FUZZ_PARALLEL) -fuzztime=$(FUZZ_TIME) . &) wait
 	@echo "All fuzz tests completed"
 
 # Detect host platform
@@ -87,12 +72,9 @@ endif
 # Default to host platform
 TARGET_OS ?= $(_HOST_OS)
 TARGET_ARCH ?= $(_HOST_ARCH)
-
 gen:
-	@SOURCE_FILE="$(CURDIR)/native/encvm/impl/encvm.c" \
-	 TARGET_DIR="$(CURDIR)/native/encvm" \
-	 STDLIB_SOURCES="$(CURDIR)/native/stdlib/memory.c" \
-	 bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) $(if $(ASM),--asm) "$(TARGET_OS)" "$(TARGET_ARCH)"
+	@bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) $(if $(ASM),--asm) \
+		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
 # Generate benchmark visualization SVG
 # Usage: make benchviz
@@ -108,4 +90,4 @@ benchviz:
 	(cd benchmark && go run ./benchviz/ -title '$(BENCH_TITLE)' -format html < '../$(BENCH_OUTPUT)' > '../$(basename $(BENCH_OUTPUT)).html');
 	(cd benchmark && go run ./benchviz/ -title '$(BENCH_TITLE)' -format svg < '../$(BENCH_OUTPUT)' > '../$(basename $(BENCH_OUTPUT)).svg');
 
-.PHONY: lint lint-ci fmt test test-coverage bench bench-baseline bench-check bench-check-threshold clean fuzz gen benchviz
+.PHONY: lint lint-ci fmt test test-coverage bench bench-baseline bench-check bench-check-threshold clean fuzz fuzz-parallel fuzz-concurrent gen benchviz

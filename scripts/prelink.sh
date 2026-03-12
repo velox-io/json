@@ -8,13 +8,14 @@
 # For native builds, clang is preferred. For cross-compilation, zig cc is used.
 #
 # Usage:
-#   ./prelink.sh -o <output> -t <target> [-s <source>] [-i <isa>] [<object.o>...]
+#   ./prelink.sh -o <output> -t <target> [-s <source>] [-i <isa>] [-e <exports>] [<object.o>...]
 #
 # Options:
 #   -s <file>     Source file: .c or .s (optional if .o files provided)
 #   -o <file>     Output file, e.g. output.o or output.syso (required)
-#   -t <triple>   Target triple: x86_64-linux, aarch64-linux, etc. (required)
+#   -t <triple>   Target triple: x86_64-linux, aarch64-linux, aarch64-macos, etc. (required)
 #   -i <isa>      ISA variant: sse42, avx512, neon (optional)
+#   -e <file>     Export symbol list file (darwin only; one symbol per line, with _ prefix)
 #   -l            Enable Link Time Optimization (LTO)
 #   -q            Quiet mode (suppress progress messages)
 #   -h            Show this help
@@ -31,21 +32,24 @@
 #   ./prelink.sh -o combined.o -t x86_64-linux \
 #                       -q file1.o file2.o file3.o
 #
+#   # Darwin prelink with export list:
+#   ./prelink.sh -l -o output.syso -t aarch64-macos \
+#                       -e exports.txt file1.o file2.o
+#
 # Technical Background:
 #   This script performs "prelinking" - it links object files together, resolves all
 #   relocations, but outputs a relocatable object (not a shared library or executable).
-#   The key steps are:
 #
-#   1. Compile with clang (native) or zig cc (cross-compilation)
-#   2. Link with -shared + custom linker script to merge .rodata into .text
-#   3. Use so-to-obj tool to convert ET_DYN to ET_REL
+#   Platform strategies:
+#     Linux (ELF):
+#       1. Link with -shared + custom linker script to merge .rodata into .text
+#       2. Use so-to-obj tool to convert ET_DYN to ET_REL
+#     Darwin (Mach-O):
+#       1. Link with -dynamiclib + export list to resolve all relocations
+#       2. Use dylib_to_obj.py to convert dylib to MH_OBJECT
 #
-#   The output can be used as input to any downstream linker without needing to
-#   resolve any relocations - they are all pre-resolved.
-#
-#   The linker script ensures proper alignment (64 bytes) for SIMD instructions:
-#   - SSE4.2 movdqa requires 16-byte alignment
-#   - AVX-512 vmovdqa64 requires 64-byte alignment
+#   The output has zero relocations — it can be used as input to any downstream
+#   linker without needing to resolve any relocations.
 
 set -e
 
@@ -56,6 +60,7 @@ SOURCE=""
 OUTPUT=""
 TARGET=""
 ISA=""
+EXPORT_LIST=""
 LTO=false
 QUIET=false
 
@@ -72,12 +77,13 @@ log() {
 }
 
 # Parse arguments
-while getopts "s:o:t:i:lqh" opt; do
+while getopts "s:o:t:i:e:lqh" opt; do
     case $opt in
         s) SOURCE="$OPTARG" ;;
         o) OUTPUT="$OPTARG" ;;
         t) TARGET="$OPTARG" ;;
         i) ISA="$OPTARG" ;;
+        e) EXPORT_LIST="$OPTARG" ;;
         l) LTO=true ;;
         q) QUIET=true ;;
         h) usage ;;
@@ -161,6 +167,21 @@ fi
 log "Using compiler: $COMPILER (target: $TARGET, native: $(is_native_target "$TARGET" && echo 'yes' || echo 'no'))"
 
 # ============================================================
+#  Detect target OS from triple
+# ============================================================
+
+get_target_os() {
+    case "$1" in
+        *-macos*|*-darwin*) echo "darwin" ;;
+        *-linux*)           echo "linux" ;;
+        *-windows*)         echo "windows" ;;
+        *)                  echo "unknown" ;;
+    esac
+}
+
+TARGET_OS=$(get_target_os "$TARGET")
+
+# ============================================================
 #  ISA-specific compiler flags
 # ============================================================
 
@@ -177,38 +198,38 @@ get_isa_flags() {
 #  Compiler invocation functions
 # ============================================================
 
+# Build compiler command prefix (handles zig target)
+compiler_cmd() {
+    case "$COMPILER" in
+        clang) echo "clang" ;;
+        zig)   echo "zig cc -target $TARGET" ;;
+    esac
+}
+
+CC_CMD=$(compiler_cmd)
+
 # Compile C file
 compile_c() {
     local src="$1"
     local out="$2"
     local lto_flag=""
     [ "$LTO" = true ] && lto_flag="-flto"
-    case "$COMPILER" in
-        clang)
-            clang -O3 $lto_flag -fPIC $ISA_FLAGS -c "$src" -o "$out"
-            ;;
-        zig)
-            zig cc -target "$TARGET" -O3 $lto_flag -fPIC $ISA_FLAGS -c "$src" -o "$out"
-            ;;
-    esac
+    $CC_CMD -O3 $lto_flag -fPIC $ISA_FLAGS -c "$src" -o "$out"
 }
 
 # Compile assembly file
 compile_asm() {
     local src="$1"
     local out="$2"
-    case "$COMPILER" in
-        clang)
-            clang -c "$src" -o "$out"
-            ;;
-        zig)
-            zig cc -target "$TARGET" -c "$src" -o "$out"
-            ;;
-    esac
+    $CC_CMD -c "$src" -o "$out"
 }
 
-# Link shared object
-link_shared() {
+# ============================================================
+#  Link functions (platform-specific)
+# ============================================================
+
+# Link ELF shared object (linux)
+link_elf_shared() {
     local out="$1"
     local ldscript="$2"
     shift 2
@@ -218,13 +239,37 @@ link_shared() {
     case "$COMPILER" in
         clang)
             # -nostdlib: don't link standard libraries
-            # -Wl,--as-needed: only link needed symbols
-            clang -shared $lto_flag -nostdlib -Wl,-T,"$ldscript" $objs -o "$out"
+            # -Wl,-Bsymbolic-functions: bind function references to local definitions,
+            #   preventing PLT indirection for internal calls. Without this, the linker
+            #   creates PLT stubs for exported functions called within the same .so,
+            #   which land outside .text and are lost during so-to-obj extraction.
+            clang -shared $lto_flag -nostdlib -Wl,-Bsymbolic-functions -Wl,-T,"$ldscript" $objs -o "$out"
             ;;
         zig)
-            zig cc -target "$TARGET" -shared $lto_flag -Wl,-T,"$ldscript" $objs -o "$out"
+            zig cc -target "$TARGET" -shared $lto_flag -nostdlib -Wl,-Bsymbolic-functions -Wl,-T,"$ldscript" $objs -o "$out"
             ;;
     esac
+}
+
+# Link Darwin dylib
+link_darwin_dylib() {
+    local out="$1"
+    shift
+    local objs="$@"
+    local lto_flag=""
+    [ "$LTO" = true ] && lto_flag="-flto"
+
+    local export_flag=""
+    if [ -n "$EXPORT_LIST" ] && [ -f "$EXPORT_LIST" ]; then
+        # zig's Mach-O LLD does not support -exported_symbols_list;
+        # skip the flag when cross-compiling with zig. The extra exported
+        # symbols are harmless — dylib_to_obj.py extracts all N_EXT symbols.
+        if [ "$COMPILER" != "zig" ]; then
+            export_flag="-Wl,-exported_symbols_list,$EXPORT_LIST"
+        fi
+    fi
+
+    $CC_CMD -O3 $lto_flag -dynamiclib $export_flag $objs -o "$out"
 }
 
 # ============================================================
@@ -238,7 +283,6 @@ trap "rm -rf $TMPDIR" EXIT
 
 BASENAME=$(basename "$OUTPUT")
 BASENAME_NOEXT="${BASENAME%.*}"
-MERGED_SO="$WORKDIR/${BASENAME_NOEXT}.so"
 
 # Build list of object files to link
 ALL_OBJS=""
@@ -274,9 +318,30 @@ for obj in $EXTRA_OBJS; do
     ALL_OBJS="$ALL_OBJS $obj"
 done
 
-# Step 2: Create linker script that merges .rodata into .text
-# The ALIGN(64) ensures SIMD constant tables are properly aligned
-cat > "$TMPDIR/merge.ld" << 'EOF'
+# ============================================================
+#  Platform-specific linking
+# ============================================================
+
+mkdir -p "$WORKDIR"
+mkdir -p "$(dirname "$OUTPUT")"
+
+if [ "$TARGET_OS" = "darwin" ]; then
+    # ── Darwin (Mach-O): -dynamiclib → dylib_to_obj.py ──
+    DYLIB_TMP="$WORKDIR/${BASENAME_NOEXT}.dylib"
+
+    log "  Linking dylib..."
+    link_darwin_dylib "$DYLIB_TMP" $ALL_OBJS
+
+    log "  Converting dylib to object..."
+    python3 "$REPO_ROOT/scripts/dylib_to_obj.py" "$DYLIB_TMP" "$OUTPUT"
+    rm -f "$DYLIB_TMP"
+else
+    # ── ELF (Linux, Windows, etc.): -shared + linker script → so-to-obj ──
+    MERGED_SO="$WORKDIR/${BASENAME_NOEXT}.so"
+
+    # Create linker script that merges .rodata into .text
+    # The ALIGN(64) ensures SIMD constant tables are properly aligned
+    cat > "$TMPDIR/merge.ld" << 'EOF'
 PHDRS {
   text PT_LOAD FLAGS(5); /* R_X = 4 | 1 = 5 */
 }
@@ -297,30 +362,24 @@ SECTIONS {
 }
 EOF
 
-# Step 3: Link to shared object - this resolves all relocations
-log "  Linking..."
-mkdir -p "$WORKDIR"
-link_shared "$MERGED_SO" "$TMPDIR/merge.ld" $ALL_OBJS
+    log "  Linking..."
+    link_elf_shared "$MERGED_SO" "$TMPDIR/merge.ld" $ALL_OBJS
 
-# Step 4: Use so-to-obj to convert ET_DYN to ET_REL
-# This tool:
-#   - Extracts the resolved .text section from the .so
-#   - Creates a new ELF relocatable object (ET_REL) with zero relocations
-#   - Preserves global function symbols with correct offsets
-SO_TO_OBJ="$REPO_ROOT/build/bin/so-to-obj"
+    # Use so-to-obj to convert ET_DYN to ET_REL
+    SO_TO_OBJ="$REPO_ROOT/build/bin/so-to-obj"
 
-if [ ! -x "$SO_TO_OBJ" ]; then
-    log "  Building so-to-obj..."
-    mkdir -p "$(dirname "$SO_TO_OBJ")"
-    (cd "$REPO_ROOT/scripts/cmd/so-to-obj" && go build -o "$SO_TO_OBJ" .)
-fi
+    if [ ! -x "$SO_TO_OBJ" ]; then
+        log "  Building so-to-obj..."
+        mkdir -p "$(dirname "$SO_TO_OBJ")"
+        (cd "$REPO_ROOT/scripts/cmd/so-to-obj" && go build -o "$SO_TO_OBJ" .)
+    fi
 
-log "  Creating object file..."
-mkdir -p "$(dirname "$OUTPUT")"
-if [ "$QUIET" = true ]; then
-    "$SO_TO_OBJ" -q -o "$OUTPUT" "$MERGED_SO"
-else
-    "$SO_TO_OBJ" -o "$OUTPUT" "$MERGED_SO"
+    log "  Creating object file..."
+    if [ "$QUIET" = true ]; then
+        "$SO_TO_OBJ" -q -o "$OUTPUT" "$MERGED_SO"
+    else
+        "$SO_TO_OBJ" -o "$OUTPUT" "$MERGED_SO"
+    fi
 fi
 
 log "  Done: $OUTPUT ($(wc -c < "$OUTPUT" | tr -d ' ') bytes)"

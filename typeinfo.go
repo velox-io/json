@@ -550,7 +550,7 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 	return result
 }
 
-// --- Codec Builders ---
+// Codec Builders
 
 // StructCodec holds pre-computed metadata for struct encoding/decoding.
 type StructCodec struct {
@@ -603,9 +603,7 @@ type SliceCodec struct {
 }
 
 // SetEMAAlpha sets the EMA smoothing denominator for adaptive array capacity.
-// The formula is: hint = (old*(alpha-1) + observed) / alpha.
-// Default alpha is 2 (equal-weight average). Higher values make the EMA
-// respond more slowly to length changes.
+// Default 2 (equal-weight). Higher values respond more slowly to length changes.
 func (d *SliceCodec) SetEMAAlpha(alpha int32) {
 	if alpha < 2 {
 		alpha = 2
@@ -701,7 +699,7 @@ func BuildPointerCodec(t reflect.Type) *PointerCodec {
 	}
 }
 
-// --- Marshal helpers ---
+// Marshal helpers
 
 // encodeKeyBytes returns `"name":`
 func encodeKeyBytes(name string) []byte {
@@ -719,7 +717,7 @@ func encodeKeyBytesIndent(name string) []byte {
 	return buf
 }
 
-// --- Zero-value detection for omitempty ---
+// Zero-value detection for omitempty.
 
 // makeIsZeroFn returns a zero-value check for the given type. Nil if not applicable.
 func makeIsZeroFn(t reflect.Type) func(unsafe.Pointer) bool {

@@ -23,8 +23,16 @@ var vmExec func(ctx unsafe.Pointer)
 // line-terminator checks), eliminating runtime flag dispatch.
 var vmExecFast func(ctx unsafe.Pointer)
 
+// vmExecCompact holds the compact-mode ISA-specific entry point selected at init time.
+// Compact mode has all indent code paths eliminated at compile time (indent_step=0),
+// but retains runtime string escape flag dispatch.
+var vmExecCompact func(ctx unsafe.Pointer)
+
 // VMExec calls the default-mode native encoder entry point.
 func VMExec(ctx unsafe.Pointer) { vmExec(ctx) }
 
 // VMExecFast calls the fast-mode native encoder entry point.
 func VMExecFast(ctx unsafe.Pointer) { vmExecFast(ctx) }
+
+// VMExecCompact calls the compact-mode native encoder entry point.
+func VMExecCompact(ctx unsafe.Pointer) { vmExecCompact(ctx) }

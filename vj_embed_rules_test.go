@@ -75,12 +75,12 @@ func TestEmbedRule1_Depth1OverDepth2(t *testing.T) {
 	}
 
 	// depth2Middle.Val (depth 1) should shadow depth2Middle.depth2Inner.Val (depth 2)
-	if stdVal.depth2Middle.Val != "hello" {
-		t.Fatalf("stdlib: expected Middle.Val=\"hello\", got %q", stdVal.depth2Middle.Val)
+	if stdVal.Val != "hello" {
+		t.Fatalf("stdlib: expected Middle.Val=\"hello\", got %q", stdVal.Val)
 	}
-	if vjVal.depth2Middle.Val != stdVal.depth2Middle.Val {
+	if vjVal.Val != stdVal.Val {
 		t.Errorf("Rule 1 (depth-1 vs depth-2): vjson Middle.Val=%q, stdlib=%q",
-			vjVal.depth2Middle.Val, stdVal.depth2Middle.Val)
+			vjVal.Val, stdVal.Val)
 	}
 
 	// Marshal round-trip

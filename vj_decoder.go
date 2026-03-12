@@ -118,7 +118,7 @@ func (d *Decoder) CopyString() {
 // but without the pool round-trip).
 func (d *Decoder) parser() *Parser {
 	if d.sc == nil {
-		d.sc = defaultPool.Get()
+		d.sc = parsers.Get()
 		d.sc.useNumber = d.useNumber
 		d.sc.copyString = d.copyString
 		return d.sc
@@ -136,7 +136,7 @@ func (d *Decoder) parser() *Parser {
 
 func (d *Decoder) releaseParser() {
 	if d.sc != nil {
-		defaultPool.Put(d.sc)
+		parsers.Put(d.sc)
 		d.sc = nil
 	}
 }
@@ -358,7 +358,7 @@ func (d *Decoder) ensureBuffer() error {
 				minNeeded = needed
 			}
 		}
-		// Cold-start: unscanned exceeds prediction, so double to converge faster.
+		// Cold-start: double to converge faster.
 		if unscanned > predicted {
 			coldNeeded := unscanned*2 + minReadSize
 			if coldNeeded > minNeeded {
@@ -368,7 +368,7 @@ func (d *Decoder) ensureBuffer() error {
 		for newSize < minNeeded {
 			newSize *= 2
 		}
-		// Value-align when predicted is driven by recent average (not spike decay).
+		// Value-align when predicted reflects recent average (not spike decay).
 		avg := d.recentAvgValueSize()
 		if predicted > minReadSize && predicted == avg {
 			nFit := (newSize - minReadSize) / predicted
@@ -492,10 +492,8 @@ func (d *Decoder) growBuffer() {
 	for newSize < needed {
 		newSize *= 2
 	}
-	// Value-align: trim the power-of-2 overshoot to a multiple of
-	// predicted + minReadSize so the buffer boundary falls right after
-	// the last value that fits. Skip when maxSeenSize dominates (spike
-	// decay) — the prediction doesn't reflect actual values in that case.
+	// Value-align: trim overshoot to a multiple of predicted size,
+	// but skip when maxSeenSize dominates (spike decay).
 	avg := d.recentAvgValueSize()
 	if predicted > minReadSize && predicted == avg {
 		nFit := (newSize - minReadSize) / predicted

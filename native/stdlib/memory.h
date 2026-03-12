@@ -19,11 +19,11 @@
  * macOS Mach-O: C symbols have _ prefix (_memcpy, _memset)
  * Linux ELF:    C symbols have no prefix (memcpy, memset) */
 #if defined(__APPLE__)
-  #define VJ_MEMCPY_SYM "_memcpy"
-  #define VJ_MEMSET_SYM "_memset"
+#define VJ_MEMCPY_SYM "_memcpy"
+#define VJ_MEMSET_SYM "_memset"
 #else
-  #define VJ_MEMCPY_SYM "memcpy"
-  #define VJ_MEMSET_SYM "memset"
+#define VJ_MEMCPY_SYM "memcpy"
+#define VJ_MEMSET_SYM "memset"
 #endif
 
 /* Declarations — always visible so each ISA TU can link against

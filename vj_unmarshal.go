@@ -13,7 +13,7 @@ const (
 	scratchBufSize = 4096 // reusable scratch buffer size for single-pass decoding
 )
 
-var defaultPool = parserPool{
+var parsers = parserPool{
 	pool: sync.Pool{
 		New: func() any { return newParser() },
 	},
@@ -21,7 +21,7 @@ var defaultPool = parserPool{
 
 func init() {
 	// Pre-warm: ensure the first Unmarshal call doesn't pay allocation cost.
-	defaultPool.pool.Put(newParser())
+	parsers.pool.Put(newParser())
 }
 
 type parserPool struct {
@@ -33,15 +33,8 @@ func (p *parserPool) Get() *Parser {
 }
 
 func (p *parserPool) Put(sc *Parser) {
-	// Arena memory may still be referenced by zero-copy strings in the
-	// caller's result (via unsafe.String from unescape).
-	//
-	// When arenaOff <= arenaBlockSize/2 the block is kept: the next parse
-	// allocates from arenaOff onward, so bytes in [0, arenaOff) — which
-	// back the previous result's strings — are never overwritten.
-	//
-	// When arenaOff > arenaBlockSize/2 the block is nearly full and not
-	// worth keeping; release it so the next parse starts with a fresh arena.
+	// Arena may still be referenced by zero-copy strings; keep the
+	// block if < half-full, else release it for a fresh allocation.
 	if sc.arenaOff > arenaBlockSize/2 {
 		sc.arenaData = nil
 		sc.arenaOff = 0
@@ -57,8 +50,7 @@ func (p *parserPool) Put(sc *Parser) {
 
 func newParser() *Parser {
 	return &Parser{
-		// Start with half-size arena so the first Put() keeps it (arenaOff <=
-		// arenaBlockSize/2), avoiding an immediate reallocation on second use.
+		// Start with half-size arena so first Put() keeps it.
 		arenaData: make([]byte, arenaBlockSize/2),
 		ptrAllocs: make(map[unsafe.Pointer]*rtypeAllocator, 8),
 	}
@@ -81,14 +73,11 @@ func WithCopyString() UnmarshalOption {
 }
 
 // Unmarshal parses JSON data into v using the single-pass scanner.
-// v must be a non-nil pointer. Strings in v may reference the data buffer
-// directly (zero-copy); the caller must not modify data after calling Unmarshal.
-//
-// Array capacities are determined by adaptive heuristics (EMA of past
-// observations) — no pre-scanning is needed.
+// v must be a non-nil pointer. Strings may reference data (zero-copy);
+// the caller must not modify data after this call.
 func Unmarshal[T any](data []byte, v *T, opts ...UnmarshalOption) error {
-	sc := defaultPool.Get()
-	defer defaultPool.Put(sc)
+	sc := parsers.Get()
+	defer parsers.Put(sc)
 	for _, o := range opts {
 		o(sc)
 	}

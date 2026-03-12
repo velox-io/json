@@ -27,6 +27,7 @@
     ctx->pc = (int32_t)(op - ops);                                             \
     ctx->cur_base = base;                                                      \
     ctx->depth = depth;                                                        \
+    VM_SAVE_INDENT_DEPTH();                                                    \
     ctx->enc_flags =                                                           \
         flags | VJ_ENC_RESUME | (first ? VJ_ENC_RESUME_FIRST : 0);             \
     ctx->error_code = (err);                                                   \
@@ -44,6 +45,33 @@ static void vj_vm_exec(VjExecCtx *ctx) {
   int32_t depth = ctx->depth;
   uint32_t flags = ctx->enc_flags;
   int first;
+
+  /* Indent state: indent_step == 0 means compact mode (no indentation).
+   * indent_tpl points to a precomputed "\n" + prefix + indent×MAX_DEPTH buffer.
+   * indent_depth tracks logical nesting (incremented at {/[, decremented at }/]).
+   * indent_prefix_len is the byte length of the prefix between "\n" and the
+   * repeated indent string. */
+#ifdef VJ_COMPACT_INDENT
+  /* Compact mode: indent state eliminated at compile time.
+   * All VM_INDENT_PAD → 0, VM_WRITE_INDENT → nop, key space → nop. */
+  #define indent_tpl        ((const uint8_t *)0)
+  #define indent_depth      ((int16_t)0)
+  #define indent_step       ((uint8_t)0)
+  #define indent_prefix_len ((uint8_t)0)
+  #define VM_KEY_SPACE      0
+  #define VM_INDENT_INC()      ((void)0)
+  #define VM_INDENT_DEC()      ((void)0)
+  #define VM_SAVE_INDENT_DEPTH() ((void)0)
+#else
+  const uint8_t *indent_tpl = ctx->indent_tpl;
+  int16_t indent_depth = ctx->indent_depth;
+  const uint8_t indent_step = ctx->indent_step;
+  const uint8_t indent_prefix_len = ctx->indent_prefix_len;
+  #define VM_KEY_SPACE      (indent_step ? 1 : 0)
+  #define VM_INDENT_INC()      (indent_depth++)
+  #define VM_INDENT_DEC()      (indent_depth--)
+  #define VM_SAVE_INDENT_DEPTH() (ctx->indent_depth = indent_depth)
+#endif
 
   /* Restore the 'first' flag for resume.
    * VJ_ENC_RESUME is set by Go when re-entering after yield/buf_full.
@@ -63,8 +91,7 @@ static void vj_vm_exec(VjExecCtx *ctx) {
  * Covers primitive, data, structural, and fallback opcodes.
  * Sparse: unused slots are zero-initialized (caught by bounds check).
  */
-#define DT_ENTRY(label)                                                        \
-  (int32_t)((char *) && label - (char *) && vj_dispatch_base)
+#define DT_ENTRY(label) (int32_t)((char *) && label - (char *) && vj_dispatch_base)
 
   static const int32_t dispatch_table[OP_DISPATCH_COUNT] = {
       /* Primitives (0-13) */
@@ -116,16 +143,35 @@ static void vj_vm_exec(VjExecCtx *ctx) {
     }                                                                          \
   } while (0)
 
+/* ---- Indent helpers ---- */
+
+/* Max indent bytes for VM_CHECK: '\n' + prefix + indent_depth * indent_step.
+ * Returns 0 in compact mode (indent_step == 0). */
+#define VM_INDENT_PAD(idepth) (indent_step ? (1 + indent_prefix_len + (idepth) * indent_step) : 0)
+
+/* Write indent: '\n' + prefix + indent for current indent_depth.
+ * No-op in compact mode. */
+#define VM_WRITE_INDENT()                                                      \
+  do {                                                                         \
+    if (indent_step) {                                                         \
+      int _n = 1 + indent_prefix_len + indent_depth * indent_step;             \
+      __builtin_memcpy(buf, indent_tpl, _n);                                   \
+      buf += _n;                                                               \
+    }                                                                          \
+  } while (0)
+
 /* ---- Write pre-encoded key with comma prefix ---- */
 #define VM_WRITE_KEY()                                                         \
   do {                                                                         \
     if (!first) {                                                              \
       *buf++ = ',';                                                            \
+      VM_WRITE_INDENT();                                                       \
     }                                                                          \
     first = 0;                                                                 \
     if (op->key_len > 0) {                                                     \
       vj_copy_key(buf, op->key_ptr, op->key_len);                              \
       buf += op->key_len;                                                      \
+      if (indent_step) { *buf++ = ' '; }                                       \
     }                                                                          \
   } while (0)
 
@@ -176,7 +222,7 @@ vj_dispatch_base:
   /* ---- Primitives (0-13) ---- */
 
 vj_op_bool: {
-  VM_CHECK(op->key_len + 1 + 5);
+  VM_CHECK(op->key_len + 1 + 5 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
   uint8_t val = *(const uint8_t *)(base + op->field_off);
   if (val) {
@@ -190,7 +236,7 @@ vj_op_bool: {
 }
 
 vj_op_int: {
-  VM_CHECK(op->key_len + 1 + 21);
+  VM_CHECK(op->key_len + 1 + 21 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
   int64_t val = *(const int64_t *)(base + op->field_off);
   buf += write_int64(buf, val);
@@ -198,7 +244,7 @@ vj_op_int: {
 }
 
 vj_op_int8: {
-  VM_CHECK(op->key_len + 1 + 5);
+  VM_CHECK(op->key_len + 1 + 5 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
   int8_t val = *(const int8_t *)(base + op->field_off);
   buf += write_int64(buf, (int64_t)val);
@@ -206,7 +252,7 @@ vj_op_int8: {
 }
 
 vj_op_int16: {
-  VM_CHECK(op->key_len + 1 + 7);
+  VM_CHECK(op->key_len + 1 + 7 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
   int16_t val = *(const int16_t *)(base + op->field_off);
   buf += write_int64(buf, (int64_t)val);
@@ -214,7 +260,7 @@ vj_op_int16: {
 }
 
 vj_op_int32: {
-  VM_CHECK(op->key_len + 1 + 12);
+  VM_CHECK(op->key_len + 1 + 12 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
   int32_t val = *(const int32_t *)(base + op->field_off);
   buf += write_int64(buf, (int64_t)val);
@@ -222,7 +268,7 @@ vj_op_int32: {
 }
 
 vj_op_int64: {
-  VM_CHECK(op->key_len + 1 + 21);
+  VM_CHECK(op->key_len + 1 + 21 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
   int64_t val = *(const int64_t *)(base + op->field_off);
   buf += write_int64(buf, val);
@@ -230,7 +276,7 @@ vj_op_int64: {
 }
 
 vj_op_uint: {
-  VM_CHECK(op->key_len + 1 + 21);
+  VM_CHECK(op->key_len + 1 + 21 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
   uint64_t val = *(const uint64_t *)(base + op->field_off);
   buf += write_uint64(buf, val);
@@ -238,7 +284,7 @@ vj_op_uint: {
 }
 
 vj_op_uint8: {
-  VM_CHECK(op->key_len + 1 + 4);
+  VM_CHECK(op->key_len + 1 + 4 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
   uint8_t val = *(const uint8_t *)(base + op->field_off);
   buf += write_uint64(buf, (uint64_t)val);
@@ -246,7 +292,7 @@ vj_op_uint8: {
 }
 
 vj_op_uint16: {
-  VM_CHECK(op->key_len + 1 + 6);
+  VM_CHECK(op->key_len + 1 + 6 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
   uint16_t val = *(const uint16_t *)(base + op->field_off);
   buf += write_uint64(buf, (uint64_t)val);
@@ -254,7 +300,7 @@ vj_op_uint16: {
 }
 
 vj_op_uint32: {
-  VM_CHECK(op->key_len + 1 + 11);
+  VM_CHECK(op->key_len + 1 + 11 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
   uint32_t val = *(const uint32_t *)(base + op->field_off);
   buf += write_uint64(buf, (uint64_t)val);
@@ -262,7 +308,7 @@ vj_op_uint32: {
 }
 
 vj_op_uint64: {
-  VM_CHECK(op->key_len + 1 + 21);
+  VM_CHECK(op->key_len + 1 + 21 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
   uint64_t val = *(const uint64_t *)(base + op->field_off);
   buf += write_uint64(buf, val);
@@ -276,7 +322,7 @@ vj_op_float32: {
     ctx->depth = depth;
     VM_SAVE_AND_RETURN(VJ_ERR_NAN_INF);
   }
-  VM_CHECK(op->key_len + 1 + 60);
+  VM_CHECK(op->key_len + 1 + 60 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
   buf += us_write_float32(buf, fval, (flags & VJ_ENC_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED);
   VM_NEXT();
@@ -289,7 +335,7 @@ vj_op_float64: {
     ctx->depth = depth;
     VM_SAVE_AND_RETURN(VJ_ERR_NAN_INF);
   }
-  VM_CHECK(op->key_len + 1 + 330);
+  VM_CHECK(op->key_len + 1 + 330 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
   buf += us_write_float64(buf, dval, (flags & VJ_ENC_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED);
   VM_NEXT();
@@ -297,7 +343,7 @@ vj_op_float64: {
 
 vj_op_string: {
   const GoString *s = (const GoString *)(base + op->field_off);
-  int64_t max_need = 1 + op->key_len + 2 + (s->len * 6);
+  int64_t max_need = 1 + op->key_len + 2 + (s->len * 6) + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE;
   VM_CHECK(max_need);
   VM_WRITE_KEY();
 #ifdef VJ_FAST_STRING_ESCAPE
@@ -313,12 +359,12 @@ vj_op_string: {
 vj_op_raw_message: {
   const GoSlice *raw = (const GoSlice *)(base + op->field_off);
   if (raw->data == NULL || raw->len == 0) {
-    VM_CHECK(op->key_len + 1 + 4);
+    VM_CHECK(op->key_len + 1 + 4 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
     VM_WRITE_KEY();
     __builtin_memcpy(buf, "null", 4);
     buf += 4;
   } else {
-    VM_CHECK(op->key_len + 1 + raw->len);
+    VM_CHECK(op->key_len + 1 + raw->len + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
     VM_WRITE_KEY();
     vj_copy_var(buf, raw->data, raw->len);
     buf += raw->len;
@@ -329,11 +375,11 @@ vj_op_raw_message: {
 vj_op_number: {
   const GoString *s = (const GoString *)(base + op->field_off);
   if (s->len == 0) {
-    VM_CHECK(op->key_len + 1 + 1);
+    VM_CHECK(op->key_len + 1 + 1 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
     VM_WRITE_KEY();
     *buf++ = '0';
   } else {
-    VM_CHECK(op->key_len + 1 + s->len);
+    VM_CHECK(op->key_len + 1 + s->len + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
     VM_WRITE_KEY();
     vj_copy_var(buf, s->ptr, s->len);
     buf += s->len;
@@ -353,8 +399,8 @@ vj_op_skip_if_zero: {
 }
 
 vj_op_struct_begin: {
-  /* Write comma + key + '{' */
-  VM_CHECK(op->key_len + 1 + 1);
+  /* Write comma + key + '{' + indent */
+  VM_CHECK(op->key_len + 1 + 1 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE + VM_INDENT_PAD(indent_depth + 1));
   VM_WRITE_KEY();
 
   if (__builtin_expect(depth >= VJ_MAX_DEPTH, 0)) {
@@ -363,7 +409,7 @@ vj_op_struct_begin: {
 
   /* Push stack frame */
   VjStackFrame *frame = &ctx->stack[depth];
-  frame->ret_op = op + 1 + op->operand_a; /* points to after STRUCT_END */
+  frame->ctrl.ret_op = op + 1 + op->operand_a; /* points to after STRUCT_END */
   frame->ret_base = base;
   frame->first = first;
   frame->frame_type = VJ_FRAME_STRUCT;
@@ -373,11 +419,15 @@ vj_op_struct_begin: {
   base = base + op->field_off;
   first = 1;
   *buf++ = '{';
+  VM_INDENT_INC();
+  VM_WRITE_INDENT(); /* indent for first child field */
   VM_NEXT();
 }
 
 vj_op_struct_end: {
-  VM_CHECK(1);
+  VM_INDENT_DEC();
+  VM_CHECK(1 + VM_INDENT_PAD(indent_depth));
+  if (!first) { VM_WRITE_INDENT(); }
   *buf++ = '}';
 
   depth--;
@@ -393,7 +443,7 @@ vj_op_ptr_deref: {
 
   if (ptr == NULL) {
     /* nil pointer → write key + "null", jump over deref body */
-    VM_CHECK(op->key_len + 1 + 4);
+    VM_CHECK(op->key_len + 1 + 4 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
     VM_WRITE_KEY();
     __builtin_memcpy(buf, "null", 4);
     buf += 4;
@@ -401,7 +451,7 @@ vj_op_ptr_deref: {
   }
 
   /* Non-nil: write key, switch base to dereferenced address */
-  VM_CHECK(op->key_len + 1);
+  VM_CHECK(op->key_len + 1 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
 
   /* Push frame to restore base after deref body */
@@ -409,7 +459,7 @@ vj_op_ptr_deref: {
     VM_SAVE_AND_RETURN(VJ_ERR_STACK_OVERFLOW);
   }
   VjStackFrame *frame = &ctx->stack[depth];
-  frame->ret_op = op + 1 + op->operand_a; /* after deref body */
+  frame->ctrl.ret_op = op + 1 + op->operand_a; /* after deref body */
   frame->ret_base = base;
   frame->first = first;
   frame->frame_type = VJ_FRAME_STRUCT; /* reuse struct frame for ptr */
@@ -432,7 +482,7 @@ vj_op_ptr_end: {
 vj_op_slice_begin: {
   const GoSlice *sl = (const GoSlice *)(base + op->field_off);
 
-  VM_CHECK(op->key_len + 1 + 4);
+  VM_CHECK(op->key_len + 1 + 4 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE + VM_INDENT_PAD(indent_depth + 1));
   VM_WRITE_KEY();
 
   if (sl->data == NULL) {
@@ -449,17 +499,19 @@ vj_op_slice_begin: {
   }
 
   *buf++ = '[';
+  VM_INDENT_INC();
+  VM_WRITE_INDENT(); /* indent for first element */
 
   /* Push loop frame */
   if (__builtin_expect(depth >= VJ_MAX_DEPTH, 0)) {
     VM_SAVE_AND_RETURN(VJ_ERR_STACK_OVERFLOW);
   }
   VjStackFrame *frame = &ctx->stack[depth];
-  frame->iter_data = sl->data;
-  frame->iter_count = sl->len;
-  frame->iter_idx = 0;
-  frame->elem_size = op->operand_a; /* element size */
-  frame->loop_pc_op = op + 1;       /* first body instruction */
+  frame->slice.iter_data = sl->data;
+  frame->slice.iter_count = sl->len;
+  frame->slice.iter_idx = 0;
+  frame->slice.elem_size = op->operand_a; /* element size */
+  frame->slice.loop_pc_op = op + 1;       /* first body instruction */
   frame->ret_base = base;
   frame->first = first;
   frame->frame_type = VJ_FRAME_SLICE;
@@ -472,20 +524,23 @@ vj_op_slice_begin: {
 
 vj_op_slice_end: {
   VjStackFrame *frame = &ctx->stack[depth - 1];
-  frame->iter_idx++;
+  frame->slice.iter_idx++;
 
-  if (frame->iter_idx < frame->iter_count) {
-    /* More elements: write comma, advance base, jump back */
-    VM_CHECK(1);
+  if (frame->slice.iter_idx < frame->slice.iter_count) {
+    /* More elements: write comma + indent, advance base, jump back */
+    VM_CHECK(1 + VM_INDENT_PAD(indent_depth));
     *buf++ = ',';
-    base = frame->iter_data + frame->iter_idx * frame->elem_size;
-    op = frame->loop_pc_op;
+    VM_WRITE_INDENT();
+    base = frame->slice.iter_data + frame->slice.iter_idx * frame->slice.elem_size;
+    op = frame->slice.loop_pc_op;
     first = 1; /* reset for element-level encoding (no struct comma) */
     VM_DISPATCH();
   }
 
-  /* Done: write ']', pop frame */
-  VM_CHECK(1);
+  /* Done: write indent + ']', pop frame */
+  VM_INDENT_DEC();
+  VM_CHECK(1 + VM_INDENT_PAD(indent_depth));
+  VM_WRITE_INDENT();
   *buf++ = ']';
   depth--;
   base = frame->ret_base;
@@ -497,17 +552,21 @@ vj_op_obj_open: {
   /* Lightweight nested struct open: write key + '{', flip first flag.
    * No stack frame push, no base switch — child field offsets are
    * pre-computed (absolute from top-level struct base). */
-  VM_CHECK(op->key_len + 1 + 1);
+  VM_CHECK(op->key_len + 1 + 1 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE + VM_INDENT_PAD(indent_depth + 1));
   VM_WRITE_KEY();
   *buf++ = '{';
+  VM_INDENT_INC();
+  VM_WRITE_INDENT(); /* indent for first child field */
   first = 1;
   VM_NEXT();
 }
 
 vj_op_obj_close: {
-  /* Lightweight nested struct close: write '}', set first=0.
+  /* Lightweight nested struct close: write indent + '}', set first=0.
    * No stack frame pop — mirrors vj_op_obj_open. */
-  VM_CHECK(1);
+  VM_INDENT_DEC();
+  VM_CHECK(1 + VM_INDENT_PAD(indent_depth));
+  if (!first) { VM_WRITE_INDENT(); }
   *buf++ = '}';
   first = 0;
   VM_NEXT();
@@ -536,7 +595,7 @@ vj_op_interface: {
 
   /* nil interface → "null" (trivial — stays inline) */
   if (type_ptr == NULL) {
-    VM_CHECK(op->key_len + 1 + 4);
+    VM_CHECK(op->key_len + 1 + 4 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
     VM_WRITE_KEY();
     __builtin_memcpy(buf, "null", 4);
     buf += 4;
@@ -546,7 +605,7 @@ vj_op_interface: {
   /* Non-nil: speculatively write key, then delegate to out-of-line handler.
    * Save buf/first so we can undo the key write on yield/miss paths
    * (Go handles its own key+comma when falling back). */
-  VM_CHECK(op->key_len + 1 + 330);
+  VM_CHECK(op->key_len + 1 + 330 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   uint8_t *iface_saved_buf = buf;
   int iface_saved_first = first;
   VM_WRITE_KEY();
@@ -578,11 +637,11 @@ vj_op_interface: {
     }
     {
       VjStackFrame *frame = &ctx->stack[depth];
-      frame->ret_op = op + 1;
+      frame->iface.ret_op = op + 1;
       frame->ret_base = base;
       frame->first = first;
       frame->frame_type = VJ_FRAME_IFACE;
-      frame->ret_ops = ops;
+      frame->iface.ret_ops = ops;
       depth++;
     }
     ops = iface_r.cached_ops;
@@ -617,15 +676,15 @@ vj_op_end: {
 
     if (frame->frame_type == VJ_FRAME_IFACE) {
       /* Return from interface call: restore parent ops and continue */
-      ops = frame->ret_ops;
-      op = frame->ret_op;
+      ops = frame->iface.ret_ops;
+      op = frame->iface.ret_op;
       base = frame->ret_base;
       first = 0;
       VM_DISPATCH();
     }
 
     /* Normal struct end (shouldn't reach here — STRUCT_END handles it) */
-    op = frame->ret_op;
+    op = frame->ctrl.ret_op;
     base = frame->ret_base;
     first = 0;
     VM_DISPATCH();
@@ -648,10 +707,22 @@ vj_op_yield: {
 
 /* ---- Cleanup macros ---- */
 #undef VM_CHECK
+#undef VM_KEY_SPACE
 #undef VM_WRITE_KEY
+#undef VM_WRITE_INDENT
+#undef VM_INDENT_PAD
 #undef VM_DISPATCH
 #undef VM_NEXT
 #undef VM_JUMP
+#undef VM_INDENT_INC
+#undef VM_INDENT_DEC
+#undef VM_SAVE_INDENT_DEPTH
+#ifdef VJ_COMPACT_INDENT
+#undef indent_tpl
+#undef indent_depth
+#undef indent_step
+#undef indent_prefix_len
+#endif
 }
 
 #undef VM_SAVE_AND_RETURN
