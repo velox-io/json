@@ -1,0 +1,113 @@
+{
+  "params": "{\"config\":{\"ProxyIDs\":\"127.0.0.1:1000,127.0.0.1:1001,127.0.0.2:1002\",\"Accounts\":\"\",\"AdminPort\":\"16379\",\"AppID\":\"2022032303\",\"BindPort\":\"6379\",\"RedisPort\":\"6379\",\"AutoUpdateNodes\":\"1\",\"CacheMajorVersion\":\"5\",\"ClientBandWidthLimit\":30198988,\"ClientCommandLimit\":\"10000\",\"ClientConnLimit\":6000,\"ClusterConnLimit\":\"10000\",\"CommandLimit\":\"100000\",\"ConnIdleTimeout\":\"600\",\"DebugRunMode\":\"0\",\"DisableInterface\":\"0\",\"DisableMigrateMode\":\"0\",\"DisabledCmd\":\"config:set,save,bgsave,bgrewriteaof,shutdown,slaveof,debug,sync,psync,module\",\"GroSysId\":20001,\"ImportMode\":\"0\",\"LogLevel\":\"2\",\"LogPath\":\"/data/log/ccagent\",\"MasterReadWeight\":\"100\",\"MasterSlaveMode\":\"0\",\"MulAz\":\"0\",\"Nodes\":\"\",\"RedisPassWD\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"RefreshIdleTime\":\"30\",\"RefreshNodeSize\":\"64\",\"ReportOpsUrlList\":\"\",\"ReportUrlList\":\"\",\"ServerBandWidthLimit\":30198988,\"SessionIdleTime\":\"31536000\",\"SlaveReadWeight\":\"0\",\"SlowCmdReportTime\":\"500\",\"TimeStamp\":\"0\",\"UseMulReport\":\"0\",\"UserPassWD\":\"dddddddddddddrg\",\"VIP\":\"\",\"BindNetDev\":\"any\",\"SSLConfig\":\"0\"},\"monitor\":{\"Redis.Addrs\":\"10.0.1.40:6379\",\"Redis.Password\":\"zzzzzzzzC\",\"sync.interval\":10}}",
+  "pod": {
+    "name": "proxy-2",
+    "fqdn": "redis-0.test1.svc.cluster.local",
+    "region": "ap-guangzhou",
+    "zone": "ap-guangzhou-3",
+    "clusterNetAddr": {
+      "ip": "9.165.0.227",
+      "host": "redis-0"
+    },
+    "externalNetAddr": null,
+    "misc": ""
+  },
+  "cluster": {
+    "name": "test1",
+    "components": {
+      "proxy": {
+        "replicas": 1,
+        "shards": 1,
+        "resources": {
+          "cpu": 1,
+          "memory": 1024
+        },
+        "pods": [
+          {
+            "name": "proxy-0",
+            "fqdn": "proxy-0.test1.svc.cluster.local",
+            "clusterNetAddr": {
+              "ip": "9.165.0.227",
+              "host": "redis-0"
+            }
+          },
+          {
+            "name": "proxy-1",
+            "fqdn": "proxy-0.test1.svc.cluster.local",
+            "clusterNetAddr": {
+              "ip": "9.165.0.227",
+              "host": "redis-0"
+            }
+          },
+          {
+            "name": "proxy-2",
+            "fqdn": "proxy-0.test1.svc.cluster.local",
+            "clusterNetAddr": {
+              "ip": "9.165.0.227",
+              "host": "redis-0"
+            }
+          }
+        ]
+      },
+      "redis": {
+        "replicas": 2,
+        "shards": 3,
+        "resources": {
+          "cpu": 4000,
+          "memory": 4096
+        },
+        "pods": [
+          {
+            "name": "redis-0",
+            "fqdn": "redis-0.test1.svc.cluster.local",
+            "clusterNetAddr": {
+              "ip": "9.165.0.227",
+              "host": "redis-0"
+            }
+          },
+          {
+            "name": "redis-1",
+            "fqdn": "redis-1.test1.svc.cluster.local",
+            "clusterNetAddr": {
+              "ip": "9.165.0.227",
+              "host": "redis-0"
+            }
+          },
+          {
+            "name": "redis-2",
+            "fqdn": "redis-2.test1.svc.cluster.local",
+            "clusterNetAddr": {
+              "ip": "9.165.0.227",
+              "host": "redis-0"
+            }
+          },
+          {
+            "name": "redis-3",
+            "fqdn": "redis-3.test1.svc.cluster.local",
+            "clusterNetAddr": {
+              "ip": "9.165.0.227",
+              "host": "redis-0"
+            }
+          },
+          {
+            "name": "redis-4",
+            "fqdn": "redis-4.test1.svc.cluster.local",
+            "clusterNetAddr": {
+              "ip": "9.165.0.227",
+              "host": "redis-0"
+            }
+          },
+          {
+            "name": "redis-5",
+            "fqdn": "redis-5.test1.svc.cluster.local",
+            "clusterNetAddr": {
+              "ip": "9.165.0.227",
+              "host": "redis-0"
+            }
+          }
+        ]
+      }
+    },
+    "tenant": "{\"env\":\"dev\",\"user\":\"123456\"}"
+  }
+}

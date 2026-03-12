@@ -1,0 +1,5 @@
+/local
+/benchmark/local
+*.prof
+*.bak
+*.png
