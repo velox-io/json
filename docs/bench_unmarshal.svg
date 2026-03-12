@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 420" font-family="'SF Mono','Cascadia Code','Consolas',monospace" font-size="13">
+  <defs>
+    <linearGradient id="u-velox" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#818cf8"/>
+    </linearGradient>
+    <linearGradient id="u-sonic" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#94a3b8"/>
+      <stop offset="100%" stop-color="#cbd5e1"/>
+    </linearGradient>
+    <filter id="u-shadow">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="780" height="420" rx="12" fill="#ffffff"/>
+  <rect width="780" height="420" rx="12" fill="none" stroke="#e2e8f0" stroke-width="1"/>
+
+  <!-- Title -->
+  <text x="390" y="36" text-anchor="middle" font-size="16" font-weight="700" fill="#1e293b">Unmarshal  ·  Single-thread  (ns/op, lower is better)</text>
+  <text x="390" y="54" text-anchor="middle" font-size="11" fill="#94a3b8">Apple M4 Pro · Go 1.24 · GOMAXPROCS=14</text>
+
+  <!-- Legend -->
+  <rect x="270" y="66" width="14" height="14" rx="3" fill="url(#u-velox)"/>
+  <text x="290" y="78" font-size="12" fill="#475569">Velox</text>
+  <rect x="340" y="66" width="14" height="14" rx="3" fill="url(#u-sonic)"/>
+  <text x="360" y="78" font-size="12" fill="#475569">Sonic</text>
+
+  <!-- Chart area: x=150..700, each group 80px, start y=100 -->
+  <!-- Scale: max = 448738 ns → 550px -->
+
+  <!-- Grid lines -->
+  <line x1="150" y1="96" x2="150" y2="395" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="272" y1="96" x2="272" y2="395" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="395" y1="96" x2="395" y2="395" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="517" y1="96" x2="517" y2="395" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="640" y1="96" x2="640" y2="395" stroke="#f1f5f9" stroke-width="1"/>
+
+  <!-- Scale labels -->
+  <text x="150" y="408" text-anchor="middle" font-size="10" fill="#94a3b8">0</text>
+  <text x="272" y="408" text-anchor="middle" font-size="10" fill="#94a3b8">100k</text>
+  <text x="395" y="408" text-anchor="middle" font-size="10" fill="#94a3b8">200k</text>
+  <text x="517" y="408" text-anchor="middle" font-size="10" fill="#94a3b8">300k</text>
+  <text x="640" y="408" text-anchor="middle" font-size="10" fill="#94a3b8">400k</text>
+
+  <!-- ===== Small ===== y=105 -->
+  <text x="140" y="128" text-anchor="end" font-size="13" fill="#334155" font-weight="600">Small</text>
+  <!-- Velox: 146.9 → scale: 146.9/448738*490 = ~0.16px, min bar 4px -->
+  <rect x="150" y="113" width="6" height="16" rx="3" fill="url(#u-velox)" filter="url(#u-shadow)"/>
+  <text x="162" y="126" font-size="11" fill="#6366f1" font-weight="600">147 ns</text>
+  <!-- Sonic: 221.2 → ~0.24px, min bar 4px -->
+  <rect x="150" y="133" width="6" height="16" rx="3" fill="url(#u-sonic)" filter="url(#u-shadow)"/>
+  <text x="162" y="146" font-size="11" fill="#64748b">221 ns</text>
+  <!-- Speedup -->
+  <rect x="680" y="119" width="72" height="20" rx="10" fill="#ecfdf5"/>
+  <text x="716" y="133" text-anchor="middle" font-size="11" font-weight="700" fill="#059669">1.51x</text>
+
+  <!-- ===== EscapeHeavy ===== y=175 -->
+  <text x="140" y="198" text-anchor="end" font-size="13" fill="#334155" font-weight="600">EscapeHeavy</text>
+  <!-- Velox: 2439 → 2439/448738*490 = 2.66px, min 6 -->
+  <rect x="150" y="183" width="6" height="16" rx="3" fill="url(#u-velox)" filter="url(#u-shadow)"/>
+  <text x="162" y="196" font-size="11" fill="#6366f1" font-weight="600">2,439 ns</text>
+  <!-- Sonic: 2702 → 2.95px, min 6 -->
+  <rect x="150" y="203" width="6" height="16" rx="3" fill="url(#u-sonic)" filter="url(#u-shadow)"/>
+  <text x="162" y="216" font-size="11" fill="#64748b">2,702 ns</text>
+  <!-- Speedup -->
+  <rect x="680" y="189" width="72" height="20" rx="10" fill="#ecfdf5"/>
+  <text x="716" y="203" text-anchor="middle" font-size="11" font-weight="700" fill="#059669">1.11x</text>
+
+  <!-- ===== KubePods ===== y=245 -->
+  <text x="140" y="268" text-anchor="end" font-size="13" fill="#334155" font-weight="600">KubePods</text>
+  <!-- Velox: 14042 → 14042/448738*490 = 15.3px -->
+  <rect x="150" y="253" width="16" height="16" rx="3" fill="url(#u-velox)" filter="url(#u-shadow)"/>
+  <text x="172" y="266" font-size="11" fill="#6366f1" font-weight="600">14,042 ns</text>
+  <!-- Sonic: 20131 → 21.97px -->
+  <rect x="150" y="273" width="22" height="16" rx="3" fill="url(#u-sonic)" filter="url(#u-shadow)"/>
+  <text x="178" y="286" font-size="11" fill="#64748b">20,131 ns</text>
+  <!-- Speedup -->
+  <rect x="680" y="259" width="72" height="20" rx="10" fill="#ecfdf5"/>
+  <text x="716" y="273" text-anchor="middle" font-size="11" font-weight="700" fill="#059669">1.43x</text>
+
+  <!-- ===== Twitter ===== y=315 -->
+  <text x="140" y="338" text-anchor="end" font-size="13" fill="#334155" font-weight="600">Twitter</text>
+  <!-- Velox: 262808 → 262808/448738*490 = 287px -->
+  <rect x="150" y="323" width="287" height="16" rx="3" fill="url(#u-velox)" filter="url(#u-shadow)"/>
+  <text x="443" y="336" font-size="11" fill="#6366f1" font-weight="600">262,808 ns</text>
+  <!-- Sonic: 448738 → 490px -->
+  <rect x="150" y="343" width="490" height="16" rx="3" fill="url(#u-sonic)" filter="url(#u-shadow)"/>
+  <text x="646" y="356" font-size="11" fill="#64748b">448,738 ns</text>
+  <!-- Speedup -->
+  <rect x="680" y="329" width="72" height="20" rx="10" fill="#ecfdf5"/>
+  <text x="716" y="343" text-anchor="middle" font-size="11" font-weight="700" fill="#059669">1.71x</text>
+</svg>

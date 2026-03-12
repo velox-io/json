@@ -61,17 +61,14 @@ func decodeSurrogatePair(high, low rune) rune {
 // Returns (new read position, new write position, error).
 // dst must have enough space for the output.
 func unescapeSequence(data []byte, n int, i int, dst []byte, pos int) (int, int, error) {
-	// Found backslash
 	if i+1 >= n {
 		return i, pos, errUnexpectedEOF
 	}
 
 	next := data[i+1]
 	if next == 'u' {
-		// Unicode escape \uXXXX
-		// Need exactly 4 hex digits after \u
+		// \uXXXX: need exactly 4 hex digits
 		if i+5 < n {
-			// Validate all 4 characters are hex
 			hexChars := data[i+2 : i+6]
 			if isHexChar(hexChars[0]) && isHexChar(hexChars[1]) && isHexChar(hexChars[2]) && isHexChar(hexChars[3]) {
 				r := hexToRune(hexChars)
@@ -131,8 +128,17 @@ func unescapeSequence(data []byte, n int, i int, dst []byte, pos int) (int, int,
 // unescapeSinglePass scans src from firstEscIdx for the closing '"', unescaping
 // escape sequences as it goes. src[start:firstEscIdx] is the prefix before the
 // first backslash (copied verbatim).
+//
 // Returns (endIdx past closing quote, decoded []byte, error).
-// The returned []byte is backed by arena, scratch, or heap — see done: label.
+//
+// Decoded bytes land in one of three storage tiers (chosen at the done: label):
+//
+//  1. Arena — when the result fits in the current arena block, it is decoded
+//     directly there (zero-copy, no extra allocation).
+//  2. Scratch → arena/heap — when the scratch buffer was used, the result is
+//     copied to the arena (if small) or a new heap slice (if large).
+//  3. Heap — when the scratch buffer overflowed into a heap-allocated slice,
+//     that slice is used directly.
 func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, []byte, error) {
 	n := len(src)
 

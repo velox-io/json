@@ -9,7 +9,17 @@ const (
 	hi64 = uint64(0x8080808080808080)
 )
 
-// hasZeroByte returns a mask with the high bit set for each zero byte.
+// hasZeroByte returns a mask with the high bit set for each zero byte in x.
+//
+// Classic null-byte detection (Mycroft's trick, see Hacker's Delight §6-1):
+// for each byte b in x, (b - 0x01) borrows from the high bit when b == 0,
+// and (^b & 0x80) is true when b < 0x80. Their conjunction is true only when
+// b == 0. To search for a specific byte c, callers XOR the word with
+// broadcast(c) first, turning c-bytes into zero-bytes.
+//
+// firstMarkedByteIndex (defined per-arch in endian_{arm64,amd64,other}.go)
+// extracts the byte offset of the lowest set marker in the returned mask;
+// the implementation depends on target endianness.
 func hasZeroByte(x uint64) uint64 {
 	return (x - lo64) & ^x & hi64
 }

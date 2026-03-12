@@ -45,6 +45,25 @@ type SliceHeader struct {
 	Cap  int
 }
 
+//go:linkname mallocgc runtime.mallocgc
+func mallocgc(size uintptr, typ unsafe.Pointer, needzero bool) unsafe.Pointer
+
+// makeDirtyBytes allocates a []byte of the given length and capacity without
+// zeroing the memory. The caller MUST overwrite every byte before reading it.
+//
+// This is safe for byte slices because bytes contain no pointers — the GC
+// never scans their contents. The returned slice is GC-managed (allocated
+// via mallocgc), so it does not require manual freeing.
+func makeDirtyBytes(len, cap int) []byte {
+	var b []byte
+	p := mallocgc(uintptr(cap), nil, false)
+	sh := (*SliceHeader)(unsafe.Pointer(&b))
+	sh.Data = p
+	sh.Len = len
+	sh.Cap = cap
+	return b
+}
+
 func init() {
 	// Verify our sliceHeader layout assumption matches the Go runtime.
 	s := make([]byte, 1, 2)

@@ -47,49 +47,39 @@ func DecoderUseNumber() DecoderOption {
 }
 
 // Decoder reads and decodes JSON values from an input stream.
+// Each [Decoder.Decode] call parses the next value via scanValue (single-pass).
+// When a value spans a buffer boundary the decoder grows the buffer and retries.
 //
-// Each call to [Decoder.Decode] parses the next complete value directly via
-// scanValue (single-pass). When the value spans a buffer boundary, the
-// decoder grows the buffer and retries.
-//
-// Buffers are never compacted in-place — decoded zero-copy strings may
-// reference them via unsafe.String. Old buffers become eligible for GC
-// once no live strings point into them.
+// Old buffers are never reused — zero-copy strings may reference them via
+// unsafe.String. Unscanned data is copied to a fresh buffer; the old one
+// stays live until the GC reclaims it.
 type Decoder struct {
 	r io.Reader
 
-	buf    []byte // read buffer
-	bufLen int    // valid bytes in buf
-	scanAt int    // next byte to consume
+	buf    []byte
+	bufLen int
+	scanAt int
 
-	bufSize int // configured initial buffer size
+	bufSize int
 
-	err error // sticky error
-	eof bool  // reader returned io.EOF
+	err error
+	eof bool
 
-	// Buffer-size history for nextBufSize() averaging.
 	lastBufSize int
 	prevBufSize int
 
-	// Value-size prediction (see predictedValueSize).
 	lastValueSize int
 	prevValueSize int
 	maxSeenSize   int // high-water mark with slow decay
 
-	// Buffer fitness (see maybeNewBuffer).
-	valuesInBuf    int // values decoded in the current buffer
-	minGoodBufSize int // sticky floor: smallest buf that held ≥ 2 values
+	valuesInBuf    int
+	minGoodBufSize int // smallest buf that held ≥ 2 values
 
-	skipErrors func(err error) bool // nil = sticky error (default)
-	useNumber  bool                 // decode numbers in interface{} as json.Number
+	skipErrors func(err error) bool
+	useNumber  bool
 
-	// Owned parser — acquired lazily from the pool on first Decode,
-	// reused across calls to avoid per-value sync.Pool round-trips.
-	sc *Parser
-
-	// Type cache — when consecutive Decode calls use the same type
-	// (the common streaming case), skip the sync.Map lookup in GetCodec.
-	lastType reflect.Type
+	sc       *Parser      // owned parser, lazily acquired from pool
+	lastType reflect.Type // type cache for consecutive same-type Decode calls
 	lastTI   *TypeInfo
 }
 
@@ -105,20 +95,15 @@ func NewDecoder(r io.Reader, opts ...DecoderOption) *Decoder {
 	return d
 }
 
-// parser returns the decoder's owned Parser, acquiring one from the pool
-// on first use. Between Decode calls the parser's arena and batch allocators
-// are cleaned up (matching the semantics of parserPool.Put) so that
-// previously decoded strings are not overwritten.
+// parser returns the owned Parser, acquiring one from the pool on first use.
+// Between Decode calls it performs inter-decode cleanup (same as parserPool.Put
+// but without the pool round-trip).
 func (d *Decoder) parser() *Parser {
 	if d.sc == nil {
 		d.sc = defaultPool.Get()
 		d.sc.useNumber = d.useNumber
 		return d.sc
 	}
-	// Inter-decode cleanup: same logic as parserPool.Put, but without
-	// the pool round-trip. Arena blocks that are more than half-used are
-	// released so the next value gets a fresh arena; partially-used blocks
-	// are kept to avoid immediate reallocation.
 	sc := d.sc
 	if sc.arenaOff > arenaBlockSize/2 {
 		sc.arenaData = nil
@@ -130,9 +115,6 @@ func (d *Decoder) parser() *Parser {
 	return sc
 }
 
-// releaseParser returns the owned parser to the pool when the Decoder
-// reaches a terminal state (EOF or sticky error). This ensures the Parser
-// is recycled even if the Decoder is abandoned without explicit cleanup.
 func (d *Decoder) releaseParser() {
 	if d.sc != nil {
 		defaultPool.Put(d.sc)
@@ -140,9 +122,8 @@ func (d *Decoder) releaseParser() {
 	}
 }
 
-// Decode reads the next JSON value from the stream into v (must be a non-nil pointer).
-//
-// Strings in v may alias the decoder's internal buffer (zero-copy).
+// Decode reads the next JSON value from the stream into v (non-nil pointer).
+// Strings in v may alias the internal buffer (zero-copy).
 // Returns [io.EOF] when no more values remain.
 func (d *Decoder) Decode(v any) error {
 	if d.err != nil {
@@ -155,7 +136,6 @@ func (d *Decoder) Decode(v any) error {
 	}
 	ptr := rv.UnsafePointer()
 
-	// P1: cache TypeInfo across calls for the common same-type streaming case.
 	elemType := rv.Elem().Type()
 	var ti *TypeInfo
 	if elemType == d.lastType {
@@ -171,7 +151,6 @@ func (d *Decoder) Decode(v any) error {
 		return err
 	}
 
-	// Find value start (skip whitespace), reading more if needed.
 	idx := skipWS(d.buf[:d.bufLen], d.scanAt)
 	for idx >= d.bufLen && !d.eof {
 		if err := d.ensureBuffer(); err != nil {
@@ -187,7 +166,6 @@ func (d *Decoder) Decode(v any) error {
 		return io.EOF
 	}
 
-	// P0: reuse the parser across Decode calls, avoiding sync.Pool round-trips.
 	sc := d.parser()
 
 	data := d.buf[:d.bufLen]
@@ -208,9 +186,7 @@ func (d *Decoder) Decode(v any) error {
 		d.releaseParser()
 		return err
 	}
-	// Number/literal boundary ambiguity: scanNumberSpan stops at bufLen
-	// even if the token continues in unread data. Strings, objects, and
-	// arrays have explicit closing delimiters so they are unambiguous.
+	// Number/literal boundary: token may continue beyond bufLen.
 	if newIdx >= d.bufLen && !d.eof {
 		c := data[idx]
 		if c != '"' && c != '{' && c != '[' {
@@ -230,8 +206,6 @@ func (d *Decoder) Decode(v any) error {
 	d.recordValueSize(newIdx - idx)
 	d.scanAt = newIdx
 	d.valuesInBuf++
-	// Inline fast-exit of maybeNewBuffer: only call the slow path when
-	// the remaining capacity is unlikely to hold the next value.
 	if !d.eof {
 		if len(d.buf)-d.scanAt < d.predictedValueSize() {
 			if err := d.growBufferAndFill(); err != nil {
@@ -242,9 +216,9 @@ func (d *Decoder) Decode(v any) error {
 	return nil
 }
 
-// retryDecode is the slow path for values that span a buffer boundary.
-// It grows the buffer, zeros the target (scanValue may have partially
-// written), and retries until the value fits or a real error occurs.
+// retryDecode grows the buffer and retries until the value fits or a real
+// error occurs. Re-zeros the target on each iteration (scanValue may have
+// partially written before errUnexpectedEOF).
 func (d *Decoder) retryDecode(sc *Parser, valueStart int, ti *TypeInfo, ptr unsafe.Pointer, rv reflect.Value) error {
 	for {
 		rv.Elem().SetZero()
@@ -281,7 +255,6 @@ func (d *Decoder) retryDecode(sc *Parser, valueStart int, ti *TypeInfo, ptr unsa
 			return err
 		}
 
-		// Number/literal boundary check (same logic as Decode fast path).
 		if newIdx >= d.bufLen && !d.eof {
 			c := data[idx]
 			if c != '"' && c != '{' && c != '[' {
@@ -330,8 +303,7 @@ func (d *Decoder) Buffered() io.Reader {
 	return bytes.NewReader(d.buf[d.scanAt:d.bufLen])
 }
 
-// ensureData guarantees buf contains at least one readable byte,
-// allocating a buffer and issuing the first read if necessary.
+// ensureData guarantees buf contains at least one readable byte.
 func (d *Decoder) ensureData() error {
 	if d.buf != nil && d.scanAt < d.bufLen {
 		return nil
@@ -346,12 +318,9 @@ func (d *Decoder) ensureData() error {
 }
 
 // ensureBuffer makes sure d.buf has at least minReadSize free bytes.
-// When the current buffer is full, unscanned data is copied to a new
-// (potentially larger) buffer. The old buffer is NOT compacted — it may
-// still be referenced by zero-copy strings.
 func (d *Decoder) ensureBuffer() error {
 	if d.buf == nil {
-		d.buf = make([]byte, d.bufSize)
+		d.buf = makeDirtyBytes(d.bufSize, d.bufSize)
 		return nil
 	}
 	if len(d.buf)-d.bufLen >= minReadSize {
@@ -364,17 +333,13 @@ func (d *Decoder) ensureBuffer() error {
 	if unscanned > 0 {
 		minNeeded := unscanned + minReadSize
 		predicted := d.predictedValueSize()
-		// Modification 2: prediction-aware sizing — include predicted value
-		// size so retry-path buffers grow fast enough to hold the next value.
 		if predicted > minReadSize {
 			needed := unscanned + predicted + minReadSize
 			if needed > minNeeded {
 				minNeeded = needed
 			}
 		}
-		// Modification 3: cold-start heuristic — when unscanned exceeds the
-		// prediction, the value is provably >= unscanned bytes. Use 2x as
-		// target to converge in fewer retries.
+		// Cold-start: unscanned exceeds prediction, so double to converge faster.
 		if unscanned > predicted {
 			coldNeeded := unscanned*2 + minReadSize
 			if coldNeeded > minNeeded {
@@ -393,13 +358,13 @@ func (d *Decoder) ensureBuffer() error {
 				newSize = aligned
 			}
 		}
-		newBuf := make([]byte, newSize)
+		newBuf := makeDirtyBytes(newSize, newSize)
 		copy(newBuf, d.buf[d.scanAt:d.bufLen])
 		d.buf = newBuf
 		d.bufLen = unscanned
 		d.scanAt = 0
 	} else {
-		d.buf = make([]byte, newSize)
+		d.buf = makeDirtyBytes(newSize, newSize)
 		d.bufLen = 0
 		d.scanAt = 0
 	}
@@ -408,10 +373,8 @@ func (d *Decoder) ensureBuffer() error {
 	return nil
 }
 
-// growAndFill moves scanAt back to valueStart (preserving the partial
-// value), ensures the buffer has space, and reads repeatedly until the
-// buffer is full or EOF is reached. This minimizes retries by giving
-// scanValue the most data possible.
+// growAndFill preserves the partial value at valueStart, grows the buffer,
+// and fills it to minimize retries.
 func (d *Decoder) growAndFill(valueStart int) error {
 	if valueStart < d.scanAt {
 		d.scanAt = valueStart
@@ -427,8 +390,7 @@ func (d *Decoder) growAndFill(valueStart int) error {
 	return nil
 }
 
-// nextBufSize returns the adaptive size for the next buffer allocation
-// (average of the last two, falling back to the configured default).
+// nextBufSize returns the average of the last two buffer sizes, or the default.
 func (d *Decoder) nextBufSize() int {
 	if d.lastBufSize > 0 && d.prevBufSize > 0 {
 		return (d.lastBufSize + d.prevBufSize) / 2
@@ -437,7 +399,6 @@ func (d *Decoder) nextBufSize() int {
 }
 
 // readMore issues a single Read into the buffer's free tail.
-// On io.EOF it sets d.eof without returning an error.
 func (d *Decoder) readMore() error {
 	n, err := d.r.Read(d.buf[d.bufLen:])
 	d.bufLen += n
@@ -452,10 +413,7 @@ func (d *Decoder) readMore() error {
 	return nil
 }
 
-// recordValueSize updates the value-size prediction state after a
-// successful decode. It maintains a high-water mark (maxSeenSize) that
-// decays by ~3% per value, keeping the decoder prepared for recurring
-// large values even across long runs of small ones.
+// recordValueSize updates prediction state and decays the high-water mark.
 func (d *Decoder) recordValueSize(size int) {
 	d.prevValueSize = d.lastValueSize
 	d.lastValueSize = size
@@ -466,8 +424,7 @@ func (d *Decoder) recordValueSize(size int) {
 	}
 }
 
-// recentAvgValueSize returns the average of the last two decoded value sizes,
-// or a conservative initial estimate if fewer than two values have been seen.
+// recentAvgValueSize returns the average of the last two value sizes.
 func (d *Decoder) recentAvgValueSize() int {
 	if d.lastValueSize > 0 && d.prevValueSize > 0 {
 		return (d.lastValueSize + d.prevValueSize) / 2
@@ -478,10 +435,7 @@ func (d *Decoder) recentAvgValueSize() int {
 	return d.bufSize / 4
 }
 
-// predictedValueSize returns the expected size of the next JSON value.
-// It takes the larger of the recent average (last two values) and
-// the decaying high-water mark, ensuring spike-heavy streams keep
-// buffers large enough to avoid retries.
+// predictedValueSize returns max(recentAvg, decaying high-water mark).
 func (d *Decoder) predictedValueSize() int {
 	avg := d.recentAvgValueSize()
 	if d.maxSeenSize > avg {
@@ -490,11 +444,7 @@ func (d *Decoder) predictedValueSize() int {
 	return avg
 }
 
-// growBufferAndFill allocates a new prediction-sized buffer (via growBuffer)
-// and immediately fills it with data from the reader. This ensures the next
-// Decode call finds a buffer that is both correctly sized and full, preventing
-// ensureData from skipping the read (because scanAt < bufLen) and thus
-// eliminating the retry that would otherwise occur on insufficient data.
+// growBufferAndFill allocates a prediction-sized buffer and fills it.
 func (d *Decoder) growBufferAndFill() error {
 	d.growBuffer()
 	for len(d.buf)-d.bufLen >= minReadSize && !d.eof {
@@ -505,17 +455,11 @@ func (d *Decoder) growBufferAndFill() error {
 	return nil
 }
 
-// growBuffer allocates a new buffer when the remaining capacity is
-// insufficient for the predicted next value. Callers perform the
-// fast-exit check inline (eof + capacity) so this method is only
-// reached on the slow path.
+// growBuffer allocates a new buffer sized for the predicted next value.
 func (d *Decoder) growBuffer() {
 	predicted := d.predictedValueSize()
 	unscanned := d.bufLen - d.scanAt
 
-	// Buffer fitness: record the current buffer size as a "good" floor
-	// when it held at least 2 values. This prevents nextBufSize()'s
-	// averaging from shrinking back to a poorly-fitting size.
 	if d.valuesInBuf >= 2 && (d.minGoodBufSize == 0 || len(d.buf) < d.minGoodBufSize) {
 		d.minGoodBufSize = len(d.buf)
 	}
@@ -523,21 +467,16 @@ func (d *Decoder) growBuffer() {
 	curSize := len(d.buf)
 	newSize := max(d.minGoodBufSize, d.nextBufSize())
 	needed := unscanned + predicted + minReadSize
-	// If this buffer only held one value, the size is a poor fit.
-	// Double the target so the next buffer can hold more values.
-	if d.valuesInBuf < 2 {
+	if d.valuesInBuf < 2 { // poor fit — double target
 		needed *= 2
 	}
 	for newSize < needed {
 		newSize *= 2
 	}
-	// Value-align: trim the power-of-2 overshoot down to the nearest
-	// multiple of predicted + minReadSize, so the buffer boundary falls
-	// right after the last value that fits, eliminating wasted tail space.
-	// Only apply when predicted is driven by the recent average, not by
-	// a decaying spike (maxSeenSize). When maxSeenSize dominates, the
-	// predicted size doesn't reflect actual values being decoded, so
-	// aligning to it would trim to the wrong grid.
+	// Value-align: trim the power-of-2 overshoot to a multiple of
+	// predicted + minReadSize so the buffer boundary falls right after
+	// the last value that fits. Skip when maxSeenSize dominates (spike
+	// decay) — the prediction doesn't reflect actual values in that case.
 	avg := d.recentAvgValueSize()
 	if predicted > minReadSize && predicted == avg {
 		nFit := (newSize - minReadSize) / predicted
@@ -548,13 +487,13 @@ func (d *Decoder) growBuffer() {
 		newSize = aligned
 	}
 	if unscanned > 0 {
-		newBuf := make([]byte, newSize)
+		newBuf := makeDirtyBytes(newSize, newSize)
 		copy(newBuf, d.buf[d.scanAt:d.bufLen])
 		d.buf = newBuf
 		d.bufLen = unscanned
 		d.scanAt = 0
 	} else {
-		d.buf = make([]byte, newSize)
+		d.buf = makeDirtyBytes(newSize, newSize)
 		d.bufLen = 0
 		d.scanAt = 0
 	}
@@ -563,9 +502,7 @@ func (d *Decoder) growBuffer() {
 	d.valuesInBuf = 0
 }
 
-// skipToNewline advances scanAt past the next '\n' in the buffer,
-// reading more data as needed. Returns io.EOF if no newline is found
-// before the end of the stream.
+// skipToNewline advances scanAt past the next '\n', reading more if needed.
 func (d *Decoder) skipToNewline() error {
 	for {
 		for i := d.scanAt; i < d.bufLen; i++ {
@@ -574,7 +511,6 @@ func (d *Decoder) skipToNewline() error {
 				return nil
 			}
 		}
-		// No newline found in current buffer data.
 		d.scanAt = d.bufLen
 		if d.eof {
 			return io.EOF
@@ -588,9 +524,7 @@ func (d *Decoder) skipToNewline() error {
 	}
 }
 
-// isTokenContinuation reports whether b can extend a JSON number or
-// literal (digits, letters, '.', '+', '-'). Used to detect buffer-
-// boundary ambiguity for undelimited tokens.
+// isTokenContinuation reports whether b can extend a JSON number or literal.
 func isTokenContinuation(b byte) bool {
 	return (b >= '0' && b <= '9') ||
 		(b >= 'a' && b <= 'z') ||

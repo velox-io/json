@@ -158,7 +158,7 @@ func (sc *Parser) scanQuotedValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 
 // scanPointerQuoted handles pointer fields with the `,string` tag.
 func (sc *Parser) scanPointerQuoted(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
-	pDec := ti.Decoder.(*PointerCodec)
+	pDec := ti.Codec.(*PointerCodec)
 
 	idx = skipWS(src, idx)
 	if idx >= len(src) {

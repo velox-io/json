@@ -29,8 +29,8 @@ var (
 )
 
 const (
-	marshalBufInitSize = 4096
-	marshalBufMaxPool  = 64 * 1024
+	marshalBufInitSize = 32 * 1024
+	marshalBufMaxPool  = 1024 * 1024
 )
 
 // MarshalOption configures encoding behavior.
@@ -88,140 +88,314 @@ func putMarshaler(m *Marshaler) {
 	}
 }
 
-// estimateDataSize pre-scans data to estimate JSON output size.
-func estimateDataSize(ti *TypeInfo, ptr unsafe.Pointer) int {
-	if ti.Flags&tiFlagHasMarshalFn != 0 {
-		return 64
+// ---------------------------------------------------------------------------
+// Per-Kind encode functions (package-level) for EncodeFn dispatch.
+// ---------------------------------------------------------------------------
+
+func encodeBool(m *Marshaler, ptr unsafe.Pointer) error {
+	if *(*bool)(ptr) {
+		m.buf = append(m.buf, litTrue...)
+	} else {
+		m.buf = append(m.buf, litFalse...)
 	}
-	if ti.Flags&tiFlagHasTextMarshalFn != 0 {
+	return nil
+}
+
+func encodeInt(m *Marshaler, ptr unsafe.Pointer) error     { return m.appendInt64(int64(*(*int)(ptr))) }
+func encodeInt8(m *Marshaler, ptr unsafe.Pointer) error    { return m.appendInt64(int64(*(*int8)(ptr))) }
+func encodeInt16(m *Marshaler, ptr unsafe.Pointer) error   { return m.appendInt64(int64(*(*int16)(ptr))) }
+func encodeInt32(m *Marshaler, ptr unsafe.Pointer) error   { return m.appendInt64(int64(*(*int32)(ptr))) }
+func encodeInt64Fn(m *Marshaler, ptr unsafe.Pointer) error { return m.appendInt64(*(*int64)(ptr)) }
+
+func encodeUint(m *Marshaler, ptr unsafe.Pointer) error {
+	return m.appendUint64(uint64(*(*uint)(ptr)))
+}
+func encodeUint8(m *Marshaler, ptr unsafe.Pointer) error {
+	return m.appendUint64(uint64(*(*uint8)(ptr)))
+}
+func encodeUint16(m *Marshaler, ptr unsafe.Pointer) error {
+	return m.appendUint64(uint64(*(*uint16)(ptr)))
+}
+func encodeUint32(m *Marshaler, ptr unsafe.Pointer) error {
+	return m.appendUint64(uint64(*(*uint32)(ptr)))
+}
+func encodeUint64Fn(m *Marshaler, ptr unsafe.Pointer) error {
+	return m.appendUint64(*(*uint64)(ptr))
+}
+
+func encodeFloat32Value(m *Marshaler, ptr unsafe.Pointer) error { return m.encodeFloat32(ptr) }
+func encodeFloat64Value(m *Marshaler, ptr unsafe.Pointer) error { return m.encodeFloat64(ptr) }
+
+func encodeStringValue(m *Marshaler, ptr unsafe.Pointer) error {
+	m.encodeString(*(*string)(ptr))
+	return nil
+}
+
+func encodeRawMessageFn(m *Marshaler, ptr unsafe.Pointer) error {
+	raw := *(*[]byte)(ptr)
+	if len(raw) == 0 {
+		m.buf = append(m.buf, litNull...)
+	} else {
+		m.buf = append(m.buf, raw...)
+	}
+	return nil
+}
+
+func encodeNumberFn(m *Marshaler, ptr unsafe.Pointer) error {
+	s := *(*string)(ptr)
+	if s == "" {
+		m.buf = append(m.buf, '0')
+	} else {
+		m.buf = append(m.buf, s...)
+	}
+	return nil
+}
+
+func encodeAnyValue(m *Marshaler, ptr unsafe.Pointer) error { return m.encodeAny(ptr) }
+
+// Closure builders for composite types.
+
+func makeEncodeStruct(dec *StructCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
+	return func(m *Marshaler, ptr unsafe.Pointer) error {
+		return m.encodeStruct(dec, ptr)
+	}
+}
+
+func makeEncodeSlice(dec *SliceCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
+	return func(m *Marshaler, ptr unsafe.Pointer) error {
+		return m.encodeSlice(dec, ptr)
+	}
+}
+
+func makeEncodePointer(dec *PointerCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
+	return func(m *Marshaler, ptr unsafe.Pointer) error {
+		return m.encodePointer(dec, ptr)
+	}
+}
+
+func makeEncodeMap(dec *MapCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
+	return func(m *Marshaler, ptr unsafe.Pointer) error {
+		return m.encodeMap(dec, ptr)
+	}
+}
+
+// Closure builders for custom marshalers.
+
+func makeEncodeMarshalJSON(marshalFn func(ptr unsafe.Pointer) ([]byte, error)) func(m *Marshaler, ptr unsafe.Pointer) error {
+	return func(m *Marshaler, ptr unsafe.Pointer) error {
+		data, err := marshalFn(ptr)
+		if err != nil {
+			return err
+		}
+		m.buf = append(m.buf, data...)
+		return nil
+	}
+}
+
+func makeEncodeTextMarshal(textMarshalFn func(ptr unsafe.Pointer) ([]byte, error)) func(m *Marshaler, ptr unsafe.Pointer) error {
+	return func(m *Marshaler, ptr unsafe.Pointer) error {
+		text, err := textMarshalFn(ptr)
+		if err != nil {
+			return err
+		}
+		m.encodeString(string(text))
+		return nil
+	}
+}
+
+// bindEncodeFn assigns EncodeFn on ti based on priority:
+// MarshalFn > TextMarshalFn > Kind-specific.
+func bindEncodeFn(ti *TypeInfo) {
+	if ti.Flags&tiFlagHasMarshalFn != 0 && ti.Ext != nil && ti.Ext.MarshalFn != nil {
+		ti.EncodeFn = makeEncodeMarshalJSON(ti.Ext.MarshalFn)
+		return
+	}
+	if ti.Flags&tiFlagHasTextMarshalFn != 0 && ti.Ext != nil && ti.Ext.TextMarshalFn != nil {
+		ti.EncodeFn = makeEncodeTextMarshal(ti.Ext.TextMarshalFn)
+		return
+	}
+	switch ti.Kind {
+	case KindBool:
+		ti.EncodeFn = encodeBool
+	case KindInt:
+		ti.EncodeFn = encodeInt
+	case KindInt8:
+		ti.EncodeFn = encodeInt8
+	case KindInt16:
+		ti.EncodeFn = encodeInt16
+	case KindInt32:
+		ti.EncodeFn = encodeInt32
+	case KindInt64:
+		ti.EncodeFn = encodeInt64Fn
+	case KindUint:
+		ti.EncodeFn = encodeUint
+	case KindUint8:
+		ti.EncodeFn = encodeUint8
+	case KindUint16:
+		ti.EncodeFn = encodeUint16
+	case KindUint32:
+		ti.EncodeFn = encodeUint32
+	case KindUint64:
+		ti.EncodeFn = encodeUint64Fn
+	case KindFloat32:
+		ti.EncodeFn = encodeFloat32Value
+	case KindFloat64:
+		ti.EncodeFn = encodeFloat64Value
+	case KindString:
+		ti.EncodeFn = encodeStringValue
+	case KindRawMessage:
+		ti.EncodeFn = encodeRawMessageFn
+	case KindNumber:
+		ti.EncodeFn = encodeNumberFn
+	case KindAny:
+		ti.EncodeFn = encodeAnyValue
+	case KindStruct:
+		ti.EncodeFn = makeEncodeStruct(ti.Codec.(*StructCodec))
+	case KindSlice:
+		ti.EncodeFn = makeEncodeSlice(ti.Codec.(*SliceCodec))
+	case KindPointer:
+		ti.EncodeFn = makeEncodePointer(ti.Codec.(*PointerCodec))
+	case KindMap:
+		ti.EncodeFn = makeEncodeMap(ti.Codec.(*MapCodec))
+	}
+}
+
+// bindStructFieldEncodeFns binds EncodeFn on struct field copies
+// and builds the EncodeSteps table for compact encoding.
+func bindStructFieldEncodeFns(ti *TypeInfo) {
+	if ti.Kind != KindStruct || ti.Codec == nil {
+		return
+	}
+	dec := ti.Codec.(*StructCodec)
+	for i := range dec.Fields {
+		fi := &dec.Fields[i]
+		if fi.EncodeFn == nil {
+			bindEncodeFn(fi)
+		}
+	}
+	buildStructEncodeSteps(dec)
+}
+
+// structEncodeStep encodes one struct field in compact (non-indent) mode.
+// first indicates whether no field has been written yet.
+// Returns the updated first flag and any error.
+type structEncodeStep func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error)
+
+// buildStructEncodeSteps pre-generates a closure per field that captures
+// offset, keyBytes, encodeFn, and omitempty logic, eliminating per-field
+// branching at encode time.
+func buildStructEncodeSteps(dec *StructCodec) {
+	steps := make([]structEncodeStep, len(dec.Fields))
+	for i := range dec.Fields {
+		fi := &dec.Fields[i]
+		offset := fi.Offset
+		keyBytes := fi.Ext.KeyBytes
+		encodeFn := fi.EncodeFn
+
+		hasOmitEmpty := fi.Flags&tiFlagOmitEmpty != 0 && fi.Ext.IsZeroFn != nil
+		isQuoted := fi.Flags&tiFlagQuoted != 0
+
+		switch {
+		case hasOmitEmpty && isQuoted:
+			isZeroFn := fi.Ext.IsZeroFn
+			tiCopy := *fi // copy for encodeValueQuoted
+			steps[i] = func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error) {
+				ptr := unsafe.Add(base, offset)
+				if isZeroFn(ptr) {
+					return first, nil
+				}
+				if !first {
+					m.buf = append(m.buf, ',')
+				}
+				m.buf = append(m.buf, keyBytes...)
+				return false, m.encodeValueQuoted(&tiCopy, ptr)
+			}
+		case hasOmitEmpty:
+			isZeroFn := fi.Ext.IsZeroFn
+			steps[i] = func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error) {
+				ptr := unsafe.Add(base, offset)
+				if isZeroFn(ptr) {
+					return first, nil
+				}
+				if !first {
+					m.buf = append(m.buf, ',')
+				}
+				m.buf = append(m.buf, keyBytes...)
+				return false, encodeFn(m, ptr)
+			}
+		case isQuoted:
+			tiCopy := *fi
+			steps[i] = func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error) {
+				if !first {
+					m.buf = append(m.buf, ',')
+				}
+				m.buf = append(m.buf, keyBytes...)
+				return false, m.encodeValueQuoted(&tiCopy, unsafe.Add(base, offset))
+			}
+		default:
+			steps[i] = func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error) {
+				if !first {
+					m.buf = append(m.buf, ',')
+				}
+				m.buf = append(m.buf, keyBytes...)
+				return false, encodeFn(m, unsafe.Add(base, offset))
+			}
+		}
+	}
+	dec.EncodeSteps = steps
+}
+
+// computeHintBytes returns a static byte-count estimate for the JSON encoding
+// of the type described by ti. Unlike the old estimateDataSize, this is
+// computed ONCE at codec construction time and costs nothing at marshal time.
+// For data-dependent types (strings, slices, maps) it uses a conservative
+// fixed estimate; underestimates are safe because the buffer grows via append.
+func computeHintBytes(ti *TypeInfo, depth int) int {
+	if depth > 8 {
+		return 32 // prevent unbounded recursion for deeply nested/recursive types
+	}
+	if ti.Flags&tiFlagHasMarshalFn != 0 || ti.Flags&tiFlagHasTextMarshalFn != 0 {
 		return 64
 	}
 	switch ti.Kind {
 	case KindBool:
-		return 5 // "false"
+		return 5
 	case KindInt, KindInt8, KindInt16, KindInt32, KindInt64:
-		return 20 // max int64 is 19 digits + sign
+		return 12
 	case KindUint, KindUint8, KindUint16, KindUint32, KindUint64:
-		return 20
+		return 12
 	case KindFloat32, KindFloat64:
-		return 24
+		return 20
 	case KindString:
-		s := *(*string)(ptr)
-		return len(s) + 2 + len(s)/8 + 1
+		return 32 // typical short string
 	case KindStruct:
-		return estimateStructDataSize(ti.Decoder.(*StructCodec), ptr)
+		dec := ti.Codec.(*StructCodec)
+		n := 2 // { }
+		for i := range dec.Fields {
+			fi := &dec.Fields[i]
+			n += len(fi.Ext.KeyBytes) + 1 // key + comma
+			n += computeHintBytes(fi, depth+1)
+		}
+		return n
 	case KindSlice:
-		return estimateSliceDataSize(ti.Decoder.(*SliceCodec), ptr)
+		dec := ti.Codec.(*SliceCodec)
+		// Assume ~4 elements with the element's static hint
+		elemHint := computeHintBytes(dec.ElemTI, depth+1)
+		return 2 + 4*(elemHint+1) // [ ] + 4*(elem+comma)
 	case KindPointer:
-		dec := ti.Decoder.(*PointerCodec)
-		elemPtr := *(*unsafe.Pointer)(ptr)
-		if elemPtr == nil {
-			return 4 // "null"
-		}
-		return estimateDataSize(dec.ElemTI, elemPtr)
+		dec := ti.Codec.(*PointerCodec)
+		return computeHintBytes(dec.ElemTI, depth+1)
 	case KindMap:
-		return estimateMapDataSize(ti.Decoder.(*MapCodec), ptr)
+		return 128 // conservative fixed estimate
 	case KindRawMessage:
-		raw := *(*[]byte)(ptr)
-		if len(raw) == 0 {
-			return 4 // "null"
-		}
-		return len(raw)
+		return 64
 	case KindNumber:
-		s := *(*string)(ptr)
-		if len(s) == 0 {
-			return 1 // "0"
-		}
-		return len(s)
+		return 12
 	case KindAny:
-		v := *(*any)(ptr)
-		if v == nil {
-			return 4
-		}
 		return 64
 	default:
 		return 32
 	}
-}
-
-func estimateStructDataSize(dec *StructCodec, base unsafe.Pointer) int {
-	n := 2 // { }
-	for i := range dec.Fields {
-		fi := &dec.Fields[i]
-		fieldPtr := unsafe.Add(base, fi.Offset)
-
-		if fi.Flags&tiFlagOmitEmpty != 0 && fi.Ext.IsZeroFn != nil && fi.Ext.IsZeroFn(fieldPtr) {
-			continue
-		}
-
-		n += len(fi.Ext.KeyBytes)
-		n += estimateDataSize(fi, fieldPtr)
-		if fi.Flags&tiFlagQuoted != 0 {
-			n += 2 // wrapping quotes
-		}
-		n++ // comma
-	}
-	return n
-}
-
-func estimateSliceDataSize(dec *SliceCodec, ptr unsafe.Pointer) int {
-	sh := (*SliceHeader)(ptr)
-	if sh.Data == nil {
-		return 4 // null
-	}
-
-	isByteSlice := dec.ElemTI.Kind == KindUint8 && dec.ElemSize == 1
-	if sh.Len == 0 {
-		if isByteSlice {
-			return 2 // ""
-		}
-		return 2 // []
-	}
-
-	if isByteSlice {
-		return int(sh.Len)*4/3 + 4 + 2
-	}
-
-	n := 2 // [ ]
-	elemSize := dec.ElemSize
-	count := int(sh.Len)
-
-	switch dec.ElemTI.Kind {
-	case KindBool:
-		n += count * 6 // "false,"
-	case KindInt, KindInt8, KindInt16, KindInt32, KindInt64,
-		KindUint, KindUint8, KindUint16, KindUint32, KindUint64:
-		n += count * 12
-	case KindFloat32, KindFloat64:
-		n += count * 16
-	case KindString:
-		// Walk each string to get actual lengths
-		for i := range count {
-			elemPtr := unsafe.Add(sh.Data, uintptr(i)*elemSize)
-			s := *(*string)(elemPtr)
-			n += len(s) + 2 + len(s)/8 + 2 // quotes + escape margin + comma
-		}
-	default:
-		// Complex elements: scan each one
-		for i := range count {
-			elemPtr := unsafe.Add(sh.Data, uintptr(i)*elemSize)
-			n += estimateDataSize(dec.ElemTI, elemPtr) + 1 // +1 for comma
-		}
-	}
-	return n
-}
-
-func estimateMapDataSize(dec *MapCodec, ptr unsafe.Pointer) int {
-	mapPtr := reflect.NewAt(dec.MapType, ptr)
-	mapVal := mapPtr.Elem()
-	if mapVal.IsNil() {
-		return 4 // null
-	}
-	l := mapVal.Len()
-	if l == 0 {
-		return 2 // {}
-	}
-	return 2 + l*48
 }
 
 // Marshal returns the compact JSON encoding of *v.
@@ -233,9 +407,8 @@ func Marshal[T any](v *T, opts ...MarshalOption) ([]byte, error) {
 
 	ti := GetCodec(reflect.TypeFor[T]())
 
-	hint := estimateDataSize(ti, unsafe.Pointer(v))
-	if hint > cap(m.buf) {
-		m.buf = make([]byte, 0, hint)
+	if ti.HintBytes > cap(m.buf) {
+		m.buf = make([]byte, 0, ti.HintBytes)
 	}
 
 	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
@@ -284,8 +457,12 @@ func AppendMarshal[T any](dst []byte, v *T, opts ...MarshalOption) ([]byte, erro
 }
 
 // finalize returns the encoded JSON as a standalone byte slice.
-// For poolable buffers, it copies the data out so the Marshaler's buf can be
-// reused by the pool without the caller's reference aliasing it.
+//
+// Poolable buffers (cap <= marshalBufMaxPool) are copied out so the
+// Marshaler's buf can be reused by the pool without aliasing the caller's
+// result. Oversized buffers are detached and given directly to the caller
+// to prevent the pool from accumulating large allocations that inflate
+// steady-state memory usage.
 func (m *Marshaler) finalize() []byte {
 	if cap(m.buf) <= marshalBufMaxPool {
 		result := make([]byte, len(m.buf))
@@ -308,6 +485,15 @@ func (m *Marshaler) appendNewlineIndent() {
 }
 
 func (m *Marshaler) encodeValue(ti *TypeInfo, ptr unsafe.Pointer) error {
+	if fn := ti.EncodeFn; fn != nil {
+		return fn(m, ptr)
+	}
+	return m.encodeValueSlow(ti, ptr)
+}
+
+// encodeValueSlow is the fallback for dynamically-obtained TypeInfo (e.g.
+// encodeAnyReflect) or recursive types where EncodeFn was not yet bound.
+func (m *Marshaler) encodeValueSlow(ti *TypeInfo, ptr unsafe.Pointer) error {
 	if ti.Flags&tiFlagHasMarshalFn != 0 {
 		data, err := ti.Ext.MarshalFn(ptr)
 		if err != nil {
@@ -365,13 +551,13 @@ func (m *Marshaler) encodeValue(ti *TypeInfo, ptr unsafe.Pointer) error {
 		return nil
 
 	case KindStruct:
-		return m.encodeStruct(ti.Decoder.(*StructCodec), ptr)
+		return m.encodeStruct(ti.Codec.(*StructCodec), ptr)
 	case KindSlice:
-		return m.encodeSlice(ti.Decoder.(*SliceCodec), ptr)
+		return m.encodeSlice(ti.Codec.(*SliceCodec), ptr)
 	case KindPointer:
-		return m.encodePointer(ti.Decoder.(*PointerCodec), ptr)
+		return m.encodePointer(ti.Codec.(*PointerCodec), ptr)
 	case KindMap:
-		return m.encodeMap(ti.Decoder.(*MapCodec), ptr)
+		return m.encodeMap(ti.Codec.(*MapCodec), ptr)
 	case KindRawMessage:
 		raw := *(*[]byte)(ptr)
 		if len(raw) == 0 {
@@ -454,7 +640,7 @@ func (m *Marshaler) encodeValueQuoted(ti *TypeInfo, ptr unsafe.Pointer) error {
 	case KindString:
 		m.encodeQuotedString(*(*string)(ptr))
 	case KindPointer:
-		dec := ti.Decoder.(*PointerCodec)
+		dec := ti.Codec.(*PointerCodec)
 		elemPtr := *(*unsafe.Pointer)(ptr)
 		if elemPtr == nil {
 			m.buf = append(m.buf, litNull...)
@@ -516,12 +702,26 @@ func (m *Marshaler) encodeFloat64(ptr unsafe.Pointer) error {
 }
 
 func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
+	if m.indent != "" {
+		return m.encodeStructIndent(dec, base)
+	}
 	m.buf = append(m.buf, '{')
 	first := true
-
-	if m.indent != "" {
-		m.depth++
+	for _, step := range dec.EncodeSteps {
+		var err error
+		first, err = step(m, base, first)
+		if err != nil {
+			return err
+		}
 	}
+	m.buf = append(m.buf, '}')
+	return nil
+}
+
+func (m *Marshaler) encodeStructIndent(dec *StructCodec, base unsafe.Pointer) error {
+	m.buf = append(m.buf, '{')
+	first := true
+	m.depth++
 
 	for i := range dec.Fields {
 		fi := &dec.Fields[i]
@@ -536,12 +736,8 @@ func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
 		}
 		first = false
 
-		if m.indent != "" {
-			m.appendNewlineIndent()
-			m.buf = append(m.buf, fi.Ext.KeyBytesIndent...)
-		} else {
-			m.buf = append(m.buf, fi.Ext.KeyBytes...)
-		}
+		m.appendNewlineIndent()
+		m.buf = append(m.buf, fi.Ext.KeyBytesIndent...)
 
 		if fi.Flags&tiFlagQuoted != 0 {
 			if err := m.encodeValueQuoted(fi, fieldPtr); err != nil {
@@ -552,11 +748,9 @@ func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
 		}
 	}
 
-	if m.indent != "" {
-		m.depth--
-		if !first {
-			m.appendNewlineIndent()
-		}
+	m.depth--
+	if !first {
+		m.appendNewlineIndent()
 	}
 
 	m.buf = append(m.buf, '}')

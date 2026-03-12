@@ -107,31 +107,69 @@ Benchmark environment: **Apple M4 Pro**, Go 1.24, `GOMAXPROCS=14`
 
 ### Unmarshal (single-thread)
 
-| Dataset | Library | ns/op | MB/s | B/op | allocs/op |
-|---------|---------|------:|-----:|-----:|----------:|
-| EscapeHeavy | Sonic | 2890 | 1416 | 6365 | 10 |
-| EscapeHeavy | **Velox** | **2466** | **1659** | **3244** | **4** |
-| KubePods | Sonic | 21481 | 1188 | 39445 | 171 |
-| KubePods | **Velox** | **14518** | **1758** | **12579** | **99** |
-| Twitter | Sonic | 440115 | 1435 | 810546 | 1525 |
-| Twitter | **Velox** | **269002** | **2348** | **167477** | **1018** |
-
-### Unmarshal (parallel, 14 goroutines)
+<p align="center"><img src="docs/bench_unmarshal.svg" width="680" alt="Unmarshal benchmark chart"></p>
 
 | Dataset | Library | ns/op | MB/s | B/op | allocs/op |
 |---------|---------|------:|-----:|-----:|----------:|
-| EscapeHeavy | Sonic | 510 | 8021 | 7147 | 10 |
-| EscapeHeavy | **Velox** | **397** | **10314** | **3119** | **4** |
-| KubePods | Sonic | 2747 | 9292 | 40974 | 171 |
-| KubePods | **Velox** | **2363** | **10807** | **12579** | **99** |
-| Twitter | Sonic | 52974 | 11927 | 825118 | 1525 |
-| Twitter | **Velox** | **31784** | **19870** | **167477** | **1018** |
+| Small | Sonic | 221 | — | 276 | 4 |
+| Small | **Velox** | **147** | — | **48** | **1** |
+| EscapeHeavy | Sonic | 2702 | 1514 | 6337 | 10 |
+| EscapeHeavy | **Velox** | **2439** | **1679** | **2988** | **4** |
+| KubePods | Sonic | 20131 | 1268 | 39398 | 171 |
+| KubePods | **Velox** | **14042** | **1817** | **12579** | **99** |
+| Twitter | Sonic | 448738 | 1412 | 813018 | 1525 |
+| Twitter | **Velox** | **262808** | **2403** | **167490** | **1018** |
+
+### Marshal (single-thread)
+
+<p align="center"><img src="docs/bench_marshal.svg" width="680" alt="Marshal benchmark chart"></p>
+
+| Dataset | Library | ns/op | B/op | allocs/op |
+|---------|---------|------:|-----:|----------:|
+| Small | Sonic | 178 | 128 | 2 |
+| Small | **Velox** | **127** | **112** | **1** |
+| EscapeHeavy | Sonic | 3528 | 3089 | 2 |
+| EscapeHeavy | **Velox** | **1955** | **3072** | **1** |
+| KubePods | Sonic | 18201 | 14178 | 8 |
+| KubePods | **Velox** | **9014** | **13569** | **1** |
+| Twitter | Sonic | 200901 | 272551 | 107 |
+| Twitter | **Velox** | **170640** | **303114** | **1** |
+
+---
+
+Benchmark environment: **AMD EPYC 7K62 48-Core** (KVM, 8C/16T), Go 1.26rc3, `GOMAXPROCS=16`, Linux x86_64
+
+### Unmarshal (single-thread)
+
+| Dataset | Library | ns/op | MB/s | B/op | allocs/op |
+|---------|---------|------:|-----:|-----:|----------:|
+| Small | Sonic | 476 | — | 208 | 3 |
+| Small | **Velox** | **530** | — | **48** | **1** |
+| EscapeHeavy | Sonic | 7447 | 549 | 7169 | 10 |
+| EscapeHeavy | **Velox** | **6793** | **602** | **2988** | **4** |
+| KubePods | Sonic | 51002 | 501 | 45245 | 148 |
+| KubePods | **Velox** | **41278** | **618** | **12579** | **99** |
+| Twitter | Sonic | 879278 | 718 | 971513 | 1410 |
+| Twitter | **Velox** | **748561** | **844** | **167517** | **1018** |
+
+### Marshal (single-thread)
+
+| Dataset | Library | ns/op | B/op | allocs/op |
+|---------|---------|------:|-----:|----------:|
+| Small | Sonic | 235 | 128 | 2 |
+| Small | Velox | 441 | 112 | 1 |
+| EscapeHeavy | Sonic | 3188 | 3093 | 2 |
+| EscapeHeavy | Velox | 5665 | 3072 | 1 |
+| KubePods | Sonic | 13364 | 14217 | 8 |
+| KubePods | Velox | 29806 | 13570 | 1 |
+| Twitter | Sonic | 187877 | 272928 | 108 |
+| Twitter | Velox | 533803 | 303125 | 1 |
 
 ### Reproduce
 
 ```bash
 cd benchmark
-go test -bench="Benchmark_(Parallel_)?(EscapeHeavy|KubePods|Twitter)_(Velox|Sonic)" -benchmem . -count=3
+go test -bench="Benchmark(_Marshal)?_(Small|Twitter|EscapeHeavy|KubePods)_(Sonic|Velox)" -benchmem . -count=2
 ```
 
 ## Testing

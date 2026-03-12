@@ -343,7 +343,7 @@ func TestLookup_ViaReflect(t *testing.T) {
 		Email string `json:"email"`
 	}
 
-	dec := GetCodec(reflect.TypeOf(User{})).Decoder.(*StructCodec)
+	dec := GetCodec(reflect.TypeOf(User{})).Codec.(*StructCodec)
 
 	tests := []struct {
 		key  string
@@ -387,7 +387,7 @@ func TestLookup_ViaReflect_LargeStruct(t *testing.T) {
 		F16 string `json:"f16"`
 	}
 
-	dec := GetCodec(reflect.TypeOf(BigStruct{})).Decoder.(*StructCodec)
+	dec := GetCodec(reflect.TypeOf(BigStruct{})).Codec.(*StructCodec)
 
 	if dec.HashTable == nil {
 		t.Fatal("expected perfect hash for 16-field struct")

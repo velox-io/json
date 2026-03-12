@@ -33,12 +33,15 @@ func (p *parserPool) Get() *Parser {
 }
 
 func (p *parserPool) Put(sc *Parser) {
-	// Arena memory may still be referenced by strings in the caller's result
-	// (via unsafe.String from unescape). We must not reset arenaOff to 0,
-	// as that would let the next Unmarshal overwrite live string data.
+	// Arena memory may still be referenced by zero-copy strings in the
+	// caller's result (via unsafe.String from unescape).
 	//
-	// Threshold is arenaBlockSize/2: low enough to reclaim mostly-used blocks,
-	// high enough that a kept block still has useful free space for the next parse.
+	// When arenaOff <= arenaBlockSize/2 the block is kept: the next parse
+	// allocates from arenaOff onward, so bytes in [0, arenaOff) — which
+	// back the previous result's strings — are never overwritten.
+	//
+	// When arenaOff > arenaBlockSize/2 the block is nearly full and not
+	// worth keeping; release it so the next parse starts with a fresh arena.
 	if sc.arenaOff > arenaBlockSize/2 {
 		sc.arenaData = nil
 		sc.arenaOff = 0
@@ -46,6 +49,7 @@ func (p *parserPool) Put(sc *Parser) {
 	for _, a := range sc.ptrAllocs {
 		a.reset()
 	}
+
 	sc.useNumber = false
 	p.pool.Put(sc)
 }

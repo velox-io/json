@@ -64,7 +64,9 @@ type TypeInfo struct {
 	Offset        uintptr
 	JSONName      string
 	JSONNameLower string
-	Decoder       any
+	EncodeFn      func(m *Marshaler, ptr unsafe.Pointer) error // pre-bound encode dispatch
+	HintBytes     int                                          // static size hint for pre-allocating marshal buffer
+	Codec         any
 	Ext           *TypeInfoExt // cold marshal/unmarshal metadata (nil when not needed)
 }
 
@@ -217,13 +219,13 @@ func getCodecSlow(t reflect.Type, wait bool) *TypeInfo {
 	// Won the race — build the codec.
 	switch t.Kind() {
 	case reflect.Struct:
-		e.ti.Decoder = BuildStructCodec(t)
+		e.ti.Codec = BuildStructCodec(t)
 	case reflect.Slice:
-		e.ti.Decoder = BuildSliceCodec(t)
+		e.ti.Codec = BuildSliceCodec(t)
 	case reflect.Pointer:
-		e.ti.Decoder = BuildPointerCodec(t)
+		e.ti.Codec = BuildPointerCodec(t)
 	case reflect.Map:
-		e.ti.Decoder = BuildMapCodec(t)
+		e.ti.Codec = BuildMapCodec(t)
 	}
 
 	// json.RawMessage: override Kind to KindRawMessage and set the flag
@@ -232,6 +234,8 @@ func getCodecSlow(t reflect.Type, wait bool) *TypeInfo {
 	if t == rawMessageType {
 		e.ti.Kind = KindRawMessage
 		e.ti.Flags |= tiFlagRawMessage
+		bindEncodeFn(e.ti)
+		e.ti.HintBytes = 64
 		close(e.done)
 		codecCache.Store(t, e.ti)
 		return e.ti
@@ -242,6 +246,8 @@ func getCodecSlow(t reflect.Type, wait bool) *TypeInfo {
 	if t == numberType {
 		e.ti.Kind = KindNumber
 		e.ti.Flags |= tiFlagNumber
+		bindEncodeFn(e.ti)
+		e.ti.HintBytes = 12
 		close(e.done)
 		codecCache.Store(t, e.ti)
 		return e.ti
@@ -309,6 +315,10 @@ func getCodecSlow(t reflect.Type, wait bool) *TypeInfo {
 			e.ti.Flags |= tiFlagHasTextUnmarshalFn
 		}
 	}
+
+	bindEncodeFn(e.ti)
+	bindStructFieldEncodeFns(e.ti)
+	e.ti.HintBytes = computeHintBytes(e.ti, 0)
 
 	close(e.done)
 	// Promote: replace the transient *codecEntry with the final *TypeInfo
@@ -432,7 +442,7 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 			if quoted {
 				switch cached.Kind {
 				case KindPointer:
-					pDec := cached.Decoder.(*PointerCodec)
+					pDec := cached.Codec.(*PointerCodec)
 					if !isQuotableKind(pDec.ElemTI.Kind) {
 						quoted = false
 					}
@@ -450,7 +460,7 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 				Offset:        base + sf.Offset,
 				JSONName:      jsonName,
 				JSONNameLower: toLowerASCII(jsonName),
-				Decoder:       cached.Decoder,
+				Codec:         cached.Codec,
 			}
 
 			ext := fi.getOrAllocExt()
@@ -519,6 +529,10 @@ func CollectStructFields(t reflect.Type, baseOffset uintptr) []TypeInfo {
 type StructCodec struct {
 	Typ    reflect.Type
 	Fields []TypeInfo
+
+	// Pre-built encode steps for compact (non-indent) marshaling.
+	// Each step encodes one field with all branching resolved at build time.
+	EncodeSteps []structEncodeStep
 
 	// Tiered lookup — set by buildLookup at construction time.
 	LookupFn     func(dec *StructCodec, key string) *TypeInfo

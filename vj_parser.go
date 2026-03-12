@@ -432,7 +432,7 @@ func (sc *Parser) scanFalse(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 	if idx+5 > len(src) {
 		return idx, errUnexpectedEOF
 	}
-	if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "else" suffix; 'f' already matched by caller's switch
+	if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "alse" suffix; 'f' already matched by caller
 		return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 	}
 	switch ti.Kind {
@@ -461,7 +461,7 @@ func (sc *Parser) scanNull(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer
 	case KindSlice:
 		*(*SliceHeader)(ptr) = SliceHeader{}
 	case KindMap:
-		mapDec := ti.Decoder.(*MapCodec)
+		mapDec := ti.Codec.(*MapCodec)
 		reflect.NewAt(mapDec.MapType, ptr).Elem().Set(reflect.Zero(mapDec.MapType))
 	case KindAny:
 		*(*any)(ptr) = nil
@@ -475,9 +475,9 @@ func (sc *Parser) scanNull(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer
 func (sc *Parser) scanObjectValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
 	switch ti.Kind {
 	case KindStruct:
-		return sc.scanStruct(src, idx, ti.Decoder.(*StructCodec), ptr)
+		return sc.scanStruct(src, idx, ti.Codec.(*StructCodec), ptr)
 	case KindMap:
-		return sc.scanMap(src, idx, ti.Decoder.(*MapCodec), ptr)
+		return sc.scanMap(src, idx, ti.Codec.(*MapCodec), ptr)
 	case KindAny:
 		newIdx, m, err := sc.scanMapAny(src, idx)
 		if err != nil {
@@ -491,13 +491,11 @@ func (sc *Parser) scanObjectValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.
 }
 
 func (sc *Parser) scanStruct(src []byte, idx int, dec *StructCodec, base unsafe.Pointer) (int, error) {
-	idx++ // consume '{'
+	idx++
 	idx = skipWSLong(src, idx)
 	if idx >= len(src) {
 		return idx, errUnexpectedEOF
 	}
-
-	// Empty object
 	if src[idx] == '}' {
 		return idx + 1, nil
 	}
@@ -505,7 +503,6 @@ func (sc *Parser) scanStruct(src []byte, idx int, dec *StructCodec, base unsafe.
 	var firstErr error
 
 	for {
-		// Key
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
@@ -519,7 +516,6 @@ func (sc *Parser) scanStruct(src []byte, idx int, dec *StructCodec, base unsafe.
 			return idx, err
 		}
 
-		// Colon
 		idx = skipWS(src, idx)
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
@@ -527,10 +523,9 @@ func (sc *Parser) scanStruct(src []byte, idx int, dec *StructCodec, base unsafe.
 		if src[idx] != ':' {
 			return idx, newSyntaxError("vjson: syntax error", idx)
 		}
-		idx++ // consume ':'
+		idx++
 		idx = skipWS(src, idx)
 
-		// Value — lookup field
 		fi := dec.LookupFieldBytes(keyBytes)
 		if fi == nil {
 			// Unknown field — skip value
@@ -561,7 +556,6 @@ func (sc *Parser) scanStruct(src []byte, idx int, dec *StructCodec, base unsafe.
 			}
 		}
 
-		// Comma or closing brace
 		idx = skipWS(src, idx)
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
@@ -584,7 +578,7 @@ func (sc *Parser) scanMap(src []byte, idx int, mDec *MapCodec, ptr unsafe.Pointe
 		return sc.scanMapStringString(src, idx, ptr)
 	}
 
-	idx++ // consume '{'
+	idx++
 	idx = skipWSLong(src, idx)
 
 	mapPtr := reflect.NewAt(mDec.MapType, ptr)
@@ -601,7 +595,6 @@ func (sc *Parser) scanMap(src []byte, idx int, mDec *MapCodec, ptr unsafe.Pointe
 	}
 
 	for {
-		// Key (need string for map key, not []byte)
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
@@ -615,7 +608,6 @@ func (sc *Parser) scanMap(src []byte, idx int, mDec *MapCodec, ptr unsafe.Pointe
 			return idx, err
 		}
 
-		// Colon
 		idx = skipWS(src, idx)
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
@@ -626,7 +618,6 @@ func (sc *Parser) scanMap(src []byte, idx int, mDec *MapCodec, ptr unsafe.Pointe
 		idx++
 		idx = skipWS(src, idx)
 
-		// Value
 		valRV := reflect.New(mDec.ValType)
 		valPtr := valRV.UnsafePointer()
 		idx, err = sc.scanValue(src, idx, mDec.ValTI, valPtr)
@@ -640,7 +631,6 @@ func (sc *Parser) scanMap(src []byte, idx int, mDec *MapCodec, ptr unsafe.Pointe
 		}
 		mapVal.SetMapIndex(keyRV, valRV.Elem())
 
-		// Comma or closing brace
 		idx = skipWS(src, idx)
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
@@ -659,10 +649,9 @@ func (sc *Parser) scanMap(src []byte, idx int, mDec *MapCodec, ptr unsafe.Pointe
 
 // scanMapStringString is a zero-reflection fast path for map[string]string.
 func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (int, error) {
-	idx++ // consume '{'
+	idx++
 	idx = skipWSLong(src, idx)
 
-	// Get or create the map
 	m := *(*map[string]string)(ptr)
 	if m == nil {
 		m = make(map[string]string)
@@ -677,7 +666,6 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 	}
 
 	for {
-		// Key (need string for map key, not []byte)
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
 		}
@@ -691,7 +679,6 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 			return idx, err
 		}
 
-		// Colon
 		idx = skipWS(src, idx)
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
@@ -702,7 +689,6 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 		idx++
 		idx = skipWS(src, idx)
 
-		// Value - zero-copy string scan
 		var val string
 		idx, val, err = sc.scanString(src, idx)
 		if err != nil {
@@ -710,7 +696,6 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 		}
 		m[key] = val
 
-		// Comma or closing brace
 		idx = skipWS(src, idx)
 		if idx >= len(src) {
 			return idx, errUnexpectedEOF
@@ -728,7 +713,7 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 }
 
 func (sc *Parser) scanMapAny(src []byte, idx int) (int, map[string]any, error) {
-	idx++ // consume '{'
+	idx++
 	idx = skipWSLong(src, idx)
 
 	m := make(map[string]any)
@@ -790,7 +775,7 @@ func (sc *Parser) scanMapAny(src []byte, idx int) (int, map[string]any, error) {
 func (sc *Parser) scanArrayValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
 	switch ti.Kind {
 	case KindSlice:
-		return sc.scanArray(src, idx, ti.Decoder.(*SliceCodec), ptr)
+		return sc.scanArray(src, idx, ti.Codec.(*SliceCodec), ptr)
 	case KindAny:
 		newIdx, arr, err := sc.scanArrayAny(src, idx)
 		if err != nil {
@@ -804,14 +789,12 @@ func (sc *Parser) scanArrayValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.P
 }
 
 func (sc *Parser) scanArray(src []byte, idx int, sDec *SliceCodec, ptr unsafe.Pointer) (int, error) {
-	idx++ // consume '['
+	idx++
 	idx = skipWSLong(src, idx)
 
 	if idx >= len(src) {
 		return idx, errUnexpectedEOF
 	}
-
-	// Empty array
 	if src[idx] == ']' {
 		sh := (*SliceHeader)(ptr)
 		sh.Data = sDec.EmptySliceData
@@ -826,9 +809,10 @@ func (sc *Parser) scanArray(src []byte, idx int, sDec *SliceCodec, ptr unsafe.Po
 	elemSize := sDec.ElemSize
 	sliceLen := 0
 
-	// Pointer-free elements (int, float64, etc.): allocate via make([]byte), no type
-	// metadata needed since GC won't scan inside. Pointer-containing elements (string,
-	// *T, etc.): allocate via unsafe_NewArray with correct rtype so GC can scan pointers.
+	// Pointer-free elements (int, float64, etc.): allocate via make([]byte) which
+	// produces a noscan (GC-invisible) block — faster than runtime.mallocgc with
+	// type metadata. Pointer-containing elements (string, *T, etc.): allocate via
+	// unsafe_NewArray with the correct rtype so GC can trace interior pointers.
 	var base unsafe.Pointer
 	var backingBytes []byte // kept alive for pointer-free path
 
@@ -895,7 +879,7 @@ func (sc *Parser) scanArray(src []byte, idx int, sDec *SliceCodec, ptr unsafe.Po
 }
 
 func (sc *Parser) scanArrayAny(src []byte, idx int) (int, []any, error) {
-	idx++ // consume '['
+	idx++
 	idx = skipWSLong(src, idx)
 
 	if idx >= len(src) {
@@ -936,7 +920,7 @@ func (sc *Parser) scanPointer(src []byte, idx int, ti *TypeInfo, ptr unsafe.Poin
 	if ti.Flags&tiFlagQuoted != 0 {
 		return sc.scanPointerQuoted(src, idx, ti, ptr)
 	}
-	pDec := ti.Decoder.(*PointerCodec)
+	pDec := ti.Codec.(*PointerCodec)
 
 	idx = skipWS(src, idx)
 	if idx >= len(src) {
@@ -944,12 +928,12 @@ func (sc *Parser) scanPointer(src []byte, idx int, ti *TypeInfo, ptr unsafe.Poin
 	}
 
 	// null → set pointer to nil.
-	// Only checks leading 'n' here; full literal validation is not performed
-	// because invalid input (e.g. "nope") will be caught by scanValue downstream
-	// or by trailing-data check in unmarshalInto.
 	if src[idx] == 'n' {
 		if idx+4 > len(src) {
 			return idx, errUnexpectedEOF
+		}
+		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null {
+			return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 		}
 		*(*unsafe.Pointer)(ptr) = nil
 		return idx + 4, nil
@@ -1019,7 +1003,7 @@ func (sc *Parser) scanValueAny(src []byte, idx int) (int, any, error) {
 		if idx+5 > len(src) {
 			return idx, nil, errUnexpectedEOF
 		}
-		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "else" suffix; 'f' already matched by caller's switch
+		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "alse" suffix; 'f' already matched by caller
 			return idx, nil, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 		}
 		return idx + 5, false, nil
@@ -1060,7 +1044,7 @@ func skipValue(src []byte, idx int) (int, error) {
 		if idx+5 > len(src) {
 			return idx, errUnexpectedEOF
 		}
-		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "else" suffix; 'f' already matched by caller's switch
+		if *(*uint32)(unsafe.Pointer(&src[idx+1])) != litU32Alse { // "alse" suffix; 'f' already matched by caller
 			return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 		}
 		return idx + 5, nil
