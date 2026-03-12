@@ -505,7 +505,7 @@ func (sc *Parser) scanObject(src []byte, idx int, dec *ReflectStructDecoder, bas
 func (sc *Parser) scanObjectToMap(src []byte, idx int, mDec *ReflectMapDecoder, ptr unsafe.Pointer) (int, error) {
 	// Fast path for map[string]string - zero reflection
 	if mDec.ValIsString {
-		return sc.scanMapStringString(src, idx, mDec, ptr)
+		return sc.scanMapStringString(src, idx, ptr)
 	}
 
 	idx++ // consume '{'
@@ -568,7 +568,7 @@ func (sc *Parser) scanObjectToMap(src []byte, idx int, mDec *ReflectMapDecoder, 
 }
 
 // scanMapStringString is a zero-reflection fast path for map[string]string.
-func (sc *Parser) scanMapStringString(src []byte, idx int, mDec *ReflectMapDecoder, ptr unsafe.Pointer) (int, error) {
+func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (int, error) {
 	idx++ // consume '{'
 	idx = skipWSLong(src, idx)
 
@@ -712,30 +712,52 @@ func (sc *Parser) scanArray(src []byte, idx int, sDec *ReflectSliceDecoder, ptr 
 		return idx + 1, nil
 	}
 
-	// Build slice using append pattern via make([]byte) + unsafe cast.
-	// Use initial capacity of 2 (same as Sonic) to minimize over-allocation.
+	// Build slice with initial capacity of 2 (same as Sonic) to minimize over-allocation.
 	const initCap = 2
 	elemSize := sDec.ElemSize
 	cap_ := initCap
 	len_ := 0
 
-	// Allocate backing storage using make([]byte) - zero reflection
-	backingBytes := make([]byte, initCap*int(elemSize))
-	base := unsafe.Pointer(&backingBytes[0])
+	// Two allocation strategies based on whether elements contain GC-managed pointers:
+	//
+	// Pointer-free elements (e.g. int, float64, [4]byte):
+	//   Use make([]byte) for zero-reflection allocation. Safe because GC doesn't
+	//   need to scan inside these elements — no pointers to track.
+	//
+	// Pointer-containing elements (e.g. string, *T, struct with string fields):
+	//   Use unsafe_NewArray (runtime.mallocgc via go:linkname) to allocate with
+	//   correct type metadata, so GC can scan pointer fields correctly.
+	//   Growth copies use typedslicecopy to trigger write barriers.
+	var base unsafe.Pointer
+	var backingBytes []byte // kept alive for pointer-free path
+
+	if sDec.ElemHasPtr {
+		base = unsafe_NewArray(sDec.ElemRType, initCap)
+	} else {
+		backingBytes = make([]byte, initCap*int(elemSize))
+		base = unsafe.Pointer(&backingBytes[0])
+	}
 
 	for {
 		// Grow if needed
 		if len_ == cap_ {
 			newCap := cap_ * 2
-			newBacking := make([]byte, newCap*int(elemSize))
-			// Copy old data
-			copy(newBacking, backingBytes)
-			backingBytes = newBacking
-			base = unsafe.Pointer(&backingBytes[0])
+			if sDec.ElemHasPtr {
+				newBase := unsafe_NewArray(sDec.ElemRType, newCap)
+				// typedslicecopy triggers write barriers, ensuring GC
+				// correctly tracks pointer fields during concurrent marking.
+				typedslicecopy(sDec.ElemRType, newBase, newCap, base, len_)
+				base = newBase
+			} else {
+				newBacking := make([]byte, newCap*int(elemSize))
+				copy(newBacking, backingBytes)
+				backingBytes = newBacking
+				base = unsafe.Pointer(&backingBytes[0])
+			}
 			cap_ = newCap
 		}
 
-		elemPtr := unsafe.Pointer(uintptr(base) + uintptr(len_)*elemSize)
+		elemPtr := unsafe.Add(base, uintptr(len_)*elemSize)
 		len_++
 
 		var err error
@@ -818,14 +840,17 @@ func (sc *Parser) scanPointer(src []byte, idx int, ti *TypeInfo, ptr unsafe.Poin
 		return idx + 4, nil
 	}
 
-	// Allocate a new element directly using make (avoids reflect.New overhead).
-	// The key insight is that reflect.New() does two things we don't need:
-	// 1. Type checking at runtime
-	// 2. Creating a reflect.Value wrapper
-	// By using make([]byte, size) and casting, we skip both.
-	elemSize := pDec.ElemSize
-	backing := make([]byte, elemSize)
-	elemPtr := unsafe.Pointer(&backing[0])
+	// Allocate a new element.
+	// For pointer-free types, use make([]byte) (fast, no reflect overhead).
+	// For pointer-containing types, use unsafe_New (runtime.mallocgc via
+	// go:linkname) for GC-correct type metadata.
+	var elemPtr unsafe.Pointer
+	if pDec.ElemHasPtr {
+		elemPtr = sc.ptrAlloc(pDec.ElemRType, pDec.ElemSize)
+	} else {
+		backing := make([]byte, pDec.ElemSize)
+		elemPtr = unsafe.Pointer(&backing[0])
+	}
 
 	newIdx, err := sc.scanValue(src, idx, pDec.ElemTI, elemPtr)
 	if err != nil {
@@ -834,6 +859,23 @@ func (sc *Parser) scanPointer(src []byte, idx int, ti *TypeInfo, ptr unsafe.Poin
 
 	*(*unsafe.Pointer)(ptr) = elemPtr
 	return newIdx, nil
+}
+
+// ptrAlloc returns a zeroed element from the per-type batch allocator.
+// On first call for a given rtype, an allocator is created. Batches are
+// allocated via unsafe_NewArray for GC-correct type metadata.
+func (sc *Parser) ptrAlloc(rtype unsafe.Pointer, elemSize uintptr) unsafe.Pointer {
+	a, ok := sc.ptrAllocs[rtype]
+	if !ok {
+		a = &rtypeAllocator{
+			rtype:    rtype,
+			elemSize: elemSize,
+			cap:      ptrBatchSize,
+			offset:   ptrBatchSize, // forces alloc on first use
+		}
+		sc.ptrAllocs[rtype] = a
+	}
+	return a.alloc()
 }
 
 func (sc *Parser) scanAnyValue(src []byte, idx int) (int, any, error) {

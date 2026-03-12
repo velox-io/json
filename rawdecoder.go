@@ -235,11 +235,13 @@ func BuildStructDecoder(t reflect.Type) *ReflectStructDecoder {
 
 // ReflectSliceDecoder handles slice decoding for any element type
 type ReflectSliceDecoder struct {
-	SliceType      reflect.Type    // the slice type itself, e.g., []int64
+	SliceType      reflect.Type   // the slice type itself, e.g., []int64
 	ElemType       reflect.Type
-	ElemSize       uintptr         // size of one element (for unsafe pointer arithmetic)
-	ElemTI         *TypeInfo       // cached TypeInfo for element (pointer for cycle safety)
-	EmptySliceData unsafe.Pointer  // pre-created empty slice backing, avoids reflect.MakeSlice per empty []
+	ElemSize       uintptr        // size of one element (for unsafe pointer arithmetic)
+	ElemTI         *TypeInfo      // cached TypeInfo for element (pointer for cycle safety)
+	EmptySliceData unsafe.Pointer // pre-created empty slice backing, avoids reflect.MakeSlice per empty []
+	ElemHasPtr     bool           // true if element type contains pointer-like fields (string, slice, ptr, etc.)
+	ElemRType      unsafe.Pointer // cached *abi.Type for element, used with runtime alloc via go:linkname
 }
 
 func BuildSliceDecoder(t reflect.Type) *ReflectSliceDecoder {
@@ -251,6 +253,36 @@ func BuildSliceDecoder(t reflect.Type) *ReflectSliceDecoder {
 		ElemSize:       t.Elem().Size(),
 		ElemTI:         elemTI,
 		EmptySliceData: unsafe.Pointer(emptySlice.Pointer()),
+		ElemHasPtr:     typeContainsPointer(t.Elem()),
+		ElemRType:      rtypePtr(t.Elem()),
+	}
+}
+
+// typeContainsPointer reports whether a type contains any pointer-like fields
+// that require GC scanning (pointers, strings, slices, maps, interfaces, etc.).
+func typeContainsPointer(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64,
+		reflect.Complex64, reflect.Complex128:
+		return false
+	case reflect.Array:
+		if t.Len() == 0 {
+			return false
+		}
+		return typeContainsPointer(t.Elem())
+	case reflect.Struct:
+		for i := range t.NumField() {
+			if typeContainsPointer(t.Field(i).Type) {
+				return true
+			}
+		}
+		return false
+	default:
+		// Ptr, Map, Chan, Func, Interface, Slice, String, UnsafePointer
+		return true
 	}
 }
 
@@ -270,28 +302,32 @@ type ReflectMapDecoder struct {
 func BuildMapDecoder(t reflect.Type) *ReflectMapDecoder {
 	valTI := GetDecoder(t.Elem())
 	return &ReflectMapDecoder{
-		MapType:    t,
-		KeyType:    t.Key(),
-		ValType:    t.Elem(),
-		ValSize:    t.Elem().Size(),
-		ValTI:      valTI,
+		MapType:     t,
+		KeyType:     t.Key(),
+		ValType:     t.Elem(),
+		ValSize:     t.Elem().Size(),
+		ValTI:       valTI,
 		ValIsString: valTI.Kind == KindString,
 	}
 }
 
 type ReflectPointerDecoder struct {
-	PtrType  reflect.Type // the pointer type itself, e.g., *Foo
-	ElemType reflect.Type
-	ElemTI   *TypeInfo // cached TypeInfo for the pointed-to element (pointer for cycle safety)
-	ElemSize uintptr    // size of the element type for allocation
+	PtrType    reflect.Type   // the pointer type itself, e.g., *Foo
+	ElemType   reflect.Type
+	ElemTI     *TypeInfo      // cached TypeInfo for the pointed-to element (pointer for cycle safety)
+	ElemSize   uintptr        // size of the element type for allocation
+	ElemHasPtr bool           // true if element type contains pointer-like fields
+	ElemRType  unsafe.Pointer // cached *abi.Type for element, used with runtime alloc via go:linkname
 }
 
 func BuildPointerDecoder(t reflect.Type) *ReflectPointerDecoder {
 	elemTI := GetDecoder(t.Elem())
 	return &ReflectPointerDecoder{
-		PtrType:  t,
-		ElemType: t.Elem(),
-		ElemTI:   elemTI,
-		ElemSize: t.Elem().Size(),
+		PtrType:    t,
+		ElemType:   t.Elem(),
+		ElemTI:     elemTI,
+		ElemSize:   t.Elem().Size(),
+		ElemHasPtr: typeContainsPointer(t.Elem()),
+		ElemRType:  rtypePtr(t.Elem()),
 	}
 }

@@ -10,7 +10,7 @@ import (
 
 	"dev.local/benchmark"
 
-	vjson "github.com/penglei/veloxjson"
+	vjson "github.com/velox-io/json"
 	"github.com/urfave/cli/v3"
 )
 

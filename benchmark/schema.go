@@ -14,29 +14,6 @@ type Small struct {
 	String  string  `json:"string"`
 }
 
-// --- Nested: User with embedded Address ---
-
-type Address struct {
-	City    string `json:"city"`
-	Country string `json:"country"`
-	Zip     int    `json:"zip"`
-}
-
-type User struct {
-	ID      int64   `json:"id"`
-	Name    string  `json:"name"`
-	Email   string  `json:"email"`
-	Active  bool    `json:"active"`
-	Score   float64 `json:"score"`
-	Address Address `json:"address"`
-}
-
-// --- SliceOfStructs ---
-
-type UserList struct {
-	Users []User `json:"users"`
-}
-
 // --- pods: matches testdata/pods.json structure ---
 
 type KubePodList struct {

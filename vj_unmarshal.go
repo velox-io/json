@@ -3,6 +3,7 @@ package vjson
 import (
 	"reflect"
 	"sync"
+	"unsafe"
 )
 
 const (
@@ -31,13 +32,27 @@ func (p *parserPool) Get() *Parser {
 }
 
 func (p *parserPool) Put(sc *Parser) {
-	sc.arenaOff = 0
+	// Arena memory may still be referenced by strings in the caller's result
+	// (via unsafe.String from unescape). We must not reset arenaOff to 0,
+	// as that would let the next Unmarshal overwrite live string data.
+	//
+	// If more than half the arena block remains free, keep it and continue
+	// appending after the current offset — old data stays intact.
+	// Otherwise, release the block so the next parse gets a fresh one.
+	if sc.arenaOff > arenaBlockSize/2 {
+		sc.arenaData = nil
+		sc.arenaOff = 0
+	}
+	for _, a := range sc.ptrAllocs {
+		a.reset()
+	}
 	p.pool.Put(sc)
 }
 
 func newParser() *Parser {
 	return &Parser{
 		arenaData: make([]byte, arenaBlockSize/2),
+		ptrAllocs: make(map[unsafe.Pointer]*rtypeAllocator, 8),
 	}
 }
 
@@ -80,10 +95,11 @@ func unmarshalInto(sc *Parser, data []byte, v any) error {
 
 // Parser is a reusable single-pass JSON scanner.
 type Parser struct {
-	scratch   [128]byte            // for LookupFieldBytes lowercase
-	buf       [scratchBufSize]byte // reusable scratch for single-pass decoding
-	arenaData []byte               // current arena block
-	arenaOff  int                  // next free offset in arenaData
+	scratch   [128]byte                          // for LookupFieldBytes lowercase
+	buf       [scratchBufSize]byte               // reusable scratch for single-pass decoding
+	arenaData []byte                             // current arena block
+	arenaOff  int                                // next free offset in arenaData
+	ptrAllocs map[unsafe.Pointer]*rtypeAllocator // per-type batch allocators for pointer fields
 }
 
 // arenaAlloc allocates size bytes from the arena.
