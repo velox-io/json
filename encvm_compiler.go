@@ -312,9 +312,11 @@ func emitNestedStruct(b *irBuilder, fi *TypeInfo, fieldOff uintptr, subDec *Stru
 	}
 
 	b.emit(IRInst{
-		Op:     opObjOpen,
-		KeyLen: keyLen,
-		KeyOff: keyOff,
+		Op:         opObjOpen,
+		KeyLen:     keyLen,
+		KeyOff:     keyOff,
+		Annotation: subDec.Typ.String(),
+		SourceType: subDec.Typ,
 	})
 
 	// Mark type as visiting to detect cycles through pointers.

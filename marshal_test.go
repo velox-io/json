@@ -2,6 +2,7 @@ package vjson
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -345,13 +346,7 @@ func TestMarshalIndent_Basic(t *testing.T) {
 	if check.Name != v.Name {
 		t.Fatalf("indent round-trip mismatch")
 	}
-	found := false
-	for _, b := range got {
-		if b == '\n' {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(got, '\n')
 	if !found {
 		t.Fatalf("MarshalIndent should produce newlines, got: %s", got)
 	}

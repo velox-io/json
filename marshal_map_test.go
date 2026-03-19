@@ -223,7 +223,7 @@ func TestNativeMapStrStr_LargeMap(t *testing.T) {
 	for _, size := range []int{10, 50, 100, 200, 500} {
 		t.Run(fmt.Sprintf("size_%d", size), func(t *testing.T) {
 			m := make(map[string]string, size)
-			for i := 0; i < size; i++ {
+			for i := range size {
 				key := fmt.Sprintf("key_%04d", i)
 				value := fmt.Sprintf("value_%d_%s", i, randomString(rng, 10))
 				m[key] = value
@@ -260,7 +260,7 @@ func TestNativeMapStrInt_LargeMap(t *testing.T) {
 	for _, size := range []int{10, 50, 100, 200, 500} {
 		t.Run(fmt.Sprintf("size_%d", size), func(t *testing.T) {
 			m := make(map[string]int, size)
-			for i := 0; i < size; i++ {
+			for i := range size {
 				key := fmt.Sprintf("key_%04d_%s", i, randomString(rng, 8))
 				m[key] = rng.Intn(2000000) - 1000000
 			}
@@ -286,7 +286,7 @@ func TestNativeMapStrInt64_LargeMap(t *testing.T) {
 	for _, size := range []int{10, 50, 100, 200, 500} {
 		t.Run(fmt.Sprintf("size_%d", size), func(t *testing.T) {
 			m := make(map[string]int64, size)
-			for i := 0; i < size; i++ {
+			for i := range size {
 				key := fmt.Sprintf("key_%04d_%s", i, randomString(rng, 8))
 				m[key] = rng.Int63n(2e18) - 1e18
 			}
@@ -793,11 +793,11 @@ func TestNativeMap_Random(t *testing.T) {
 	const N = 100
 
 	var mismatches int
-	for i := 0; i < N; i++ {
+	for i := range N {
 		// Generate random map
 		size := rng.Intn(50) + 1
 		m := make(map[string]string, size)
-		for j := 0; j < size; j++ {
+		for range size {
 			key := randomString(rng, rng.Intn(20)+1)
 			value := randomString(rng, rng.Intn(30)+1)
 			m[key] = value
