@@ -92,10 +92,16 @@ enum OpType {
   /* --- C-native Swiss Map variants (36-37) --- */
   OP_MAP_STR_INT   = 36, /* C-native Swiss Map iteration for map[string]int */
   OP_MAP_STR_INT64 = 37, /* C-native Swiss Map iteration for map[string]int64 */
+
+  /* --- C-native sequence iterators (38-41) --- */
+  OP_SEQ_FLOAT64 = 38, /* []float64 / [N]float64 — single-instruction loop */
+  OP_SEQ_INT     = 39, /* []int / [N]int — single-instruction loop */
+  OP_SEQ_INT64   = 40, /* []int64 / [N]int64 — single-instruction loop */
+  OP_SEQ_STRING  = 41, /* []string / [N]string — single-instruction loop */
 };
 
-/* Dispatch table size — compact: covers all opcodes 0..37 (38 entries). */
-#define OP_DISPATCH_COUNT 38
+/* Dispatch table size — compact: covers all opcodes 0..41 (42 entries). */
+#define OP_DISPATCH_COUNT 42
 
 
 /* ================================================================

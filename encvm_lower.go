@@ -152,7 +152,8 @@ func isLongOp(op uint16) bool {
 	switch op {
 	case opSkipIfZero, opCall, opPtrDeref,
 		opSliceBegin, opSliceEnd,
-		opMapBegin, opArrayBegin:
+		opMapBegin, opArrayBegin,
+		opSeqFloat64, opSeqInt, opSeqInt64, opSeqString:
 		return true
 	}
 	return false

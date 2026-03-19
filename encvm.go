@@ -60,6 +60,12 @@ const (
 	// C-native Swiss Map variants (36-37).
 	opMapStrInt   uint16 = 36 // map[string]int: C-native Swiss Map iteration
 	opMapStrInt64 uint16 = 37 // map[string]int64: C-native Swiss Map iteration
+
+	// C-native sequence iterators (38-41).
+	opSeqFloat64 uint16 = 38 // []float64 / [N]float64: single-instruction loop
+	opSeqInt     uint16 = 39 // []int / [N]int: single-instruction loop
+	opSeqInt64   uint16 = 40 // []int64 / [N]int64: single-instruction loop
+	opSeqString  uint16 = 41 // []string / [N]string: single-instruction loop
 )
 
 func kindToOpcode(k ElemTypeKind) uint16 {
@@ -199,6 +205,7 @@ func init() { //nolint:unused
 		opSkipIfZero, opCall, opPtrDeref,
 		opSliceBegin, opSliceEnd,
 		opMapBegin, opArrayBegin,
+		opSeqFloat64, opSeqInt, opSeqInt64, opSeqString,
 	} {
 		opIsLong[op] = true
 	}

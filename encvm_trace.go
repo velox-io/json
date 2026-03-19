@@ -250,6 +250,10 @@ var opcodeName = map[uint16]string{
 	opKString:    "KSTRING",
 	opKInt:       "KINT",
 	opKInt64:     "KINT64",
+	opSeqFloat64: "SEQ_FLOAT64",
+	opSeqInt:     "SEQ_INT",
+	opSeqInt64:   "SEQ_INT64",
+	opSeqString:  "SEQ_STRING",
 }
 
 // dumpBlueprint prints one blueprint's instruction listing to stderr

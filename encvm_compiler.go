@@ -455,7 +455,24 @@ func emitDerefBody(b *irBuilder, elemTI *TypeInfo) {
 }
 
 // emitSlice emits SLICE_BEGIN + element body + SLICE_END for a slice field.
+// For primitive element types, emits a single OP_SEQ_xxx instruction instead.
 func emitSlice(b *irBuilder, fi *TypeInfo, fieldOff uintptr, sliceDec *SliceCodec) {
+	if seqOp := seqOpcode(sliceDec.ElemTI); seqOp != 0 {
+		keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
+		if !ok {
+			emitYieldOverflow(b, fi, fieldOff)
+			return
+		}
+		b.emit(IRInst{
+			Op:       seqOp,
+			KeyLen:   keyLen,
+			KeyOff:   keyOff,
+			FieldOff: uint16(fieldOff),
+			OperandA: 0, // slice: operand_a == 0
+		})
+		return
+	}
+
 	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
 	if !ok {
 		emitYieldOverflow(b, fi, fieldOff)
@@ -489,6 +506,15 @@ func emitSlice(b *irBuilder, fi *TypeInfo, fieldOff uintptr, sliceDec *SliceCode
 
 // emitSliceInner is like emitSlice but without key bytes (for deref'd pointers).
 func emitSliceInner(b *irBuilder, fieldOff uintptr, sliceDec *SliceCodec) {
+	if seqOp := seqOpcode(sliceDec.ElemTI); seqOp != 0 {
+		b.emit(IRInst{
+			Op:       seqOp,
+			FieldOff: uint16(fieldOff),
+			OperandA: 0, // slice: operand_a == 0
+		})
+		return
+	}
+
 	bodyLabel := b.allocLabel()
 	afterLabel := b.allocLabel()
 
@@ -513,7 +539,25 @@ func emitSliceInner(b *irBuilder, fieldOff uintptr, sliceDec *SliceCodec) {
 }
 
 // emitArray emits ARRAY_BEGIN + element body + SLICE_END for an array field.
+// For primitive element types, emits a single OP_SEQ_xxx instruction instead.
 func emitArray(b *irBuilder, fi *TypeInfo, fieldOff uintptr, aDec *ArrayCodec) {
+	if seqOp := seqOpcode(aDec.ElemTI); seqOp != 0 {
+		keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
+		if !ok {
+			emitYieldOverflow(b, fi, fieldOff)
+			return
+		}
+		packed := int32(aDec.ElemSize&0xFFFF) | int32(aDec.ArrayLen&0xFFFF)<<16
+		b.emit(IRInst{
+			Op:       seqOp,
+			KeyLen:   keyLen,
+			KeyOff:   keyOff,
+			FieldOff: uint16(fieldOff),
+			OperandA: packed, // array: operand_a != 0
+		})
+		return
+	}
+
 	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
 	if !ok {
 		emitYieldOverflow(b, fi, fieldOff)
@@ -548,6 +592,16 @@ func emitArray(b *irBuilder, fi *TypeInfo, fieldOff uintptr, aDec *ArrayCodec) {
 
 // emitArrayInner is like emitArray but without key bytes.
 func emitArrayInner(b *irBuilder, fieldOff uintptr, aDec *ArrayCodec) {
+	if seqOp := seqOpcode(aDec.ElemTI); seqOp != 0 {
+		packed := int32(aDec.ElemSize&0xFFFF) | int32(aDec.ArrayLen&0xFFFF)<<16
+		b.emit(IRInst{
+			Op:       seqOp,
+			FieldOff: uint16(fieldOff),
+			OperandA: packed, // array: operand_a != 0
+		})
+		return
+	}
+
 	packed := int32(aDec.ElemSize&0xFFFF) | int32(aDec.ArrayLen&0xFFFF)<<16
 
 	bodyLabel := b.allocLabel()
@@ -708,6 +762,26 @@ func emitMapInner(b *irBuilder, fieldOff uintptr, elemTI *TypeInfo, mapDec *MapC
 
 	b.defineLabel(endLabel)
 	b.emit(IRInst{Op: opMapEnd})
+}
+
+// seqOpcode returns the sequence iterator opcode for a given element TypeInfo,
+// or 0 if the element type is not supported by a C-native sequence iterator.
+// Supported: float64, int, int64, string (without custom marshalers).
+func seqOpcode(elemTI *TypeInfo) uint16 {
+	if elemTI.Flags&(tiFlagHasMarshalFn|tiFlagHasTextMarshalFn) != 0 {
+		return 0
+	}
+	switch elemTI.Kind {
+	case KindFloat64:
+		return opSeqFloat64
+	case KindInt:
+		return opSeqInt
+	case KindInt64:
+		return opSeqInt64
+	case KindString:
+		return opSeqString
+	}
+	return 0
 }
 
 // canSwissMapInC returns true if the given map variant can use C-native Swiss Map iteration.

@@ -25,6 +25,7 @@
 #include "iface.h"
 #include "trace.h"
 #include "swissmap.h"
+#include "seqiter.h"
 #include "base64.h"
 
 /* ================================================================
@@ -209,6 +210,12 @@ VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
       /* C-native Swiss Map variants (36-37) */
       [OP_MAP_STR_INT]   = DT_ENTRY(vj_op_map_str_int),
       [OP_MAP_STR_INT64] = DT_ENTRY(vj_op_map_str_int64),
+
+      /* C-native sequence iterators (38-41) */
+      [OP_SEQ_FLOAT64] = DT_ENTRY(vj_op_seq_float64),
+      [OP_SEQ_INT]     = DT_ENTRY(vj_op_seq_int),
+      [OP_SEQ_INT64]   = DT_ENTRY(vj_op_seq_int64),
+      [OP_SEQ_STRING]  = DT_ENTRY(vj_op_seq_string),
   };
 
 #undef DT_ENTRY
@@ -1085,6 +1092,141 @@ VJ_DEFINE_MAP_SWISS_OP(vj_op_map_str_int, "MAP_STR_INT", vj_swiss_iterate_str_in
 VJ_DEFINE_MAP_SWISS_OP(vj_op_map_str_int64, "MAP_STR_INT64", vj_swiss_iterate_str_int)
 
 #undef VJ_DEFINE_MAP_SWISS_OP
+
+/* ================================================================
+ *  Macro-generated Sequence Iterator handlers for primitive slice/array.
+ *
+ *  Single-instruction loop: reads data source (slice or array via operand_a),
+ *  handles nil/empty, then delegates to vj_seq_iterate_* for the full
+ *  [elem,elem,...] encoding.  On BUF_FULL, pushes a seq frame for resume.
+ *
+ *  Instruction format:
+ *    Short (8 bytes): operand_a == 0 → slice (GoSlice* at base+field_off)
+ *    Long (16 bytes): operand_a != 0 → array (packed elem_size|array_len),
+ *                     data at base+field_off
+ * ================================================================ */
+
+#define VJ_DEFINE_SEQ_OP(OP_LABEL, TRACE_LABEL, ITERATE_FN, HAS_NAN_CHECK)  \
+OP_LABEL: {                                                                  \
+  VM_TRACE_KEY(TRACE_LABEL);                                                 \
+  int32_t _depth = VJ_ST_GET_STACK_DEPTH(vmstate);                           \
+  int is_resume = (_depth > 0 && (ctx->stack[_depth - 1].state & 1));        \
+                                                                              \
+  const uint8_t *seq_data;                                                    \
+  int64_t seq_count;                                                          \
+  int32_t seq_start_idx;                                                      \
+  int is_long;                                                                \
+                                                                              \
+  if (is_resume) {                                                            \
+    /* Resume from BUF_FULL: read saved state from frame */                   \
+    VjStackFrame *f = &ctx->stack[_depth - 1];                               \
+    seq_data = f->seq.iter_data;                                              \
+    seq_count = f->seq.iter_count;                                            \
+    seq_start_idx = f->seq.iter_idx;                                          \
+    is_long = (VJ_OP_EXT(op)->operand_a != 0);                              \
+  } else {                                                                    \
+    /* First entry: determine slice vs array from operand_a */                \
+    const VjOpExt *ext = VJ_OP_EXT(op);                                      \
+    is_long = (ext->operand_a != 0);                                         \
+                                                                              \
+    if (!is_long) {                                                           \
+      /* Slice: GoSlice* at base+field_off */                                 \
+      const GoSlice *sl = (const GoSlice *)(base + op->field_off);           \
+      if (sl->data == NULL) {                                                \
+        VM_CHECK(op->key_len + 1 + 4 + VM_INDENT_PAD(indent_depth)          \
+                 + VM_KEY_SPACE);                                             \
+        VM_WRITE_KEY();                                                       \
+        __builtin_memcpy(buf, "null", 4);                                    \
+        buf += 4;                                                             \
+        VM_NEXT_LONG();                                                       \
+      }                                                                       \
+      seq_data = sl->data;                                                    \
+      seq_count = sl->len;                                                    \
+    } else {                                                                  \
+      /* Array: inline data at base+field_off */                              \
+      int32_t packed = ext->operand_a;                                       \
+      seq_count = (int64_t)((uint32_t)packed >> 16);                         \
+      seq_data = base + op->field_off;                                       \
+    }                                                                         \
+                                                                              \
+    if (seq_count == 0) {                                                     \
+      VM_CHECK(op->key_len + 1 + 2 + VM_INDENT_PAD(indent_depth)            \
+               + VM_KEY_SPACE);                                               \
+      VM_WRITE_KEY();                                                         \
+      *buf++ = '[';                                                           \
+      *buf++ = ']';                                                           \
+      if (is_long) { VM_NEXT_LONG(); }                                       \
+      else { VM_NEXT_LONG(); }                                                \
+    }                                                                         \
+                                                                              \
+    /* Write comma + key + '[' + indent */                                    \
+    VM_CHECK(op->key_len + 1 + 1 + VM_INDENT_PAD(indent_depth)              \
+             + VM_KEY_SPACE + VM_INDENT_PAD(indent_depth + 1));               \
+    VM_WRITE_KEY();                                                           \
+    *buf++ = '[';                                                             \
+    VM_INDENT_INC();                                                          \
+    VM_WRITE_INDENT();                                                        \
+    seq_start_idx = 0;                                                        \
+  }                                                                           \
+                                                                              \
+  /* Delegate iteration to out-of-line function */                            \
+  {                                                                           \
+    if (__builtin_expect(VJ_ST_GET_STACK_DEPTH(vmstate)                      \
+                         >= VJ_MAX_STACK_DEPTH, 0)) {                         \
+      VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);                             \
+    }                                                                         \
+    VjStackFrame *f = &ctx->stack[is_resume ? (_depth - 1) : _depth];       \
+                                                                              \
+    VjSeqIndent ind = {                                                       \
+      (const uint8_t *)(indent_tpl),                                          \
+      (int16_t)(indent_depth),                                                \
+      (uint8_t)(indent_step),                                                 \
+      (uint8_t)(indent_prefix_len),                                           \
+    };                                                                        \
+                                                                              \
+    VjSeqResult r = ITERATE_FN(                                               \
+        buf, bend, seq_data, seq_count, seq_start_idx,                        \
+        VJ_ST_GET_FLAGS(vmstate), &ind);                                      \
+    buf = r.buf;                                                              \
+                                                                              \
+    if (r.action == VJ_SEQ_BUF_FULL) {                                       \
+      f->ret_base = base;                                                     \
+      f->seq.iter_data = seq_data;                                            \
+      f->seq.iter_count = seq_count;                                          \
+      f->seq.iter_idx = r.resume_idx;                                         \
+      VM_SAVE_TRACE_DEPTH(f);                                                 \
+      f->state |= 1;                                                          \
+      if (!is_resume) { VJ_ST_INC_STACK_DEPTH(vmstate); }                    \
+      VM_SAVE_AND_RETURN(VJ_EXIT_BUF_FULL);                                   \
+    }                                                                         \
+                                                                              \
+    if (HAS_NAN_CHECK && r.action == VJ_SEQ_NAN_INF) {                       \
+      VM_SAVE_AND_RETURN(VJ_EXIT_NAN_INF);                                    \
+    }                                                                         \
+                                                                              \
+    /* All elements encoded: write indent + ']' */                            \
+    VM_INDENT_DEC();                                                          \
+    VM_CHECK(1 + VM_INDENT_PAD(indent_depth));                               \
+    VM_WRITE_INDENT();                                                        \
+    *buf++ = ']';                                                             \
+                                                                              \
+    if (is_resume) {                                                          \
+      f->state &= ~1;                                                         \
+      VJ_ST_DEC_STACK_DEPTH(vmstate);                                         \
+      VM_RESTORE_TRACE_DEPTH(f);                                              \
+    }                                                                         \
+    VJ_ST_SET_FIRST_0(vmstate);                                              \
+    if (is_long) { VM_NEXT_LONG(); }                                          \
+    else { VM_NEXT_LONG(); }                                                  \
+  }                                                                           \
+}
+
+VJ_DEFINE_SEQ_OP(vj_op_seq_float64, "SEQ_FLOAT64", vj_seq_iterate_float64, 1)
+VJ_DEFINE_SEQ_OP(vj_op_seq_int,     "SEQ_INT",     vj_seq_iterate_int,     0)
+VJ_DEFINE_SEQ_OP(vj_op_seq_int64,   "SEQ_INT64",   vj_seq_iterate_int64,   0)
+VJ_DEFINE_SEQ_OP(vj_op_seq_string,  "SEQ_STRING",  vj_seq_iterate_string,  0)
+
+#undef VJ_DEFINE_SEQ_OP
 
 vj_op_interface: {
   VM_TRACE_KEY("INTERFACE");
