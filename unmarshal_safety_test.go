@@ -252,8 +252,10 @@ func TestConcurrentUnmarshal_DiverseTypes(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 5)
 
+	wg.Add(5)
 	// Goroutine 1: struct target
-	wg.Go(func() {
+	go func() {
+		defer wg.Done()
 		for i := range iters {
 			data, want := safetyInput(i)
 			var got SafetyItem
@@ -266,10 +268,11 @@ func TestConcurrentUnmarshal_DiverseTypes(t *testing.T) {
 				return
 			}
 		}
-	})
+	}()
 
 	// Goroutine 2: any target
-	wg.Go(func() {
+	go func() {
+		defer wg.Done()
 		for i := range iters {
 			data := fmt.Appendf(nil, `{"key":"val-%d\nesc"}`, i)
 			var got any
@@ -288,10 +291,11 @@ func TestConcurrentUnmarshal_DiverseTypes(t *testing.T) {
 				return
 			}
 		}
-	})
+	}()
 
 	// Goroutine 3: map[string]string target
-	wg.Go(func() {
+	go func() {
+		defer wg.Done()
 		for i := range iters {
 			data := fmt.Appendf(nil, `{"a":"x%d","b":"y%d\ttab"}`, i, i)
 			var got map[string]string
@@ -306,10 +310,11 @@ func TestConcurrentUnmarshal_DiverseTypes(t *testing.T) {
 				return
 			}
 		}
-	})
+	}()
 
 	// Goroutine 4: []any target
-	wg.Go(func() {
+	go func() {
+		defer wg.Done()
 		for i := range iters {
 			data := fmt.Appendf(nil, `[%d,"s%d\n",true]`, i, i)
 			var got []any
@@ -322,10 +327,11 @@ func TestConcurrentUnmarshal_DiverseTypes(t *testing.T) {
 				return
 			}
 		}
-	})
+	}()
 
 	// Goroutine 5: nested slice of structs
-	wg.Go(func() {
+	go func() {
+		defer wg.Done()
 		type List struct {
 			Items []SafetyInner `json:"items"`
 		}
@@ -341,7 +347,7 @@ func TestConcurrentUnmarshal_DiverseTypes(t *testing.T) {
 				return
 			}
 		}
-	})
+	}()
 
 	wg.Wait()
 	close(errs)
