@@ -6,15 +6,9 @@ import (
 	json "github.com/velox-io/json"
 )
 
-func main() {
+//nolint:unused
+func marshalUser() {
 	u := NewTestUser()
-
-	// b, err := json.Marshal(&u)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// fmt.Println("--- compact ---")
-	// fmt.Println(string(b))
 
 	b2, err := json.MarshalIndent(&u, "", "  ")
 	if err != nil {
@@ -22,4 +16,27 @@ func main() {
 	}
 	fmt.Println("--- indent ---")
 	fmt.Println(string(b2))
+}
+
+func marshalCanada() {
+	c := NewCanadaRoot()
+
+	b, err := json.Marshal(&c)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("--- canada (compact, %d bytes) ---\n", len(b))
+	fmt.Println(string(b[:200]) + "...")
+
+	// b2, err := json.MarshalIndent(&c, "", "  ")
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// fmt.Printf("--- canada (indent, %d bytes) ---\n", len(b2))
+	// fmt.Println(string(b2[:300]) + "...")
+}
+
+func main() {
+	// marshalUser()
+	marshalCanada()
 }
