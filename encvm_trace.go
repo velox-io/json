@@ -258,6 +258,7 @@ var opcodeName = map[uint16]string{
 	opSeqString:  "SEQ_STRING",
 	opMapStrIter:    "MAP_STR_ITER",
 	opMapStrIterEnd: "MAP_STR_ITER_END",
+	opTime:          "TIME",
 }
 
 // dumpBlueprint prints one blueprint's instruction listing to stderr

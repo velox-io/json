@@ -74,6 +74,9 @@ const (
 	// Keyed-field quoted variants (44-45) — ,string tag.
 	opKQInt   uint16 = 44 // struct field int with ,string — quoted: "123"
 	opKQInt64 uint16 = 45 // struct field int64 with ,string — quoted: "123"
+
+	// time.Time (46) — native RFC3339Nano formatting or yield.
+	opTime uint16 = 46 // time.Time — native RFC3339Nano
 )
 
 func kindToOpcode(k ElemTypeKind) uint16 {

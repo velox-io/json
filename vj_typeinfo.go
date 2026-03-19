@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 )
 
@@ -15,6 +16,7 @@ var rawMessageType = reflect.TypeFor[json.RawMessage]()
 var numberType = reflect.TypeFor[json.Number]()
 var intType = reflect.TypeFor[int]()
 var int64Type = reflect.TypeFor[int64]()
+var timeType = reflect.TypeFor[time.Time]()
 
 type ElemTypeKind uint8
 

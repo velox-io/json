@@ -163,7 +163,15 @@ func emitStructBody(b *irBuilder, dec *StructCodec, baseOff uintptr) {
 		}
 
 		// Fields with custom marshalers → yield to Go.
+		// Exception: time.Time is handled natively by C VM (opKTime).
 		if fi.Flags&(tiFlagHasMarshalFn|tiFlagHasTextMarshalFn) != 0 {
+			if isTimeType(fi) {
+				if needsOmitempty {
+					emitSkipIfZero(b, fi, fieldOff, 16+8, fi.Kind)
+				}
+				emitTime(b, fi, fieldOff)
+				continue
+			}
 			if needsOmitempty {
 				emitSkipIfZero(b, fi, fieldOff, 16+8, fi.Kind)
 			}
@@ -416,8 +424,12 @@ func emitPointer(b *irBuilder, fi *TypeInfo, fieldOff uintptr, pDec *PointerCode
 
 // emitDerefBody emits the body for a dereferenced pointer target.
 func emitDerefBody(b *irBuilder, elemTI *TypeInfo) {
-	// Custom marshalers → yield
+	// Custom marshalers → yield (except time.Time which has native support)
 	if elemTI.Flags&(tiFlagHasMarshalFn|tiFlagHasTextMarshalFn) != 0 {
+		if isTimeTypeFromTI(elemTI) {
+			emitTimeInner(b, elemTI, 0)
+			return
+		}
 		b.emit(IRInst{
 			Op: opFallback,
 			Fallback: &fbInfo{
@@ -681,6 +693,10 @@ func emitArrayInner(b *irBuilder, fieldOff uintptr, aDec *ArrayCodec) {
 // (used in slice/array loops). base points to the element.
 func emitElementBody(b *irBuilder, elemTI *TypeInfo) {
 	if elemTI.Flags&(tiFlagHasMarshalFn|tiFlagHasTextMarshalFn) != 0 {
+		if isTimeTypeFromTI(elemTI) {
+			emitTimeInner(b, elemTI, 0)
+			return
+		}
 		b.emit(IRInst{
 			Op: opFallback,
 			Fallback: &fbInfo{
@@ -1069,6 +1085,71 @@ func emitYieldOverflow(b *irBuilder, fi *TypeInfo, fieldOff uintptr) {
 			TI:     fi,
 			Offset: fieldOff,
 			Reason: fbReasonKeyPoolFull,
+		},
+	})
+}
+
+// isTimeType reports whether a struct field's TypeInfo is time.Time.
+func isTimeType(fi *TypeInfo) bool {
+	if fi.Kind != KindStruct {
+		return false
+	}
+	if fi.Ext == nil || fi.Ext.Type == nil {
+		return false
+	}
+	return fi.Ext.Type == timeType
+}
+
+// isTimeTypeFromTI reports whether a TypeInfo (possibly from codec cache) is time.Time.
+// Used in deref/element contexts where fi.Ext.Type may differ from struct field context.
+func isTimeTypeFromTI(ti *TypeInfo) bool {
+	if ti.Kind != KindStruct {
+		return false
+	}
+	if ti.Ext != nil && ti.Ext.Type != nil {
+		return ti.Ext.Type == timeType
+	}
+	// Check via StructCodec.Typ
+	if c := ti.resolveCodec(); c != nil {
+		if sc, ok := c.(*StructCodec); ok {
+			return sc.Typ == timeType
+		}
+	}
+	return false
+}
+
+// emitTime emits an opTime instruction for a time.Time field/element.
+// The C VM will attempt native RFC3339Nano formatting; if the timezone
+// is too complex (DST), it yields back to Go via the fallback mechanism.
+// Works in any context: struct field (with key), slice/array element, pointer deref.
+func emitTime(b *irBuilder, fi *TypeInfo, fieldOff uintptr) {
+	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
+	if !ok {
+		emitYieldOverflow(b, fi, fieldOff)
+		return
+	}
+	b.emit(IRInst{
+		Op:       opTime,
+		KeyLen:   keyLen,
+		KeyOff:   keyOff,
+		FieldOff: uint16(fieldOff),
+		Fallback: &fbInfo{
+			TI:     fi,
+			Offset: fieldOff,
+			Reason: fbReasonMarshaler,
+		},
+	})
+}
+
+// emitTimeInner emits an opTime instruction without key bytes (for deref/element contexts).
+func emitTimeInner(b *irBuilder, elemTI *TypeInfo, fieldOff uintptr) {
+	b.emit(IRInst{
+		Op:       opTime,
+		FieldOff: uint16(fieldOff),
+		Fallback: &fbInfo{
+			TI:     elemTI,
+			Offset: fieldOff,
+			Reason: fbReasonMarshaler,
 		},
 	})
 }
