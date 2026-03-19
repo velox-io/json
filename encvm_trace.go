@@ -13,7 +13,7 @@ import (
 const vjTraceEnabled = true
 
 // vjTraceBufSize must match VJ_TRACE_BUF_SIZE in native/encvm/impl/types.h.
-const vjTraceBufSize = 16384
+const vjTraceBufSize = 1048576
 
 // VjTraceBuf mirrors the C VjTraceBuf layout.
 type VjTraceBuf struct {

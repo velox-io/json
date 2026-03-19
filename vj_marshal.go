@@ -1150,6 +1150,18 @@ func (m *Marshaler) encodePointer(dec *PointerCodec, ptr unsafe.Pointer) error {
 }
 
 func (m *Marshaler) encodeMap(dec *MapCodec, ptr unsafe.Pointer) error {
+	// Try native VM path for top-level map encoding.
+	// Only for string-keyed maps where MAP_STR_ITER can iterate in C.
+	// Non-string-key maps use MAP_BEGIN/MAP_END which requires Go-driven
+	// iteration with fallback info that standalone blueprints can't provide.
+	// ptr points to the map variable (i.e. *map[K]V), so MAP_STR_ITER
+	// correctly reads the map pointer via *(GoSwissMap**)(base+0).
+	if !m.inVM && encvm.Available && dec.isStringKey {
+		bp := dec.getBlueprint()
+		if bp != nil && len(bp.Ops) > 0 {
+			return m.execVM(bp, ptr)
+		}
+	}
 	if dec.MapKind == MapVariantStrStr {
 		return m.encodeMapStringString(ptr)
 	}

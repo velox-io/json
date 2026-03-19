@@ -24,7 +24,7 @@
  *  Size must be a power of 2 for fast modular indexing.
  * ================================================================ */
 
-#define VJ_TRACE_BUF_SIZE 16384  /* 16KB */
+#define VJ_TRACE_BUF_SIZE 1048576  /* 1MB */
 
 typedef struct VjTraceBuf {
   uint32_t head;                      /* write position (wraps via & mask) */

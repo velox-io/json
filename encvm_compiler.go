@@ -1246,3 +1246,11 @@ func (d *ArrayCodec) getBlueprint() *Blueprint {
 	})
 	return cache.blueprint
 }
+
+func (d *MapCodec) getBlueprint() *Blueprint {
+	cache := d.vmCache()
+	cache.once.Do(func() {
+		cache.blueprint = compileStandaloneMapBlueprint(d)
+	})
+	return cache.blueprint
+}

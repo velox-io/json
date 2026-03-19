@@ -853,6 +853,18 @@ type MapCodec struct {
 	KeySize     uintptr
 	SlotSize    uintptr // Swiss Map slot size (0 = not probed or probe failed)
 	ScanMapFn   func(sc *Parser, src []byte, idx int, ptr unsafe.Pointer) (int, error)
+	vm          atomic.Pointer[encvmCache]
+}
+
+func (d *MapCodec) vmCache() *encvmCache {
+	if p := d.vm.Load(); p != nil {
+		return p
+	}
+	p := &encvmCache{}
+	if d.vm.CompareAndSwap(nil, p) {
+		return p
+	}
+	return d.vm.Load()
 }
 
 func BuildMapCodec(t reflect.Type) *MapCodec {
