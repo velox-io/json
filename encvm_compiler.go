@@ -121,7 +121,12 @@ func compileStandaloneSliceBlueprint(dec *SliceCodec) *Blueprint {
 		visiting: make(map[reflect.Type]Label),
 	}
 
-	emitSliceInner(b, 0, dec)
+	// []byte → single OP_BYTE_SLICE (base64 encoding).
+	if dec.ElemTI.Kind == KindUint8 && dec.ElemSize == 1 {
+		b.emit(IRInst{Op: opByteSlice, FieldOff: 0})
+	} else {
+		emitSliceInner(b, 0, dec)
+	}
 	b.emit(IRInst{Op: opRet})
 
 	ops, fallbacks, annotations := lower(b.insts)
@@ -177,7 +182,7 @@ func emitStructBody(b *irBuilder, dec *StructCodec, baseOff uintptr) {
 		}
 
 		// Fields with custom marshalers → yield to Go.
-		// Exception: time.Time is handled natively by C VM (opKTime).
+		// Exception: time.Time is handled natively by C VM (opTime).
 		if fi.Flags&(tiFlagHasMarshalFn|tiFlagHasTextMarshalFn) != 0 {
 			if isTimeType(fi) {
 				if needsOmitempty {
@@ -255,12 +260,12 @@ func emitStructBody(b *irBuilder, dec *StructCodec, baseOff uintptr) {
 
 		case KindSlice:
 			sliceDec := fi.resolveCodec().(*SliceCodec)
-			// []byte needs base64 encoding — yield to Go.
+			// []byte → base64 encoding, handled natively by OP_BYTE_SLICE.
 			if sliceDec.ElemTI.Kind == KindUint8 && sliceDec.ElemSize == 1 {
 				if needsOmitempty {
 					emitSkipIfZero(b, fi, fieldOff, 16+8, KindSlice)
 				}
-				emitYield(b, fi, fieldOff, fbReasonByteSlice)
+				emitByteSlice(b, fi, fieldOff)
 				continue
 			}
 			if needsOmitempty {
@@ -1099,6 +1104,22 @@ func emitYieldOverflow(b *irBuilder, fi *TypeInfo, fieldOff uintptr) {
 			Offset: fieldOff,
 			Reason: fbReasonKeyPoolFull,
 		},
+	})
+}
+
+// emitByteSlice emits an opByteSlice instruction for a []byte struct field.
+// The C VM handles base64 encoding natively via OP_BYTE_SLICE.
+func emitByteSlice(b *irBuilder, fi *TypeInfo, fieldOff uintptr) {
+	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
+	if !ok {
+		emitYieldOverflow(b, fi, fieldOff)
+		return
+	}
+	b.emit(IRInst{
+		Op:       opByteSlice,
+		KeyLen:   keyLen,
+		KeyOff:   keyOff,
+		FieldOff: uint16(fieldOff),
 	})
 }
 

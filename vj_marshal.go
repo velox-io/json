@@ -1010,7 +1010,9 @@ func (m *Marshaler) encodeSlice(dec *SliceCodec, ptr unsafe.Pointer) error {
 		return nil
 	}
 
-	// []byte → base64 (handles empty []byte{} → "")
+	// []byte → base64. Go fast path: avoids blueprint compilation overhead for
+	// this top-level entry point. In struct/element contexts the C VM handles
+	// []byte natively via OP_BYTE_SLICE.
 	if dec.ElemTI.Kind == KindUint8 && dec.ElemSize == 1 {
 		return m.encodeByteSlice(sh)
 	}
