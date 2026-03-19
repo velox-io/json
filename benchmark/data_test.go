@@ -83,6 +83,40 @@ func TestMarshalTwitter(t *testing.T) {
 	}
 }
 
+type omitemptyMapStruct struct {
+	Name  string            `json:"name"`
+	Tags  map[string]string `json:"tags,omitempty"`
+	Extra map[string]any    `json:"extra,omitempty"`
+}
+
+func TestMarshalOmitemptyMap(t *testing.T) {
+	v := omitemptyMapStruct{
+		Name:  "test",
+		Tags:  map[string]string{"a": "b", "c": "d"},
+		Extra: nil,
+	}
+	got, err := vjson.Marshal(&v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []byte
+	want, err = json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Compare with stdlib (note: map key order may differ, so unmarshal and compare)
+	var gotMap, wantMap map[string]any
+	if err := json.Unmarshal(got, &gotMap); err != nil {
+		t.Fatalf("unmarshal got: %v\ngot: %s", err, got)
+	}
+	if err := json.Unmarshal(want, &wantMap); err != nil {
+		t.Fatalf("unmarshal want: %v", err)
+	}
+	if len(gotMap) != len(wantMap) {
+		t.Fatalf("field count mismatch:\n  got:  %s\n  want: %s", got, want)
+	}
+}
+
 func TestMarshalKubePods(t *testing.T) {
 	var pods KubePodList
 	if err := json.Unmarshal(LoadPodsCompactJSON(), &pods); err != nil {

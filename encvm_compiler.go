@@ -317,7 +317,19 @@ func emitStructBody(b *irBuilder, dec *StructCodec, baseOff uintptr) {
 		case KindMap:
 			mapDec := fi.resolveCodec().(*MapCodec)
 			if needsOmitempty {
-				emitYield(b, fi, fieldOff, fbReasonMapOmitempty)
+				afterLabel := b.allocLabel()
+				b.emit(IRInst{
+					Op:       opSkipIfZero,
+					FieldOff: uint16(fieldOff),
+					Target:   afterLabel,
+					OperandB: int32(KindMap),
+				})
+				if canSwissMapInC(mapDec.MapKind) {
+					emitMapSwiss(b, fi, fieldOff, mapDec.MapKind)
+				} else {
+					emitMap(b, fi, fieldOff, mapDec)
+				}
+				b.defineLabel(afterLabel)
 			} else if canSwissMapInC(mapDec.MapKind) {
 				emitMapSwiss(b, fi, fieldOff, mapDec.MapKind)
 			} else {

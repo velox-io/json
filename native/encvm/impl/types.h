@@ -230,8 +230,11 @@ static inline int vj_is_zero(const uint8_t *ptr, uint16_t zct) {
     return s->len == 0;
   }
   case ZCT_MAP: {
-    /* Map header is a single pointer; nil map → zero. */
-    return *(const void *const *)ptr == NULL;
+    /* Map is "empty" for omitempty when nil or used==0 (Swiss Map). */
+    const void *mp = *(const void *const *)ptr;
+    if (mp == NULL) return 1;
+    /* GoSwissMap.used is at offset 0, uint64_t */
+    return *(const uint64_t *)mp == 0;
   }
   case ZCT_STRUCT: {
     /* Struct is never considered "zero" for omitempty by stdlib.
