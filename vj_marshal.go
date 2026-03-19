@@ -1,103 +1,29 @@
 package vjson
 
 import (
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"math"
 	"reflect"
-	"strconv"
 	"sync"
 	"unsafe"
 
 	"github.com/velox-io/json/native/encvm"
 )
 
-// Pre-computed string representations for 0-999.
-var smallInts [1000]string
-
-func init() {
-	for i := range smallInts {
-		smallInts[i] = strconv.Itoa(i)
-	}
-	// Pre-warm pool so the first Marshal call avoids allocation.
-	marshalerPool.Put(&Marshaler{buf: make([]byte, 0, marshalBufInitSize)})
-}
-
-var (
-	litTrue  = []byte("true")
-	litFalse = []byte("false")
-	litNull  = []byte("null")
-	litEmpty = []byte("{}")
-	litArr   = []byte("[]")
-)
-
 const (
 	// marshalBufInitSize is the default capacity for pool-created buffers.
 	marshalBufInitSize = 32 * 1024
 	// marshalBufPoolLimit is the maximum buffer capacity kept in the pool.
-	// Buffers that grow beyond this during encoding are discarded (nil-ed)
-	// when the Marshaler is returned to the pool, preventing large one-off
-	// payloads from inflating steady-state pool memory.
+	// When the Marshaler is returned to the pool, if its buffer has grown
+	// beyond this limit, the buffer is released (set to nil) so the GC can
+	// reclaim it, preventing large one-off payloads from inflating
+	// steady-state pool memory.
 	marshalBufPoolLimit = 1024 * 1024
 )
 
-// MarshalOption configures encoding behavior.
-type MarshalOption func(*Marshaler)
-
-// WithEscapeHTML enables escaping of <, >, & in strings.
-func WithEscapeHTML() MarshalOption {
-	return func(m *Marshaler) { m.flags |= uint32(escapeHTML) }
+func init() {
+	// Pre-warm pool so the first Marshal call avoids allocation.
+	marshalerPool.Put(&Marshaler{buf: make([]byte, 0, marshalBufInitSize)})
 }
 
-// WithoutEscapeHTML disables escaping of <, >, &.
-func WithoutEscapeHTML() MarshalOption {
-	return func(m *Marshaler) { m.flags &^= uint32(escapeHTML) }
-}
-
-// WithEscapeLineTerms enables escaping of U+2028 and U+2029 line terminators in strings.
-func WithEscapeLineTerms() MarshalOption {
-	return func(m *Marshaler) { m.flags |= uint32(escapeLineTerms) }
-}
-
-// WithoutEscapeLineTerms disables escaping of U+2028 and U+2029.
-func WithoutEscapeLineTerms() MarshalOption {
-	return func(m *Marshaler) { m.flags &^= uint32(escapeLineTerms) }
-}
-
-// WithUTF8Correction enables replacing invalid UTF-8 with \ufffd in strings.
-func WithUTF8Correction() MarshalOption {
-	return func(m *Marshaler) { m.flags |= uint32(escapeInvalidUTF8) }
-}
-
-// WithoutUTF8Correction disables replacing invalid UTF-8 in strings.
-func WithoutUTF8Correction() MarshalOption {
-	return func(m *Marshaler) { m.flags &^= uint32(escapeInvalidUTF8) }
-}
-
-// WithStdCompat enables full encoding/json compatibility.
-func WithStdCompat() MarshalOption {
-	return func(m *Marshaler) {
-		m.flags = uint32(escapeStdCompat) | vjEncFloatExpAuto
-	}
-}
-
-// WithFloatExpAuto enables encoding/json-compatible scientific notation
-// for floats with |f| < 1e-6 or |f| >= 1e21 (e.g. 1e-7, 1e+21).
-// By default, floats are always formatted in fixed-point notation.
-func WithFloatExpAuto() MarshalOption {
-	return func(m *Marshaler) { m.flags |= vjEncFloatExpAuto }
-}
-
-// WithFastEscape disables all string-level escape features
-// (UTF-8 validation, line terminator escaping, HTML escaping).
-// Only mandatory JSON escapes (control chars, '"', '\\') are performed.
-// This enables the fastest string encoding path in the native encoder.
-func WithFastEscape() MarshalOption {
-	return func(m *Marshaler) { m.flags &^= uint32(escapeHTML | escapeLineTerms | escapeInvalidUTF8) }
-}
-
-// Marshaler is a pooled JSON encoder.
 type Marshaler struct {
 	// vmCtx MUST be the first field: VjExecCtx.Stack (at offset 96 within
 	// VjExecCtx) requires 32-byte alignment relative to the struct base.
@@ -183,127 +109,240 @@ func (m *Marshaler) flush() error {
 	return err
 }
 
-// Per-Kind encode functions (package-level) for EncodeFn dispatch.
+// MarshalOption configures encoding behavior.
+type MarshalOption func(*Marshaler)
 
-func encodeBool(m *Marshaler, ptr unsafe.Pointer) error {
-	if *(*bool)(ptr) {
-		m.buf = append(m.buf, litTrue...)
-	} else {
-		m.buf = append(m.buf, litFalse...)
-	}
-	return nil
+// WithEscapeHTML enables escaping of <, >, & in strings.
+func WithEscapeHTML() MarshalOption {
+	return func(m *Marshaler) { m.flags |= uint32(escapeHTML) }
 }
 
-func encodeInt(m *Marshaler, ptr unsafe.Pointer) error     { return m.appendInt64(int64(*(*int)(ptr))) }
-func encodeInt8(m *Marshaler, ptr unsafe.Pointer) error    { return m.appendInt64(int64(*(*int8)(ptr))) }
-func encodeInt16(m *Marshaler, ptr unsafe.Pointer) error   { return m.appendInt64(int64(*(*int16)(ptr))) }
-func encodeInt32(m *Marshaler, ptr unsafe.Pointer) error   { return m.appendInt64(int64(*(*int32)(ptr))) }
-func encodeInt64Fn(m *Marshaler, ptr unsafe.Pointer) error { return m.appendInt64(*(*int64)(ptr)) }
-
-func encodeUint(m *Marshaler, ptr unsafe.Pointer) error {
-	return m.appendUint64(uint64(*(*uint)(ptr)))
-}
-func encodeUint8(m *Marshaler, ptr unsafe.Pointer) error {
-	return m.appendUint64(uint64(*(*uint8)(ptr)))
-}
-func encodeUint16(m *Marshaler, ptr unsafe.Pointer) error {
-	return m.appendUint64(uint64(*(*uint16)(ptr)))
-}
-func encodeUint32(m *Marshaler, ptr unsafe.Pointer) error {
-	return m.appendUint64(uint64(*(*uint32)(ptr)))
-}
-func encodeUint64Fn(m *Marshaler, ptr unsafe.Pointer) error {
-	return m.appendUint64(*(*uint64)(ptr))
+// WithoutEscapeHTML disables escaping of <, >, &.
+func WithoutEscapeHTML() MarshalOption {
+	return func(m *Marshaler) { m.flags &^= uint32(escapeHTML) }
 }
 
-func encodeFloat32Value(m *Marshaler, ptr unsafe.Pointer) error { return m.encodeFloat32(ptr) }
-func encodeFloat64Value(m *Marshaler, ptr unsafe.Pointer) error { return m.encodeFloat64(ptr) }
-
-func encodeStringValue(m *Marshaler, ptr unsafe.Pointer) error {
-	m.encodeString(*(*string)(ptr))
-	return nil
+// WithEscapeLineTerms enables escaping of U+2028 and U+2029 line terminators in strings.
+func WithEscapeLineTerms() MarshalOption {
+	return func(m *Marshaler) { m.flags |= uint32(escapeLineTerms) }
 }
 
-func encodeRawMessageFn(m *Marshaler, ptr unsafe.Pointer) error {
-	raw := *(*[]byte)(ptr)
-	if len(raw) == 0 {
-		m.buf = append(m.buf, litNull...)
-	} else {
-		m.buf = append(m.buf, raw...)
-	}
-	return nil
+// WithoutEscapeLineTerms disables escaping of U+2028 and U+2029.
+func WithoutEscapeLineTerms() MarshalOption {
+	return func(m *Marshaler) { m.flags &^= uint32(escapeLineTerms) }
 }
 
-func encodeNumberFn(m *Marshaler, ptr unsafe.Pointer) error {
-	s := *(*string)(ptr)
-	if s == "" {
-		m.buf = append(m.buf, '0')
-	} else {
-		m.buf = append(m.buf, s...)
-	}
-	return nil
+// WithUTF8Correction enables replacing invalid UTF-8 with \ufffd in strings.
+func WithUTF8Correction() MarshalOption {
+	return func(m *Marshaler) { m.flags |= uint32(escapeInvalidUTF8) }
 }
 
-func encodeAnyValue(m *Marshaler, ptr unsafe.Pointer) error { return m.encodeAny(ptr) }
+// WithoutUTF8Correction disables replacing invalid UTF-8 in strings.
+func WithoutUTF8Correction() MarshalOption {
+	return func(m *Marshaler) { m.flags &^= uint32(escapeInvalidUTF8) }
+}
 
-// Closure builders for composite types.
-
-func makeEncodeStruct(dec *StructCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
-	return func(m *Marshaler, ptr unsafe.Pointer) error {
-		return m.encodeStruct(dec, ptr)
+// WithStdCompat enables full encoding/json compatibility.
+func WithStdCompat() MarshalOption {
+	return func(m *Marshaler) {
+		m.flags = uint32(escapeStdCompat) | vjEncFloatExpAuto
 	}
 }
 
-func makeEncodeSlice(dec *SliceCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
-	return func(m *Marshaler, ptr unsafe.Pointer) error {
-		return m.encodeSlice(dec, ptr)
-	}
+// WithFloatExpAuto enables encoding/json-compatible scientific notation
+// for floats with |f| < 1e-6 or |f| >= 1e21 (e.g. 1e-7, 1e+21).
+// By default, floats are always formatted in fixed-point notation.
+func WithFloatExpAuto() MarshalOption {
+	return func(m *Marshaler) { m.flags |= vjEncFloatExpAuto }
 }
 
-func makeEncodeArray(dec *ArrayCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
-	return func(m *Marshaler, ptr unsafe.Pointer) error {
-		return m.encodeArray(dec, ptr)
-	}
+// WithFastEscape disables all string-level escape features
+// (UTF-8 validation, line terminator escaping, HTML escaping).
+// Only mandatory JSON escapes (control chars, '"', '\\') are performed.
+// This enables the fastest string encoding path in the native encoder.
+func WithFastEscape() MarshalOption {
+	return func(m *Marshaler) { m.flags &^= uint32(escapeHTML | escapeLineTerms | escapeInvalidUTF8) }
 }
 
-func makeEncodePointer(dec *PointerCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
-	return func(m *Marshaler, ptr unsafe.Pointer) error {
-		return m.encodePointer(dec, ptr)
+// Marshal returns the compact JSON encoding of *v.
+func Marshal[T any](v *T, opts ...MarshalOption) ([]byte, error) {
+	m := getMarshaler()
+	for _, o := range opts {
+		o(m)
 	}
+
+	ti := codecCacheMarshal.getCodec(reflect.TypeFor[T]())
+
+	if ti.HintBytes > cap(m.buf) {
+		m.buf = make([]byte, 0, ti.HintBytes)
+	}
+
+	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
+		putMarshaler(m)
+		return nil, err
+	}
+
+	return m.finalize(), nil
 }
 
-func makeEncodeMap(dec *MapCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
-	return func(m *Marshaler, ptr unsafe.Pointer) error {
-		return m.encodeMap(dec, ptr)
+// MarshalIndent returns the indented JSON encoding of *v.
+func MarshalIndent[T any](v *T, prefix, indent string, opts ...MarshalOption) ([]byte, error) {
+	m := getMarshaler()
+	for _, o := range opts {
+		o(m)
 	}
+
+	m.prefix = prefix
+	m.indent = indent
+
+	ti := codecCacheMarshal.getCodec(reflect.TypeFor[T]())
+	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
+		putMarshaler(m)
+		return nil, err
+	}
+
+	return m.finalize(), nil
 }
 
-// Closure builders for custom marshalers.
+// AppendMarshal appends the compact JSON encoding of *v to dst.
+func AppendMarshal[T any](dst []byte, v *T, opts ...MarshalOption) ([]byte, error) {
+	m := getMarshaler()
+	for _, o := range opts {
+		o(m)
+	}
 
-func makeEncodeMarshalJSON(marshalFn func(ptr unsafe.Pointer) ([]byte, error)) func(m *Marshaler, ptr unsafe.Pointer) error {
-	return func(m *Marshaler, ptr unsafe.Pointer) error {
-		data, err := marshalFn(ptr)
-		if err != nil {
-			return err
+	m.buf = dst
+
+	ti := codecCacheMarshal.getCodec(reflect.TypeFor[T]())
+	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
+		m.buf = nil // detach caller's buffer before pooling
+		putMarshaler(m)
+		return dst, err
+	}
+
+	result := m.buf
+	m.buf = nil // detach caller's buffer before pooling
+	putMarshaler(m)
+	return result, nil
+}
+
+// finalize copies the result to a new slice and recycles the Marshaler.
+func (m *Marshaler) finalize() []byte {
+	n := len(m.buf)
+	result := makeDirtyBytes(n, n)
+	copy(result, m.buf)
+	putMarshaler(m)
+	return result
+}
+
+// encodeValue dispatches encoding via pre-bound EncodeFn (hot path),
+// falling back to encodeValueSlow for dynamically-obtained TypeInfo (e.g. encodeAnyReflect).
+func (m *Marshaler) encodeValue(ti *TypeInfo, ptr unsafe.Pointer) error {
+	if fn := ti.EncodeFn; fn != nil {
+		return fn(m, ptr)
+	}
+	return m.encodeValueSlow(ti, ptr)
+}
+
+func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
+	// Indent mode: check if we can use the native VM fast path.
+	// Simple indents (uniform spaces/tabs, no prefix) can be handled
+	// by the C VM; exotic indents fall through to the Go path.
+	if m.indent != "" {
+		if m.inVM || !encvm.Available || isSimpleIndent(m.prefix, m.indent) == 0 {
+			return m.encodeStructIndent(dec, base)
 		}
-		m.buf = append(m.buf, data...)
+		return m.encodeStructNative(dec, base)
+	}
+
+	// If we're inside a VM yield handler (e.g. cycle-detected struct fallback),
+	// use the Go path to avoid re-entrant execVM calls that would corrupt the
+	// single shared VjExecCtx.
+	if m.inVM {
+		return m.encodeStructGo(dec, base)
+	}
+
+	if encvm.Available {
+		bp := dec.getBlueprint()
+		if bp != nil && len(bp.Ops) > 0 {
+			return m.execVM(bp, base)
+		}
+	}
+
+	// Go fallback: no native encoder available on this platform.
+	return m.encodeStructGo(dec, base)
+}
+
+func (m *Marshaler) encodeSlice(dec *SliceCodec, ptr unsafe.Pointer) error {
+	sh := (*SliceHeader)(ptr)
+
+	if sh.Data == nil {
+		m.buf = append(m.buf, litNull...) // nil slice → null
 		return nil
 	}
-}
 
-func makeEncodeTextMarshal(textMarshalFn func(ptr unsafe.Pointer) ([]byte, error)) func(m *Marshaler, ptr unsafe.Pointer) error {
-	return func(m *Marshaler, ptr unsafe.Pointer) error {
-		text, err := textMarshalFn(ptr)
-		if err != nil {
-			return err
-		}
-		m.encodeString(string(text))
-		return nil
+	// []byte → base64. Go fast path: avoids blueprint compilation overhead for
+	// this top-level entry point. In struct/element contexts the C VM handles
+	// []byte natively via OP_BYTE_SLICE.
+	if dec.ElemTI.Kind == KindUint8 && dec.ElemSize == 1 {
+		return m.encodeByteSlice(sh)
 	}
+
+	if !m.inVM && encvm.Available {
+		if m.indent == "" || isSimpleIndent(m.prefix, m.indent) > 0 {
+			return m.encodeSliceNative(dec, ptr)
+		}
+	}
+
+	return m.encodeSliceGo(dec, ptr)
 }
 
+func (m *Marshaler) encodeArray(dec *ArrayCodec, ptr unsafe.Pointer) error {
+	// [N]byte → base64
+	if dec.ElemTI.Kind == KindUint8 && dec.ElemSize == 1 {
+		return m.encodeByteArray(dec, ptr)
+	}
+
+	if !m.inVM && encvm.Available {
+		if m.indent == "" || isSimpleIndent(m.prefix, m.indent) > 0 {
+			return m.encodeArrayNative(dec, ptr)
+		}
+	}
+
+	return m.encodeArrayGo(dec, ptr)
+}
+
+func (m *Marshaler) encodeMap(dec *MapCodec, ptr unsafe.Pointer) error {
+	// Try native VM path for top-level map encoding.
+	// Only for string-keyed maps where MAP_STR_ITER can iterate in C.
+	// Non-string-key maps use MAP_BEGIN/MAP_END which requires Go-driven
+	// iteration with fallback info that standalone blueprints can't provide.
+	// ptr points to the map variable (i.e. *map[K]V), so MAP_STR_ITER
+	// correctly reads the map pointer via *(GoSwissMap**)(base+0).
+	if !m.inVM && encvm.Available && dec.isStringKey {
+		bp := dec.getBlueprint()
+		if bp != nil && len(bp.Ops) > 0 {
+			return m.execVM(bp, ptr)
+		}
+	}
+	if dec.MapKind == MapVariantStrStr {
+		return m.encodeMapStringString(ptr)
+	}
+	return m.encodeMapGeneric(dec, ptr)
+}
+
+// Codec binding
+//
 // bindEncodeFn assigns EncodeFn on ti based on priority:
-// MarshalFn > TextMarshalFn > Kind-specific.
+//   MarshalFn > TextMarshalFn > Kind-specific.
+//
+// This is the "hot path" setup: at codec construction time, each TypeInfo
+// gets a pre-bound EncodeFn so that encodeValue can call it directly
+// without any runtime dispatch overhead.
+//
+// The cold-path counterpart is encodeValueSlow, which handles
+// dynamically-obtained TypeInfo (e.g. encodeAnyReflect).
+
 func bindEncodeFn(ti *TypeInfo) {
 	if ti.Flags&tiFlagHasMarshalFn != 0 && ti.Ext != nil && ti.Ext.MarshalFn != nil {
 		ti.EncodeFn = makeEncodeMarshalJSON(ti.Ext.MarshalFn)
@@ -546,85 +585,6 @@ func computeHintBytes(ti *TypeInfo, depth int) int {
 	}
 }
 
-// Marshal returns the compact JSON encoding of *v.
-func Marshal[T any](v *T, opts ...MarshalOption) ([]byte, error) {
-	m := getMarshaler()
-	for _, o := range opts {
-		o(m)
-	}
-
-	ti := codecCacheMarshal.getCodec(reflect.TypeFor[T]())
-
-	if ti.HintBytes > cap(m.buf) {
-		m.buf = make([]byte, 0, ti.HintBytes)
-	}
-
-	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
-		putMarshaler(m)
-		return nil, err
-	}
-
-	return m.finalize(), nil
-}
-
-// MarshalIndent returns the indented JSON encoding of *v.
-func MarshalIndent[T any](v *T, prefix, indent string, opts ...MarshalOption) ([]byte, error) {
-	m := getMarshaler()
-	for _, o := range opts {
-		o(m)
-	}
-
-	m.prefix = prefix
-	m.indent = indent
-
-	ti := codecCacheMarshal.getCodec(reflect.TypeFor[T]())
-	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
-		putMarshaler(m)
-		return nil, err
-	}
-
-	return m.finalize(), nil
-}
-
-// AppendMarshal appends the compact JSON encoding of *v to dst.
-func AppendMarshal[T any](dst []byte, v *T, opts ...MarshalOption) ([]byte, error) {
-	m := getMarshaler()
-	for _, o := range opts {
-		o(m)
-	}
-
-	m.buf = dst
-
-	ti := codecCacheMarshal.getCodec(reflect.TypeFor[T]())
-	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
-		m.buf = nil // detach caller's buffer before pooling
-		putMarshaler(m)
-		return dst, err
-	}
-
-	result := m.buf
-	m.buf = nil // detach caller's buffer before pooling
-	putMarshaler(m)
-	return result, nil
-}
-
-// finalize copies the result to a new slice and recycles the Marshaler.
-func (m *Marshaler) finalize() []byte {
-	n := len(m.buf)
-	result := makeDirtyBytes(n, n)
-	copy(result, m.buf)
-	putMarshaler(m)
-	return result
-}
-
-func (m *Marshaler) appendNewlineIndent() {
-	m.buf = append(m.buf, '\n')
-	m.buf = append(m.buf, m.prefix...)
-	for range m.indentDepth {
-		m.buf = append(m.buf, m.indent...)
-	}
-}
-
 // isSimpleIndent returns the indent step (bytes per level) if the indent
 // string is a uniform repetition of spaces or tabs and prefix fits in uint8.
 // Returns 0 if the indent is not suitable for the native VM fast path.
@@ -656,937 +616,4 @@ func (m *Marshaler) buildIndentTpl(prefix, indent string) {
 	for range maxIndentDepth {
 		off += copy(m.indentTpl[off:], indent)
 	}
-}
-
-func (m *Marshaler) encodeValue(ti *TypeInfo, ptr unsafe.Pointer) error {
-	if fn := ti.EncodeFn; fn != nil {
-		return fn(m, ptr)
-	}
-	return m.encodeValueSlow(ti, ptr)
-}
-
-// encodeValueSlow is the fallback for dynamically-obtained TypeInfo (e.g.
-// encodeAnyReflect) or recursive types where EncodeFn was not yet bound.
-func (m *Marshaler) encodeValueSlow(ti *TypeInfo, ptr unsafe.Pointer) error {
-	if ti.Flags&tiFlagHasMarshalFn != 0 {
-		data, err := ti.Ext.MarshalFn(ptr)
-		if err != nil {
-			return err
-		}
-		m.buf = append(m.buf, data...)
-		return nil
-	}
-	if ti.Flags&tiFlagHasTextMarshalFn != 0 {
-		text, err := ti.Ext.TextMarshalFn(ptr)
-		if err != nil {
-			return err
-		}
-		m.encodeString(string(text))
-		return nil
-	}
-	switch ti.Kind {
-	case KindBool:
-		if *(*bool)(ptr) {
-			m.buf = append(m.buf, litTrue...)
-		} else {
-			m.buf = append(m.buf, litFalse...)
-		}
-		return nil
-
-	case KindInt:
-		return m.appendInt64(int64(*(*int)(ptr)))
-	case KindInt8:
-		return m.appendInt64(int64(*(*int8)(ptr)))
-	case KindInt16:
-		return m.appendInt64(int64(*(*int16)(ptr)))
-	case KindInt32:
-		return m.appendInt64(int64(*(*int32)(ptr)))
-	case KindInt64:
-		return m.appendInt64(*(*int64)(ptr))
-
-	case KindUint:
-		return m.appendUint64(uint64(*(*uint)(ptr)))
-	case KindUint8:
-		return m.appendUint64(uint64(*(*uint8)(ptr)))
-	case KindUint16:
-		return m.appendUint64(uint64(*(*uint16)(ptr)))
-	case KindUint32:
-		return m.appendUint64(uint64(*(*uint32)(ptr)))
-	case KindUint64:
-		return m.appendUint64(*(*uint64)(ptr))
-
-	case KindFloat32:
-		return m.encodeFloat32(ptr)
-	case KindFloat64:
-		return m.encodeFloat64(ptr)
-
-	case KindString:
-		m.encodeString(*(*string)(ptr))
-		return nil
-
-	case KindStruct:
-		return m.encodeStruct(ti.resolveCodec().(*StructCodec), ptr)
-	case KindSlice:
-		return m.encodeSlice(ti.resolveCodec().(*SliceCodec), ptr)
-	case KindArray:
-		return m.encodeArray(ti.resolveCodec().(*ArrayCodec), ptr)
-	case KindPointer:
-		return m.encodePointer(ti.resolveCodec().(*PointerCodec), ptr)
-	case KindMap:
-		return m.encodeMap(ti.resolveCodec().(*MapCodec), ptr)
-	case KindRawMessage:
-		raw := *(*[]byte)(ptr)
-		if len(raw) == 0 {
-			m.buf = append(m.buf, litNull...)
-		} else {
-			m.buf = append(m.buf, raw...)
-		}
-		return nil
-	case KindNumber:
-		s := *(*string)(ptr)
-		if s == "" {
-			m.buf = append(m.buf, '0')
-		} else {
-			m.buf = append(m.buf, s...)
-		}
-		return nil
-	case KindAny:
-		return m.encodeAny(ptr)
-	case KindIface:
-		return m.encodeIface(ti, ptr)
-
-	default:
-		return &UnsupportedTypeError{Type: ti.Ext.Type}
-	}
-}
-
-func (m *Marshaler) encodeString(s string) {
-	m.buf = appendEscapedString(m.buf, s, escapeFlags(m.flags))
-}
-
-// encodeQuotedString double-encodes a string: Go "hello" → JSON "\"hello\"".
-func (m *Marshaler) encodeQuotedString(s string) {
-	inner := appendEscapedString(nil, s, escapeFlags(m.flags))
-	m.buf = appendEscapedString(m.buf, unsafeString(inner), escapeFlags(m.flags))
-}
-
-// encodeValueQuoted encodes a value wrapped in a JSON string (for `,string` tag).
-func (m *Marshaler) encodeValueQuoted(ti *TypeInfo, ptr unsafe.Pointer) error {
-	switch ti.Kind {
-	case KindBool:
-		if *(*bool)(ptr) {
-			m.buf = append(m.buf, `"true"`...)
-		} else {
-			m.buf = append(m.buf, `"false"`...)
-		}
-	case KindInt:
-		m.appendQuotedInt64(int64(*(*int)(ptr)))
-	case KindInt8:
-		m.appendQuotedInt64(int64(*(*int8)(ptr)))
-	case KindInt16:
-		m.appendQuotedInt64(int64(*(*int16)(ptr)))
-	case KindInt32:
-		m.appendQuotedInt64(int64(*(*int32)(ptr)))
-	case KindInt64:
-		m.appendQuotedInt64(*(*int64)(ptr))
-	case KindUint:
-		m.appendQuotedUint64(uint64(*(*uint)(ptr)))
-	case KindUint8:
-		m.appendQuotedUint64(uint64(*(*uint8)(ptr)))
-	case KindUint16:
-		m.appendQuotedUint64(uint64(*(*uint16)(ptr)))
-	case KindUint32:
-		m.appendQuotedUint64(uint64(*(*uint32)(ptr)))
-	case KindUint64:
-		m.appendQuotedUint64(*(*uint64)(ptr))
-	case KindFloat32:
-		f := float64(*(*float32)(ptr))
-		if math.IsNaN(f) || math.IsInf(f, 0) {
-			return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
-		}
-		m.buf = append(m.buf, '"')
-		m.appendJSONFloat32(f)
-		m.buf = append(m.buf, '"')
-	case KindFloat64:
-		f := *(*float64)(ptr)
-		if math.IsNaN(f) || math.IsInf(f, 0) {
-			return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
-		}
-		m.buf = append(m.buf, '"')
-		m.appendJSONFloat64(f)
-		m.buf = append(m.buf, '"')
-	case KindString:
-		m.encodeQuotedString(*(*string)(ptr))
-	case KindPointer:
-		dec := ti.resolveCodec().(*PointerCodec)
-		elemPtr := *(*unsafe.Pointer)(ptr)
-		if elemPtr == nil {
-			m.buf = append(m.buf, litNull...)
-			return nil
-		}
-		return m.encodeValueQuoted(dec.ElemTI, elemPtr)
-	default:
-		return m.encodeValue(ti, ptr)
-	}
-	return nil
-}
-
-func (m *Marshaler) appendQuotedInt64(v int64) {
-	m.buf = append(m.buf, '"')
-	m.buf = strconv.AppendInt(m.buf, v, 10)
-	m.buf = append(m.buf, '"')
-}
-
-func (m *Marshaler) appendQuotedUint64(v uint64) {
-	m.buf = append(m.buf, '"')
-	m.buf = strconv.AppendUint(m.buf, v, 10)
-	m.buf = append(m.buf, '"')
-}
-
-func (m *Marshaler) appendInt64(v int64) error {
-	if v >= 0 && v < 1000 {
-		m.buf = append(m.buf, smallInts[v]...)
-		return nil
-	}
-	m.buf = strconv.AppendInt(m.buf, v, 10)
-	return nil
-}
-
-func (m *Marshaler) appendUint64(v uint64) error {
-	if v < 1000 {
-		m.buf = append(m.buf, smallInts[v]...)
-		return nil
-	}
-	m.buf = strconv.AppendUint(m.buf, v, 10)
-	return nil
-}
-
-// appendJSONFloat64 appends a float64. When vjEncFloatExpAuto is set, uses
-// encoding/json format: scientific notation for |f| < 1e-6 or |f| >= 1e21.
-// Otherwise uses fixed-point notation.
-func (m *Marshaler) appendJSONFloat64(f float64) {
-	if m.flags&vjEncFloatExpAuto != 0 {
-		abs := math.Abs(f)
-		if abs != 0 && (abs < 1e-6 || abs >= 1e21) {
-			m.buf = strconv.AppendFloat(m.buf, f, 'e', -1, 64)
-			n := len(m.buf)
-			if n >= 4 && m.buf[n-4] == 'e' && m.buf[n-3] == '-' && m.buf[n-2] == '0' {
-				m.buf[n-2] = m.buf[n-1]
-				m.buf = m.buf[:n-1]
-			}
-			return
-		}
-	}
-	m.buf = strconv.AppendFloat(m.buf, f, 'f', -1, 64)
-}
-
-// appendJSONFloat32 appends a float32. When vjEncFloatExpAuto is set, uses
-// encoding/json format: scientific notation for |f| < 1e-6 or |f| >= 1e21.
-// Otherwise uses fixed-point notation.
-func (m *Marshaler) appendJSONFloat32(f float64) {
-	if m.flags&vjEncFloatExpAuto != 0 {
-		abs := float32(math.Abs(f))
-		if abs != 0 && (abs < 1e-6 || abs >= 1e21) {
-			m.buf = strconv.AppendFloat(m.buf, f, 'e', -1, 32)
-			n := len(m.buf)
-			if n >= 4 && m.buf[n-4] == 'e' && m.buf[n-3] == '-' && m.buf[n-2] == '0' {
-				m.buf[n-2] = m.buf[n-1]
-				m.buf = m.buf[:n-1]
-			}
-			return
-		}
-	}
-	m.buf = strconv.AppendFloat(m.buf, f, 'f', -1, 32)
-}
-
-func (m *Marshaler) encodeFloat32(ptr unsafe.Pointer) error {
-	f := float64(*(*float32)(ptr))
-	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
-	}
-	m.appendJSONFloat32(f)
-	return nil
-}
-
-func (m *Marshaler) encodeFloat64(ptr unsafe.Pointer) error {
-	f := *(*float64)(ptr)
-	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
-	}
-	m.appendJSONFloat64(f)
-	return nil
-}
-
-func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
-	// Indent mode: check if we can use the native VM fast path.
-	// Simple indents (uniform spaces/tabs, no prefix) can be handled
-	// by the C VM; exotic indents fall through to the Go path.
-	if m.indent != "" {
-		if m.inVM || !encvm.Available || isSimpleIndent(m.prefix, m.indent) == 0 {
-			return m.encodeStructIndent(dec, base)
-		}
-		return m.encodeStructNative(dec, base)
-	}
-
-	// If we're inside a VM yield handler (e.g. cycle-detected struct fallback),
-	// use the Go path to avoid re-entrant execVM calls that would corrupt the
-	// single shared VjExecCtx.
-	if m.inVM {
-		return m.encodeStructGo(dec, base)
-	}
-
-	if encvm.Available {
-		bp := dec.getBlueprint()
-		if bp != nil && len(bp.Ops) > 0 {
-			return m.execVM(bp, base)
-		}
-	}
-
-	// Go fallback: no native encoder available on this platform.
-	return m.encodeStructGo(dec, base)
-}
-
-// encodeStructGo encodes a struct using the pure-Go encoder.
-// This is the fallback path for structs with features
-// not supported by the C engine (omitempty, custom marshalers, etc.).
-func (m *Marshaler) encodeStructGo(dec *StructCodec, base unsafe.Pointer) error {
-	m.buf = append(m.buf, '{')
-	first := true
-	for _, step := range dec.EncodeSteps {
-		var err error
-		first, err = step(m, base, first)
-		if err != nil {
-			return err
-		}
-	}
-	m.buf = append(m.buf, '}')
-	return nil
-}
-
-func (m *Marshaler) encodeStructIndent(dec *StructCodec, base unsafe.Pointer) error {
-	m.buf = append(m.buf, '{')
-	first := true
-	m.indentDepth++
-
-	for i := range dec.Fields {
-		fi := &dec.Fields[i]
-		fieldPtr := unsafe.Add(base, fi.Offset)
-
-		if fi.Flags&tiFlagOmitEmpty != 0 && fi.Ext.IsZeroFn != nil && fi.Ext.IsZeroFn(fieldPtr) {
-			continue
-		}
-
-		if !first {
-			m.buf = append(m.buf, ',')
-		}
-		first = false
-
-		m.appendNewlineIndent()
-		m.buf = append(m.buf, fi.Ext.KeyBytesIndent...)
-
-		if fi.Flags&tiFlagQuoted != 0 {
-			if err := m.encodeValueQuoted(fi, fieldPtr); err != nil {
-				return err
-			}
-		} else if err := m.encodeValue(fi, fieldPtr); err != nil {
-			return err
-		}
-	}
-
-	m.indentDepth--
-	if !first {
-		m.appendNewlineIndent()
-	}
-
-	m.buf = append(m.buf, '}')
-	return nil
-}
-
-func (m *Marshaler) encodeSlice(dec *SliceCodec, ptr unsafe.Pointer) error {
-	sh := (*SliceHeader)(ptr)
-
-	if sh.Data == nil {
-		m.buf = append(m.buf, litNull...) // nil slice → null
-		return nil
-	}
-
-	// []byte → base64. Go fast path: avoids blueprint compilation overhead for
-	// this top-level entry point. In struct/element contexts the C VM handles
-	// []byte natively via OP_BYTE_SLICE.
-	if dec.ElemTI.Kind == KindUint8 && dec.ElemSize == 1 {
-		return m.encodeByteSlice(sh)
-	}
-
-	if !m.inVM && encvm.Available {
-		if m.indent == "" || isSimpleIndent(m.prefix, m.indent) > 0 {
-			return m.encodeSliceNative(dec, ptr)
-		}
-	}
-
-	return m.encodeSliceGo(dec, ptr)
-}
-
-// encodeSliceGo is the pure-Go fallback for slice encoding.
-func (m *Marshaler) encodeSliceGo(dec *SliceCodec, ptr unsafe.Pointer) error {
-	sh := (*SliceHeader)(ptr)
-
-	if sh.Len == 0 {
-		m.buf = append(m.buf, litArr...)
-		return nil
-	}
-
-	m.buf = append(m.buf, '[')
-	elemSize := dec.ElemSize
-
-	if m.indent != "" {
-		m.indentDepth++
-	}
-
-	for i := range sh.Len {
-		if i > 0 {
-			m.buf = append(m.buf, ',')
-		}
-		if m.indent != "" {
-			m.appendNewlineIndent()
-		}
-
-		elemPtr := unsafe.Add(sh.Data, uintptr(i)*elemSize)
-		if err := m.encodeValue(dec.ElemTI, elemPtr); err != nil {
-			return err
-		}
-	}
-
-	if m.indent != "" {
-		m.indentDepth--
-		m.appendNewlineIndent()
-	}
-
-	m.buf = append(m.buf, ']')
-	return nil
-}
-
-func (m *Marshaler) encodeByteSlice(sh *SliceHeader) error {
-	data := unsafe.Slice((*byte)(sh.Data), sh.Len)
-	m.buf = append(m.buf, '"')
-	encodedLen := base64.StdEncoding.EncodedLen(len(data))
-	start := len(m.buf)
-	m.buf = append(m.buf, make([]byte, encodedLen)...)
-	base64.StdEncoding.Encode(m.buf[start:], data)
-	m.buf = append(m.buf, '"')
-	return nil
-}
-
-func (m *Marshaler) encodeArray(dec *ArrayCodec, ptr unsafe.Pointer) error {
-	// [N]byte → base64
-	if dec.ElemTI.Kind == KindUint8 && dec.ElemSize == 1 {
-		return m.encodeByteArray(dec, ptr)
-	}
-
-	if !m.inVM && encvm.Available {
-		if m.indent == "" || isSimpleIndent(m.prefix, m.indent) > 0 {
-			return m.encodeArrayNative(dec, ptr)
-		}
-	}
-
-	return m.encodeArrayGo(dec, ptr)
-}
-
-// encodeArrayGo is the pure-Go fallback for fixed-size array encoding.
-func (m *Marshaler) encodeArrayGo(dec *ArrayCodec, ptr unsafe.Pointer) error {
-	if dec.ArrayLen == 0 {
-		m.buf = append(m.buf, litArr...)
-		return nil
-	}
-
-	m.buf = append(m.buf, '[')
-	elemSize := dec.ElemSize
-
-	if m.indent != "" {
-		m.indentDepth++
-	}
-
-	for i := range dec.ArrayLen {
-		if i > 0 {
-			m.buf = append(m.buf, ',')
-		}
-		if m.indent != "" {
-			m.appendNewlineIndent()
-		}
-
-		elemPtr := unsafe.Add(ptr, uintptr(i)*elemSize)
-		if err := m.encodeValue(dec.ElemTI, elemPtr); err != nil {
-			return err
-		}
-	}
-
-	if m.indent != "" {
-		m.indentDepth--
-		m.appendNewlineIndent()
-	}
-
-	m.buf = append(m.buf, ']')
-	return nil
-}
-
-// encodeByteArray encodes [N]byte as a base64 JSON string.
-func (m *Marshaler) encodeByteArray(dec *ArrayCodec, ptr unsafe.Pointer) error {
-	data := unsafe.Slice((*byte)(ptr), dec.ArrayLen)
-	m.buf = append(m.buf, '"')
-	encodedLen := base64.StdEncoding.EncodedLen(len(data))
-	start := len(m.buf)
-	m.buf = append(m.buf, make([]byte, encodedLen)...)
-	base64.StdEncoding.Encode(m.buf[start:], data)
-	m.buf = append(m.buf, '"')
-	return nil
-}
-
-func (m *Marshaler) encodePointer(dec *PointerCodec, ptr unsafe.Pointer) error {
-	elemPtr := *(*unsafe.Pointer)(ptr)
-	if elemPtr == nil {
-		m.buf = append(m.buf, litNull...)
-		return nil
-	}
-	return m.encodeValue(dec.ElemTI, elemPtr)
-}
-
-func (m *Marshaler) encodeMap(dec *MapCodec, ptr unsafe.Pointer) error {
-	// Try native VM path for top-level map encoding.
-	// Only for string-keyed maps where MAP_STR_ITER can iterate in C.
-	// Non-string-key maps use MAP_BEGIN/MAP_END which requires Go-driven
-	// iteration with fallback info that standalone blueprints can't provide.
-	// ptr points to the map variable (i.e. *map[K]V), so MAP_STR_ITER
-	// correctly reads the map pointer via *(GoSwissMap**)(base+0).
-	if !m.inVM && encvm.Available && dec.isStringKey {
-		bp := dec.getBlueprint()
-		if bp != nil && len(bp.Ops) > 0 {
-			return m.execVM(bp, ptr)
-		}
-	}
-	if dec.MapKind == MapVariantStrStr {
-		return m.encodeMapStringString(ptr)
-	}
-	return m.encodeMapGeneric(dec, ptr)
-}
-
-func (m *Marshaler) encodeMapStringString(ptr unsafe.Pointer) error {
-	mp := *(*map[string]string)(ptr)
-	if mp == nil {
-		m.buf = append(m.buf, litNull...)
-		return nil
-	}
-	if len(mp) == 0 {
-		m.buf = append(m.buf, litEmpty...)
-		return nil
-	}
-
-	m.buf = append(m.buf, '{')
-	first := true
-
-	if m.indent != "" {
-		m.indentDepth++
-	}
-
-	for k, v := range mp {
-		if !first {
-			m.buf = append(m.buf, ',')
-		}
-		first = false
-
-		if m.indent != "" {
-			m.appendNewlineIndent()
-		}
-
-		m.encodeString(k)
-		if m.indent != "" {
-			m.buf = append(m.buf, ':', ' ')
-		} else {
-			m.buf = append(m.buf, ':')
-		}
-		m.encodeString(v)
-	}
-
-	if m.indent != "" {
-		m.indentDepth--
-		m.appendNewlineIndent()
-	}
-
-	m.buf = append(m.buf, '}')
-	return nil
-}
-
-// encodeMapKey encodes a non-string map key directly into m.buf as a quoted
-// JSON string, avoiding the intermediate string allocation that
-// resolveMapKeyPtr + encodeString would incur for integer keys.
-func (m *Marshaler) encodeMapKey(keyPtr unsafe.Pointer, keyTI *TypeInfo, keyType reflect.Type) error {
-	if keyTI.Flags&tiFlagHasTextMarshalFn != 0 {
-		text, err := keyTI.Ext.TextMarshalFn(keyPtr)
-		if err != nil {
-			return err
-		}
-		m.encodeString(string(text))
-		return nil
-	}
-	switch keyType.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		m.appendQuotedInt64(readIntN(keyPtr, keyType.Size()))
-		return nil
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		m.appendQuotedUint64(readUintN(keyPtr, keyType.Size()))
-		return nil
-	}
-	return &UnsupportedTypeError{Type: keyType}
-}
-
-// readIntN reads a signed integer of the given byte width from ptr.
-func readIntN(ptr unsafe.Pointer, size uintptr) int64 {
-	switch size {
-	case 1:
-		return int64(*(*int8)(ptr))
-	case 2:
-		return int64(*(*int16)(ptr))
-	case 4:
-		return int64(*(*int32)(ptr))
-	default:
-		return *(*int64)(ptr)
-	}
-}
-
-// readUintN reads an unsigned integer of the given byte width from ptr.
-func readUintN(ptr unsafe.Pointer, size uintptr) uint64 {
-	switch size {
-	case 1:
-		return uint64(*(*uint8)(ptr))
-	case 2:
-		return uint64(*(*uint16)(ptr))
-	case 4:
-		return uint64(*(*uint32)(ptr))
-	default:
-		return *(*uint64)(ptr)
-	}
-}
-
-func (m *Marshaler) encodeMapGeneric(dec *MapCodec, ptr unsafe.Pointer) error {
-	// ptr is a pointer to the map variable, which itself is a pointer to the map header.
-	mp := *(*unsafe.Pointer)(ptr)
-	if mp == nil {
-		m.buf = append(m.buf, litNull...)
-		return nil
-	}
-	n := maplen(mp)
-	if n == 0 {
-		m.buf = append(m.buf, litEmpty...)
-		return nil
-	}
-
-	m.buf = append(m.buf, '{')
-	first := true
-
-	if m.indent != "" {
-		m.indentDepth++
-	}
-
-	var it mapsIter
-	mapsIterInit(dec.mapRType, mp, &it)
-	for mapsIterKey(&it) != nil {
-		if !first {
-			m.buf = append(m.buf, ',')
-		}
-		first = false
-
-		if m.indent != "" {
-			m.appendNewlineIndent()
-		}
-
-		keyPtr := mapsIterKey(&it)
-		if dec.isStringKey {
-			m.encodeString(*(*string)(keyPtr))
-		} else if err := m.encodeMapKey(keyPtr, dec.KeyTI, dec.KeyType); err != nil {
-			return err
-		}
-		if m.indent != "" {
-			m.buf = append(m.buf, ':', ' ')
-		} else {
-			m.buf = append(m.buf, ':')
-		}
-
-		elemPtr := mapsIterElem(&it)
-		if err := m.encodeValue(dec.ValTI, elemPtr); err != nil {
-			return err
-		}
-		mapsIterNext(&it)
-	}
-
-	if m.indent != "" {
-		m.indentDepth--
-		m.appendNewlineIndent()
-	}
-
-	m.buf = append(m.buf, '}')
-	return nil
-}
-
-// encodeAny encodes an any-typed value from a pointer to the interface{} eface.
-// Thin wrapper over encodeAnyVal; exists to satisfy the EncodeFn / encodeValueSlow
-// signature that requires unsafe.Pointer.
-func (m *Marshaler) encodeAny(ptr unsafe.Pointer) error {
-	return m.encodeAnyVal(*(*any)(ptr))
-}
-
-// encodeIface encodes a non-empty interface field (e.g. fmt.Stringer).
-// It extracts the dynamic value via reflect and marshals it, matching
-// encoding/json behavior.
-func (m *Marshaler) encodeIface(ti *TypeInfo, ptr unsafe.Pointer) error {
-	rv := reflect.NewAt(ti.Ext.Type, ptr).Elem()
-	if rv.IsNil() {
-		m.buf = append(m.buf, litNull...)
-		return nil
-	}
-	// Unwrap the interface to get the dynamic value, then marshal via encodeAnyReflect.
-	return m.encodeAnyReflect(rv.Elem().Interface())
-}
-
-// encodeAnyVal encodes an arbitrary Go value stored in an interface{}.
-// Hot types (string, float64, bool, []any, map[string]any) are handled
-// inline; numeric types, []byte, json.Number follow; everything else
-// falls back to encodeAnyReflect.
-func (m *Marshaler) encodeAnyVal(v any) error {
-	if v == nil {
-		m.buf = append(m.buf, litNull...)
-		return nil
-	}
-
-	switch val := v.(type) {
-	case string:
-		m.encodeString(val)
-	case float64:
-		if math.IsNaN(val) || math.IsInf(val, 0) {
-			return &UnsupportedValueError{Str: strconv.FormatFloat(val, 'g', -1, 64)}
-		}
-		m.appendJSONFloat64(val)
-	case bool:
-		if val {
-			m.buf = append(m.buf, litTrue...)
-		} else {
-			m.buf = append(m.buf, litFalse...)
-		}
-	case []any:
-		return m.encodeAnySlice(val)
-	case map[string]any:
-		return m.encodeAnyMap(val)
-	case int:
-		_ = m.appendInt64(int64(val))
-	case int8:
-		_ = m.appendInt64(int64(val))
-	case int16:
-		_ = m.appendInt64(int64(val))
-	case int32:
-		_ = m.appendInt64(int64(val))
-	case int64:
-		_ = m.appendInt64(val)
-	case uint:
-		_ = m.appendUint64(uint64(val))
-	case uint8:
-		_ = m.appendUint64(uint64(val))
-	case uint16:
-		_ = m.appendUint64(uint64(val))
-	case uint32:
-		_ = m.appendUint64(uint64(val))
-	case uint64:
-		_ = m.appendUint64(val)
-	case float32:
-		f := float64(val)
-		if math.IsNaN(f) || math.IsInf(f, 0) {
-			return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
-		}
-		m.appendJSONFloat32(f)
-	case []byte:
-		if val == nil {
-			m.buf = append(m.buf, litNull...)
-		} else {
-			m.buf = append(m.buf, '"')
-			encodedLen := base64.StdEncoding.EncodedLen(len(val))
-			start := len(m.buf)
-			m.buf = append(m.buf, make([]byte, encodedLen)...)
-			base64.StdEncoding.Encode(m.buf[start:], val)
-			m.buf = append(m.buf, '"')
-		}
-	case json.Number:
-		s := string(val)
-		if s == "" {
-			m.buf = append(m.buf, '0')
-		} else {
-			m.buf = append(m.buf, s...)
-		}
-	default:
-		return m.encodeAnyReflect(v)
-	}
-	return nil
-}
-
-// encodeAnySlice encodes a []any as a JSON array.
-// Hot types are inlined for icache locality; cold types fall through to encodeAnyVal.
-func (m *Marshaler) encodeAnySlice(arr []any) error {
-	if arr == nil {
-		m.buf = append(m.buf, litNull...)
-		return nil
-	}
-	if len(arr) == 0 {
-		m.buf = append(m.buf, litArr...)
-		return nil
-	}
-
-	m.buf = append(m.buf, '[')
-
-	if m.indent != "" {
-		m.indentDepth++
-	}
-
-	for i, v := range arr {
-		if i > 0 {
-			m.buf = append(m.buf, ',')
-		}
-		if m.indent != "" {
-			m.appendNewlineIndent()
-		}
-
-		// Inline fast-path for the most common JSON value types.
-		switch val := v.(type) {
-		case string:
-			m.encodeString(val)
-		case float64:
-			if math.IsNaN(val) || math.IsInf(val, 0) {
-				return &UnsupportedValueError{Str: strconv.FormatFloat(val, 'g', -1, 64)}
-			}
-			m.appendJSONFloat64(val)
-		case bool:
-			if val {
-				m.buf = append(m.buf, litTrue...)
-			} else {
-				m.buf = append(m.buf, litFalse...)
-			}
-		case nil:
-			m.buf = append(m.buf, litNull...)
-		case []any:
-			if err := m.encodeAnySlice(val); err != nil {
-				return err
-			}
-		case map[string]any:
-			if err := m.encodeAnyMap(val); err != nil {
-				return err
-			}
-		default:
-			if err := m.encodeAnyVal(v); err != nil {
-				return err
-			}
-		}
-	}
-
-	if m.indent != "" {
-		m.indentDepth--
-		m.appendNewlineIndent()
-	}
-
-	m.buf = append(m.buf, ']')
-	return nil
-}
-
-// encodeAnyMap encodes a map[string]any as a JSON object.
-// Hot types are inlined for icache locality; cold types fall through to encodeAnyVal.
-func (m *Marshaler) encodeAnyMap(mp map[string]any) error {
-	if mp == nil {
-		m.buf = append(m.buf, litNull...)
-		return nil
-	}
-	if len(mp) == 0 {
-		m.buf = append(m.buf, litEmpty...)
-		return nil
-	}
-
-	m.buf = append(m.buf, '{')
-	first := true
-
-	if m.indent != "" {
-		m.indentDepth++
-	}
-
-	for k, v := range mp {
-		if !first {
-			m.buf = append(m.buf, ',')
-		}
-		first = false
-
-		if m.indent != "" {
-			m.appendNewlineIndent()
-		}
-
-		m.encodeString(k)
-		if m.indent != "" {
-			m.buf = append(m.buf, ':', ' ')
-		} else {
-			m.buf = append(m.buf, ':')
-		}
-
-		// Inline fast-path for the most common JSON value types.
-		// Avoids function call overhead for hot cases (string, float64, etc.).
-		switch val := v.(type) {
-		case string:
-			m.encodeString(val)
-		case float64:
-			if math.IsNaN(val) || math.IsInf(val, 0) {
-				return &UnsupportedValueError{Str: strconv.FormatFloat(val, 'g', -1, 64)}
-			}
-			m.appendJSONFloat64(val)
-		case bool:
-			if val {
-				m.buf = append(m.buf, litTrue...)
-			} else {
-				m.buf = append(m.buf, litFalse...)
-			}
-		case nil:
-			m.buf = append(m.buf, litNull...)
-		case []any:
-			if err := m.encodeAnySlice(val); err != nil {
-				return err
-			}
-		case map[string]any:
-			if err := m.encodeAnyMap(val); err != nil {
-				return err
-			}
-		default:
-			if err := m.encodeAnyVal(v); err != nil {
-				return err
-			}
-		}
-	}
-
-	if m.indent != "" {
-		m.indentDepth--
-		m.appendNewlineIndent()
-	}
-
-	m.buf = append(m.buf, '}')
-	return nil
-}
-
-// encodeAnyReflect is the reflect fallback for non-standard any values.
-func (m *Marshaler) encodeAnyReflect(v any) error {
-	rv := reflect.ValueOf(v)
-	if !rv.IsValid() {
-		m.buf = append(m.buf, litNull...)
-		return nil
-	}
-
-	for rv.Kind() == reflect.Pointer {
-		if rv.IsNil() {
-			m.buf = append(m.buf, litNull...)
-			return nil
-		}
-		rv = rv.Elem()
-	}
-
-	ti := getCodec(rv.Type())
-
-	tmp := reflect.New(rv.Type())
-	tmp.Elem().Set(rv)
-	return m.encodeValue(ti, tmp.UnsafePointer())
 }
