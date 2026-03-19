@@ -265,6 +265,13 @@ func emitStructBody(b *irBuilder, dec *StructCodec, baseOff uintptr) {
 			}
 			emitInterface(b, fi, fieldOff)
 
+		case KindIface:
+			// Non-empty interface — yield to Go (same as unknown, but explicit).
+			if needsOmitempty {
+				emitSkipIfZero(b, fi, fieldOff, 16+8, KindIface)
+			}
+			emitYield(b, fi, fieldOff, fbReasonUnknown)
+
 		default:
 			// Unknown kind → yield to Go.
 			if needsOmitempty {

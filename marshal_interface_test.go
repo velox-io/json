@@ -2,6 +2,7 @@ package vjson
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -140,6 +141,51 @@ func TestMarshal_StructWithMapStringAny(t *testing.T) {
 				t.Fatalf("unmarshal want: %v\nJSON: %s", err, want)
 			}
 			if !reflect.DeepEqual(gotVal, wantVal) {
+				t.Errorf("mismatch:\n  got:  %s\n  want: %s", got, want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMarshal_NonEmptyInterface
+//
+// Struct fields with non-empty interface types (e.g. fmt.Stringer).
+// These yield to Go every time (not handled by C VM ifaceCache).
+// ---------------------------------------------------------------------------
+
+type testStringer struct {
+	Val string
+}
+
+func (s testStringer) String() string { return s.Val }
+
+func TestMarshal_NonEmptyInterface(t *testing.T) {
+	type S struct {
+		Label string       `json:"label"`
+		Name  fmt.Stringer `json:"name"`
+		Extra fmt.Stringer `json:"extra,omitempty"`
+	}
+
+	cases := []struct {
+		name string
+		val  S
+	}{
+		{"nil", S{Label: "test", Name: nil}},
+		{"value", S{Label: "test", Name: testStringer{"alice"}}},
+		{"pointer", S{Label: "test", Name: &testStringer{"bob"}}},
+		{"omitempty_nil", S{Label: "test", Name: testStringer{"x"}, Extra: nil}},
+		{"omitempty_present", S{Label: "test", Name: testStringer{"x"}, Extra: testStringer{"y"}}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Marshal(&tc.val)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, _ := json.Marshal(tc.val)
+			if string(got) != string(want) {
 				t.Errorf("mismatch:\n  got:  %s\n  want: %s", got, want)
 			}
 		})

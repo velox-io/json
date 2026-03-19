@@ -42,6 +42,7 @@ const (
 	KindRawMessage // json.RawMessage
 	KindNumber     // json.Number
 	KindArray      // Codec: *ArrayCodec
+	KindIface      // non-empty interface (e.g. fmt.Stringer)
 )
 
 // MapVariant represents specialized map types for fast path optimization.
@@ -154,7 +155,7 @@ type codecEntry struct {
 }
 
 // kindForType maps reflect.Kind to ElemTypeKind.
-// Returns 0 (invalid) for unsupported types (chan, func, non-empty interface, etc.).
+// Returns 0 (invalid) for unsupported types (chan, func, etc.).
 // The caller should handle 0 as an unsupported type — encodeValueSlow's default
 // branch returns UnsupportedTypeError in that case.
 func kindForType(t reflect.Type) ElemTypeKind {
@@ -197,7 +198,7 @@ func kindForType(t reflect.Type) ElemTypeKind {
 		if t.NumMethod() == 0 {
 			return KindAny
 		}
-		return 0 // non-empty interface: unsupported
+		return KindIface // non-empty interface: handled like any
 	case reflect.Map:
 		return KindMap
 	case reflect.Array:

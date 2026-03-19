@@ -752,6 +752,8 @@ func (m *Marshaler) encodeValueSlow(ti *TypeInfo, ptr unsafe.Pointer) error {
 		return nil
 	case KindAny:
 		return m.encodeAny(ptr)
+	case KindIface:
+		return m.encodeIface(ti, ptr)
 
 	default:
 		return &UnsupportedTypeError{Type: ti.Ext.Type}
@@ -1314,6 +1316,19 @@ func (m *Marshaler) encodeMapGeneric(dec *MapCodec, ptr unsafe.Pointer) error {
 // signature that requires unsafe.Pointer.
 func (m *Marshaler) encodeAny(ptr unsafe.Pointer) error {
 	return m.encodeAnyVal(*(*any)(ptr))
+}
+
+// encodeIface encodes a non-empty interface field (e.g. fmt.Stringer).
+// It extracts the dynamic value via reflect and marshals it, matching
+// encoding/json behavior.
+func (m *Marshaler) encodeIface(ti *TypeInfo, ptr unsafe.Pointer) error {
+	rv := reflect.NewAt(ti.Ext.Type, ptr).Elem()
+	if rv.IsNil() {
+		m.buf = append(m.buf, litNull...)
+		return nil
+	}
+	// Unwrap the interface to get the dynamic value, then marshal via encodeAnyReflect.
+	return m.encodeAnyReflect(rv.Elem().Interface())
 }
 
 // encodeAnyVal encodes an arbitrary Go value stored in an interface{}.
