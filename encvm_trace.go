@@ -250,6 +250,8 @@ var opcodeName = map[uint16]string{
 	opKString:    "KSTRING",
 	opKInt:       "KINT",
 	opKInt64:     "KINT64",
+	opKQInt:      "KQINT",
+	opKQInt64:    "KQINT64",
 	opSeqFloat64: "SEQ_FLOAT64",
 	opSeqInt:     "SEQ_INT",
 	opSeqInt64:   "SEQ_INT64",

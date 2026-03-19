@@ -70,6 +70,10 @@ const (
 	// C-native Swiss Map key iterator (42-43).
 	opMapStrIter    uint16 = 42 // map[string]<V>: Swiss Map key iteration + VM body dispatch
 	opMapStrIterEnd uint16 = 43 // map[string]<V>: iteration back-edge
+
+	// Keyed-field quoted variants (44-45) — ,string tag.
+	opKQInt   uint16 = 44 // struct field int with ,string — quoted: "123"
+	opKQInt64 uint16 = 45 // struct field int64 with ,string — quoted: "123"
 )
 
 func kindToOpcode(k ElemTypeKind) uint16 {

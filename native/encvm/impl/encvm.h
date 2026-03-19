@@ -220,6 +220,10 @@ VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
       /* C-native Swiss Map key iterator (42-43) */
       [OP_MAP_STR_ITER]     = DT_ENTRY(vj_op_map_str_iter),
       [OP_MAP_STR_ITER_END] = DT_ENTRY(vj_op_map_str_iter_end),
+
+      /* Keyed-field quoted variants (44-45) — ,string tag */
+      [OP_KQINT]   = DT_ENTRY(vj_op_kqint),
+      [OP_KQINT64] = DT_ENTRY(vj_op_kqint64),
   };
 
 #undef DT_ENTRY
@@ -513,6 +517,28 @@ vj_op_kint64: {
   VM_WRITE_KEY_ALWAYS();
   int64_t val = *(const int64_t *)(base + op->field_off);
   buf += write_int64(buf, val);
+  VM_NEXT_SHORT();
+}
+
+vj_op_kqint: {
+  VM_TRACE_KEY("KQINT");
+  VM_CHECK(op->key_len + 1 + 21 + 2 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
+  VM_WRITE_KEY_ALWAYS();
+  *buf++ = '"';
+  int64_t val = *(const int64_t *)(base + op->field_off);
+  buf += write_int64(buf, val);
+  *buf++ = '"';
+  VM_NEXT_SHORT();
+}
+
+vj_op_kqint64: {
+  VM_TRACE_KEY("KQINT64");
+  VM_CHECK(op->key_len + 1 + 21 + 2 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
+  VM_WRITE_KEY_ALWAYS();
+  *buf++ = '"';
+  int64_t val = *(const int64_t *)(base + op->field_off);
+  buf += write_int64(buf, val);
+  *buf++ = '"';
   VM_NEXT_SHORT();
 }
 

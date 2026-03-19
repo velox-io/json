@@ -162,12 +162,28 @@ func emitStructBody(b *irBuilder, dec *StructCodec, baseOff uintptr) {
 			continue
 		}
 
-		// Fields with custom marshalers or ,string tag → yield to Go.
-		if fi.Flags&(tiFlagHasMarshalFn|tiFlagHasTextMarshalFn|tiFlagQuoted) != 0 {
+		// Fields with custom marshalers → yield to Go.
+		if fi.Flags&(tiFlagHasMarshalFn|tiFlagHasTextMarshalFn) != 0 {
 			if needsOmitempty {
 				emitSkipIfZero(b, fi, fieldOff, 16+8, fi.Kind)
 			}
 			emitYield(b, fi, fieldOff, fallbackReasonFromFlags(fi.Flags))
+			continue
+		}
+
+		// ,string tag: int/int64 can be handled natively; others yield to Go.
+		if fi.Flags&tiFlagQuoted != 0 {
+			if fi.Kind == KindInt || fi.Kind == KindInt64 {
+				if needsOmitempty {
+					emitSkipIfZero(b, fi, fieldOff, 16+8, fi.Kind)
+				}
+				emitQuotedInt(b, fi, fieldOff)
+				continue
+			}
+			if needsOmitempty {
+				emitSkipIfZero(b, fi, fieldOff, 16+8, fi.Kind)
+			}
+			emitYield(b, fi, fieldOff, fbReasonQuoted)
 			continue
 		}
 
@@ -301,6 +317,31 @@ func emitPrimitive(b *irBuilder, fi *TypeInfo, fieldOff uintptr) {
 		case opInt64:
 			op = opKInt64
 		}
+	}
+	b.emit(IRInst{
+		Op:       op,
+		KeyLen:   keyLen,
+		KeyOff:   keyOff,
+		FieldOff: uint16(fieldOff),
+	})
+}
+
+// emitQuotedInt emits a keyed quoted integer instruction (opKQInt or opKQInt64)
+// for struct fields with the `,string` tag. Only supports KindInt and KindInt64.
+func emitQuotedInt(b *irBuilder, fi *TypeInfo, fieldOff uintptr) {
+	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
+	if !ok {
+		emitYieldOverflow(b, fi, fieldOff)
+		return
+	}
+	var op uint16
+	switch fi.Kind {
+	case KindInt:
+		op = opKQInt
+	case KindInt64:
+		op = opKQInt64
+	default:
+		panic("emitQuotedInt: unsupported kind")
 	}
 	b.emit(IRInst{
 		Op:       op,
