@@ -22,7 +22,7 @@
 #include "number.h"
 #include "strfn.h"
 #include "uscale.h"
-#include "iface.h"
+#include "eface.h"
 #include "trace.h"
 #include "swissmap.h"
 #include "seqiter.h"

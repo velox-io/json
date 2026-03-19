@@ -1,39 +1,21 @@
-#include "iface.h"
+#include "eface.h"
 #include "number.h"
 #include "strfn.h"
 #include "uscale.h"
 
-/* ================================================================
- *  vj_encode_interface_value — out-of-line interface encoder
- *
- *  Handles a non-nil interface value:
- *    1. Binary search the interface cache (single pass)
- *    2. Cache miss → return CACHE_MISS
- *    3. Found but not compilable (tag=0, ops=NULL) → return YIELD
- *    4. Primitive tag → encode via vj_encode_ptr_value, return DONE
- *    5. Cached Blueprint → return SWITCH_OPS
- *
- *  Parameters:
- *    buf, bend    — output buffer (caller already wrote key+comma)
- *    iface_ptr    — pointer to eface {type_ptr, data_ptr} in struct
- *    cache, count — sorted interface cache array
- *    flags        — VjEncFlags bitmask
- *
- *  The caller is responsible for:
- *    - Nil check (type_ptr == NULL → write "null")
- *    - Writing key+comma (VM_WRITE_KEY) before calling
- *    - Buffer check for fixed-size worst case before calling
- *    - Interpreting the returned action code
- * ================================================================ */
+/* Result from encoding a single primitive value. */
+typedef struct {
+  uint8_t *buf;  /* NULL on error */
+  int exit_code; /* 0 = ok, otherwise VJ_EXIT_* */
+} EncValueResult;
 
-static __attribute__((noinline)) VjPtrEncResult
-vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend, const void *ptr,
+/* Encode a primitive value given its data pointer and type tag.
+ * Called when ifaceCache lookup finds a primitive (tag != 0).
+ * Fixed-size types assume caller pre-checked buffer space;
+ * variable-length types (string, raw_message, number) check inline. */
+static __attribute__((noinline)) EncValueResult
+encode_primitive_value(uint8_t *buf, const uint8_t *bend, const void *ptr,
                     uint16_t etype, uint32_t flags) {
-
-  /* Caller already did CHECK(key_len+1+330) or similar for fixed-size
-   * types.  For variable-length types (string, raw_message, number)
-   * we do additional bounds checks below. */
-
   switch (etype) {
   case OP_BOOL: {
     uint8_t val = *(const uint8_t *)ptr;
@@ -75,9 +57,8 @@ vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend, const void *ptr,
   case OP_FLOAT32: {
     float fval;
     __builtin_memcpy(&fval, ptr, 4);
-    if (__builtin_expect(__builtin_isnan(fval) || __builtin_isinf(fval), 0)) {
-      return (VjPtrEncResult){NULL, VJ_EXIT_NAN_INF};
-    }
+    if (__builtin_expect(__builtin_isnan(fval) || __builtin_isinf(fval), 0))
+      return (EncValueResult){NULL, VJ_EXIT_NAN_INF};
     buf += us_write_float32(buf, fval,
                             (flags & VJ_FLAGS_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO
                                                               : US_FMT_FIXED);
@@ -86,9 +67,8 @@ vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend, const void *ptr,
   case OP_FLOAT64: {
     double dval;
     __builtin_memcpy(&dval, ptr, 8);
-    if (__builtin_expect(__builtin_isnan(dval) || __builtin_isinf(dval), 0)) {
-      return (VjPtrEncResult){NULL, VJ_EXIT_NAN_INF};
-    }
+    if (__builtin_expect(__builtin_isnan(dval) || __builtin_isinf(dval), 0))
+      return (EncValueResult){NULL, VJ_EXIT_NAN_INF};
     buf += us_write_float64(buf, dval,
                             (flags & VJ_FLAGS_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO
                                                               : US_FMT_FIXED);
@@ -97,9 +77,8 @@ vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend, const void *ptr,
   case OP_STRING: {
     const GoString *s = (const GoString *)ptr;
     int64_t str_need = 2 + (s->len * 6);
-    if (__builtin_expect(buf + str_need > bend, 0)) {
-      return (VjPtrEncResult){NULL, VJ_EXIT_BUF_FULL};
-    }
+    if (__builtin_expect(buf + str_need > bend, 0))
+      return (EncValueResult){NULL, VJ_EXIT_BUF_FULL};
     *buf++ = '"';
     if (s->len > 0) {
 #ifdef VJ_FAST_STRING_ESCAPE
@@ -117,9 +96,8 @@ vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend, const void *ptr,
       __builtin_memcpy(buf, "null", 4);
       buf += 4;
     } else {
-      if (__builtin_expect(buf + raw->len > bend, 0)) {
-        return (VjPtrEncResult){NULL, VJ_EXIT_BUF_FULL};
-      }
+      if (__builtin_expect(buf + raw->len > bend, 0))
+        return (EncValueResult){NULL, VJ_EXIT_BUF_FULL};
       vj_copy_var(buf, raw->data, raw->len);
       buf += raw->len;
     }
@@ -130,22 +108,30 @@ vj_encode_ptr_value(uint8_t *buf, const uint8_t *bend, const void *ptr,
     if (s->len == 0) {
       *buf++ = '0';
     } else {
-      if (__builtin_expect(buf + s->len > bend, 0)) {
-        return (VjPtrEncResult){NULL, VJ_EXIT_BUF_FULL};
-      }
+      if (__builtin_expect(buf + s->len > bend, 0))
+        return (EncValueResult){NULL, VJ_EXIT_BUF_FULL};
       vj_copy_var(buf, s->ptr, s->len);
       buf += s->len;
     }
     break;
   }
   default:
-    /* Defensive fallback: an unknown cached primitive tag should hand control
-     * back to Go instead of looking like a retryable BUF_FULL condition. */
-    return (VjPtrEncResult){NULL, VJ_EXIT_GO_FALLBACK};
+    return (EncValueResult){NULL, VJ_EXIT_GO_FALLBACK};
   }
-  return (VjPtrEncResult){buf, 0};
+  return (EncValueResult){buf, 0};
 }
 
+/* Encode a non-nil interface{} value.
+ *
+ * Reads eface {type_ptr, data_ptr} from iface_ptr, then binary-searches
+ * the sorted ifaceCache to decide the encoding strategy:
+ *
+ *   cache miss        → CACHE_MISS  (yield to Go for compilation)
+ *   tag=0, ops=NULL   → YIELD       (not compilable, e.g. map)
+ *   tag!=0            → DONE        (primitive, encoded inline)
+ *   ops!=NULL          → SWITCH_OPS  (cached Blueprint, caller pushes frame)
+ *
+ * Caller must: nil-check type_ptr, write key/comma, pre-check buffer. */
 VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend,
                                         const uint8_t *iface_ptr,
                                         const VjIfaceCacheEntry *cache,
@@ -154,7 +140,7 @@ VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend,
   const void *type_ptr = *(const void **)iface_ptr;
   const uint8_t *data_ptr = *(const uint8_t **)(iface_ptr + 8);
 
-  /* ---- Single binary search with found flag ---- */
+  /* Binary search the sorted cache by type pointer. */
   uint8_t tag = 0;
   const uint8_t *cached_ops = NULL;
   int found = 0;
@@ -177,21 +163,16 @@ VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend,
     }
   }
 
-  /* Not in cache → yield to Go for compilation */
-  if (__builtin_expect(!found, 0)) {
+  if (__builtin_expect(!found, 0))
     return (VjIfaceResult){buf, NULL, type_ptr, NULL, VJ_IFACE_CACHE_MISS};
-  }
 
-  /* Found but not compilable by C (tag=0, ops=NULL) → yield fallback.
-   * Since opcodes are 1-based, tag=0 unambiguously means "no primitive tag". */
-  if (tag == 0 && cached_ops == NULL) {
+  /* Not compilable by C (e.g. map) → yield to Go fallback. */
+  if (tag == 0 && cached_ops == NULL)
     return (VjIfaceResult){buf, NULL, NULL, NULL, VJ_IFACE_YIELD};
-  }
 
-  /* ---- Primitive type (tag != 0) → encode inline ---- */
+  /* Primitive → encode inline via tag dispatch. */
   if (tag != 0) {
-    /* Tag is the opcode directly (opcodes are 1-based, so tag >= 1). */
-    VjPtrEncResult r = vj_encode_ptr_value(buf, bend, data_ptr, tag, flags);
+    EncValueResult r = encode_primitive_value(buf, bend, data_ptr, tag, flags);
     if (__builtin_expect(r.buf == NULL, 0)) {
       if (r.exit_code == VJ_EXIT_NAN_INF)
         return (VjIfaceResult){NULL, NULL, NULL, NULL, VJ_IFACE_NAN_INF};
@@ -202,7 +183,7 @@ VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend,
     return (VjIfaceResult){r.buf, NULL, NULL, NULL, VJ_IFACE_DONE};
   }
 
-  /* ---- Cached Blueprint (ops != NULL) → caller pushes frame ---- */
+  /* Cached Blueprint → caller pushes VM frame. */
   return (VjIfaceResult){buf, cached_ops, type_ptr, data_ptr,
                          VJ_IFACE_SWITCH_OPS};
 }
