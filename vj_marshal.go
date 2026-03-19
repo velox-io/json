@@ -30,14 +30,13 @@ type Marshaler struct {
 	// Placing vmCtx at offset 0 guarantees this (96 % 32 == 0), regardless
 	// of what fields follow. Do not reorder.
 	vmCtx VjExecCtx // reusable C VM context (avoids per-call stack zeroing)
+	flags uint32    // escapeFlags (bits 0-2) | vjEncFloatExpAuto (bit 3)
+	inVM  bool      // true while execVM is active; prevents re-entrant VM calls
+	buf   []byte
 
-	buf         []byte
 	indent      string
 	prefix      string
 	indentDepth int
-	flags       uint32 // escapeFlags (bits 0-2) | vjEncFloatExpAuto (bit 3)
-	inVM        bool   // true while execVM is active; prevents re-entrant VM calls
-
 	// indentTpl holds the precomputed "\n" + prefix + indent×MAX_DEPTH template
 	// for the C VM indent path. Only used when isSimpleIndent returns true.
 	// Pointer to pool-allocated array; nil in compact mode (zero overhead).

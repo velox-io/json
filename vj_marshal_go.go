@@ -192,7 +192,7 @@ func encodeNumberFn(m *Marshaler, ptr unsafe.Pointer) error {
 	return nil
 }
 
-func encodeAnyValue(m *Marshaler, ptr unsafe.Pointer) error { return m.encodeAny(ptr) }
+func encodeAnyValue(m *Marshaler, ptr unsafe.Pointer) error { return m.encodeAny(*(*any)(ptr)) }
 
 // Closure builders for composite types.
 
@@ -315,7 +315,7 @@ func (m *Marshaler) encodeValueSlow(ti *TypeInfo, ptr unsafe.Pointer) error {
 	case KindNumber:
 		return encodeNumberFn(m, ptr)
 	case KindAny:
-		return m.encodeAny(ptr)
+		return m.encodeAny(*(*any)(ptr))
 	case KindIface:
 		return m.encodeIface(ti, ptr)
 	default:
@@ -723,13 +723,6 @@ func (m *Marshaler) encodeMapGeneric(dec *MapCodec, ptr unsafe.Pointer) error {
 
 // any / interface encoding
 
-// encodeAny encodes an any-typed value from a pointer to the interface{} eface.
-// Thin wrapper over encodeAnyVal; exists to satisfy the EncodeFn / encodeValueSlow
-// signature that requires unsafe.Pointer.
-func (m *Marshaler) encodeAny(ptr unsafe.Pointer) error {
-	return m.encodeAnyVal(*(*any)(ptr))
-}
-
 // encodeIface encodes a non-empty interface field (e.g. fmt.Stringer).
 // It extracts the dynamic value via reflect and marshals it, matching
 // encoding/json behavior.
@@ -743,11 +736,11 @@ func (m *Marshaler) encodeIface(ti *TypeInfo, ptr unsafe.Pointer) error {
 	return m.encodeAnyReflect(rv.Elem().Interface())
 }
 
-// encodeAnyVal encodes an arbitrary Go value stored in an interface{}.
+// encodeAny encodes an arbitrary Go value stored in an interface{}.
 // Hot types (string, float64, bool, []any, map[string]any) are handled
 // inline; numeric types, []byte, json.Number follow; everything else
 // falls back to encodeAnyReflect.
-func (m *Marshaler) encodeAnyVal(v any) error {
+func (m *Marshaler) encodeAny(v any) error {
 	if v == nil {
 		m.buf = append(m.buf, litNull...)
 		return nil
@@ -822,7 +815,7 @@ func (m *Marshaler) encodeAnyVal(v any) error {
 }
 
 // encodeAnySlice encodes a []any as a JSON array.
-// Hot types are inlined for icache locality; cold types fall through to encodeAnyVal.
+// Hot types are inlined for icache locality; cold types fall through to encodeAny.
 func (m *Marshaler) encodeAnySlice(arr []any) error {
 	if arr == nil {
 		m.buf = append(m.buf, litNull...)
@@ -873,7 +866,7 @@ func (m *Marshaler) encodeAnySlice(arr []any) error {
 				return err
 			}
 		default:
-			if err := m.encodeAnyVal(v); err != nil {
+			if err := m.encodeAny(v); err != nil {
 				return err
 			}
 		}
@@ -889,7 +882,7 @@ func (m *Marshaler) encodeAnySlice(arr []any) error {
 }
 
 // encodeAnyMap encodes a map[string]any as a JSON object.
-// Hot types are inlined for icache locality; cold types fall through to encodeAnyVal.
+// Hot types are inlined for icache locality; cold types fall through to encodeAny.
 func (m *Marshaler) encodeAnyMap(mp map[string]any) error {
 	if mp == nil {
 		m.buf = append(m.buf, litNull...)
@@ -950,7 +943,7 @@ func (m *Marshaler) encodeAnyMap(mp map[string]any) error {
 				return err
 			}
 		default:
-			if err := m.encodeAnyVal(v); err != nil {
+			if err := m.encodeAny(v); err != nil {
 				return err
 			}
 		}

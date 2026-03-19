@@ -315,9 +315,9 @@ func (m *Marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 }
 
 // encodeAnyIface encodes an interface{} value from a pointer to the eface.
-// Delegates to encodeAnyVal which covers all concrete JSON value types.
+// Delegates to encodeAny which covers all concrete JSON value types.
 func (m *Marshaler) encodeAnyIface(ifacePtr unsafe.Pointer) error {
-	return m.encodeAnyVal(*(*any)(ifacePtr))
+	return m.encodeAny(*(*any)(ifacePtr))
 }
 
 // handleYieldFallback handles a yield due to custom marshaler, ,string, or
