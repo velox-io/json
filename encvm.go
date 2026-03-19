@@ -66,6 +66,10 @@ const (
 	opSeqInt     uint16 = 39 // []int / [N]int: single-instruction loop
 	opSeqInt64   uint16 = 40 // []int64 / [N]int64: single-instruction loop
 	opSeqString  uint16 = 41 // []string / [N]string: single-instruction loop
+
+	// C-native Swiss Map key iterator (42-43).
+	opMapStrIter    uint16 = 42 // map[string]<V>: Swiss Map key iteration + VM body dispatch
+	opMapStrIterEnd uint16 = 43 // map[string]<V>: iteration back-edge
 )
 
 func kindToOpcode(k ElemTypeKind) uint16 {
@@ -206,6 +210,7 @@ func init() { //nolint:unused
 		opSliceBegin, opSliceEnd,
 		opMapBegin, opArrayBegin,
 		opSeqFloat64, opSeqInt, opSeqInt64, opSeqString,
+		opMapStrIter, opMapStrIterEnd,
 	} {
 		opIsLong[op] = true
 	}

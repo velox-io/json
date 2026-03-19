@@ -310,6 +310,75 @@ func verifySwissMapStrInt64Layout() bool {
 	return elem == 42
 }
 
+// probeSwissMapSlotSize determines the slot size for a map[string]V type
+// by creating a test map with one entry and inspecting the Swiss Map memory layout.
+// Returns the slot size and true if successful, or 0 and false if the layout
+// doesn't match expectations (e.g. different Go runtime version).
+//
+// Requires SwissMapLayoutOK as a precondition (GoSwissMap/GoSwissTable structs OK).
+func probeSwissMapSlotSize(mapType reflect.Type, valSize uintptr) (slotSize uintptr, ok bool) {
+	if !SwissMapLayoutOK {
+		return 0, false
+	}
+	if mapType.Key().Kind() != reflect.String {
+		return 0, false
+	}
+
+	// Expected slot size: GoString (16 bytes) + value size, aligned to 8 bytes.
+	expectedSlotSize := (16 + valSize + 7) &^ 7
+
+	// Create a 1-element map using the runtime's makemap + mapassign_faststr.
+	// This avoids reflect.Value.Pointer() issues.
+	mt := rtypePtr(mapType)
+	mp := makemap(mt, 1, nil)
+	valPtr := mapassign_faststr(mt, mp, "__vjson_probe__")
+	// Zero-initialize the value (mapassign returns uninitialized memory).
+	for i := uintptr(0); i < valSize; i++ {
+		*(*byte)(unsafe.Add(valPtr, i)) = 0
+	}
+
+	// Verify Map.used == 1
+	used := *(*uint64)(mp)
+	if used != 1 {
+		return 0, false
+	}
+
+	// Verify Map.dirLen == 0 (small map with 1 entry)
+	dirLen := *(*int64)(unsafe.Add(mp, 24))
+	if dirLen != 0 {
+		return 0, false
+	}
+
+	// Map.dirPtr at offset 16 is the group pointer (small map)
+	dirPtr := *(*unsafe.Pointer)(unsafe.Add(mp, 16))
+	if dirPtr == nil {
+		return 0, false
+	}
+
+	// Find the full slot (ctrl byte with bit 7 clear)
+	ctrls := *(*uint64)(dirPtr)
+	foundSlot := -1
+	for i := range 8 {
+		ctrl := byte(ctrls >> (i * 8))
+		if ctrl&0x80 == 0 {
+			foundSlot = i
+			break
+		}
+	}
+	if foundSlot < 0 {
+		return 0, false
+	}
+
+	// Verify key at expected position: group + 8 + slot * expectedSlotSize
+	keyPtr := unsafe.Add(dirPtr, 8+uintptr(foundSlot)*expectedSlotSize)
+	key := *(*string)(keyPtr)
+	if key != "__vjson_probe__" {
+		return 0, false
+	}
+
+	return expectedSlotSize, true
+}
+
 // ---- Low-level map iteration via go:linkname ----
 //
 // We bypass both reflect.MapRange (which allocates reflect.Values per entry)

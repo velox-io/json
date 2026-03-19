@@ -18,6 +18,7 @@ func marshalUser() {
 	fmt.Println(string(b2))
 }
 
+//nolint:unused
 func marshalCanada() {
 	c := NewCanadaRoot()
 
@@ -37,6 +38,6 @@ func marshalCanada() {
 }
 
 func main() {
-	// marshalUser()
-	marshalCanada()
+	marshalUser()
+	// marshalCanada()
 }

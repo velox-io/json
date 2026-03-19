@@ -848,6 +848,7 @@ type MapCodec struct {
 	isStringKey bool           // KeyType.Kind() == reflect.String
 	valHasPtr   bool           // value type contains GC-traced pointers
 	KeySize     uintptr
+	SlotSize    uintptr // Swiss Map slot size (0 = not probed or probe failed)
 	ScanMapFn   func(sc *Parser, src []byte, idx int, ptr unsafe.Pointer) (int, error)
 }
 
@@ -881,6 +882,11 @@ func BuildMapCodec(t reflect.Type) *MapCodec {
 		case KindInt64:
 			mc.ScanMapFn = (*Parser).scanMapStringInt64
 			mc.MapKind = MapVariantStrInt64
+		}
+		// Probe Swiss Map slot size for generic string-key iterator.
+		// This enables MAP_STR_ITER for map[string]<any_value_type>.
+		if slotSize, ok := probeSwissMapSlotSize(t, t.Elem().Size()); ok {
+			mc.SlotSize = slotSize
 		}
 	}
 	return mc

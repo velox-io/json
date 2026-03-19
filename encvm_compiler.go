@@ -718,7 +718,12 @@ func emitElementBody(b *irBuilder, elemTI *TypeInfo) {
 }
 
 // emitMap emits MAP_BEGIN + value body + MAP_END for a map field.
+// If the map supports Swiss Map key iteration, emits MAP_STR_ITER + body + MAP_STR_ITER_END instead.
 func emitMap(b *irBuilder, fi *TypeInfo, fieldOff uintptr, mapDec *MapCodec) {
+	if canSwissMapIterInC(mapDec) {
+		emitMapSwissIter(b, fi, fieldOff, mapDec)
+		return
+	}
 	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
 	if !ok {
 		emitYieldOverflow(b, fi, fieldOff)
@@ -746,6 +751,10 @@ func emitMap(b *irBuilder, fi *TypeInfo, fieldOff uintptr, mapDec *MapCodec) {
 
 // emitMapInner is like emitMap but without key bytes.
 func emitMapInner(b *irBuilder, fieldOff uintptr, elemTI *TypeInfo, mapDec *MapCodec) {
+	if canSwissMapIterInC(mapDec) {
+		emitMapSwissIterInner(b, fieldOff, mapDec)
+		return
+	}
 	endLabel := b.allocLabel()
 
 	b.emit(IRInst{
@@ -797,6 +806,24 @@ func canSwissMapInC(variant MapVariant) bool {
 	return false
 }
 
+// canSwissMapIterInC returns true if the map can use the generic Swiss Map key
+// iterator (MAP_STR_ITER/MAP_STR_ITER_END) for C-native key iteration with
+// VM-dispatched value body instructions.
+func canSwissMapIterInC(mapDec *MapCodec) bool {
+	if !mapDec.isStringKey {
+		return false
+	}
+	if mapDec.SlotSize == 0 {
+		return false
+	}
+	return true
+}
+
+// swissMapSlotSize returns the slot size for the map, or 0 if unknown.
+func swissMapSlotSize(mapDec *MapCodec) int32 {
+	return int32(mapDec.SlotSize)
+}
+
 // swissMapOpcode returns the VM opcode for the given Swiss Map variant.
 func swissMapOpcode(variant MapVariant) uint16 {
 	switch variant {
@@ -829,6 +856,65 @@ func emitMapSwissInner(b *irBuilder, fieldOff uintptr, variant MapVariant) {
 	b.emit(IRInst{
 		Op:       swissMapOpcode(variant),
 		FieldOff: uint16(fieldOff),
+	})
+}
+
+// emitMapSwissIter emits MAP_STR_ITER + value body + MAP_STR_ITER_END for a struct field map.
+func emitMapSwissIter(b *irBuilder, fi *TypeInfo, fieldOff uintptr, mapDec *MapCodec) {
+	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
+	if !ok {
+		emitYieldOverflow(b, fi, fieldOff)
+		return
+	}
+	slotSize := swissMapSlotSize(mapDec)
+
+	bodyLabel := b.allocLabel()
+	afterLabel := b.allocLabel()
+
+	b.emit(IRInst{
+		Op:       opMapStrIter,
+		KeyLen:   keyLen,
+		KeyOff:   keyOff,
+		FieldOff: uint16(fieldOff),
+		OperandA: slotSize,
+		Target:   afterLabel,
+	})
+
+	b.defineLabel(bodyLabel)
+
+	emitElementBody(b, mapDec.ValTI)
+
+	b.defineLabel(afterLabel)
+	b.emit(IRInst{
+		Op:       opMapStrIterEnd,
+		LoopBack: bodyLabel,
+		OperandB: slotSize,
+	})
+}
+
+// emitMapSwissIterInner emits MAP_STR_ITER + value body + MAP_STR_ITER_END without key bytes.
+func emitMapSwissIterInner(b *irBuilder, fieldOff uintptr, mapDec *MapCodec) {
+	slotSize := swissMapSlotSize(mapDec)
+
+	bodyLabel := b.allocLabel()
+	afterLabel := b.allocLabel()
+
+	b.emit(IRInst{
+		Op:       opMapStrIter,
+		FieldOff: uint16(fieldOff),
+		OperandA: slotSize,
+		Target:   afterLabel,
+	})
+
+	b.defineLabel(bodyLabel)
+
+	emitElementBody(b, mapDec.ValTI)
+
+	b.defineLabel(afterLabel)
+	b.emit(IRInst{
+		Op:       opMapStrIterEnd,
+		LoopBack: bodyLabel,
+		OperandB: slotSize,
 	})
 }
 

@@ -18,6 +18,7 @@ type Bar struct {
 	Key2 string `json:"key2"`
 }
 
+//nolint:unused
 func demo1() {
 	var v = make(map[int]string)
 	v[0] = "djlajfdlajf"

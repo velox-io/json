@@ -40,7 +40,7 @@ typedef struct VjTraceBuf {
  *  19-31: Structural control-flow
  *  32:    Go-only fallback
  *
- *  Compact layout — no gaps; dispatch table = 38 entries.
+ *  Compact layout — no gaps; dispatch table = 44 entries.
  * ================================================================ */
 
 enum OpType {
@@ -98,10 +98,14 @@ enum OpType {
   OP_SEQ_INT     = 39, /* []int / [N]int — single-instruction loop */
   OP_SEQ_INT64   = 40, /* []int64 / [N]int64 — single-instruction loop */
   OP_SEQ_STRING  = 41, /* []string / [N]string — single-instruction loop */
+
+  /* --- C-native Swiss Map key iterator (42-43) --- */
+  OP_MAP_STR_ITER     = 42, /* Swiss Map string-key iteration: init, write first key, dispatch body */
+  OP_MAP_STR_ITER_END = 43, /* Swiss Map iteration back-edge: advance slot, write key or end */
 };
 
-/* Dispatch table size — compact: covers all opcodes 0..41 (42 entries). */
-#define OP_DISPATCH_COUNT 42
+/* Dispatch table size — compact: covers all opcodes 0..43 (44 entries). */
+#define OP_DISPATCH_COUNT 44
 
 
 /* ================================================================

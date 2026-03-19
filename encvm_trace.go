@@ -254,6 +254,8 @@ var opcodeName = map[uint16]string{
 	opSeqInt:     "SEQ_INT",
 	opSeqInt64:   "SEQ_INT64",
 	opSeqString:  "SEQ_STRING",
+	opMapStrIter:    "MAP_STR_ITER",
+	opMapStrIterEnd: "MAP_STR_ITER_END",
 }
 
 // dumpBlueprint prints one blueprint's instruction listing to stderr
@@ -292,7 +294,7 @@ func dumpBlueprint(bp *Blueprint) {
 
 		// Closing ops reduce depth before printing.
 		switch code {
-		case opObjClose, opSliceEnd, opMapEnd, opPtrEnd:
+		case opObjClose, opSliceEnd, opMapEnd, opPtrEnd, opMapStrIterEnd:
 			depth--
 			if depth < 0 {
 				depth = 0
@@ -346,7 +348,7 @@ func dumpBlueprint(bp *Blueprint) {
 
 		// Opening ops increase depth after printing.
 		switch code {
-		case opObjOpen, opSliceBegin, opMapBegin, opArrayBegin, opPtrDeref:
+		case opObjOpen, opSliceBegin, opMapBegin, opArrayBegin, opPtrDeref, opMapStrIter:
 			depth++
 		}
 
