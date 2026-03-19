@@ -1,4 +1,4 @@
-//go:build !goexperiment.swissmap
+//go:build !goexperiment.swissmap && !go1.26
 
 package vjson
 
@@ -8,7 +8,6 @@ import (
 )
 
 // SwissMapLayoutOK is always false when Swiss Tables are disabled.
-// Map encoding falls back to the generic Go-based map iteration (OP_MAP_BEGIN/END).
 var SwissMapLayoutOK = false
 
 // SwissMapStrIntLayoutOK is always false when Swiss Tables are disabled.
@@ -18,50 +17,58 @@ var SwissMapStrIntLayoutOK = false
 var SwissMapStrInt64LayoutOK = false
 
 func init() {
-	// Verify our sliceHeader layout assumption matches the Go runtime.
 	s := make([]byte, 1, 2)
 	sh := (*SliceHeader)(unsafe.Pointer(&s))
 	if sh.Len != 1 || sh.Cap != 2 || sh.Data == nil {
 		panic("vjson: unexpected slice memory layout — sliceHeader assumption violated")
 	}
 
-	// Skip mapsIter verification and Swiss Map layout checks — they are
-	// not available when Swiss Tables are disabled (GOEXPERIMENT=noswissmap).
-	// The mapsIter API is provided via GoMapIterator-based shim below.
+	// Verify mapsIter buffer fits runtime.hiter (104 bytes on 64-bit).
+	m := map[string]string{"__vjson_init_check__": "ok"}
+	mt := rtypePtr(reflect.TypeFor[map[string]string]())
+	mp := *(*unsafe.Pointer)(unsafe.Pointer(&m))
+	var it mapsIter
+	mapsIterInit(mt, mp, &it)
+	if mapsIterKey(&it) == nil {
+		panic("vjson: mapsIter (noswissmap) init check failed — hiter layout may have changed")
+	}
 }
 
-// mapsIter wraps GoMapIterator to provide the same API surface as the
-// swissmap variant. This avoids the direct linkname to internal/runtime/maps
-// which is not available when Swiss Tables are disabled.
+// mapsIter is a stack-allocatable buffer matching runtime.hiter (noswissmap).
+// runtime asserts: sizeof(hiter) == 8 + 12*PtrSize = 104 on 64-bit.
+// hiter.key at offset 0, hiter.elem at offset 8.
 type mapsIter struct {
-	it GoMapIterator
+	buf [14]uintptr // 112 bytes >= 104
 }
 
-// mapsIterKey returns the current key pointer from the iterator.
-// nil indicates end of iteration.
 func mapsIterKey(it *mapsIter) unsafe.Pointer {
-	return it.it.Key
+	return *(*unsafe.Pointer)(unsafe.Pointer(&it.buf[0]))
 }
 
-// mapsIterElem returns the current elem pointer from the iterator.
-// nil indicates end of iteration.
 func mapsIterElem(it *mapsIter) unsafe.Pointer {
-	return it.it.Elem
+	return *(*unsafe.Pointer)(unsafe.Pointer(&it.buf[1]))
 }
 
 // mapsIterInit initializes the iterator and advances to the first entry.
-// After return, mapsIterKey(it) is the first key or nil if the map is empty.
+// noswissmap's mapiterinit calls mapiternext internally, so the iterator
+// is already at the first entry on return.
 func mapsIterInit(t unsafe.Pointer, m unsafe.Pointer, it *mapsIter) {
-	mapiterinit(t, m, &it.it)
+	noswissMapiterinit(t, m, unsafe.Pointer(it))
 }
 
-// mapsIterNext advances the iterator to the next entry.
-// After return, mapsIterKey(it) is the next key or nil if done.
 func mapsIterNext(it *mapsIter) {
-	mapiternext(&it.it)
+	noswissMapiternext(unsafe.Pointer(it))
 }
 
-// probeSwissMapSlotSize always returns (0, false) when Swiss Tables are disabled.
+// Linknames to the old (noswissmap) map iteration runtime.
+// Takes unsafe.Pointer because our mapsIter buffer matches hiter layout.
+//
+//go:linkname noswissMapiterinit runtime.mapiterinit
+func noswissMapiterinit(t unsafe.Pointer, m unsafe.Pointer, it unsafe.Pointer) //nolint:revive
+
+//go:linkname noswissMapiternext runtime.mapiternext
+func noswissMapiternext(it unsafe.Pointer) //nolint:revive
+
 func probeSwissMapSlotSize(_ reflect.Type, _ uintptr) (slotSize uintptr, ok bool) {
 	return 0, false
 }

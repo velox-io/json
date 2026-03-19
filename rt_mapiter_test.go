@@ -7,25 +7,22 @@ import (
 	"unsafe"
 )
 
-// goString mirrors the Go string header for reading key/value from map slots.
+// goString mirrors the Go string header.
 type goString struct {
 	Ptr unsafe.Pointer
 	Len int
 }
 
-// readGoString reads a Go string from a pointer to its string header.
 func readGoString(p unsafe.Pointer) string {
 	gs := (*goString)(p)
 	return unsafe.String((*byte)(gs.Ptr), gs.Len)
 }
 
-// mapHeaderPtr reads the map header pointer (*maps.Map) from a pointer to
-// a map variable. A Go map variable IS a pointer, so we just read through.
 func mapHeaderPtr(mapVarPtr unsafe.Pointer) unsafe.Pointer {
 	return *(*unsafe.Pointer)(mapVarPtr)
 }
 
-// Tests for stack-based mapsIter (direct linkname to maps.Iter.Init/Next)
+// Tests for mapsIter (works in both swissmap and noswissmap modes)
 
 func TestMapsIterStringString(t *testing.T) {
 	m := map[string]string{
@@ -206,50 +203,5 @@ func TestMapsIterLargeMap(t *testing.T) {
 		if got[k] != want {
 			t.Errorf("m[%q] = %q, want %q", k, got[k], want)
 		}
-	}
-}
-
-// Tests for legacy GoMapIterator (shim-based, kept for coverage)
-
-func TestLegacyMapIterStringString(t *testing.T) {
-	m := map[string]string{
-		"hello": "world",
-		"foo":   "bar",
-		"key":   "value",
-	}
-
-	mt := rtypePtr(reflect.TypeFor[map[string]string]())
-	mp := mapHeaderPtr(unsafe.Pointer(&m))
-
-	got := make(map[string]string)
-	var it GoMapIterator
-	mapiterinit(mt, mp, &it)
-	for it.Key != nil {
-		k := readGoString(it.Key)
-		v := readGoString(it.Elem)
-		got[k] = v
-		mapiternext(&it)
-	}
-
-	if len(got) != 3 {
-		t.Fatalf("iteration count: got %d, want 3", len(got))
-	}
-	for k, want := range m {
-		if got[k] != want {
-			t.Errorf("m[%q] = %q, want %q", k, got[k], want)
-		}
-	}
-}
-
-func TestLegacyMapIterEmpty(t *testing.T) {
-	m := map[string]string{}
-
-	mt := rtypePtr(reflect.TypeFor[map[string]string]())
-	mp := mapHeaderPtr(unsafe.Pointer(&m))
-
-	var it GoMapIterator
-	mapiterinit(mt, mp, &it)
-	if it.Key != nil {
-		t.Fatal("expected nil Key for empty map")
 	}
 }

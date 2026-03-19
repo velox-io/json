@@ -139,16 +139,16 @@ func compileStandaloneSliceBlueprint(dec *SliceCodec) *Blueprint {
 	}
 }
 
-// compileStandaloneMapBlueprint builds a Blueprint for encoding a map
-// whose type was discovered at runtime (e.g. inside an interface{}).
-// For string-keyed maps with known slot layout, this uses MAP_STR_ITER
-// for C-native key iteration; otherwise MAP_BEGIN/MAP_END (Go-driven).
+// compileStandaloneMapBlueprint builds a Blueprint for a map discovered
+// at runtime (e.g. inside an interface{}). Uses C-native Swiss Map iteration
+// when available, otherwise MAP_BEGIN/MAP_END (Go-driven iteration).
 func compileStandaloneMapBlueprint(mapDec *MapCodec) *Blueprint {
 	b := &irBuilder{
 		visiting: make(map[reflect.Type]Label),
 	}
 
-	emitMapInner(b, 0, mapDec.ValTI, mapDec)
+	mapTI := getCodec(mapDec.MapType)
+	emitMapInner(b, 0, mapTI, mapDec)
 	b.emit(IRInst{Op: opRet})
 
 	ops, fallbacks, annotations := lower(b.insts)
@@ -835,8 +835,9 @@ func emitElementBody(b *irBuilder, elemTI *TypeInfo) {
 	}
 }
 
-// emitMap emits MAP_BEGIN + value body + MAP_END for a map field.
-// If the map supports Swiss Map key iteration, emits MAP_STR_ITER + body + MAP_STR_ITER_END instead.
+// emitMap emits a map field. Tries C-native Swiss Map iteration first,
+// falls back to opMapBegin/opMapEnd (Go-driven iteration with encodeAnyMap
+// fast path for map[string]any).
 func emitMap(b *irBuilder, fi *TypeInfo, fieldOff uintptr, mapDec *MapCodec) {
 	if canSwissMapIterInC(mapDec) {
 		emitMapSwissIter(b, fi, fieldOff, mapDec)
@@ -867,8 +868,8 @@ func emitMap(b *irBuilder, fi *TypeInfo, fieldOff uintptr, mapDec *MapCodec) {
 	b.emit(IRInst{Op: opMapEnd})
 }
 
-// emitMapInner is like emitMap but without key bytes.
-func emitMapInner(b *irBuilder, fieldOff uintptr, elemTI *TypeInfo, mapDec *MapCodec) {
+// emitMapInner is like emitMap but without key bytes (standalone map blueprints).
+func emitMapInner(b *irBuilder, fieldOff uintptr, mapTI *TypeInfo, mapDec *MapCodec) {
 	if canSwissMapIterInC(mapDec) {
 		emitMapSwissIterInner(b, fieldOff, mapDec)
 		return
@@ -880,7 +881,7 @@ func emitMapInner(b *irBuilder, fieldOff uintptr, elemTI *TypeInfo, mapDec *MapC
 		FieldOff: uint16(fieldOff),
 		Target:   endLabel,
 		Fallback: &fbInfo{
-			TI:     elemTI,
+			TI:     mapTI,
 			Offset: fieldOff,
 		},
 	})
