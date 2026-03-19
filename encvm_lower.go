@@ -147,11 +147,13 @@ func resolveOperands(inst *IRInst, selfOff int, labelOffsets map[Label]int, a, b
 
 	case opMapStrIter:
 		// OperandA = slot_size (already set).
-		// OperandB = body byte length = afterIter - bodyStart - 16 (exclude MAP_STR_ITER_END).
+		// OperandB = body byte length (between MAP_STR_ITER and MAP_STR_ITER_END).
+		// The C VM uses: VM_JUMP_BYTES(16 + body_len + 16) to skip
+		// self (16) + body + ITER_END (16) on nil/empty maps.
 		if inst.Target != InvalidLabel {
 			afterIterOff := mustResolve(labelOffsets, inst.Target, "MAP_STR_ITER")
 			bodyStart := selfOff + 16
-			*b = int32(afterIterOff - bodyStart - 16) // exclude MAP_STR_ITER_END (16 bytes)
+			*b = int32(afterIterOff - bodyStart)
 		}
 
 	case opMapStrIterEnd:
