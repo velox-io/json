@@ -17,6 +17,9 @@ type wrapMapStrInt struct {
 type wrapMapIntStr struct {
 	M map[int]string `json:"m"`
 }
+type wrapMapStrInt64 struct {
+	M map[string]int64 `json:"m"`
+}
 type wrapMapStrSlice struct {
 	M map[string][]int `json:"m"`
 }
@@ -58,6 +61,25 @@ func marshalMapStrInt(t *testing.T, val map[string]int) []byte {
 func stdlibMapStrInt(t *testing.T, val map[string]int) []byte {
 	t.Helper()
 	w := wrapMapStrInt{M: val}
+	got, _ := json.Marshal(w)
+	return got
+}
+
+// marshalMapStrInt64 marshals map[string]int64 through a struct field.
+func marshalMapStrInt64(t *testing.T, val map[string]int64) []byte {
+	t.Helper()
+	w := wrapMapStrInt64{M: val}
+	got, err := Marshal(&w)
+	if err != nil {
+		t.Fatalf("Marshal(%v) error: %v", val, err)
+	}
+	return got
+}
+
+// stdlibMapStrInt64 returns encoding/json's output for map[string]int64.
+func stdlibMapStrInt64(t *testing.T, val map[string]int64) []byte {
+	t.Helper()
+	w := wrapMapStrInt64{M: val}
 	got, _ := json.Marshal(w)
 	return got
 }
@@ -228,7 +250,59 @@ func randomString(rng *rand.Rand, n int) string {
 }
 
 // ---------------------------------------------------------------------------
-// TestNativeMapStrInt — map[string]int via native VM (Go iteration path)
+// TestNativeMapStrInt_LargeMap — stress test to trigger BUF_FULL resume
+// ---------------------------------------------------------------------------
+
+func TestNativeMapStrInt_LargeMap(t *testing.T) {
+
+	rng := rand.New(rand.NewSource(20260314))
+
+	for _, size := range []int{10, 50, 100, 200, 500} {
+		t.Run(fmt.Sprintf("size_%d", size), func(t *testing.T) {
+			m := make(map[string]int, size)
+			for i := 0; i < size; i++ {
+				key := fmt.Sprintf("key_%04d_%s", i, randomString(rng, 8))
+				m[key] = rng.Intn(2000000) - 1000000
+			}
+
+			got := marshalMapStrInt(t, m)
+			want := stdlibMapStrInt(t, m)
+			if !mapsEqual(got, want) {
+				t.Errorf("mismatch for size=%d:\n  got len: %d\n  want len: %d",
+					size, len(got), len(want))
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestNativeMapStrInt64_LargeMap — stress test to trigger BUF_FULL resume
+// ---------------------------------------------------------------------------
+
+func TestNativeMapStrInt64_LargeMap(t *testing.T) {
+
+	rng := rand.New(rand.NewSource(20260314))
+
+	for _, size := range []int{10, 50, 100, 200, 500} {
+		t.Run(fmt.Sprintf("size_%d", size), func(t *testing.T) {
+			m := make(map[string]int64, size)
+			for i := 0; i < size; i++ {
+				key := fmt.Sprintf("key_%04d_%s", i, randomString(rng, 8))
+				m[key] = rng.Int63n(2e18) - 1e18
+			}
+
+			got := marshalMapStrInt64(t, m)
+			want := stdlibMapStrInt64(t, m)
+			if !mapsEqual(got, want) {
+				t.Errorf("mismatch for size=%d:\n  got len: %d\n  want len: %d",
+					size, len(got), len(want))
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestNativeMapStrInt — map[string]int via C-native Swiss Map iteration
 // ---------------------------------------------------------------------------
 
 func TestNativeMapStrInt(t *testing.T) {
@@ -250,6 +324,46 @@ func TestNativeMapStrInt(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := marshalMapStrInt(t, tc.val)
 			want := stdlibMapStrInt(t, tc.val)
+			if !mapsEqual(got, want) {
+				t.Errorf("mismatch:\n  got:  %s\n  want: %s", got, want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestNativeMapStrInt64 — map[string]int64 via C-native Swiss Map iteration
+// ---------------------------------------------------------------------------
+
+func TestNativeMapStrInt64(t *testing.T) {
+
+	cases := []struct {
+		name string
+		val  map[string]int64
+	}{
+		{"empty", map[string]int64{}},
+		{"nil", nil},
+		{"single", map[string]int64{"count": 42}},
+		{"multiple", map[string]int64{"a": 1, "b": 2, "c": 3}},
+		{"negative", map[string]int64{"neg": -100, "pos": 100}},
+		{"zero", map[string]int64{"zero": 0, "nonzero": 1}},
+		{"large_values", map[string]int64{
+			"max_int64": 1<<63 - 1,
+			"min_int64": -1 << 63,
+		}},
+		{"mixed_magnitude", map[string]int64{
+			"tiny":     1,
+			"small":    256,
+			"medium":   1000000,
+			"large":    1<<62 - 1,
+			"negative": -999999999999,
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := marshalMapStrInt64(t, tc.val)
+			want := stdlibMapStrInt64(t, tc.val)
 			if !mapsEqual(got, want) {
 				t.Errorf("mismatch:\n  got:  %s\n  want: %s", got, want)
 			}
@@ -368,11 +482,13 @@ func TestNativeMap_Nested(t *testing.T) {
 func TestNativeMap_InStruct(t *testing.T) {
 
 	type MapStruct struct {
-		Data     map[string]string `json:"data"`
-		Optional map[string]int    `json:"optional,omitempty"`
-		Pointer  *map[string]int   `json:"pointer"`
-		Ignored  map[string]string `json:"-"`
-		Named    map[string]string `json:"named_field"`
+		Data      map[string]string `json:"data"`
+		Optional  map[string]int    `json:"optional,omitempty"`
+		Pointer   *map[string]int   `json:"pointer"`
+		Ignored   map[string]string `json:"-"`
+		Named     map[string]string `json:"named_field"`
+		Counters  map[string]int64  `json:"counters"`
+		OptInt64  map[string]int64  `json:"opt_int64,omitempty"`
 	}
 
 	cases := []struct {
@@ -382,11 +498,23 @@ func TestNativeMap_InStruct(t *testing.T) {
 		{"empty", MapStruct{}},
 		{"nil_pointer", MapStruct{Data: map[string]string{"a": "b"}}},
 		{"with_optional", MapStruct{Data: map[string]string{"x": "y"}, Optional: map[string]int{"n": 1}}},
+		{"with_counters", MapStruct{
+			Counters: map[string]int64{"hits": 999999999999, "misses": -1},
+		}},
+		{"omitempty_int64_nil", MapStruct{
+			Data:     map[string]string{"x": "y"},
+			OptInt64: nil, // should be omitted
+		}},
+		{"omitempty_int64_nonempty", MapStruct{
+			OptInt64: map[string]int64{"n": 42},
+		}},
 		{"all_fields", MapStruct{
 			Data:     map[string]string{"key": "value"},
 			Optional: map[string]int{"num": 42},
 			Pointer:  &map[string]int{"ptr": 100},
 			Named:    map[string]string{"name": "test"},
+			Counters: map[string]int64{"c": 1<<62 - 1},
+			OptInt64: map[string]int64{"big": -1 << 63},
 		}},
 	}
 
@@ -397,7 +525,7 @@ func TestNativeMap_InStruct(t *testing.T) {
 				t.Fatal(err)
 			}
 			want, _ := json.Marshal(tc.val)
-			if string(got) != string(want) {
+			if !mapsEqual(got, want) {
 				t.Errorf("mismatch:\n  got:  %s\n  want: %s", got, want)
 			}
 		})
@@ -410,24 +538,52 @@ func TestNativeMap_InStruct(t *testing.T) {
 
 func TestNativeMap_WithIndent(t *testing.T) {
 
-	val := map[string]string{
-		"alpha":   "first",
-		"beta":    "second",
-		"gamma":   "third",
-		"delta":   "fourth",
-		"epsilon": "fifth",
-	}
+	t.Run("string_string", func(t *testing.T) {
+		val := map[string]string{
+			"alpha":   "first",
+			"beta":    "second",
+			"gamma":   "third",
+			"delta":   "fourth",
+			"epsilon": "fifth",
+		}
+		got, err := MarshalIndent(&val, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, _ := json.MarshalIndent(val, "", "  ")
+		if !mapsEqual(got, want) {
+			t.Errorf("mismatch:\n  got:\n%s\n  want:\n%s", got, want)
+		}
+	})
 
-	got, err := MarshalIndent(&val, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, _ := json.MarshalIndent(val, "", "  ")
+	t.Run("string_int", func(t *testing.T) {
+		val := map[string]int{
+			"alpha": 1, "beta": 2, "gamma": 3,
+			"delta": -100, "epsilon": 0,
+		}
+		got, err := MarshalIndent(&val, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, _ := json.MarshalIndent(val, "", "  ")
+		if !mapsEqual(got, want) {
+			t.Errorf("mismatch:\n  got:\n%s\n  want:\n%s", got, want)
+		}
+	})
 
-	// Compare using JSON equality (ignores key order)
-	if !mapsEqual(got, want) {
-		t.Errorf("mismatch:\n  got:\n%s\n  want:\n%s", got, want)
-	}
+	t.Run("string_int64", func(t *testing.T) {
+		val := map[string]int64{
+			"small": 42, "large": 1<<62 - 1, "negative": -999999999999,
+		}
+		got, err := MarshalIndent(&val, "", "\t")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, _ := json.MarshalIndent(val, "", "\t")
+		if !mapsEqual(got, want) {
+			t.Errorf("mismatch:\n  got:\n%s\n  want:\n%s", got, want)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -436,22 +592,54 @@ func TestNativeMap_WithIndent(t *testing.T) {
 
 func TestNativeMap_EscapeHTML(t *testing.T) {
 
-	val := map[string]string{
-		"script": "<script>alert('xss')</script>",
-		"link":   "<a href=\"test\">link</a>",
-		"amp":    "tom & jerry",
-		"quote":  `"quoted"`,
-	}
+	t.Run("string_string", func(t *testing.T) {
+		val := map[string]string{
+			"script": "<script>alert('xss')</script>",
+			"link":   "<a href=\"test\">link</a>",
+			"amp":    "tom & jerry",
+			"quote":  `"quoted"`,
+		}
+		got, err := Marshal(&val, WithEscapeHTML())
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, _ := json.Marshal(val) // encoding/json escapes HTML by default
+		if !mapsEqual(got, want) {
+			t.Errorf("mismatch:\n  got:  %s\n  want: %s", got, want)
+		}
+	})
 
-	got, err := Marshal(&val, WithEscapeHTML())
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, _ := json.Marshal(val) // encoding/json escapes HTML by default
+	t.Run("string_int", func(t *testing.T) {
+		// Keys contain HTML-sensitive chars; values are ints (no escaping needed).
+		val := map[string]int{
+			"<b>bold</b>": 1,
+			"a&b":         2,
+			"normal":      3,
+		}
+		got, err := Marshal(&val, WithEscapeHTML())
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, _ := json.Marshal(val)
+		if !mapsEqual(got, want) {
+			t.Errorf("mismatch:\n  got:  %s\n  want: %s", got, want)
+		}
+	})
 
-	if !mapsEqual(got, want) {
-		t.Errorf("mismatch:\n  got:  %s\n  want: %s", got, want)
-	}
+	t.Run("string_int64", func(t *testing.T) {
+		val := map[string]int64{
+			"<tag>": 999999999999,
+			"a&b":   -42,
+		}
+		got, err := Marshal(&val, WithEscapeHTML())
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, _ := json.Marshal(val)
+		if !mapsEqual(got, want) {
+			t.Errorf("mismatch:\n  got:  %s\n  want: %s", got, want)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -494,6 +682,27 @@ func TestNativeMap_Roundtrip(t *testing.T) {
 		}
 
 		var decoded map[string]int
+		if err := json.Unmarshal(got, &decoded); err != nil {
+			t.Fatal(err)
+		}
+
+		for k, v := range original {
+			if decoded[k] != v {
+				t.Errorf("decoded[%q] = %d, want %d", k, decoded[k], v)
+			}
+		}
+	})
+
+	t.Run("string_int64", func(t *testing.T) {
+		original := map[string]int64{
+			"small": 42, "large": 1<<62 - 1, "negative": -999999999999,
+		}
+		got, err := Marshal(&original)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var decoded map[string]int64
 		if err := json.Unmarshal(got, &decoded); err != nil {
 			t.Fatal(err)
 		}

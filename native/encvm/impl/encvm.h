@@ -205,6 +205,10 @@ VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
       [OP_KSTRING] = DT_ENTRY(vj_op_kstring),
       [OP_KINT]    = DT_ENTRY(vj_op_kint),
       [OP_KINT64]  = DT_ENTRY(vj_op_kint64),
+
+      /* C-native Swiss Map variants (36-37) */
+      [OP_MAP_STR_INT]   = DT_ENTRY(vj_op_map_str_int),
+      [OP_MAP_STR_INT64] = DT_ENTRY(vj_op_map_str_int64),
   };
 
 #undef DT_ENTRY
@@ -957,13 +961,13 @@ vj_op_map_str_str: {
       (uint8_t)(indent_prefix_len),
     };
 
-    VjSwissMapResult r = vj_swiss_map_iterate(
+    VjSwissMapResult r = vj_swiss_iterate_str_str(
         buf, bend, f, m, remaining, di, gi, si,
         entry_first, VJ_ST_GET_FLAGS(vmstate), &ind);
     buf = r.buf;
 
     if (r.action == VJ_SWISS_BUF_FULL) {
-      /* Frame was written by vj_swiss_map_iterate.
+      /* Frame was written by vj_swiss_iterate_str_str.
        * If first entry (not resume), increment depth now. */
       VM_SAVE_TRACE_DEPTH(f);
       f->state |= 1;
@@ -988,6 +992,99 @@ vj_op_map_str_str: {
     VM_NEXT_SHORT();
   }
 }
+
+/* ================================================================
+ *  Macro-generated Swiss Map handlers for map[string]int variants.
+ *
+ *  The handler logic is identical to vj_op_map_str_str except for
+ *  the iterate function called and the trace label.
+ * ================================================================ */
+
+#define VJ_DEFINE_MAP_SWISS_OP(OP_LABEL, TRACE_LABEL, ITERATE_FN)           \
+OP_LABEL: {                                                                  \
+  VM_TRACE_KEY(TRACE_LABEL);                                                 \
+  int32_t _depth = VJ_ST_GET_STACK_DEPTH(vmstate);                           \
+  int is_resume = (_depth > 0 && (ctx->stack[_depth - 1].state & 1));        \
+  const GoSwissMap *m;                                                       \
+  int32_t remaining, di, gi, si;                                             \
+  int entry_first;                                                           \
+  if (is_resume) {                                                           \
+    VjStackFrame *f = &ctx->stack[_depth - 1];                               \
+    m = (const GoSwissMap *)f->map.map_ptr;                                  \
+    remaining = f->map.remaining;                                            \
+    di = f->map.dir_idx;                                                     \
+    gi = f->map.group_idx;                                                   \
+    si = f->map.slot_idx;                                                    \
+    entry_first = 0;                                                         \
+  } else {                                                                   \
+    m = *(const GoSwissMap **)(base + op->field_off);                         \
+    if (m == NULL || m->used == 0) {                                         \
+      if (m == NULL) {                                                       \
+        VM_CHECK(op->key_len + 1 + 4 + VM_INDENT_PAD(indent_depth)          \
+                 + VM_KEY_SPACE);                                            \
+        VM_WRITE_KEY();                                                      \
+        __builtin_memcpy(buf, "null", 4);                                    \
+        buf += 4;                                                            \
+      } else {                                                               \
+        VM_CHECK(op->key_len + 1 + 2 + VM_INDENT_PAD(indent_depth)          \
+                 + VM_KEY_SPACE);                                            \
+        VM_WRITE_KEY();                                                      \
+        *buf++ = '{';                                                        \
+        *buf++ = '}';                                                        \
+      }                                                                      \
+      VJ_ST_SET_FIRST_0(vmstate);                                            \
+      VM_NEXT_SHORT();                                                       \
+    }                                                                        \
+    VM_CHECK(op->key_len + 1 + 1 + VM_INDENT_PAD(indent_depth)              \
+             + VM_KEY_SPACE + VM_INDENT_PAD(indent_depth + 1));              \
+    VM_WRITE_KEY();                                                          \
+    *buf++ = '{';                                                            \
+    VM_INDENT_INC();                                                         \
+    VM_WRITE_INDENT();                                                       \
+    remaining = (int32_t)m->used;                                            \
+    di = 0; gi = 0; si = 0;                                                  \
+    entry_first = 1;                                                         \
+  }                                                                          \
+  {                                                                          \
+    if (__builtin_expect(VJ_ST_GET_STACK_DEPTH(vmstate)                      \
+                         >= VJ_MAX_STACK_DEPTH, 0)) {                        \
+      VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);                            \
+    }                                                                        \
+    VjStackFrame *f = &ctx->stack[is_resume ? (_depth - 1) : _depth];       \
+    VjSwissIndent ind = {                                                    \
+      (const uint8_t *)(indent_tpl),                                         \
+      (int16_t)(indent_depth),                                               \
+      (uint8_t)(indent_step),                                                \
+      (uint8_t)(indent_prefix_len),                                          \
+    };                                                                       \
+    VjSwissMapResult r = ITERATE_FN(                                         \
+        buf, bend, f, m, remaining, di, gi, si,                              \
+        entry_first, VJ_ST_GET_FLAGS(vmstate), &ind);                        \
+    buf = r.buf;                                                             \
+    if (r.action == VJ_SWISS_BUF_FULL) {                                     \
+      VM_SAVE_TRACE_DEPTH(f);                                                \
+      f->state |= 1;                                                        \
+      if (!is_resume) { VJ_ST_INC_STACK_DEPTH(vmstate); }                   \
+      VM_SAVE_AND_RETURN(VJ_EXIT_BUF_FULL);                                  \
+    }                                                                        \
+    VM_INDENT_DEC();                                                         \
+    VM_CHECK(1 + VM_INDENT_PAD(indent_depth));                               \
+    VM_WRITE_INDENT();                                                       \
+    *buf++ = '}';                                                            \
+    if (is_resume) {                                                         \
+      f->state &= ~1;                                                        \
+      VJ_ST_DEC_STACK_DEPTH(vmstate);                                        \
+      VM_RESTORE_TRACE_DEPTH(f);                                             \
+    }                                                                        \
+    VJ_ST_SET_FIRST_0(vmstate);                                              \
+    VM_NEXT_SHORT();                                                         \
+  }                                                                          \
+}
+
+VJ_DEFINE_MAP_SWISS_OP(vj_op_map_str_int, "MAP_STR_INT", vj_swiss_iterate_str_int)
+VJ_DEFINE_MAP_SWISS_OP(vj_op_map_str_int64, "MAP_STR_INT64", vj_swiss_iterate_str_int)
+
+#undef VJ_DEFINE_MAP_SWISS_OP
 
 vj_op_interface: {
   VM_TRACE_KEY("INTERFACE");

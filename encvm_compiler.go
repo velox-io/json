@@ -253,8 +253,8 @@ func emitStructBody(b *irBuilder, dec *StructCodec, baseOff uintptr) {
 			mapDec := fi.resolveCodec().(*MapCodec)
 			if needsOmitempty {
 				emitYield(b, fi, fieldOff, fbReasonMapOmitempty)
-			} else if mapDec.MapKind == MapVariantStrStr && SwissMapLayoutOK {
-				emitMapStrStr(b, fi, fieldOff)
+			} else if canSwissMapInC(mapDec.MapKind) {
+				emitMapSwiss(b, fi, fieldOff, mapDec.MapKind)
 			} else {
 				emitMap(b, fi, fieldOff, mapDec)
 			}
@@ -420,8 +420,8 @@ func emitDerefBody(b *irBuilder, elemTI *TypeInfo) {
 
 	case KindMap:
 		mapDec := elemTI.resolveCodec().(*MapCodec)
-		if mapDec.MapKind == MapVariantStrStr && SwissMapLayoutOK {
-			emitMapStrStrInner(b, 0)
+		if canSwissMapInC(mapDec.MapKind) {
+			emitMapSwissInner(b, 0, mapDec.MapKind)
 		} else {
 			emitMapInner(b, 0, elemTI, mapDec)
 		}
@@ -640,8 +640,8 @@ func emitElementBody(b *irBuilder, elemTI *TypeInfo) {
 
 	case KindMap:
 		mapDec := elemTI.resolveCodec().(*MapCodec)
-		if mapDec.MapKind == MapVariantStrStr && SwissMapLayoutOK {
-			emitMapStrStrInner(b, 0)
+		if canSwissMapInC(mapDec.MapKind) {
+			emitMapSwissInner(b, 0, mapDec.MapKind)
 		} else {
 			emitMapInner(b, 0, elemTI, mapDec)
 		}
@@ -710,24 +710,50 @@ func emitMapInner(b *irBuilder, fieldOff uintptr, elemTI *TypeInfo, mapDec *MapC
 	b.emit(IRInst{Op: opMapEnd})
 }
 
-func emitMapStrStr(b *irBuilder, fi *TypeInfo, fieldOff uintptr) {
+// canSwissMapInC returns true if the given map variant can use C-native Swiss Map iteration.
+func canSwissMapInC(variant MapVariant) bool {
+	switch variant {
+	case MapVariantStrStr:
+		return SwissMapLayoutOK
+	case MapVariantStrInt:
+		return SwissMapStrIntLayoutOK
+	case MapVariantStrInt64:
+		return SwissMapStrInt64LayoutOK
+	}
+	return false
+}
+
+// swissMapOpcode returns the VM opcode for the given Swiss Map variant.
+func swissMapOpcode(variant MapVariant) uint16 {
+	switch variant {
+	case MapVariantStrStr:
+		return opMapStrStr
+	case MapVariantStrInt:
+		return opMapStrInt
+	case MapVariantStrInt64:
+		return opMapStrInt64
+	}
+	panic("unreachable")
+}
+
+func emitMapSwiss(b *irBuilder, fi *TypeInfo, fieldOff uintptr, variant MapVariant) {
 	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
 	if !ok {
 		emitYieldOverflow(b, fi, fieldOff)
 		return
 	}
 	b.emit(IRInst{
-		Op:       opMapStrStr,
+		Op:       swissMapOpcode(variant),
 		KeyLen:   keyLen,
 		KeyOff:   keyOff,
 		FieldOff: uint16(fieldOff),
 	})
 }
 
-// emitMapStrStrInner emits a keyless OP_MAP_STR_STR (for deref/element body contexts).
-func emitMapStrStrInner(b *irBuilder, fieldOff uintptr) {
+// emitMapSwissInner emits a keyless Swiss Map op (for deref/element body contexts).
+func emitMapSwissInner(b *irBuilder, fieldOff uintptr, variant MapVariant) {
 	b.emit(IRInst{
-		Op:       opMapStrStr,
+		Op:       swissMapOpcode(variant),
 		FieldOff: uint16(fieldOff),
 	})
 }

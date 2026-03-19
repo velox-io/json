@@ -103,6 +103,14 @@ func makeDirtyBytes(len, cap int) []byte {
 // When false, map[string]string is still correctly encoded, just slower.
 var SwissMapLayoutOK bool
 
+// SwissMapStrIntLayoutOK indicates whether the Go runtime's Swiss Map layout
+// for map[string]int matches what our C code expects.
+var SwissMapStrIntLayoutOK bool
+
+// SwissMapStrInt64LayoutOK indicates whether the Go runtime's Swiss Map layout
+// for map[string]int64 matches what our C code expects.
+var SwissMapStrInt64LayoutOK bool
+
 func init() {
 	// Verify our sliceHeader layout assumption matches the Go runtime.
 	s := make([]byte, 1, 2)
@@ -126,13 +134,16 @@ func init() {
 		panic("vjson: mapsIter size mismatch — maps.Iter layout may have changed")
 	}
 
-	// Verify Swiss Map memory layout for C-native map[string]string iteration.
-	// C code (OP_MAP_STR_STR) directly reads these structs — any layout change
-	// in the Go runtime would silently corrupt output.
+	// Verify Swiss Map memory layout for C-native map iteration.
+	// C code (OP_MAP_STR_STR/OP_MAP_STR_INT/OP_MAP_STR_INT64) directly reads
+	// these structs — any layout change in the Go runtime would silently
+	// corrupt output.
 	//
 	// Unlike the mapsIter check above, this is NOT fatal — we can fall back
 	// to Go-based map iteration (OP_MAP_BEGIN/END) if the layout doesn't match.
 	SwissMapLayoutOK = verifySwissMapLayout()
+	SwissMapStrIntLayoutOK = verifySwissMapStrIntLayout()
+	SwissMapStrInt64LayoutOK = verifySwissMapStrInt64Layout()
 }
 
 // verifySwissMapLayout checks that the Go runtime's Swiss Map struct offsets
@@ -191,6 +202,112 @@ func verifySwissMapLayout() bool {
 	elemPtr := unsafe.Add(dirPtr, 8+uintptr(foundSlot)*slotSize+elemOff)
 	elem := *(*string)(elemPtr)
 	return elem == "b"
+}
+
+// verifySwissMapStrIntLayout checks that map[string]int Swiss Map layout
+// matches what our C code assumes (slot_size=24, elem_off=16, group_size=200).
+func verifySwissMapStrIntLayout() bool {
+	m := map[string]int{"a": 42}
+	mp := *(*unsafe.Pointer)(unsafe.Pointer(&m))
+
+	// Map.used at offset 0 should be 1
+	used := *(*uint64)(mp)
+	if used != 1 {
+		return false
+	}
+
+	// Map.dirLen at offset 24 should be 0 (small map)
+	dirLen := *(*int64)(unsafe.Add(mp, 24))
+	if dirLen != 0 {
+		return false
+	}
+
+	// Map.dirPtr at offset 16 is the group pointer (small map)
+	dirPtr := *(*unsafe.Pointer)(unsafe.Add(mp, 16))
+	if dirPtr == nil {
+		return false
+	}
+
+	// Find the full slot
+	ctrls := *(*uint64)(dirPtr)
+	foundSlot := -1
+	for i := range 8 {
+		ctrl := byte(ctrls >> (i * 8))
+		if ctrl&0x80 == 0 {
+			foundSlot = i
+			break
+		}
+	}
+	if foundSlot < 0 {
+		return false
+	}
+
+	// Read key GoString from slot: group + 8 + slot*24
+	const slotSize = 24
+	const elemOff = 16
+	keyPtr := unsafe.Add(dirPtr, 8+uintptr(foundSlot)*slotSize)
+	key := *(*string)(keyPtr)
+	if key != "a" {
+		return false
+	}
+
+	// Read elem int from slot: group + 8 + slot*24 + 16
+	elemPtr := unsafe.Add(dirPtr, 8+uintptr(foundSlot)*slotSize+elemOff)
+	elem := *(*int)(elemPtr)
+	return elem == 42
+}
+
+// verifySwissMapStrInt64Layout checks that map[string]int64 Swiss Map layout
+// matches what our C code assumes (slot_size=24, elem_off=16, group_size=200).
+func verifySwissMapStrInt64Layout() bool {
+	m := map[string]int64{"a": 42}
+	mp := *(*unsafe.Pointer)(unsafe.Pointer(&m))
+
+	// Map.used at offset 0 should be 1
+	used := *(*uint64)(mp)
+	if used != 1 {
+		return false
+	}
+
+	// Map.dirLen at offset 24 should be 0 (small map)
+	dirLen := *(*int64)(unsafe.Add(mp, 24))
+	if dirLen != 0 {
+		return false
+	}
+
+	// Map.dirPtr at offset 16 is the group pointer (small map)
+	dirPtr := *(*unsafe.Pointer)(unsafe.Add(mp, 16))
+	if dirPtr == nil {
+		return false
+	}
+
+	// Find the full slot
+	ctrls := *(*uint64)(dirPtr)
+	foundSlot := -1
+	for i := range 8 {
+		ctrl := byte(ctrls >> (i * 8))
+		if ctrl&0x80 == 0 {
+			foundSlot = i
+			break
+		}
+	}
+	if foundSlot < 0 {
+		return false
+	}
+
+	// Read key GoString from slot: group + 8 + slot*24
+	const slotSize = 24
+	const elemOff = 16
+	keyPtr := unsafe.Add(dirPtr, 8+uintptr(foundSlot)*slotSize)
+	key := *(*string)(keyPtr)
+	if key != "a" {
+		return false
+	}
+
+	// Read elem int64 from slot: group + 8 + slot*24 + 16
+	elemPtr := unsafe.Add(dirPtr, 8+uintptr(foundSlot)*slotSize+elemOff)
+	elem := *(*int64)(elemPtr)
+	return elem == 42
 }
 
 // ---- Low-level map iteration via go:linkname ----

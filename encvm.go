@@ -56,6 +56,10 @@ const (
 	opKString uint16 = 33 // struct field string
 	opKInt    uint16 = 34 // struct field int
 	opKInt64  uint16 = 35 // struct field int64
+
+	// C-native Swiss Map variants (36-37).
+	opMapStrInt   uint16 = 36 // map[string]int: C-native Swiss Map iteration
+	opMapStrInt64 uint16 = 37 // map[string]int64: C-native Swiss Map iteration
 )
 
 func kindToOpcode(k ElemTypeKind) uint16 {
