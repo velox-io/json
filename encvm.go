@@ -575,9 +575,11 @@ func insertIfaceCache(typePtr unsafe.Pointer, bp *Blueprint, tag uint8) {
 
 // initPrimitiveIfaceCache seeds the interface cache with all primitive types
 // so the C VM can inline-encode bool/int/string etc. without yielding.
+// Also pre-warms common composite types (slices, maps) so that first-encounter
+// interface dispatch avoids the CACHE_MISS → Go compile → re-run cycle.
 // Called once via initPrimitiveIfaceCacheOnce at the first VM execution.
 func initPrimitiveIfaceCache() {
-	entries := []struct {
+	primitives := []struct {
 		t   reflect.Type
 		tag uint8
 	}{
@@ -597,13 +599,47 @@ func initPrimitiveIfaceCache() {
 		{reflect.TypeFor[float64](), uint8(opFloat64)},
 		{reflect.TypeFor[string](), uint8(opString)},
 	}
-	table := make([]VjIfaceCacheEntry, len(entries))
-	for i, e := range entries {
-		table[i] = VjIfaceCacheEntry{
+
+	table := make([]VjIfaceCacheEntry, 0, len(primitives)+8)
+	for _, e := range primitives {
+		table = append(table, VjIfaceCacheEntry{
 			TypePtr: rtypePtr(e.t),
 			Tag:     e.tag,
-		}
+		})
 	}
+
+	// Pre-warm common composite types found in interface fields.
+	// Slices: compile Blueprint → C VM does SWITCH_OPS (no yield).
+	// Maps: Go-driven (tag=0, ops=nil) → C VM yields with YIELD (not CACHE_MISS).
+	compositeSlices := []reflect.Type{
+		reflect.TypeFor[[]any](),
+		reflect.TypeFor[[]string](),
+		reflect.TypeFor[[]float64](),
+		reflect.TypeFor[[]int](),
+		reflect.TypeFor[[]int64](),
+	}
+	for _, t := range compositeSlices {
+		ti := getCodec(t)
+		sliceDec := ti.resolveCodec().(*SliceCodec)
+		bp := compileStandaloneSliceBlueprint(sliceDec)
+		entry := VjIfaceCacheEntry{TypePtr: rtypePtr(t)}
+		if bp != nil && len(bp.Ops) > 0 {
+			entry.OpsPtr = unsafe.Pointer(&bp.Ops[0])
+			registerBlueprintOps(bp)
+		}
+		table = append(table, entry)
+	}
+
+	compositeMaps := []reflect.Type{
+		reflect.TypeFor[map[string]any](),
+		reflect.TypeFor[map[string]string](),
+	}
+	for _, t := range compositeMaps {
+		// Maps are Go-driven; insert with tag=0, ops=nil.
+		// This avoids CACHE_MISS — C VM yields YIELD directly.
+		table = append(table, VjIfaceCacheEntry{TypePtr: rtypePtr(t)})
+	}
+
 	sort.Slice(table, func(i, j int) bool {
 		return uintptr(table[i].TypePtr) < uintptr(table[j].TypePtr)
 	})
