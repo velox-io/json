@@ -83,6 +83,17 @@ func main() {
 }
 ```
 
+### Map serialization
+
+**Do not write to a map concurrently while it is being marshaled.** Go's runtime detects concurrent map read+write and panics. Velox's native encoder reads map memory directly, bypassing this detection — a concurrent write during serialization may cause **silent data corruption** instead of a clean crash.
+
+   ```go
+   // ❌ DANGEROUS — concurrent write during marshal.
+   // Standard encoding/json panics; Velox may silently corrupt.
+   go func() { m["key"] = "value" }()
+   b, _ := json.Marshal(&s)
+   ```
+
 ## Performance & benchmarks
 
 See [detailed benchmark results](docs/benchmark.md).
