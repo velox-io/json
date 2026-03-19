@@ -370,7 +370,8 @@ type VjIfaceCacheEntry struct {
 	TypePtr unsafe.Pointer // *abi.Type
 	OpsPtr  unsafe.Pointer // &Blueprint.Ops[0] (byte stream), nil if not compilable by C
 	Tag     uint8          // opcode for primitives (= ElemTypeKind); 0 = none
-	_pad    [7]byte
+	Flags   uint8          // VJ_IFACE_FLAG_* bits (e.g. INDIRECT for maps)
+	_pad    [6]byte
 }
 
 var _ [24]byte = [unsafe.Sizeof(VjIfaceCacheEntry{})]byte{}
@@ -544,9 +545,12 @@ func registerBlueprintOps(bp *Blueprint) {
 	blueprintRegistry.Store(&newMap)
 }
 
+// ifaceFlagIndirect must match VJ_IFACE_FLAG_INDIRECT in types.h.
+const ifaceFlagIndirect uint8 = 0x01
+
 // insertIfaceCache adds a new type→blueprint mapping to the global cache.
 // Thread-safe via mutex; uses COW to avoid interfering with concurrent readers.
-func insertIfaceCache(typePtr unsafe.Pointer, bp *Blueprint, tag uint8) {
+func insertIfaceCache(typePtr unsafe.Pointer, bp *Blueprint, tag uint8, flags uint8) {
 	globalIfaceCache.mu.Lock()
 	defer globalIfaceCache.mu.Unlock()
 
@@ -559,6 +563,7 @@ func insertIfaceCache(typePtr unsafe.Pointer, bp *Blueprint, tag uint8) {
 	entry := VjIfaceCacheEntry{
 		TypePtr: typePtr,
 		Tag:     tag,
+		Flags:   flags,
 	}
 	if bp != nil && len(bp.Ops) > 0 {
 		entry.OpsPtr = unsafe.Pointer(&bp.Ops[0])
@@ -642,9 +647,18 @@ func initPrimitiveIfaceCache() {
 		reflect.TypeFor[map[string]string](),
 	}
 	for _, t := range compositeMaps {
-		// Maps are Go-driven; insert with tag=0, ops=nil.
-		// This avoids CACHE_MISS — C VM yields YIELD directly.
-		table = append(table, VjIfaceCacheEntry{TypePtr: rtypePtr(t)})
+		ti := getCodec(t)
+		mapDec := ti.resolveCodec().(*MapCodec)
+		bp := compileStandaloneMapBlueprint(mapDec)
+		entry := VjIfaceCacheEntry{
+			TypePtr: rtypePtr(t),
+			Flags:   ifaceFlagIndirect, // map is reference type
+		}
+		if bp != nil && len(bp.Ops) > 0 {
+			entry.OpsPtr = unsafe.Pointer(&bp.Ops[0])
+			registerBlueprintOps(bp)
+		}
+		table = append(table, entry)
 	}
 
 	sort.Slice(table, func(i, j int) bool {

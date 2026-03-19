@@ -279,6 +279,7 @@ func (m *Marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 	// Tag = opcode directly (all primitive opcodes >= 1, so tag=0 means "no tag").
 	var tag uint8
 	var bp *Blueprint
+	var flags uint8
 
 	switch {
 	case ti.Kind <= KindString:
@@ -295,13 +296,18 @@ func (m *Marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 			aDec := ti.resolveCodec().(*ArrayCodec)
 			bp = compileStandaloneArrayBlueprint(aDec)
 		case KindMap:
-			// Maps are Go-driven — insert with nil ops.
+			mapDec := ti.resolveCodec().(*MapCodec)
+			bp = compileStandaloneMapBlueprint(mapDec)
+			// Maps are reference types — eface.data IS the map pointer.
+			// INDIRECT flag tells C to use &eface.data as base, so
+			// MAP_STR_ITER correctly dereferences base+0 → map pointer.
+			flags = ifaceFlagIndirect
 		default:
 			// Insert with nil ops — C will yield on next encounter.
 		}
 	}
 
-	insertIfaceCache(typePtr, bp, tag)
+	insertIfaceCache(typePtr, bp, tag, flags)
 	if bp != nil {
 		m.traceRecordBlueprint(bp)
 	}

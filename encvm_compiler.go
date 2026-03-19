@@ -139,6 +139,28 @@ func compileStandaloneSliceBlueprint(dec *SliceCodec) *Blueprint {
 	}
 }
 
+// compileStandaloneMapBlueprint builds a Blueprint for encoding a map
+// whose type was discovered at runtime (e.g. inside an interface{}).
+// For string-keyed maps with known slot layout, this uses MAP_STR_ITER
+// for C-native key iteration; otherwise MAP_BEGIN/MAP_END (Go-driven).
+func compileStandaloneMapBlueprint(mapDec *MapCodec) *Blueprint {
+	b := &irBuilder{
+		visiting: make(map[reflect.Type]Label),
+	}
+
+	emitMapInner(b, 0, mapDec.ValTI, mapDec)
+	b.emit(IRInst{Op: opRet})
+
+	ops, fallbacks, annotations := lower(b.insts)
+
+	return &Blueprint{
+		Name:        mapDec.MapType.String(),
+		Ops:         alignedOps(ops),
+		Fallbacks:   fallbacks,
+		Annotations: annotations,
+	}
+}
+
 // compileStandaloneArrayBlueprint builds a Blueprint for encoding a fixed-size array
 // whose type was discovered at runtime (e.g. inside an interface{}).
 func compileStandaloneArrayBlueprint(dec *ArrayCodec) *Blueprint {

@@ -482,8 +482,12 @@ typedef struct VjIfaceCacheEntry {
   const void      *type_ptr;  /*  0: Go *abi.Type address */
   const uint8_t   *ops;       /*  8: Blueprint ops byte stream, or NULL */
   uint8_t          tag;       /* 16: opcode (= ElemTypeKind) for primitives; 0 = none */
-  uint8_t          _pad[7];   /* 17: alignment */
+  uint8_t          flags;     /* 17: VJ_IFACE_FLAG_* bits */
+  uint8_t          _pad[6];   /* 18: alignment */
 } VjIfaceCacheEntry;
+
+/* VjIfaceCacheEntry.flags bits */
+#define VJ_IFACE_FLAG_INDIRECT 0x01  /* base = &eface.data (not *eface.data) */
 
 _Static_assert(sizeof(VjIfaceCacheEntry) == 24,
                "VjIfaceCacheEntry must be 24 bytes");
