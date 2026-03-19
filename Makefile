@@ -18,23 +18,6 @@ test-coverage:
 	go test -race -coverprofile=coverage.out .
 	go tool cover -html=coverage.out -o coverage.html
 
-bench:
-	cd benchmark && go test -bench=. -benchmem .
-	go test -run=^$ -bench=. -benchmem .
-
-# Run benchmarks (count=5) and save baseline (root + ./benchmark)
-bench-baseline:
-	@mkdir -p .benchdata
-	cd benchmark && go test -run=^$ -bench=Velox -benchmem -count=5 . >> ../.benchdata/baseline.txt 2>/dev/null || true
-	@echo "Baseline saved to .benchdata/baseline.txt"
-
-# Check for regressions against baseline (default threshold: 10%)
-bench-check:
-	@./scripts/benchcheck.sh
-
-# Check with custom threshold: make bench-check-threshold THRESHOLD=5
-bench-check-threshold:
-	@./scripts/benchcheck.sh .benchdata/baseline.txt $(or $(THRESHOLD),10)
 
 clean:
 	go clean
@@ -101,18 +84,41 @@ gen-debug:
 	@EXTRA_CFLAGS="-DVJ_ENCVM_DEBUG" DEBUG_SYMBOLS=1 bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
 		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
-# Generate benchmark visualization SVG
-# Usage: make benchviz
-#        make benchviz BENCH_FILTER="Benchmark_Marshal.*" BENCH_TITLE="Marshal Performance"
 BENCH_FILTER ?= .
 BENCH_TITLE ?= Benchmark Results
-BENCH_COUNT ?= 3
+BENCH_COUNT ?= 5
 BENCH_OUTPUT ?= local/benchmark.txt
+BENCH_LIBS ?=
+BENCH_TIME ?= 3s
+GOOS ?= $(_HOST_OS)
+GOARCH ?= $(_HOST_ARCH)
+BENCH_BIN ?= local/bin/vjson-benchmark_$(GOOS)_$(GOARCH)
 
-benchviz:
+bench-build:
+	mkdir -p $(dir $(BENCH_BIN))
+	cd benchmark && GOOS=$(GOOS) GOARCH=$(GOARCH) go test -c -o ../$(BENCH_BIN) .
+
+benchviz: bench-build
 	mkdir -p $(dir $(BENCH_OUTPUT));
-	(cd benchmark && go test -run='^$$' -bench='$(BENCH_FILTER)' -benchmem -count=$(BENCH_COUNT) . | tee '../$(BENCH_OUTPUT)');
+	bash scripts/bench.sh -b $(BENCH_BIN) -f '$(BENCH_FILTER)' -t $(BENCH_TIME) -c $(BENCH_COUNT) -w $(if $(BENCH_LIBS),-l $(BENCH_LIBS)) -o '$(BENCH_OUTPUT)';
 	(cd benchmark && go run ./benchviz/ -title '$(BENCH_TITLE)' -format html < '../$(BENCH_OUTPUT)' > '../$(basename $(BENCH_OUTPUT)).html');
 	(cd benchmark && go run ./benchviz/ -title '$(BENCH_TITLE)' -format svg < '../$(BENCH_OUTPUT)' > '../$(basename $(BENCH_OUTPUT)).svg');
 
-.PHONY: lint lint-ci fmt test test-coverage bench bench-baseline bench-check bench-check-threshold clean fuzz fuzz-parallel fuzz-concurrent gen gen-debug gen-pgo-use benchviz
+# Compare libraries with benchstat
+# Usage: make benchcmp BENCH_CMP="Velox StdJSON"
+#        make benchcmp BENCH_CMP="Velox Sonic StdJSON" BENCH_FILTER=Marshal
+BENCH_CMP ?= Velox StdJSON
+BENCHCMP_OUTPUT ?= local/benchcmp.txt
+
+benchcmp: bench-build
+	bash scripts/benchcmp.sh -b $(BENCH_BIN) -f '$(BENCH_FILTER)' -c $(BENCH_COUNT) -w -o '$(BENCHCMP_OUTPUT)' $(BENCH_CMP)
+
+# Package benchmark binary + scripts for remote testing
+# Usage: make bench-pack GOOS=linux GOARCH=amd64
+BENCH_PACK ?= local/vjson-bench_$(GOOS)_$(GOARCH).tar.gz
+
+bench-pack: bench-build
+	tar czf $(BENCH_PACK) -C $(CURDIR) Makefile scripts/bench.sh scripts/benchcmp.sh scripts/bench-run.sh $(BENCH_BIN)
+	@echo "Packed: $(BENCH_PACK)"
+
+.PHONY: lint lint-ci fmt test test-coverage bclean fuzz fuzz-parallel fuzz-concurrent gen gen-debug gen-pgo-use bench-build bench-pack benchviz benchcmp

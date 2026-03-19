@@ -1,0 +1,4140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Benchmark Results</title>
+<style>
+  :root {
+    --font-sans: -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    --font-mono: Menlo, Consolas, 'Liberation Mono', monospace;
+    --color-title: #2c3e50;
+    --color-subtitle: #7f8c8d;
+    --color-text: #555;
+    --color-dim: #95a5a6;
+    --color-card-bg: #f8f9fa;
+    --color-card-bdr: #dee2e6;
+    --color-fastest: #27ae60;
+    --color-slowest: #e74c3c;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--color-text);
+    background: #fff;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px 16px;
+  }
+  h1 {
+    font-family: var(--font-sans);
+    font-size: 22px; font-weight: bold;
+    color: var(--color-title);
+    text-align: center; margin: 0 0 4px;
+  }
+  .subtitle {
+    font-family: var(--font-sans);
+    font-size: 13px; color: var(--color-subtitle);
+    text-align: center; margin: 0 0 16px;
+  }
+  /* Legend */
+  .legend {
+    display: flex; justify-content: center; gap: 18px;
+    margin-bottom: 20px; flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex; align-items: center; gap: 5px;
+    cursor: pointer; user-select: none;
+    transition: opacity 0.15s;
+  }
+  .legend-item.dimmed { opacity: 0.35; text-decoration: line-through; }
+  .legend-swatch {
+    width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0;
+  }
+  .legend-label {
+    font-size: 12px; font-weight: bold;
+  }
+  /* Section */
+  details { margin-bottom: 8px; }
+  summary {
+    font-family: var(--font-sans);
+    font-size: 16px; font-weight: bold;
+    color: var(--color-title);
+    cursor: pointer; padding: 6px 0;
+    border-bottom: 1px solid var(--color-card-bdr);
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+  }
+  summary::-webkit-details-marker { margin-right: 6px; }
+  .section-title {
+    font-family: var(--font-sans);
+    font-size: 16px; font-weight: bold;
+    color: var(--color-title);
+    padding: 6px 0;
+    border-bottom: 1px solid var(--color-card-bdr);
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+  }
+  /* Group card */
+  .group-card {
+    background: var(--color-card-bg);
+    border: 1px solid var(--color-card-bdr);
+    border-radius: 8px;
+    padding: 12px 14px 8px;
+    margin-bottom: 12px;
+  }
+  .group-title {
+    font-family: var(--font-sans);
+    font-size: 14px; font-weight: bold;
+    color: var(--color-title);
+    margin: 0 0 8px;
+  }
+  /* Grid */
+  .metric-grid {
+    display: grid;
+    grid-template-columns: 80px 1fr 0.6fr 0.4fr;
+    column-gap: 24px;
+  }
+  .col-hdr {
+    font-family: var(--font-sans);
+    font-size: 10px; font-weight: 600;
+    color: var(--color-dim);
+    letter-spacing: 0.3px;
+    padding-bottom: 4px;
+  }
+  .col-hdr-hint {
+    font-style: italic;
+  }
+  /* Row */
+  .metric-row {
+    display: contents;
+  }
+  .metric-row.hidden { display: none; }
+  .lib-label {
+    font-size: 11px; font-weight: bold;
+    display: flex; align-items: center;
+    padding: 2px 0;
+    white-space: nowrap;
+  }
+  .metric-cell {
+    display: flex; align-items: center; gap: 5px;
+    padding: 2px 0;
+    min-height: 24px;
+  }
+  .bar {
+    height: 20px; border-radius: 3px;
+    opacity: 0.80; flex-shrink: 0;
+  }
+  .bar-annot {
+    flex-shrink: 0;
+    display: flex; align-items: center; gap: 3px;
+    white-space: nowrap;
+  }
+  .bar-val {
+    font-size: 10.5px; color: var(--color-text);
+    white-space: nowrap;
+  }
+  .badge-fast {
+    font-size: 9.5px; font-weight: bold;
+    color: var(--color-fastest);
+  }
+  .badge-ratio {
+    font-size: 9.5px; font-weight: bold;
+    color: var(--color-slowest);
+  }
+  /* Footer */
+  .footer {
+    text-align: center; font-size: 11px;
+    color: var(--color-dim); margin-top: 16px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Benchmark Results</h1>
+<p class="subtitle">goos: darwin  |  goarch: arm64  |  cpu: Apple M4 Pro</p>
+
+<div class="legend" id="legend">
+  <span class="legend-item" data-lib="StdJSON" onclick="toggleLib(this)">
+    <span class="legend-swatch" style="background:#e67e22"></span>
+    <span class="legend-label" style="color:#e67e22">StdJSON</span>
+  </span>
+  <span class="legend-item" data-lib="Sonic" onclick="toggleLib(this)">
+    <span class="legend-swatch" style="background:#3498db"></span>
+    <span class="legend-label" style="color:#3498db">Sonic</span>
+  </span>
+  <span class="legend-item" data-lib="GoJSON" onclick="toggleLib(this)">
+    <span class="legend-swatch" style="background:#8e44ad"></span>
+    <span class="legend-label" style="color:#8e44ad">GoJSON</span>
+  </span>
+  <span class="legend-item" data-lib="EasyJSON" onclick="toggleLib(this)">
+    <span class="legend-swatch" style="background:#e74c8b"></span>
+    <span class="legend-label" style="color:#e74c8b">EasyJSON</span>
+  </span>
+  <span class="legend-item" data-lib="Velox" onclick="toggleLib(this)">
+    <span class="legend-swatch" style="background:#27ae60"></span>
+    <span class="legend-label" style="color:#27ae60">Velox</span>
+  </span>
+</div>
+
+
+<details open>
+<summary>Marshal</summary>
+
+
+<div class="group-card">
+  <div class="group-title">Tiny</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:49.3%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">157.5ns</span>
+        <span class="badge-ratio">2.54x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:28.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">112B</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:30.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">191.7ns</span>
+        <span class="badge-ratio">3.09x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:32.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">128B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">2</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:28.9%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">92.3ns</span>
+        <span class="badge-ratio">1.49x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:28.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">112B</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:30.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="EasyJSON">
+      <div class="lib-label" style="color:#e74c8b">EasyJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:35.8%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">114.5ns</span>
+        <span class="badge-ratio">1.85x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">240B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">2</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:19.4%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">62.0ns</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:28.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">112B</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:30.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">Small</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:45.2%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">565.1ns</span>
+        <span class="badge-ratio">3.48x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:21.5%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">384B</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">750.7ns</span>
+        <span class="badge-ratio">4.62x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:22.4%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">400B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:24.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">2</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:28.7%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">359.3ns</span>
+        <span class="badge-ratio">2.21x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:21.5%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">384B</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="EasyJSON">
+      <div class="lib-label" style="color:#e74c8b">EasyJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:36.5%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">457.3ns</span>
+        <span class="badge-ratio">2.81x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">1.0KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">5</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:13.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">162.6ns</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:21.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">384B</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">EscapeHeavy</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:44.5%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">2.7µs</span>
+        <span class="badge-ratio">2.66x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:48.1%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">3.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:7.5%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">3.6µs</span>
+        <span class="badge-ratio">3.59x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:48.4%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">3.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:15.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">2</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:26.6%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">1.6µs</span>
+        <span class="badge-ratio">1.59x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:48.1%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">3.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:7.5%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="EasyJSON">
+      <div class="lib-label" style="color:#e74c8b">EasyJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:35.1%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">2.1µs</span>
+        <span class="badge-ratio">2.10x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">3.7KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">8</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:16.7%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1.0µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:48.1%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">3.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:7.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">KubePods</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:43.2%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">13.6µs</span>
+        <span class="badge-ratio">4.90x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:59.6%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">14.1KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">31</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">18.9µs</span>
+        <span class="badge-ratio">6.80x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:58.3%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">13.8KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:15.5%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">8</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:20.4%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">6.4µs</span>
+        <span class="badge-ratio">2.31x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">14.2KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:19.4%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">10</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="EasyJSON">
+      <div class="lib-label" style="color:#e74c8b">EasyJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:22.3%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">7.0µs</span>
+        <span class="badge-ratio">2.53x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:59.2%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">14.0KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:19.4%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">10</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:8.8%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">2.8µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:55.8%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">13.2KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.9%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">Twitter</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">260.8µs</span>
+        <span class="badge-ratio">5.90x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:55.1%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">292.1KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:26.2%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1111</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:48.7%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">211.7µs</span>
+        <span class="badge-ratio">4.79x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:50.2%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">265.9KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:2.5%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">106</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:42.3%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">183.9µs</span>
+        <span class="badge-ratio">4.16x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:50.8%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">269.1KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:2.8%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">119</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="EasyJSON">
+      <div class="lib-label" style="color:#e74c8b">EasyJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:55.1%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">239.6µs</span>
+        <span class="badge-ratio">5.42x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">318.0KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">2544</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:10.2%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">44.2µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:48.3%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">256.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">TwitterTyped</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">207.9µs</span>
+        <span class="badge-ratio">5.92x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">256.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:30.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:48.3%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">167.4µs</span>
+        <span class="badge-ratio">4.76x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">256.1KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">2</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:38.4%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">133.1µs</span>
+        <span class="badge-ratio">3.79x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">256.1KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:30.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:10.1%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">35.1µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">256.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:30.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">MapAny</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">56.0µs</span>
+        <span class="badge-ratio">6.32x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">51.2KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1234</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:59.4%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">55.4µs</span>
+        <span class="badge-ratio">6.26x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:35.2%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">30.1KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:8.8%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">181</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:49.2%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">45.8µs</span>
+        <span class="badge-ratio">5.18x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:50.6%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">43.2KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:11.2%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">231</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:9.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">8.8µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:15.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">13.2KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">JSONBenchCanadaGeometry</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">612.0µs</span>
+        <span class="badge-ratio">2.17x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">272.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">2</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:27.6%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">282.0µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">272.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:30.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">JSONBenchCITMCatalog</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">589.0µs</span>
+        <span class="badge-ratio">3.38x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">496.8KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">10</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:17.8%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">174.3µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:59.9%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">496.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:6.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">JSONBenchGolangSource</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">2.6ms</span>
+        <span class="badge-ratio">3.79x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:50.2%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">7.4MB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">21</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:15.8%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">681.3µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">8.8MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:25.7%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">9</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">JSONBenchStringUnicode</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">3.3µs</span>
+        <span class="badge-ratio">2.13x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">18.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">2</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:28.1%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1.5µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:59.9%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">18.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:30.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">JSONBenchSyntheaFHIR</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">4.2ms</span>
+        <span class="badge-ratio">5.15x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">18.1MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">15976</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:11.7%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">813.8µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:44.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">13.3MB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">6</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">JSONBenchTwitterStatus</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">322.8µs</span>
+        <span class="badge-ratio">4.51x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">489.9KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">22</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:13.3%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">71.6µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:59.8%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">488.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:2.7%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+</details>
+
+<details open>
+<summary>Unmarshal</summary>
+
+
+<div class="group-card">
+  <div class="group-title">Tiny</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">687.1ns</span>
+        <span class="badge-ratio">7.80x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">288B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">6</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:20.1%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">230.2ns</span>
+        <span class="badge-ratio">2.61x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:58.1%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">279B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:40.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">4</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.2%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">139.7ns</span>
+        <span class="badge-ratio">1.59x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:36.7%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">176B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:20.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">2</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="EasyJSON">
+      <div class="lib-label" style="color:#e74c8b">EasyJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:17.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">195.0ns</span>
+        <span class="badge-ratio">2.21x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:5.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">24B</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:10.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:7.7%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">88.1ns</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:10.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">48B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:10.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">TinyCompact</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">639.9ns</span>
+        <span class="badge-ratio">7.89x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">288B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">6</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:19.9%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">212.3ns</span>
+        <span class="badge-ratio">2.62x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:54.8%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">263B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:40.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">4</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.5%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">133.5ns</span>
+        <span class="badge-ratio">1.65x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:33.3%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">160B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:20.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">2</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="EasyJSON">
+      <div class="lib-label" style="color:#e74c8b">EasyJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:16.8%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">179.0ns</span>
+        <span class="badge-ratio">2.21x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:5.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">24B</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:10.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:7.6%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">81.1ns</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:10.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">48B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:10.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">Small</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">3.7µs</span>
+        <span class="badge-ratio">7.70x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:44.4%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">936B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">26</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:17.4%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">1.1µs</span>
+        <span class="badge-ratio">2.23x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">1.2KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:32.3%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">14</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.3%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">768.1ns</span>
+        <span class="badge-ratio">1.58x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:56.6%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">1.2KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:43.8%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">19</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="EasyJSON">
+      <div class="lib-label" style="color:#e74c8b">EasyJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:16.9%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">1.1µs</span>
+        <span class="badge-ratio">2.17x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:24.3%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">512B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:30.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">13</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:7.8%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">485.7ns</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:18.4%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">387B</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:13.8%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">6</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">SmallCompact</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">2.9µs</span>
+        <span class="badge-ratio">7.54x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:56.1%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">936B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">26</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:19.3%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">934.5ns</span>
+        <span class="badge-ratio">2.43x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">1001B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:32.3%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">14</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:13.4%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">645.8ns</span>
+        <span class="badge-ratio">1.68x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:56.1%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">936B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:43.8%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">19</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="EasyJSON">
+      <div class="lib-label" style="color:#e74c8b">EasyJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:19.4%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">939.6ns</span>
+        <span class="badge-ratio">2.44x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:30.7%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">512B</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:30.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">13</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:8.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">384.7ns</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:23.2%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">387B</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:13.8%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">6</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">EscapeHeavy</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">16.9µs</span>
+        <span class="badge-ratio">7.92x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:52.5%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">5.4KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">65</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:9.8%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">2.7µs</span>
+        <span class="badge-ratio">1.29x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">6.2KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:9.2%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">10</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.1%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">3.4µs</span>
+        <span class="badge-ratio">1.60x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:52.2%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">5.4KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">13</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="EasyJSON">
+      <div class="lib-label" style="color:#e74c8b">EasyJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:28.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">7.9µs</span>
+        <span class="badge-ratio">3.69x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:33.4%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">3.5KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:48.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">52</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:7.6%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">2.1µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:28.2%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">2.9KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:3.7%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">4</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">EscapeHeavyCompact</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">13.0µs</span>
+        <span class="badge-ratio">7.23x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">5.4KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">65</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:11.2%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">2.4µs</span>
+        <span class="badge-ratio">1.35x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:57.3%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">5.2KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:9.2%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">10</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:13.2%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">2.9µs</span>
+        <span class="badge-ratio">1.59x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:48.6%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">4.4KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">13</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="EasyJSON">
+      <div class="lib-label" style="color:#e74c8b">EasyJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:33.3%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">7.2µs</span>
+        <span class="badge-ratio">4.01x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:38.2%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">3.5KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:48.0%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">52</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:8.3%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1.8µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:32.2%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">2.9KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:3.7%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">4</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">KubePods</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">121.6µs</span>
+        <span class="badge-ratio">8.65x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:32.7%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">24.3KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">540</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:10.2%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">20.7µs</span>
+        <span class="badge-ratio">1.47x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:51.8%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">38.5KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:19.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">171</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:10.5%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">21.3µs</span>
+        <span class="badge-ratio">1.51x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">44.6KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:29.3%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">264</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="EasyJSON">
+      <div class="lib-label" style="color:#e74c8b">EasyJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:15.4%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">31.3µs</span>
+        <span class="badge-ratio">2.22x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:31.7%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">23.6KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:55.6%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">500</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:6.9%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">14.1µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:16.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">12.3KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:11.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">99</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">KubePodsCompact</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">78.1µs</span>
+        <span class="badge-ratio">7.13x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:46.7%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">24.3KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">540</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:13.8%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">17.9µs</span>
+        <span class="badge-ratio">1.64x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:48.1%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">25.1KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:19.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">171</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.7%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">16.6µs</span>
+        <span class="badge-ratio">1.52x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">31.3KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:29.3%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">264</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="EasyJSON">
+      <div class="lib-label" style="color:#e74c8b">EasyJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:18.1%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">23.5µs</span>
+        <span class="badge-ratio">2.15x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:45.2%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">23.6KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:55.6%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">500</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:8.4%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">10.9µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:23.6%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">12.3KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:11.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">99</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">Twitter</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">2.4ms</span>
+        <span class="badge-ratio">10.63x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:29.4%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">428.6KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">5073</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:10.6%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">426.7µs</span>
+        <span class="badge-ratio">1.87x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:54.4%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">793.7KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:18.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">1525</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:11.9%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">480.6µs</span>
+        <span class="badge-ratio">2.11x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">875.5KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:33.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">2793</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="EasyJSON">
+      <div class="lib-label" style="color:#e74c8b">EasyJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:29.9%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">1.2ms</span>
+        <span class="badge-ratio">5.29x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:27.3%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">398.1KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:51.4%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">4346</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:5.6%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">228.3µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:11.2%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">163.6KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1018</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">TwitterCompact</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1.9ms</span>
+        <span class="badge-ratio">9.53x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:36.4%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">428.6KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">5073</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:11.6%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">368.9µs</span>
+        <span class="badge-ratio">1.84x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:53.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">624.7KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:18.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">1525</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.3%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">390.8µs</span>
+        <span class="badge-ratio">1.95x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">707.1KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:33.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">2793</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="EasyJSON">
+      <div class="lib-label" style="color:#e74c8b">EasyJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:29.3%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">930.2µs</span>
+        <span class="badge-ratio">4.65x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:33.8%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">398.1KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:51.4%;background:#e74c8b"></div>
+        <span class="bar-annot"><span class="bar-val">4346</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:6.3%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">200.0µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:13.9%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">163.6KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1018</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">TwitterTyped</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1.9ms</span>
+        <span class="badge-ratio">10.08x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:33.8%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">352.5KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">3423</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:11.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">352.2µs</span>
+        <span class="badge-ratio">1.85x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:54.8%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">571.9KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.4%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">708</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:10.8%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">344.2µs</span>
+        <span class="badge-ratio">1.81x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">626.4KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:13.4%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">762</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:5.9%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">190.3µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:11.1%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">116.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:4.9%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">279</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">JSONBenchCanadaGeometry</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">354.4µs</span>
+        <span class="badge-ratio">1.39x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">412.3KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">968</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:43.1%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">254.5µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:55.4%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">380.6KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:47.4%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">764</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">JSONBenchCITMCatalog</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">864.5µs</span>
+        <span class="badge-ratio">1.20x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">2.1MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">4019</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:50.2%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">723.2µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:20.4%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">727.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:51.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">3452</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">JSONBenchGolangSource</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">2.0ms</span>
+        <span class="badge-ratio">1.29x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">13.9MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">1406</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:46.6%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1.5ms</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.6%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">2.9MB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:46.8%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1097</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">JSONBenchStringUnicode</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">4.3µs</span>
+        <span class="badge-ratio">1.49x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">19.6KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">6</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:40.2%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">2.9µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:5.3%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1.7KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:10.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">JSONBenchSyntheaFHIR</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">1.9ms</span>
+        <span class="badge-ratio">1.48x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">9.6MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">15611</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:40.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1.3ms</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:19.8%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">3.2MB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:31.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">8067</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">JSONBenchTwitterStatus</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">569.4µs</span>
+        <span class="badge-ratio">1.80x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">873.6KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">1102</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:33.4%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">317.2µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:17.6%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">256.2KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:26.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">486</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+</details>
+
+<details open>
+<summary>Parallel Marshal</summary>
+
+
+<div class="group-card">
+  <div class="group-title">EscapeHeavy</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:47.5%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">339.1ns</span>
+        <span class="badge-ratio">1.90x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:58.8%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">3.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:30.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">428.1ns</span>
+        <span class="badge-ratio">2.40x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">3.1KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">2</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:25.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">178.4ns</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:58.8%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">3.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:30.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">KubePods</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:48.3%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1.7µs</span>
+        <span class="badge-ratio">3.09x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">14.1KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">31</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">2.2µs</span>
+        <span class="badge-ratio">3.84x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:59.3%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">14.0KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:15.5%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">8</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:15.6%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">563.2ns</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:56.2%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">13.3KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.9%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">Twitter</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">31.0µs</span>
+        <span class="badge-ratio">5.22x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">292.1KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1111</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:48.1%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">24.8µs</span>
+        <span class="badge-ratio">4.19x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:54.8%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">266.7KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:5.7%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">106</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:11.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">5.9µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:52.6%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">256.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+</details>
+
+<details open>
+<summary>Parallel Unmarshal</summary>
+
+
+<div class="group-card">
+  <div class="group-title">EscapeHeavy</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1.9µs</span>
+        <span class="badge-ratio">4.64x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:47.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">5.4KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">65</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:17.8%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">570.0ns</span>
+        <span class="badge-ratio">1.38x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">6.9KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:9.2%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">10</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.9%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">412.9ns</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:26.2%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">3.0KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:3.7%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">4</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">KubePods</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">12.7µs</span>
+        <span class="badge-ratio">5.38x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:36.6%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">24.3KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">540</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.9%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">2.7µs</span>
+        <span class="badge-ratio">1.16x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">39.9KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:19.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">171</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:11.1%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">2.4µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:18.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">12.3KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:11.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">99</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">Twitter</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">259.0µs</span>
+        <span class="badge-ratio">8.99x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:31.9%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">428.6KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">5073</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:11.9%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">51.3µs</span>
+        <span class="badge-ratio">1.78x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">805.3KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:18.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">1525</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:6.7%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">28.8µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.2%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">163.6KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1018</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+</details>
+
+<details open>
+<summary>Decoder</summary>
+
+
+<div class="group-card">
+  <div class="group-title">Tiny</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">62.8µs</span>
+        <span class="badge-ratio">5.81x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:4.3%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">9.5KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:41.1%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">209</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:23.4%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">24.5µs</span>
+        <span class="badge-ratio">2.27x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:10.2%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">22.7KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">305</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:10.3%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">10.8µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">133.0KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:20.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">104</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">Small</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">296.8µs</span>
+        <span class="badge-ratio">6.33x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:23.6%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">65.3KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1914</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:20.6%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">102.1µs</span>
+        <span class="badge-ratio">2.18x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:34.3%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">95.2KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:40.9%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">1305</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:9.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">46.9µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">166.3KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:18.9%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">604</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">EscapeHeavy</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">688.3µs</span>
+        <span class="badge-ratio">6.35x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:36.5%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">252.1KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">2769</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.7%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">146.1µs</span>
+        <span class="badge-ratio">1.35x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:37.7%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">260.5KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:9.9%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">455</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:9.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">108.4µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">414.9KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:4.9%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">225</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">KubePodsStream</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">4.1ms</span>
+        <span class="badge-ratio">6.67x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:53.7%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1.2MB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">26424</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:14.6%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">1.0ms</span>
+        <span class="badge-ratio">1.62x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:56.1%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">1.2MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:19.3%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">8505</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:9.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">618.0µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1.3MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:11.3%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">4959</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">TwitterStream</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">20.8ms</span>
+        <span class="badge-ratio">8.54x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:40.4%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">5.2MB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">50648</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.6%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">4.3ms</span>
+        <span class="badge-ratio">1.79x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:47.6%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">6.1MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:18.1%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">15245</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:7.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">2.4ms</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">7.7MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.4%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">10481</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">TwitterSingle</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">2.1ms</span>
+        <span class="badge-ratio">8.76x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1.4MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">5089</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.3%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">425.0µs</span>
+        <span class="badge-ratio">1.80x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:25.8%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">624.9KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:18.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">1527</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:6.8%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">236.7µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:49.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1.2MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.1%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1025</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">EmptyObj</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:20.8%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">66.5µs</span>
+        <span class="badge-ratio">1.34x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:11.5%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">57.1KB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:20.1%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">2007</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">192.0µs</span>
+        <span class="badge-ratio">3.87x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">297.8KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">6005</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:15.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">49.6µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:38.4%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">190.7KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:30.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">3004</span>
+        </span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">Spiky</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">17.5ms</span>
+        <span class="badge-ratio">14.17x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:51.5%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">10.1MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">20899</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:6.7%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">2.0ms</span>
+        <span class="badge-ratio">1.58x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:47.2%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">9.3MB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.6%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">545</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:4.2%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">1.2ms</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">11.8MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">303</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">HalfBuf</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">10.4ms</span>
+        <span class="badge-ratio">18.96x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:59.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">3.8MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">12520</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:5.7%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">995.8µs</span>
+        <span class="badge-ratio">1.81x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">3.8MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.5%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">255</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:3.2%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">550.1µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:55.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">3.5MB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">112</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">ThirdBuf</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">14.0ms</span>
+        <span class="badge-ratio">18.58x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:59.6%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">5.3MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">16570</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:5.8%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">1.4ms</span>
+        <span class="badge-ratio">1.80x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:52.5%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">4.7MB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.5%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">255</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:3.2%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">752.6µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">5.4MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">166</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">Log</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">249.0ms</span>
+        <span class="badge-ratio">8.89x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:54.2%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">115.7MB</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1182986</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:12.4%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">51.5ms</span>
+        <span class="badge-ratio">1.84x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">128.1MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:19.8%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">390485</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:6.8%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">28.0ms</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:57.2%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">122.2MB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:10.6%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">208111</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+</details>
+
+<details open>
+<summary>Encoder</summary>
+
+
+<div class="group-card">
+  <div class="group-title">KubePodsStream</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:43.1%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">661.7µs</span>
+        <span class="badge-ratio">5.55x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:54.3%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">44.6KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1502</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">920.5µs</span>
+        <span class="badge-ratio">7.72x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:35.3%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">29.0KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:16.1%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">402</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:19.1%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">293.4µs</span>
+        <span class="badge-ratio">2.46x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">49.3KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:18.1%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">452</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:7.8%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">119.2µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">888B</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:2.1%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">52</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">TwitterStream</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">2.6ms</span>
+        <span class="badge-ratio">6.43x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">360.6KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">11102</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:49.2%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">2.1ms</span>
+        <span class="badge-ratio">5.28x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:16.3%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">97.7KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:5.7%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">1062</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:42.1%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">1.8ms</span>
+        <span class="badge-ratio">4.51x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:21.7%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">130.4KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:6.4%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">1182</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:9.3%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">396.5µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">248B</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">12</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="group-card">
+  <div class="group-title">TwitterSingle</div>
+  <div class="metric-grid">
+    <div class="col-hdr"></div>
+    <div class="col-hdr">ns/op <span class="col-hdr-hint">relative efficiency →</span></div>
+    <div class="col-hdr">B/op</div>
+    <div class="col-hdr">allocs/op</div>
+    
+    <div class="metric-row" data-lib="StdJSON">
+      <div class="lib-label" style="color:#e67e22">StdJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">253.9µs</span>
+        <span class="badge-ratio">6.47x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">36.1KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:60.0%;background:#e67e22"></div>
+        <span class="bar-annot"><span class="bar-val">1112</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Sonic">
+      <div class="lib-label" style="color:#3498db">Sonic</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:49.3%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">208.6µs</span>
+        <span class="badge-ratio">5.32x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:16.3%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">9.8KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:5.8%;background:#3498db"></div>
+        <span class="bar-annot"><span class="bar-val">108</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="GoJSON">
+      <div class="lib-label" style="color:#8e44ad">GoJSON</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:42.3%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">179.0µs</span>
+        <span class="badge-ratio">4.56x</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:21.7%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">13.1KB</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:6.5%;background:#8e44ad"></div>
+        <span class="bar-annot"><span class="bar-val">120</span>
+        </span>
+      </div>
+    </div>
+    
+    <div class="metric-row" data-lib="Velox">
+      <div class="lib-label" style="color:#27ae60">Velox</div>
+      <div class="metric-cell">
+        <div class="bar" style="width:9.3%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">39.2µs</span>
+        <span class="badge-fast">★ fastest</span>
+        </span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">104B</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+      <div class="metric-cell">
+        <div class="bar" style="width:1.5%;background:#27ae60"></div>
+        <span class="bar-annot"><span class="bar-val">3</span>
+        <span class="badge-fast">★</span></span>
+      </div>
+    </div>
+    
+  </div>
+</div>
+
+</details>
+
+
+<div class="footer">Generated by benchviz  |  count=5 (median)</div>
+
+<script>
+function toggleLib(el) {
+  var lib = el.getAttribute("data-lib");
+  el.classList.toggle("dimmed");
+  var hidden = el.classList.contains("dimmed");
+  var rows = document.querySelectorAll('.metric-row[data-lib="'+lib+'"]');
+  for (var i = 0; i < rows.length; i++) {
+    rows[i].classList.toggle("hidden", hidden);
+  }
+}
+</script>
+</body>
+</html>

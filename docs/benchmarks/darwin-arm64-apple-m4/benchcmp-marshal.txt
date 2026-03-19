@@ -1,0 +1,53 @@
+goos: darwin
+goarch: arm64
+pkg: dev.local/benchmark
+cpu: Apple M4 Pro
+                         │    Velox     │                StdJSON                │                 Sonic                 │
+                         │    sec/op    │    sec/op      vs base                │    sec/op      vs base                │
+_Marshal_Tiny-14           63.40n ± ∞ ¹   163.70n ± ∞ ¹  +158.20% (p=0.008 n=5)   199.00n ± ∞ ¹  +213.88% (p=0.008 n=5)
+_Marshal_Small-14          163.5n ± ∞ ¹    589.9n ± ∞ ¹  +260.80% (p=0.008 n=5)    794.2n ± ∞ ¹  +385.75% (p=0.008 n=5)
+_Marshal_EscapeHeavy-14    999.3n ± ∞ ¹   2842.0n ± ∞ ¹  +184.40% (p=0.008 n=5)   3893.0n ± ∞ ¹  +289.57% (p=0.008 n=5)
+_Marshal_KubePods-14       2.840µ ± ∞ ¹   13.946µ ± ∞ ¹  +391.06% (p=0.008 n=5)   20.195µ ± ∞ ¹  +611.09% (p=0.008 n=5)
+_Marshal_Twitter-14        44.33µ ± ∞ ¹   266.53µ ± ∞ ¹  +501.22% (p=0.008 n=5)   224.23µ ± ∞ ¹  +405.80% (p=0.008 n=5)
+_Marshal_TwitterTyped-14   35.30µ ± ∞ ¹   213.61µ ± ∞ ¹  +505.18% (p=0.008 n=5)   176.12µ ± ∞ ¹  +398.97% (p=0.008 n=5)
+_Marshal_MapAny-14         8.673µ ± ∞ ¹   57.480µ ± ∞ ¹  +562.75% (p=0.008 n=5)   58.892µ ± ∞ ¹  +579.03% (p=0.008 n=5)
+geomean                    2.353µ          10.33µ        +338.90%                  11.64µ        +394.58%
+¹ need >= 6 samples for confidence interval at level 0.95
+
+                         │     Velox      │               StdJSON                │                 Sonic                 │
+                         │      B/s       │      B/s       vs base               │      B/s        vs base               │
+_Marshal_Tiny-14           1654.5Mi ± ∞ ¹   641.0Mi ± ∞ ¹  -61.26% (p=0.008 n=5)    527.0Mi ± ∞ ¹  -68.14% (p=0.008 n=5)
+_Marshal_Small-14          2129.2Mi ± ∞ ¹   590.0Mi ± ∞ ¹  -72.29% (p=0.008 n=5)    438.3Mi ± ∞ ¹  -79.42% (p=0.008 n=5)
+_Marshal_EscapeHeavy-14    2681.7Mi ± ∞ ¹   942.9Mi ± ∞ ¹  -64.84% (p=0.008 n=5)    688.4Mi ± ∞ ¹  -74.33% (p=0.008 n=5)
+_Marshal_KubePods-14       4423.2Mi ± ∞ ¹   900.9Mi ± ∞ ¹  -79.63% (p=0.008 n=5)    622.1Mi ± ∞ ¹  -85.94% (p=0.008 n=5)
+_Marshal_Twitter-14        5540.2Mi ± ∞ ¹   921.5Mi ± ∞ ¹  -83.37% (p=0.008 n=5)   1095.3Mi ± ∞ ¹  -80.23% (p=0.008 n=5)
+_Marshal_TwitterTyped-14    6.795Gi ± ∞ ¹   1.123Gi ± ∞ ¹  -83.48% (p=0.008 n=5)    1.362Gi ± ∞ ¹  -79.96% (p=0.008 n=5)
+_Marshal_MapAny-14         1446.0Mi ± ∞ ¹   218.2Mi ± ∞ ¹  -84.91% (p=0.008 n=5)    212.9Mi ± ∞ ¹  -85.27% (p=0.008 n=5)
+geomean                     2.956Gi         689.7Mi        -77.22%                  612.1Mi        -79.78%
+¹ need >= 6 samples for confidence interval at level 0.95
+
+                         │     Velox     │                 StdJSON                 │                 Sonic                 │
+                         │     B/op      │     B/op       vs base                  │     B/op       vs base                │
+_Marshal_Tiny-14             112.0 ± ∞ ¹     112.0 ± ∞ ¹         ~ (p=1.000 n=5) ²     128.0 ± ∞ ¹   +14.29% (p=0.008 n=5)
+_Marshal_Small-14            384.0 ± ∞ ¹     384.0 ± ∞ ¹         ~ (p=1.000 n=5) ²     400.0 ± ∞ ¹    +4.17% (p=0.008 n=5)
+_Marshal_EscapeHeavy-14    3.000Ki ± ∞ ¹   3.000Ki ± ∞ ¹         ~ (p=1.000 n=5) ²   3.017Ki ± ∞ ¹    +0.55% (p=0.008 n=5)
+_Marshal_KubePods-14       13.25Ki ± ∞ ¹   14.14Ki ± ∞ ¹    +6.72% (p=0.008 n=5)     13.83Ki ± ∞ ¹    +4.39% (p=0.008 n=5)
+_Marshal_Twitter-14        256.0Ki ± ∞ ¹   292.1Ki ± ∞ ¹   +14.07% (p=0.008 n=5)     265.9Ki ± ∞ ¹    +3.84% (p=0.008 n=5)
+_Marshal_TwitterTyped-14   256.1Ki ± ∞ ¹   256.0Ki ± ∞ ¹    -0.02% (p=0.008 n=5)     256.0Ki ± ∞ ¹         ~ (p=0.786 n=5)
+_Marshal_MapAny-14         13.25Ki ± ∞ ¹   51.20Ki ± ∞ ¹  +286.45% (p=0.008 n=5)     30.06Ki ± ∞ ¹  +126.84% (p=0.008 n=5)
+geomean                    7.564Ki         9.436Ki         +24.76%                   8.825Ki         +16.68%
+¹ need >= 6 samples for confidence interval at level 0.95
+² all samples are equal
+
+                         │    Velox    │                   StdJSON                   │                  Sonic                  │
+                         │  allocs/op  │   allocs/op     vs base                     │   allocs/op    vs base                  │
+_Marshal_Tiny-14           1.000 ± ∞ ¹      1.000 ± ∞ ¹            ~ (p=1.000 n=5) ²     2.000 ± ∞ ¹    +100.00% (p=0.008 n=5)
+_Marshal_Small-14          1.000 ± ∞ ¹      1.000 ± ∞ ¹            ~ (p=1.000 n=5) ²     2.000 ± ∞ ¹    +100.00% (p=0.008 n=5)
+_Marshal_EscapeHeavy-14    1.000 ± ∞ ¹      1.000 ± ∞ ¹            ~ (p=1.000 n=5) ²     2.000 ± ∞ ¹    +100.00% (p=0.008 n=5)
+_Marshal_KubePods-14       1.000 ± ∞ ¹     31.000 ± ∞ ¹    +3000.00% (p=0.008 n=5)       8.000 ± ∞ ¹    +700.00% (p=0.008 n=5)
+_Marshal_Twitter-14        1.000 ± ∞ ¹   1111.000 ± ∞ ¹  +111000.00% (p=0.008 n=5)     106.000 ± ∞ ¹  +10500.00% (p=0.008 n=5)
+_Marshal_TwitterTyped-14   1.000 ± ∞ ¹      1.000 ± ∞ ¹            ~ (p=1.000 n=5) ²     2.000 ± ∞ ¹    +100.00% (p=0.008 n=5)
+_Marshal_MapAny-14         1.000 ± ∞ ¹   1234.000 ± ∞ ¹  +123300.00% (p=0.008 n=5)     181.000 ± ∞ ¹  +18000.00% (p=0.008 n=5)
+geomean                    1.000            12.30          +1129.62%                     8.182          +718.25%
+¹ need >= 6 samples for confidence interval at level 0.95
+² all samples are equal
