@@ -9,6 +9,7 @@
 //
 //	-o <file>           Output file (required)
 //	-export-prefix <s>  Demote non-matching symbols to local (ELF/PE only)
+//	-no-adrp-patch      Disable ADRP→ADR patching (ARM64)
 //	-q                  Quiet mode
 package main
 
@@ -27,6 +28,7 @@ with zero relocations. Format is auto-detected by magic bytes.
 Flags:
   -o <file>           Output file (required)
   -export-prefix <s>  Demote non-matching symbols to local (ELF/PE only)
+  -no-adrp-patch      Disable ADRP→ADR patching (ARM64); uses 4096 alignment instead
   -q                  Quiet mode
 `)
 	os.Exit(2)
@@ -72,6 +74,7 @@ func main() {
 	var input string
 	var exportPrefix string
 	quiet := false
+	noADRPPatch := false
 
 	args := os.Args[1:]
 	for i := 0; i < len(args); i++ {
@@ -90,6 +93,8 @@ func main() {
 			exportPrefix = args[i]
 		case "-q":
 			quiet = true
+		case "-no-adrp-patch":
+			noADRPPatch = true
 		case "-h", "--help":
 			usage()
 		default:
@@ -140,12 +145,17 @@ func main() {
 	}
 
 	// Step 3: ADRP patching (ARM64 only)
-	if result.IsARM64 {
+	if result.IsARM64 && !noADRPPatch {
 		patched, err := patchADRPtoADR(result.Blob, result.CodeExtent, result.BlobExtent, quiet)
 		if err != nil {
 			fatalf("ADRP patching failed: %v", err)
 		}
 		result.Blob = patched
+	}
+	// When ADRP patch is disabled, .text needs 4096 alignment so that
+	// page-relative relocations resolve correctly at link time.
+	if result.IsARM64 && noADRPPatch {
+		result.TextAlign = 4096
 	}
 
 	// Step 4: export-prefix demote (ELF and PE only)
@@ -172,7 +182,7 @@ func main() {
 	// Step 5: write output
 	switch format {
 	case "elf":
-		if err := writeRelocatableELF(output, result.Blob, result.Syms, result.ELFMachine); err != nil {
+		if err := writeRelocatableELF(output, result.Blob, result.Syms, result.ELFMachine, result.TextAlign); err != nil {
 			fatalf("writing output: %v", err)
 		}
 	case "macho":

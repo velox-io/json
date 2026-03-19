@@ -26,6 +26,7 @@ type ExtractResult struct {
 	CodeExtent uint64        // end of code region (for ADRP scan range)
 	BlobExtent uint64        // total blob size (code + rodata/data)
 	IsARM64    bool          // whether ARM64 ADRP patching is needed
+	TextAlign  uint64        // .text section alignment override (0 = use default)
 	ELFMachine elf.Machine   // ELF machine type (only for ELF output)
 	COFFMachine uint16       // COFF machine type (only for PE/COFF output)
 	BuildVer   *BuildVersion // Mach-O build version (only for Mach-O output)

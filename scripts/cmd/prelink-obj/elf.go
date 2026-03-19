@@ -106,7 +106,7 @@ func findCodeExtent(syms []SymInfo) uint64 {
 //   - A single .text section containing the provided code+data blob
 //   - Local and global function symbols at their correct offsets
 //   - Zero relocation entries
-func writeRelocatableELF(path string, textData []byte, syms []SymInfo, machine elf.Machine) error {
+func writeRelocatableELF(path string, textData []byte, syms []SymInfo, machine elf.Machine, textAlign uint64) error {
 	var buf bytes.Buffer
 
 	// Sort symbols: locals first, then globals
@@ -171,7 +171,11 @@ func writeRelocatableELF(path string, textData []byte, syms []SymInfo, machine e
 	ehdrSize := 64
 	shdrSize := 64
 
-	textOff := align(uint64(ehdrSize), 64)
+	if textAlign == 0 {
+		textAlign = 64
+	}
+
+	textOff := align(uint64(ehdrSize), textAlign)
 	textEnd := textOff + uint64(len(textData))
 
 	symtabOff := align(textEnd, 8)
@@ -229,7 +233,7 @@ func writeRelocatableELF(path string, textData []byte, syms []SymInfo, machine e
 		Flags:     uint64(elf.SHF_ALLOC | elf.SHF_EXECINSTR),
 		Off:       textOff,
 		Size:      uint64(len(textData)),
-		Addralign: 64,
+		Addralign: textAlign,
 	})
 
 	writeShdr(&buf, elf.Section64{ // Section 2: .note.GNU-stack
