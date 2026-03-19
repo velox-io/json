@@ -1,8 +1,5 @@
-// prelink-obj converts a shared library (ELF .so or Mach-O dylib) into a
-// relocatable object with zero relocations.
-//
-// This unified tool replaces both so-to-obj (ELF) and dylib_to_obj.py (Mach-O).
-// Format is auto-detected by magic bytes.
+// prelink-obj converts a shared library (ELF .so, Mach-O dylib, or Windows
+// PE DLL) into a relocatable object with zero relocations.
 //
 // Usage:
 //
@@ -11,7 +8,7 @@
 // Flags:
 //
 //	-o <file>           Output file (required)
-//	-export-prefix <s>  Demote non-matching symbols to local (ELF only)
+//	-export-prefix <s>  Demote non-matching symbols to local (ELF/PE only)
 //	-q                  Quiet mode
 package main
 
@@ -24,12 +21,12 @@ import (
 func usage() {
 	fmt.Fprintf(os.Stderr, `Usage: prelink-obj [flags] -o <output> <input>
 
-Converts a shared library (.so or .dylib) into a relocatable object
+Converts a shared library (.so, .dylib, or .dll) into a relocatable object
 with zero relocations. Format is auto-detected by magic bytes.
 
 Flags:
   -o <file>           Output file (required)
-  -export-prefix <s>  Demote non-matching symbols to local (ELF only)
+  -export-prefix <s>  Demote non-matching symbols to local (ELF/PE only)
   -q                  Quiet mode
 `)
 	os.Exit(2)
@@ -60,6 +57,10 @@ func detectFormat(path string) string {
 	// Mach-O 64-bit: 0xFEEDFACF (little-endian)
 	if magic[0] == 0xCF && magic[1] == 0xFA && magic[2] == 0xED && magic[3] == 0xFE {
 		return "macho"
+	}
+	// PE/COFF: MZ header
+	if magic[0] == 0x4D && magic[1] == 0x5A {
+		return "pe"
 	}
 
 	fatalf("unrecognized file format (magic: %02X %02X %02X %02X)", magic[0], magic[1], magic[2], magic[3])
@@ -124,6 +125,8 @@ func main() {
 		result, err = extractFromELF(input)
 	case "macho":
 		result, err = extractFromMachO(input)
+	case "pe":
+		result, err = extractFromPE(input)
 	}
 	if err != nil {
 		fatalf("%v", err)
@@ -145,8 +148,8 @@ func main() {
 		result.Blob = patched
 	}
 
-	// Step 4: export-prefix demote (ELF only)
-	if exportPrefix != "" && format == "elf" {
+	// Step 4: export-prefix demote (ELF and PE only)
+	if exportPrefix != "" && (format == "elf" || format == "pe") {
 		for i := range result.Syms {
 			if !result.Syms[i].Local && !strings.HasPrefix(result.Syms[i].Name, exportPrefix) {
 				result.Syms[i].Local = true
@@ -176,11 +179,20 @@ func main() {
 		if err := writeMachOObject(output, result.Blob, result.Syms, result.BuildVer); err != nil {
 			fatalf("writing output: %v", err)
 		}
+	case "pe":
+		if err := writeCOFFObject(output, result.Blob, result.Syms, result.COFFMachine); err != nil {
+			fatalf("writing output: %v", err)
+		}
 	}
 
-	// Step 6: verify (ELF only — Mach-O verification would need debug/macho which lacks needed features)
-	if format == "elf" {
+	// Step 6: verify
+	switch format {
+	case "elf":
 		if err := verifyELFOutput(output); err != nil {
+			fatalf("verification failed: %v", err)
+		}
+	case "pe":
+		if err := verifyCOFFOutput(output); err != nil {
 			fatalf("verification failed: %v", err)
 		}
 	}

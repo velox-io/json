@@ -1,4 +1,4 @@
-//go:build !(darwin && arm64) && !(linux && arm64) && !(linux && amd64)
+//go:build !(darwin && arm64) && !(linux && arm64) && !(linux && amd64) && !(windows && amd64)
 
 package encvm
 

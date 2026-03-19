@@ -77,14 +77,20 @@ TARGET_ARCH ?= $(_HOST_ARCH)
 # Set NO_PRELINK=1 to disable prelink path in scripts/gen-natives.sh
 GEN_NATIVE_PRELINK_FLAG := $(if $(NO_PRELINK),--no-prelink,)
 
+# Auto-detect cross-compilation: use zig when target differs from host
+_IS_CROSS := $(if $(or \
+  $(filter-out $(_HOST_OS),$(TARGET_OS)), \
+  $(filter-out $(_HOST_ARCH),$(TARGET_ARCH))),1,)
+_AUTO_ZIG := $(or $(USE_ZIG),$(_IS_CROSS))
+
 gen:
-	@bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
+	@bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
 		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
 # Generate native artifacts optimized using AutoFDO sample profile data.
 # Requires local/pgo-data/merged.profdata (generated via perf + create_llvm_prof).
 gen-with-pgo:
-	@bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) --pgo-use \
+	@bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) --pgo-use \
 		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
 # Generate native artifacts for debugging:
@@ -92,7 +98,7 @@ gen-with-pgo:
 # - keep richer syso symbols for native debugging
 # Use with: go test -tags vjdebug -run TestFoo -v
 gen-debug:
-	@EXTRA_CFLAGS="-DVJ_ENCVM_DEBUG" DEBUG_SYMBOLS=1 bash scripts/gen-natives.sh $(if $(USE_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
+	@EXTRA_CFLAGS="-DVJ_ENCVM_DEBUG" DEBUG_SYMBOLS=1 bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
 		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
 # Generate benchmark visualization SVG

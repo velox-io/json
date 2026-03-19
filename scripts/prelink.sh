@@ -47,6 +47,9 @@
 #     Darwin (Mach-O):
 #       1. Link with -dynamiclib + export list to resolve all relocations
 #       2. Use prelink-obj tool to convert dylib to MH_OBJECT
+#     Windows (PE/COFF):
+#       1. Link with -shared to produce a DLL (requires DllMain stub)
+#       2. Use prelink-obj tool to extract exports and produce raw COFF .o
 #
 #   The output has zero relocations — it can be used as input to any downstream
 #   linker without needing to resolve any relocations.
@@ -226,43 +229,93 @@ compile_asm() {
 }
 
 # ============================================================
-#  Link functions (platform-specific)
+#  Prelink functions (platform-specific)
+#
+#  Each function encapsulates the full pipeline for its platform:
+#    link → (optional export filtering) → prelink-obj conversion
 # ============================================================
 
-# Link ELF shared object (linux)
-link_elf_shared() {
-    local out="$1"
-    local ldscript="$2"
-    shift 2
+# Derive export prefix from EXPORT_LIST (shared by ELF and Windows)
+get_export_prefix() {
+    if [ -n "$EXPORT_LIST" ] && [ -f "$EXPORT_LIST" ]; then
+        local first_sym=$(grep -m1 . "$EXPORT_LIST")
+        if [ -n "$first_sym" ]; then
+            # Strip the last two underscore-delimited tokens (mode and isa)
+            # e.g. "vj_vm_exec_fast_sse42" → "vj_vm_exec"
+            printf '%s' "$first_sym" | sed 's/_[^_]*_[^_]*$//'
+        fi
+    fi
+}
+
+# Run prelink-obj with optional export prefix and quiet flag
+run_prelink_obj() {
+    local output="$1"
+    local input="$2"
+    local prefix="$3"
+
+    local flags=""
+    [ -n "$prefix" ] && flags="-export-prefix $prefix"
+    [ "$QUIET" = true ] && flags="-q $flags"
+
+    "$PRELINK_OBJ" $flags -o "$output" "$input"
+}
+
+# ELF (Linux, etc.): -shared + linker script → prelink-obj
+prelink_elf() {
+    local output="$1"
+    shift
     local objs="$@"
+    local merged_so="$WORKDIR/${BASENAME_NOEXT}.so"
     local lto_flag=""
     [ "$LTO" = true ] && lto_flag="-flto"
+
+    # Create linker script that merges .rodata into .text
+    # The ALIGN(64) ensures SIMD constant tables are properly aligned
+    cat > "$TMPDIR/merge.ld" << 'LDEOF'
+PHDRS {
+  text PT_LOAD FLAGS(5); /* R_X = 4 | 1 = 5 */
+}
+SECTIONS {
+  .text : {
+    *(.text*)
+    . = ALIGN(64);
+    *(.rodata*)
+    *(.rodata.cst16*)
+    *(.rodata.cst32*)
+  } :text
+  /DISCARD/ : {
+    *(.comment)
+    *(.note*)
+    *(.debug*)
+    *(.eh_frame*)
+  }
+}
+LDEOF
 
     # -Bsymbolic-functions: bind function references to local definitions,
     #   preventing PLT indirection for internal calls. Without this, the linker
     #   creates PLT stubs for exported functions called within the same .so,
-    #   which land outside .text and are lost during so-to-obj extraction.
+    #   which land outside .text and are lost during prelink-obj extraction.
     #   Note: zig's LLD does not support -Bsymbolic-functions, so we skip it.
     local symbolic_flag=""
     case "$COMPILER" in
-        clang)
-            symbolic_flag="-Wl,-Bsymbolic-functions"
-            ;;
-        zig)
-            # LLD doesn't support -Bsymbolic-functions, but the so-to-obj
-            # tool handles symbol resolution correctly anyway.
-            symbolic_flag=""
-            ;;
+        clang) symbolic_flag="-Wl,-Bsymbolic-functions" ;;
+        zig)   symbolic_flag="" ;;
     esac
 
-    $CC_CMD -shared $lto_flag -nostdlib $symbolic_flag -Wl,--build-id=none -Wl,-T,"$ldscript" $objs -o "$out"
+    log "  Linking..."
+    $CC_CMD -shared $lto_flag -nostdlib $symbolic_flag -Wl,--build-id=none -Wl,-T,"$TMPDIR/merge.ld" $objs -o "$merged_so"
+
+    log "  Creating object file..."
+    run_prelink_obj "$output" "$merged_so" "$(get_export_prefix)"
 }
 
-# Link Darwin dylib
-link_darwin_dylib() {
-    local out="$1"
+# Darwin (Mach-O): -dynamiclib → prelink-obj
+prelink_darwin() {
+    local output="$1"
     shift
     local objs="$@"
+    local dylib_tmp="$WORKDIR/${BASENAME_NOEXT}.dylib"
     local lto_flag=""
     [ "$LTO" = true ] && lto_flag="-flto"
 
@@ -270,13 +323,40 @@ link_darwin_dylib() {
     if [ -n "$EXPORT_LIST" ] && [ -f "$EXPORT_LIST" ]; then
         # zig's Mach-O LLD does not support -exported_symbols_list;
         # skip the flag when cross-compiling with zig. The extra exported
-        # symbols are harmless — dylib_to_obj.py extracts all N_EXT symbols.
+        # symbols are harmless — prelink-obj extracts all N_EXT symbols.
         if [ "$COMPILER" != "zig" ]; then
             export_flag="-Wl,-exported_symbols_list,$EXPORT_LIST"
         fi
     fi
 
-    $CC_CMD -O3 $lto_flag -dynamiclib $export_flag $objs -o "$out"
+    log "  Linking dylib..."
+    log "    $dylib_tmp"
+    $CC_CMD -O3 $lto_flag -dynamiclib $export_flag $objs -o "$dylib_tmp"
+
+    log "  Converting dylib to object..."
+    run_prelink_obj "$output" "$dylib_tmp" ""
+}
+
+# Windows (PE/COFF): -shared DLL → prelink-obj
+prelink_windows() {
+    local output="$1"
+    shift
+    local objs="$@"
+    local dll_tmp="$WORKDIR/${BASENAME_NOEXT}.dll"
+    local lto_flag=""
+    [ "$LTO" = true ] && lto_flag="-flto"
+
+    # Compile a minimal DllMain stub (required for -shared on Windows)
+    log "  Compiling DllMain stub..."
+    echo 'int _DllMainCRTStartup(void *h, unsigned r, void *p) { (void)h; (void)r; (void)p; return 1; }' > "$TMPDIR/dllmain.c"
+    $CC_CMD -c "$TMPDIR/dllmain.c" -o "$TMPDIR/dllmain.obj"
+
+    log "  Linking DLL..."
+    log "    $dll_tmp"
+    $CC_CMD -shared $lto_flag -nostdlib -fno-sanitize=undefined $objs "$TMPDIR/dllmain.obj" -o "$dll_tmp"
+
+    log "  Converting DLL to COFF object..."
+    run_prelink_obj "$output" "$dll_tmp" "$(get_export_prefix)"
 }
 
 # ============================================================
@@ -340,74 +420,11 @@ if [ ! -x "$PRELINK_OBJ" ]; then
     (cd "$REPO_ROOT/scripts/cmd/prelink-obj" && go build -o "$PRELINK_OBJ" .)
 fi
 
-if [ "$TARGET_OS" = "darwin" ]; then
-    # ── Darwin (Mach-O): -dynamiclib → prelink-obj ──
-    DYLIB_TMP="$WORKDIR/${BASENAME_NOEXT}.dylib"
-
-    log "  Linking dylib..."
-    log "    $DYLIB_TMP"
-    link_darwin_dylib "$DYLIB_TMP" $ALL_OBJS
-
-    log "  Converting dylib to object..."
-    if [ "$QUIET" = true ]; then
-        "$PRELINK_OBJ" -q -o "$OUTPUT" "$DYLIB_TMP"
-    else
-        "$PRELINK_OBJ" -o "$OUTPUT" "$DYLIB_TMP"
-    fi
-else
-    # ── ELF (Linux, Windows, etc.): -shared + linker script → prelink-obj ──
-    MERGED_SO="$WORKDIR/${BASENAME_NOEXT}.so"
-
-    # Create linker script that merges .rodata into .text
-    # The ALIGN(64) ensures SIMD constant tables are properly aligned
-    cat > "$TMPDIR/merge.ld" << 'EOF'
-PHDRS {
-  text PT_LOAD FLAGS(5); /* R_X = 4 | 1 = 5 */
-}
-SECTIONS {
-  .text : {
-    *(.text*)
-    . = ALIGN(64);
-    *(.rodata*)
-    *(.rodata.cst16*)
-    *(.rodata.cst32*)
-  } :text
-  /DISCARD/ : {
-    *(.comment)
-    *(.note*)
-    *(.debug*)
-    *(.eh_frame*)
-  }
-}
-EOF
-
-    log "  Linking..."
-    link_elf_shared "$MERGED_SO" "$TMPDIR/merge.ld" $ALL_OBJS
-
-    # Build prelink-obj flags.
-    # If EXPORT_LIST is provided, derive an export prefix from the first symbol
-    # in the list and pass it via -export-prefix so that prelink-obj demotes
-    # non-matching symbols to STB_LOCAL in the output ET_REL.
-    # This avoids using --version-script during LTO linking, which would change
-    # symbol visibility and alter the optimizer's inlining decisions.
-    PRELINK_FLAGS=""
-    if [ -n "$EXPORT_LIST" ] && [ -f "$EXPORT_LIST" ]; then
-        # Read the first non-empty symbol and strip trailing _<mode>_<isa> suffix
-        # to get the bare prefix (e.g. "vj_vm_exec_fast_sse42" → "vj_vm_exec").
-        _first_sym=$(grep -m1 . "$EXPORT_LIST")
-        if [ -n "$_first_sym" ]; then
-            # Strip the last two underscore-delimited tokens (mode and isa)
-            _prefix=$(printf '%s' "$_first_sym" | sed 's/_[^_]*_[^_]*$//')
-            PRELINK_FLAGS="-export-prefix $_prefix"
-        fi
-    fi
-
-    log "  Creating object file..."
-    if [ "$QUIET" = true ]; then
-        "$PRELINK_OBJ" -q $PRELINK_FLAGS -o "$OUTPUT" "$MERGED_SO"
-    else
-        "$PRELINK_OBJ" $PRELINK_FLAGS -o "$OUTPUT" "$MERGED_SO"
-    fi
-fi
+case "$TARGET_OS" in
+    darwin)  prelink_darwin  "$OUTPUT" $ALL_OBJS ;;
+    windows) prelink_windows "$OUTPUT" $ALL_OBJS ;;
+    linux)   prelink_elf     "$OUTPUT" $ALL_OBJS ;;
+    *)       echo "Error: unsupported target OS: $TARGET_OS"; exit 1 ;;
+esac
 
 log "  Done: $OUTPUT ($(wc -c < "$OUTPUT" | tr -d ' ') bytes)"

@@ -36,11 +36,6 @@ func parseEightDigits(src []byte, i int) uint32 {
 //   - Tier 3 — strconv.ParseFloat: handles all remaining cases (>19 digits,
 //     ambiguous rounding, extreme exponents) via Go's standard library.
 func scanFloat64(src []byte, idx int) (end int, value float64, err error) {
-	const (
-		mantissaBits = 52    // float64 explicit mantissa width
-		exponentBias = -1023 // float64 exponent bias
-	)
-
 	length := len(src)
 	pos := idx
 	negative := false

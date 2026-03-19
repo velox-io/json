@@ -331,7 +331,7 @@ elif [ "$TARGET_OS" = "linux" ] && [ "$TARGET_ARCH" = "arm64" ]; then
     echo "Note: LTO disabled for linux/arm64 (prelink uses native object format, not LLVM IR bitcode)"
 elif [ "$TARGET_OS" = "windows" ]; then
     USE_LTO=false
-    echo "Note: LTO disabled (windows uses relocatable -r path which requires native object format, not LLVM IR bitcode)"
+    echo "Note: LTO disabled for windows (zig cc -shared does not support -flto for COFF/PE targets)"
 fi
 
 LTO_FLAG=""
@@ -348,11 +348,14 @@ fi
 # Clang 21+ (LLVM 21) deprecated this flag — -mavx512f alone is sufficient.
 # Probe the compiler to decide.
 _EVEX512_FLAG=""
-if $CC -mevex512 -xc -c /dev/null -o /dev/null 2>&1 | grep -q 'deprecated'; then
+_evex_probe_dir=$(mktemp -d)
+: > "$_evex_probe_dir/probe.c"
+if $CC -mevex512 -xc -c "$_evex_probe_dir/probe.c" -o "$_evex_probe_dir/probe.o" 2>&1 | grep -q 'deprecated'; then
     : # Clang 21+: flag deprecated, not needed
 else
     _EVEX512_FLAG="-mevex512"
 fi
+rm -rf "$_evex_probe_dir"
 
 get_isa_flags() {
     case "$1" in
@@ -533,16 +536,13 @@ done
 #  Link each mode×ISA into separate .syso
 #
 #  Strategy based on target platform (default):
-#  - darwin, linux/amd64: prelink (LTO link → extract .text → zero-relocation object)
-#  - linux/arm64, windows: ld -r (simple relocatable link)
+#  - darwin, linux, windows: prelink (LTO link → extract .text → zero-relocation object)
 #
 #  Override:
 #  - --no-prelink / NO_PRELINK=1: force ld -r / zig ld.lld -r for all platforms
 #
 #  Each (mode, isa) combination produces one syso.
 #  - prelink path: each syso contains stdlib + extra + mode/isa main object
-#  - relocatable path: stdlib + extra are linked into the first syso only;
-#    remaining sysos contain only their mode/isa main object
 # ============================================================
 
 echo ""
@@ -552,6 +552,7 @@ needs_prelink() {
     if [ "$DISABLE_PRELINK" = true ]; then return 1; fi
     if [ "$TARGET_OS" = "darwin" ]; then return 0; fi
     if [ "$TARGET_OS" = "linux" ]; then return 0; fi
+    if [ "$TARGET_OS" = "windows" ]; then return 0; fi
     return 1
 }
 
@@ -573,6 +574,12 @@ for isa in $ISAS; do
         echo "Linking $SYSO_NAME..."
 
         if needs_prelink; then
+            # Prelink path (darwin, linux, windows):
+            # Each syso is fully linked from stdlib + extra + main, then
+            # prelink-obj strips all relocations. Since every syso contains
+            # the same stdlib/extra code, the export filter below demotes
+            # internal symbols to local, keeping only vj_vm_exec_<mode>_<isa>
+            # as global — otherwise Go's linker would see duplicate definitions.
             LINK_OBJS="$STDLIB_OBJS $EXTRA_OBJS $MAIN_OBJ"
 
             ZIG_TARGET=$(get_zig_target "$TARGET_OS" "$TARGET_ARCH")
@@ -581,19 +588,16 @@ for isa in $ISAS; do
                 PRELINK_FLAGS="-l $PRELINK_FLAGS"
             fi
 
-            # Export symbol list: keep only vj_vm_exec_* as global symbols.
-            # This is required on Darwin even in debug mode — without the
-            # export filter, internal helpers (e.g. us_write_float32) stay
-            # N_EXT in the dylib, and dylib_to_obj.py extracts them into
-            # every .syso file, causing duplicate symbol errors in Go's linker.
-            # Debug info (DWARF) is not affected by symbol visibility.
+            # Export symbol list: keep only vj_vm_exec_* as global.
+            # Without this, internal helpers (e.g. us_write_float32) remain
+            # global in every syso, causing duplicate symbol errors.
             if [ -n "${EXPORT_SYMBOL_PREFIX:-}" ]; then
                 EXPORT_LIST="$OUTPUT_DIR/_exports_${mode}_${isa}.txt"
                 if [ "$TARGET_OS" = "darwin" ]; then
                     # macOS ld: symbol names must be prefixed with '_'
                     echo "_${EXPORT_SYMBOL_PREFIX}_${mode}_${isa}" > "$EXPORT_LIST"
                 else
-                    # ELF ld: no leading underscore
+                    # ELF/COFF: no leading underscore
                     echo "${EXPORT_SYMBOL_PREFIX}_${mode}_${isa}" > "$EXPORT_LIST"
                 fi
                 PRELINK_FLAGS="$PRELINK_FLAGS -e $EXPORT_LIST"
