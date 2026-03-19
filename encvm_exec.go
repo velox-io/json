@@ -59,6 +59,16 @@ func (m *Marshaler) encodeArrayNative(dec *ArrayCodec, base unsafe.Pointer) erro
 	return m.execVM(bp, base)
 }
 
+// encodeMapNative is the native VM entry point for top-level map encoding.
+// Only used for string-keyed maps where MAP_STR_ITER can iterate in C.
+func (m *Marshaler) encodeMapNative(dec *MapCodec, ptr unsafe.Pointer) error {
+	bp := dec.getBlueprint()
+	if bp == nil || len(bp.Ops) == 0 {
+		return m.encodeMapFallback(dec, ptr)
+	}
+	return m.execVM(bp, ptr)
+}
+
 // execVM runs the C VM engine with the given Blueprint and data base pointer.
 // It manages the Go↔C interaction loop including buffer growth, yield handling,
 // and interface cache management.
