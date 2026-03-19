@@ -7,10 +7,8 @@ import (
 	"unsafe"
 )
 
-// ================================================================
 // Benchmark structs: all fields are native-encoder eligible
 // (no floats, slices, maps, pointers, interfaces, omitempty).
-// ================================================================
 
 // benchFlat5 — small flat struct, 5 fields.
 type benchFlat5 struct {
@@ -125,9 +123,7 @@ type benchWide struct {
 	F15 int64  `json:"f15"`
 }
 
-// ================================================================
 // Test data
-// ================================================================
 
 var (
 	flat5Val = benchFlat5{
@@ -177,9 +173,7 @@ var (
 	}
 )
 
-// ================================================================
 // Helper: force Go-only encoding path through Marshaler.
-// ================================================================
 
 func marshalGoOnly[T any](v *T) ([]byte, error) {
 	m := getMarshaler()
@@ -200,9 +194,7 @@ func marshalGoOnly[T any](v *T) ([]byte, error) {
 	return m.finalize(), nil
 }
 
-// ================================================================
 // Flat5 benchmarks
-// ================================================================
 
 func BenchmarkMarshal_Flat5_Native(b *testing.B) {
 	b.ReportAllocs()
@@ -222,9 +214,7 @@ func BenchmarkMarshal_Flat5_GoOnly(b *testing.B) {
 	}
 }
 
-// ================================================================
 // Flat10 benchmarks
-// ================================================================
 
 func BenchmarkMarshal_Flat10_Native(b *testing.B) {
 	b.ReportAllocs()
@@ -244,9 +234,7 @@ func BenchmarkMarshal_Flat10_GoOnly(b *testing.B) {
 	}
 }
 
-// ================================================================
 // Nested (2-level) benchmarks
-// ================================================================
 
 func BenchmarkMarshal_Nested_Native(b *testing.B) {
 	b.ReportAllocs()
@@ -266,9 +254,7 @@ func BenchmarkMarshal_Nested_GoOnly(b *testing.B) {
 	}
 }
 
-// ================================================================
 // Deep (3-level) benchmarks
-// ================================================================
 
 func BenchmarkMarshal_Deep_Native(b *testing.B) {
 	b.ReportAllocs()
@@ -288,9 +274,7 @@ func BenchmarkMarshal_Deep_GoOnly(b *testing.B) {
 	}
 }
 
-// ================================================================
 // Deep5 (5-level nesting) benchmarks
-// ================================================================
 
 func BenchmarkMarshal_Deep5_Native(b *testing.B) {
 	b.ReportAllocs()
@@ -310,9 +294,7 @@ func BenchmarkMarshal_Deep5_GoOnly(b *testing.B) {
 	}
 }
 
-// ================================================================
 // MultiNest (3 nested struct siblings) benchmarks
-// ================================================================
 
 func BenchmarkMarshal_MultiNest_Native(b *testing.B) {
 	b.ReportAllocs()
@@ -332,9 +314,7 @@ func BenchmarkMarshal_MultiNest_GoOnly(b *testing.B) {
 	}
 }
 
-// ================================================================
 // Wide (15 fields) benchmarks
-// ================================================================
 
 func BenchmarkMarshal_Wide_Native(b *testing.B) {
 	b.ReportAllocs()
@@ -354,9 +334,7 @@ func BenchmarkMarshal_Wide_GoOnly(b *testing.B) {
 	}
 }
 
-// ================================================================
 // String-heavy benchmark (stress string escaping)
-// ================================================================
 
 type benchStringHeavy struct {
 	Title   string `json:"title"`
@@ -392,9 +370,7 @@ func BenchmarkMarshal_StringHeavy_GoOnly(b *testing.B) {
 	}
 }
 
-// ================================================================
 // Float-heavy benchmark (stress float formatting via Ryu)
-// ================================================================
 
 type benchWithFloats struct {
 	ID    int64   `json:"id"`
@@ -428,9 +404,7 @@ func BenchmarkMarshal_WithFloats_GoOnly(b *testing.B) {
 	}
 }
 
-// ================================================================
 // omitempty benchmark (mix of zero and non-zero fields)
-// ================================================================
 
 type benchOmitempty struct {
 	ID     int64   `json:"id"`
@@ -465,9 +439,7 @@ func BenchmarkMarshal_Omitempty_GoOnly(b *testing.B) {
 	}
 }
 
-// ================================================================
 // Slice of struct benchmarks
-// ================================================================
 
 // benchSliceItem — small struct for slice benchmarks.
 type benchSliceItem struct {

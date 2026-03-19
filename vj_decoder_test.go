@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// --- Basic Functionality ---
+// Basic Functionality
 
 func TestDecoder_SingleObject(t *testing.T) {
 	type Msg struct {
@@ -152,7 +152,7 @@ func TestDecoder_Struct(t *testing.T) {
 	}
 }
 
-// --- Buffer Management ---
+// Buffer Management
 
 func TestDecoder_SmallBuffer(t *testing.T) {
 	// Use a very small buffer to force multi-read for a single value.
@@ -284,7 +284,7 @@ func TestDecoder_LargeValue(t *testing.T) {
 	}
 }
 
-// --- Edge Cases ---
+// Edge Cases
 
 func TestDecoder_EmptyReader(t *testing.T) {
 	dec := NewDecoder(strings.NewReader(""))
@@ -329,7 +329,7 @@ func TestDecoder_NoTrailingWhitespace(t *testing.T) {
 	}
 }
 
-// --- Error Handling ---
+// Error Handling
 
 func TestDecoder_TruncatedInput(t *testing.T) {
 	dec := NewDecoder(strings.NewReader(`{"a":1`))
@@ -400,7 +400,7 @@ func TestDecoder_NotPointer(t *testing.T) {
 	}
 }
 
-// --- More() Method ---
+// More() Method
 
 func TestDecoder_More(t *testing.T) {
 	dec := NewDecoder(strings.NewReader(`1 2 3`))
@@ -444,7 +444,7 @@ func TestDecoder_MoreEmpty(t *testing.T) {
 	}
 }
 
-// --- Buffered() Method ---
+// Buffered() Method
 
 func TestDecoder_Buffered(t *testing.T) {
 	var buf bytes.Buffer
@@ -483,7 +483,7 @@ func TestDecoder_BufferedEmpty(t *testing.T) {
 	}
 }
 
-// --- Options ---
+// Options
 
 func TestDecoder_WithScanner(t *testing.T) {
 	// WithScanner is a no-op retained for API compatibility.
@@ -513,7 +513,7 @@ func TestDecoder_WithBufferSizeOption(t *testing.T) {
 	}
 }
 
-// --- Zero-Copy Safety ---
+// Zero-Copy Safety
 
 func TestDecoder_ZeroCopySafety(t *testing.T) {
 	// Decode multiple values and verify earlier strings remain intact
@@ -571,7 +571,7 @@ func TestDecoder_ZeroCopyAcrossBuffers(t *testing.T) {
 	}
 }
 
-// --- Compatibility with encoding/json.Decoder ---
+// Compatibility with encoding/json.Decoder
 
 func TestDecoder_CompatBasicStream(t *testing.T) {
 	input := `{"a":1} {"a":2} {"a":3}`
@@ -620,7 +620,7 @@ func TestDecoder_CompatEmptyInput(t *testing.T) {
 	}
 }
 
-// --- DecodeValue Generic Wrapper ---
+// DecodeValue Generic Wrapper
 
 func TestDecodeValue(t *testing.T) {
 	input := `{"name":"test","value":42}`
@@ -640,7 +640,7 @@ func TestDecodeValue(t *testing.T) {
 	}
 }
 
-// --- Escaped Strings ---
+// Escaped Strings
 
 func TestDecoder_EscapedStrings(t *testing.T) {
 	input := `{"s":"hello\nworld"} {"s":"tab\there"}`
@@ -667,7 +667,7 @@ func TestDecoder_EscapedStrings(t *testing.T) {
 	}
 }
 
-// --- Deeply Nested ---
+// Deeply Nested
 
 func TestDecoder_DeeplyNested(t *testing.T) {
 	// Build deeply nested JSON.
@@ -702,7 +702,7 @@ func TestDecoder_DeeplyNested(t *testing.T) {
 	}
 }
 
-// --- SkipErrors ---
+// SkipErrors
 
 func TestDecoder_SkipErrors_Basic(t *testing.T) {
 	// Mix of good and bad lines. Bad lines should be skipped.
@@ -843,7 +843,7 @@ func TestDecoder_SkipErrors_SmallBuffer(t *testing.T) {
 	}
 }
 
-// --- Benchmark ---
+// Benchmark
 
 func BenchmarkDecoder_SingleObject(b *testing.B) {
 	input := `{"name":"alice","age":30,"city":"wonderland","active":true}`

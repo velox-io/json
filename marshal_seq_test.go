@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// ---------------------------------------------------------------------------
 // TestMarshal_SeqFloat64 — []float64 via C-native sequence iterator
-// ---------------------------------------------------------------------------
 
 func TestMarshal_SeqFloat64(t *testing.T) {
 	type S struct {
@@ -40,9 +38,7 @@ func TestMarshal_SeqFloat64(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // TestMarshal_SeqInt — []int via C-native sequence iterator
-// ---------------------------------------------------------------------------
 
 func TestMarshal_SeqInt(t *testing.T) {
 	type S struct {
@@ -75,9 +71,7 @@ func TestMarshal_SeqInt(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // TestMarshal_SeqInt64 — []int64 via C-native sequence iterator
-// ---------------------------------------------------------------------------
 
 func TestMarshal_SeqInt64(t *testing.T) {
 	type S struct {
@@ -110,9 +104,7 @@ func TestMarshal_SeqInt64(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // TestMarshal_SeqString — []string via C-native sequence iterator
-// ---------------------------------------------------------------------------
 
 func TestMarshal_SeqString(t *testing.T) {
 	type S struct {
@@ -147,9 +139,7 @@ func TestMarshal_SeqString(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // TestMarshal_SeqOmitempty — sequence fields with omitempty tag
-// ---------------------------------------------------------------------------
 
 func TestMarshal_SeqOmitempty(t *testing.T) {
 	type S struct {
@@ -200,9 +190,7 @@ func TestMarshal_SeqOmitempty(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // TestMarshal_SeqPointer — pointer to sequence fields
-// ---------------------------------------------------------------------------
 
 func TestMarshal_SeqPointer(t *testing.T) {
 	type S struct {
@@ -240,9 +228,7 @@ func TestMarshal_SeqPointer(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // TestMarshal_SeqMultiField — struct with multiple seq fields of different types
-// ---------------------------------------------------------------------------
 
 func TestMarshal_SeqMultiField(t *testing.T) {
 	type S struct {
@@ -295,9 +281,7 @@ func TestMarshal_SeqMultiField(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // TestMarshal_SeqIndent — sequence fields with indentation
-// ---------------------------------------------------------------------------
 
 func TestMarshal_SeqIndent(t *testing.T) {
 	type S struct {
@@ -324,9 +308,7 @@ func TestMarshal_SeqIndent(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // TestMarshal_SeqEscapeHTML — sequence string fields with HTML escaping
-// ---------------------------------------------------------------------------
 
 func TestMarshal_SeqEscapeHTML(t *testing.T) {
 	type S struct {

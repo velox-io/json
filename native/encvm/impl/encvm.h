@@ -61,9 +61,7 @@
 #endif
 
 /* On Windows, __declspec(dllexport) is needed so that the entry function
- * appears in the PE export directory when linking as a DLL.  The prelink
- * pipeline (gen-natives.sh → prelink.sh → prelink-obj) links a temporary
- * DLL and extracts exported symbols to build the final .syso. */
+ * appears in the PE export directory when linking as a DLL.  */
 #ifdef _WIN32
 #define VJ_EXPORT __declspec(dllexport)
 #else

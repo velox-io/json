@@ -12,7 +12,7 @@ import (
 // All tests compare vjson output byte-for-byte with encoding/json to catch
 // key corruption bugs (e.g. stale KeyPoolBase after interface cache miss).
 
-// --- Test types (unexported, local to this file) ---
+// Test types (unexported, local to this file)
 
 type fnAddress struct {
 	City   string `json:"city"`
@@ -41,7 +41,7 @@ type fnProfile struct {
 	Age    int    `json:"age"`
 }
 
-// --- Tests ---
+// Tests
 
 // TestMarshal_StructFieldNames_StdlibCompat verifies that basic struct field
 // names with json tags produce output identical to encoding/json.

@@ -9,9 +9,7 @@ import (
 	"github.com/velox-io/json/native/encvm"
 )
 
-// ================================================================
 // OpType ↔ ElemTypeKind alignment + kindToOpcode
-// ================================================================
 
 func TestPrimitiveOpTypeAlignedWithElemTypeKind(t *testing.T) {
 	// Primitive opcodes 1-14 must equal the corresponding ElemTypeKind.
@@ -80,9 +78,7 @@ func TestKindToOpcodePanicsForStructural(t *testing.T) {
 	}
 }
 
-// ================================================================
 // Encoding flags bit position sanity check
-// ================================================================
 
 func TestEncFlagsBitPositions(t *testing.T) {
 	// escapeFlags bits 0-2 must not overlap with vjEncFloatExpAuto (bit 3).
@@ -92,9 +88,7 @@ func TestEncFlagsBitPositions(t *testing.T) {
 	}
 }
 
-// ================================================================
 // Phase 3: Assembly bridge integration tests
-// ================================================================
 
 func TestNativeEncodeStructBridgeAvailable(t *testing.T) {
 	// On darwin/arm64 the native encoder should be available.
@@ -104,9 +98,7 @@ func TestNativeEncodeStructBridgeAvailable(t *testing.T) {
 	}
 }
 
-// ================================================================
 // omitempty tests
-// ================================================================
 
 func TestNativeEncodeOmitemptyZeroValues(t *testing.T) {
 	// All zero-valued omitempty fields should be skipped.
@@ -278,9 +270,7 @@ func TestNativeEncodeOmitemptyConsistency(t *testing.T) {
 	}
 }
 
-// ================================================================
 // Hot Resume (breakpoint continuation) tests
-// ================================================================
 
 func TestHotResumeMapFieldMiddle(t *testing.T) {
 	// Map field in the middle: C handles ID, Go handles Tags, C resumes for Name.
@@ -1057,9 +1047,7 @@ func TestHotResumeConsistencyWithStdlib(t *testing.T) {
 	}
 }
 
-// ================================================================
 // []NativeStruct batch encoding tests
-// ================================================================
 
 func TestNativeSliceOfStruct(t *testing.T) {
 	if !encvm.Available {
@@ -1349,9 +1337,7 @@ func TestNativeSliceInStructField(t *testing.T) {
 	}
 }
 
-// ================================================================
 // []byte base64 encoding tests (VM path, verified against encoding/json)
-// ================================================================
 
 func TestNativeEncode_ByteSlice_StdlibCompat(t *testing.T) {
 	if !encvm.Available {

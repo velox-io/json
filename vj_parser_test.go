@@ -14,7 +14,7 @@ import (
 	"unsafe"
 )
 
-// ---------- Types for testing ----------
+// Types for testing
 
 type Float32Struct struct {
 	V float32 `json:"v"`
@@ -71,7 +71,7 @@ type AnyStruct struct {
 	V any `json:"v"`
 }
 
-// ---------- scanNumber: float32 ----------
+// scanNumber: float32
 
 func TestScanNumber_Float32(t *testing.T) {
 	var s Float32Struct
@@ -96,7 +96,7 @@ func TestScanNumber_Float32Null(t *testing.T) {
 	}
 }
 
-// ---------- scanNull: KindPointer ----------
+// scanNull: KindPointer
 
 func TestScanNull_Pointer(t *testing.T) {
 	val := 42
@@ -110,7 +110,7 @@ func TestScanNull_Pointer(t *testing.T) {
 	}
 }
 
-// ---------- scanPointer: pointer-free elem ----------
+// scanPointer: pointer-free elem
 
 func TestScanPointer_PointerFreeElem(t *testing.T) {
 	// *int is pointer-free elem (int doesn't contain pointers)
@@ -127,7 +127,7 @@ func TestScanPointer_PointerFreeElem(t *testing.T) {
 	}
 }
 
-// ---------- Invalid literals ----------
+// Invalid literals
 
 func TestScanTrue_InvalidLiteral(t *testing.T) {
 	type B struct {
@@ -162,7 +162,7 @@ func TestScanNull_InvalidLiteral(t *testing.T) {
 	}
 }
 
-// ---------- scanStringValue SWAR: KindAny with long no-escape string ----------
+// scanStringValue SWAR: KindAny with long no-escape string
 
 func TestScanStringValue_KindAny_SWARPath(t *testing.T) {
 	// String must be long enough that the closing quote is found in the SWAR loop.
@@ -181,7 +181,7 @@ func TestScanStringValue_KindAny_SWARPath(t *testing.T) {
 	}
 }
 
-// ---------- scanStringValue SWAR: control character ----------
+// scanStringValue SWAR: control character
 
 func TestScanStringValue_ControlChar_SWAR(t *testing.T) {
 	// Embed a control char in the middle of a long string to trigger SWAR control char path.
@@ -198,7 +198,7 @@ func TestScanStringValue_ControlChar_SWAR(t *testing.T) {
 	}
 }
 
-// ---------- scanStringValue: default kind (not string/any) in SWAR path ----------
+// scanStringValue: default kind (not string/any) in SWAR path
 
 func TestScanStringValue_DefaultKind_SWAR(t *testing.T) {
 	// Try to assign a long string (>8 bytes, triggering SWAR) to an int field
@@ -217,7 +217,7 @@ func TestScanStringValue_DefaultKind_SWAR(t *testing.T) {
 	}
 }
 
-// ---------- skipValue: true, false, {, [ ----------
+// skipValue: true, false, {, [
 
 func TestSkipValue_TrueFalseObjectArray(t *testing.T) {
 	// struct with only "name" field; all other fields are skipped via skipValue
@@ -254,7 +254,7 @@ func TestSkipValue_TrueFalseObjectArray(t *testing.T) {
 	}
 }
 
-// ---------- skipString: all paths (SWAR + tail, escapes, control chars) ----------
+// skipString: all paths (SWAR + tail, escapes, control chars)
 
 func TestSkipString_WithEscapes(t *testing.T) {
 	// Skip a string value containing escapes (backslash in SWAR path)
@@ -355,7 +355,7 @@ func TestSkipString_TailUnicodeEscape(t *testing.T) {
 	}
 }
 
-// ---------- skipContainer: nested objects and arrays ----------
+// skipContainer: nested objects and arrays
 
 func TestSkipContainer_Nested(t *testing.T) {
 	type S struct {
@@ -423,7 +423,7 @@ func TestSkipContainer_Array(t *testing.T) {
 	}
 }
 
-// ---------- scanArray: pointer-free elements ([]int, []float64) ----------
+// scanArray: pointer-free elements ([]int, []float64)
 
 func TestScanArray_PointerFreeElements(t *testing.T) {
 	// []int uses pointer-free backing (make([]byte))
@@ -449,7 +449,7 @@ func TestScanArray_PointerFreeGrow(t *testing.T) {
 	}
 }
 
-// ---------- scanObjectToMap: multi-entry map (comma continuation) ----------
+// scanObjectToMap: multi-entry map (comma continuation)
 
 func TestScanObjectToMap_MultiEntry(t *testing.T) {
 	var s MapIntStruct
@@ -462,7 +462,7 @@ func TestScanObjectToMap_MultiEntry(t *testing.T) {
 	}
 }
 
-// ---------- Malformed JSON: scanObject errors ----------
+// Malformed JSON: scanObject errors
 
 func TestScanObject_TruncatedAfterBrace(t *testing.T) {
 	type S struct {
@@ -521,7 +521,7 @@ func TestScanObject_TruncatedAfterValue(t *testing.T) {
 	}
 }
 
-// ---------- Malformed JSON: scanObjectToMap errors ----------
+// Malformed JSON: scanObjectToMap errors
 
 func TestScanObjectToMap_TruncatedAfterBrace(t *testing.T) {
 	var s MapIntStruct
@@ -555,7 +555,7 @@ func TestScanObjectToMap_TruncatedAfterValue(t *testing.T) {
 	}
 }
 
-// ---------- Malformed JSON: scanMapStringString errors ----------
+// Malformed JSON: scanMapStringString errors
 
 func TestScanMapStringString_TruncatedAfterBrace(t *testing.T) {
 	type S struct {
@@ -612,7 +612,7 @@ func TestScanMapStringString_UnexpectedChar(t *testing.T) {
 	}
 }
 
-// ---------- Malformed JSON: scanArray errors ----------
+// Malformed JSON: scanArray errors
 
 func TestScanArray_TruncatedAfterBracket(t *testing.T) {
 	var s IntSliceStruct
@@ -646,7 +646,7 @@ func TestScanArray_InvalidElement(t *testing.T) {
 	}
 }
 
-// ---------- scanPointer edge cases ----------
+// scanPointer edge cases
 
 func TestScanPointer_TruncatedNull(t *testing.T) {
 	// "nul" is truncated null literal for pointer field
@@ -674,7 +674,7 @@ func TestScanPointer_ValueError(t *testing.T) {
 	}
 }
 
-// ---------- scanStringKey: edge cases ----------
+// scanStringKey: edge cases
 
 func TestScanStringBytes_ControlChar_SWAR(t *testing.T) {
 	// scanStringKey is used for object keys.
@@ -725,7 +725,7 @@ func TestScanStringBytes_Escape_Tail(t *testing.T) {
 	}
 }
 
-// ---------- escaped key matching (bitmap path, ≤8 fields) ----------
+// escaped key matching (bitmap path, ≤8 fields)
 
 func TestEscapedKey_BitmapExactMatch(t *testing.T) {
 	// ≤8 fields → bitmap lookup; key uses \uXXXX that decodes to exact match
@@ -858,7 +858,7 @@ func TestScanStringBytes_EOF(t *testing.T) {
 	}
 }
 
-// ---------- skipValue error paths ----------
+// skipValue error paths
 
 func TestSkipValue_EOF(t *testing.T) {
 	type S struct {
@@ -896,7 +896,7 @@ func TestSkipValue_InvalidNumber(t *testing.T) {
 	}
 }
 
-// ---------- skipString error paths ----------
+// skipString error paths
 
 func TestSkipString_InvalidEscape_SWAR(t *testing.T) {
 	type S struct {
@@ -1033,7 +1033,7 @@ func TestSkipString_EOF(t *testing.T) {
 	}
 }
 
-// ---------- skipContainer error paths ----------
+// skipContainer error paths
 
 func TestSkipContainer_Unclosed(t *testing.T) {
 	type S struct {
@@ -1058,7 +1058,7 @@ func TestSkipContainer_StringError(t *testing.T) {
 	}
 }
 
-// ---------- skipContainer byte-by-byte path ----------
+// skipContainer byte-by-byte path
 
 func TestSkipContainer_TailBytePath(t *testing.T) {
 	type S struct {
@@ -1090,7 +1090,7 @@ func TestSkipContainer_TailStringInBytePath(t *testing.T) {
 	}
 }
 
-// ---------- scanObject: skipValue error propagation ----------
+// scanObject: skipValue error propagation
 
 func TestScanObject_SkipValueError(t *testing.T) {
 	type S struct {
@@ -1104,7 +1104,7 @@ func TestScanObject_SkipValueError(t *testing.T) {
 	}
 }
 
-// ---------- scanObject: scanStringKey error on key ----------
+// scanObject: scanStringKey error on key
 
 func TestScanObject_KeyError(t *testing.T) {
 	type S struct {
@@ -1119,7 +1119,7 @@ func TestScanObject_KeyError(t *testing.T) {
 	}
 }
 
-// ---------- skipValue: truncated literals ----------
+// skipValue: truncated literals
 
 func TestSkipValue_TruncatedTrue(t *testing.T) {
 	type S struct {
@@ -1200,7 +1200,7 @@ func TestSkipValue_InvalidNumberInSkip(t *testing.T) {
 	}
 }
 
-// ---------- skipString tail: valid escapes ----------
+// skipString tail: valid escapes
 
 func TestSkipString_TailValidUnicode(t *testing.T) {
 	type S struct {
@@ -1412,7 +1412,7 @@ func TestSkipString_DenseBackslashes(t *testing.T) {
 	}
 }
 
-// ---------- skipContainer: tail path for { [ } ] ----------
+// skipContainer: tail path for { [ } ]
 
 func TestSkipContainer_TailNested(t *testing.T) {
 	type S struct {
@@ -1460,7 +1460,7 @@ func TestSkipContainer_TailStringError(t *testing.T) {
 	}
 }
 
-// ---------- []byte ↔ base64 string ----------
+// []byte ↔ base64 string
 
 type ByteSliceStruct struct {
 	Data []byte `json:"data"`
@@ -1550,7 +1550,7 @@ func TestUnmarshal_ByteSlice_Roundtrip(t *testing.T) {
 	}
 }
 
-// ---------- json.Marshaler / json.Unmarshaler interface support ----------
+// json.Marshaler / json.Unmarshaler interface support
 
 // customMarshalType implements json.Marshaler with a value receiver.
 type customMarshalType struct {
@@ -1745,7 +1745,7 @@ func TestUnmarshal_JSONMarshaler_InStruct(t *testing.T) {
 	}
 }
 
-// ---------- encoding.TextMarshaler / encoding.TextUnmarshaler interface support ----------
+// encoding.TextMarshaler / encoding.TextUnmarshaler interface support
 
 // textMarshalType implements encoding.TextMarshaler with a value receiver.
 type textMarshalType struct {
@@ -2107,7 +2107,7 @@ func TestMarshal_MapIntString_StdlibCompat(t *testing.T) {
 	}
 }
 
-// ---------- Comprehensive non-string map key tests (stdlib compat) ----------
+// Comprehensive non-string map key tests (stdlib compat)
 
 // TestMapNonStringKey_StdlibCompat verifies that vjson produces the same
 // marshal output and unmarshal results as encoding/json for map types with
@@ -2296,7 +2296,7 @@ func compareMapRoundtrip[T any](t *testing.T, m *T) {
 	}
 }
 
-// ---------- stdlib types: net.IP (pure TextMarshaler, no json.Marshaler) ----------
+// stdlib types: net.IP (pure TextMarshaler, no json.Marshaler)
 
 func TestRoundtrip_NetIP(t *testing.T) {
 	ip := net.ParseIP("192.168.1.1")
@@ -2358,7 +2358,7 @@ func TestUnmarshal_NetIP_InStruct(t *testing.T) {
 	}
 }
 
-// ---------- stdlib types: big.Int (*T has json.Marshaler + TextMarshaler) ----------
+// stdlib types: big.Int (*T has json.Marshaler + TextMarshaler)
 
 func TestRoundtrip_BigInt(t *testing.T) {
 	v := new(big.Int).SetInt64(123456789012345)
@@ -2425,7 +2425,7 @@ func TestRoundtrip_BigInt_InStruct(t *testing.T) {
 	}
 }
 
-// ---------- stdlib types: big.Float (pure TextMarshaler on *T) ----------
+// stdlib types: big.Float (pure TextMarshaler on *T)
 
 func TestRoundtrip_BigFloat(t *testing.T) {
 	v := new(big.Float).SetFloat64(3.14159265358979)
@@ -2449,7 +2449,7 @@ func TestRoundtrip_BigFloat(t *testing.T) {
 	}
 }
 
-// ---------- stdlib types: time.Time as map key ----------
+// stdlib types: time.Time as map key
 
 func TestRoundtrip_MapTimeKey(t *testing.T) {
 	t1 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -2485,7 +2485,7 @@ func TestRoundtrip_MapTimeKey(t *testing.T) {
 	}
 }
 
-// ---------- stdlib types: net.IP as map key ----------
+// stdlib types: net.IP as map key
 
 func TestRoundtrip_MapNetIPKey(t *testing.T) {
 	m := map[string]int{"10.0.0.1": 80, "10.0.0.2": 443}
@@ -2521,7 +2521,7 @@ func TestRoundtrip_MapNetIPKey(t *testing.T) {
 	_ = m // silence unused
 }
 
-// ---------- scanArray: [N]any (fixed-size array of interface{}) ----------
+// scanArray: [N]any (fixed-size array of interface{})
 
 func TestUnmarshal_FixedArrayAny_MixedTypes(t *testing.T) {
 	// [N]any should decode a JSON array with mixed types into a fixed-size Go array.
@@ -2672,7 +2672,7 @@ func TestUnmarshal_FixedArrayAny_StdlibCompat(t *testing.T) {
 	}
 }
 
-// ---------- stdlib types: time.Time roundtrip vs stdlib ----------
+// stdlib types: time.Time roundtrip vs stdlib
 
 func TestMarshal_TimeTime_StdlibCompat(t *testing.T) {
 	times := []time.Time{
@@ -2703,9 +2703,7 @@ func TestMarshal_TimeTime_StdlibCompat(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Unescape tests (unescapeSinglePass, processEscapedString, etc.)
-// ---------------------------------------------------------------------------
 
 // testUnescape is a test helper that wraps unescapeSinglePass.
 // It appends a closing '"' to the input and calls unescapeSinglePass,

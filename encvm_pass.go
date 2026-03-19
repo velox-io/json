@@ -27,7 +27,7 @@ func runPasses(insts []IRInst, nextLabel Label) []IRInst {
 	return insts
 }
 
-// ── eliminateTrampolinesPass ────────────────────────────────────────
+// eliminateTrampolinesPass
 // Detects trampoline subroutines of the form:
 //
 //	label L1: CALL L2, RET

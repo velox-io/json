@@ -11,7 +11,6 @@ import (
 	"github.com/velox-io/json/native/encvm"
 )
 
-// =============================================================================
 // Goroutine Stack Stress Tests for Native C Encoder
 //
 // The native C encoder runs directly on the goroutine stack via NOSPLIT
@@ -31,9 +30,8 @@ import (
 // 2. Run concurrent goroutines to maximize the chance of exercising
 //    freshly allocated small stacks
 // 3. Verify the output is correct (no silent corruption)
-// =============================================================================
 
-// --- Test data types (varying complexity to exercise different VM paths) ---
+// Test data types (varying complexity to exercise different VM paths)
 
 type stackTestSimple struct {
 	A int    `json:"a"`
@@ -87,7 +85,7 @@ type stackTestComplex struct {
 	Flags  map[string]string `json:"flags"`
 }
 
-// --- Core test runner ---
+// Core test runner
 
 // runStackStressTest runs the given test function across many concurrent
 // goroutines to stress freshly allocated goroutine stacks.
@@ -159,9 +157,7 @@ func verifyMarshalResult[T any](t *testing.T, v *T, got []byte, err error, label
 	}
 }
 
-// =============================================================================
 // Test cases — all use depth=0 (direct Marshal on fresh goroutine stacks)
-// =============================================================================
 
 // TestNativeEncoder_GoroutineStackStress_Simple tests the native encoder
 // with simple structs on fresh goroutine stacks.

@@ -5,15 +5,13 @@ import (
 	"testing"
 )
 
-// ================================================================
 // Circular pointer reference tests
 //
 // These tests verify that:
 // 1. compileBlueprint does NOT stack-overflow on circular types
 // 2. Marshal output matches encoding/json for acyclic instances
-// ================================================================
 
-// --- Mutual recursion: A ↔ B ---
+// Mutual recursion: A ↔ B
 
 type circA struct {
 	Name string `json:"name"`
@@ -88,7 +86,7 @@ func TestMarshal_CircularMutual_TwoLevels(t *testing.T) {
 	}
 }
 
-// --- Self-referential struct ---
+// Self-referential struct
 
 type selfRef struct {
 	ID   int      `json:"id"`
@@ -134,7 +132,7 @@ func TestMarshal_SelfRef_Chain(t *testing.T) {
 	}
 }
 
-// --- Deep cycle: A → B → C → A ---
+// Deep cycle: A → B → C → A
 
 type cycleTriA struct {
 	Name string     `json:"name"`
@@ -193,7 +191,7 @@ func TestMarshal_TriangleCycle_FullChain(t *testing.T) {
 	}
 }
 
-// --- Tree structure (cycle through slice of pointers) ---
+// Tree structure (cycle through slice of pointers)
 
 type treeNode struct {
 	Name     string      `json:"name"`
@@ -241,7 +239,7 @@ func TestMarshal_TreeCycle_TwoLevels(t *testing.T) {
 	}
 }
 
-// --- Self-referential struct through value-embedded struct ---
+// Self-referential struct through value-embedded struct
 // type Inner struct { Back *Outer }
 // type Outer struct { Inner; ID int }
 
@@ -295,7 +293,7 @@ func TestMarshal_SelfRefViaEmbed_OneLevel(t *testing.T) {
 	}
 }
 
-// --- Value-embedded struct containing self-pointer ---
+// Value-embedded struct containing self-pointer
 // This tests the case where a struct has an anonymous embedded struct,
 // and that embedded struct has a pointer back to itself.
 
@@ -326,7 +324,7 @@ func TestMarshal_EmbedSelfRef_InnerDirect(t *testing.T) {
 	}
 }
 
-// --- Self-referential type as indirect dependency via anonymous embedding ---
+// Self-referential type as indirect dependency via anonymous embedding
 //
 // Reproduces the getCodecForCycle nil Codec copy bug.
 //
@@ -411,7 +409,7 @@ func TestRoundtrip_IndirectSelfRef(t *testing.T) {
 	}
 }
 
-// --- Circular with omitempty ---
+// Circular with omitempty
 
 type circOmitA struct {
 	Name string     `json:"name"`
@@ -459,7 +457,7 @@ func TestMarshal_CircularOmitempty_Partial(t *testing.T) {
 	}
 }
 
-// --- Unmarshal circular types ---
+// Unmarshal circular types
 
 func TestUnmarshal_CircularMutual(t *testing.T) {
 	input := `{"name":"a1","b":{"value":42,"a":{"name":"a2","b":null}}}`
@@ -543,7 +541,7 @@ func TestUnmarshal_TreeNode(t *testing.T) {
 	}
 }
 
-// --- Roundtrip (marshal → unmarshal) for circular types ---
+// Roundtrip (marshal → unmarshal) for circular types
 
 func TestRoundtrip_CircularMutual(t *testing.T) {
 	orig := circA{
@@ -611,11 +609,9 @@ func TestRoundtrip_SelfRef(t *testing.T) {
 	}
 }
 
-// ================================================================
 // Additional anonymous embed edge cases
-// ================================================================
 
-// --- Embedded struct with field name conflict at different embed depths ---
+// Embedded struct with field name conflict at different embed depths
 
 type embedConflictBase struct {
 	Name string `json:"name"`
@@ -666,7 +662,7 @@ func TestEmbed_ShadowedFieldRoundtrip(t *testing.T) {
 	}
 }
 
-// --- Embedded struct with mixed field types (value + pointer fields) ---
+// Embedded struct with mixed field types (value + pointer fields)
 
 type embedMixedInner struct {
 	A int    `json:"a"`
@@ -707,7 +703,7 @@ func TestEmbed_MixedFieldTypes(t *testing.T) {
 	}
 }
 
-// --- Double embedding (3 levels of value embed) ---
+// Double embedding (3 levels of value embed)
 
 type embedL3 struct {
 	X int `json:"x"`
@@ -744,7 +740,6 @@ func TestEmbed_ThreeLevelValue(t *testing.T) {
 	}
 }
 
-// ================================================================
 // Transitive circular reference tests
 //
 // These verify that resolveCodec() correctly handles the case where a
@@ -757,9 +752,8 @@ func TestEmbed_ThreeLevelValue(t *testing.T) {
 // Each test group uses unique types (not shared with other tests) so
 // that codec construction order is deterministic regardless of which
 // test runs first — the outer wrapper type is always the entry point.
-// ================================================================
 
-// --- Scenario 1: Wrapper embeds a self-referential struct by value ---
+// Scenario 1: Wrapper embeds a self-referential struct by value
 // Construction: Wrapper → Inner (via value embed) → *Inner (cycle)
 // Inner's Codec is nil when Wrapper's Fields[] is built.
 
@@ -881,7 +875,7 @@ func TestRoundtrip_TransitiveSelfRef_ViaEmbed(t *testing.T) {
 	}
 }
 
-// --- Scenario 2: Wrapper has a named field (not embed) of self-referential type ---
+// Scenario 2: Wrapper has a named field (not embed) of self-referential type
 // Construction: Wrapper → Inner (named field) → *Inner (cycle)
 
 type transInner2 struct {
@@ -975,7 +969,7 @@ func TestRoundtrip_TransitiveSelfRef_NamedField(t *testing.T) {
 	}
 }
 
-// --- Scenario 3: Transitive mutual recursion through a third type ---
+// Scenario 3: Transitive mutual recursion through a third type
 // Construction: Wrapper → NodeA → *NodeB → *NodeA (cycle)
 // None of NodeA, NodeB, *NodeA, *NodeB have been seen before Wrapper.
 
@@ -1093,7 +1087,7 @@ func TestRoundtrip_TransitiveMutualRecursion(t *testing.T) {
 	}
 }
 
-// --- Scenario 4: Slice of self-referential struct as transitive dep ---
+// Scenario 4: Slice of self-referential struct as transitive dep
 // Construction: Wrapper → []Inner → Inner → *Inner (cycle)
 
 type transInner4 struct {
@@ -1151,7 +1145,7 @@ func TestUnmarshal_TransitiveSelfRef_ViaSlice(t *testing.T) {
 	}
 }
 
-// --- Scenario 5: Map value is a self-referential struct (transitive) ---
+// Scenario 5: Map value is a self-referential struct (transitive)
 // Construction: Wrapper → map[string]Inner → Inner → *Inner (cycle)
 
 type transInner5 struct {
@@ -1204,7 +1198,7 @@ func TestUnmarshal_TransitiveSelfRef_ViaMap(t *testing.T) {
 	}
 }
 
-// --- Scenario 6: MarshalIndent path for transitive self-ref ---
+// Scenario 6: MarshalIndent path for transitive self-ref
 // Exercises the encodeStructIndent → encodeValue → encodeValueSlow path
 // where field-level TypeInfo.Codec may be nil.
 
@@ -1232,7 +1226,7 @@ func TestMarshalIndent_TransitiveSelfRef(t *testing.T) {
 	}
 }
 
-// --- Indirect recursion: Root → A → []B → A ---
+// Indirect recursion: Root → A → []B → A
 // A is not the root type, and the cycle goes through a different struct B.
 
 type indirectCycleA struct {
@@ -1325,7 +1319,7 @@ func TestRoundtrip_IndirectCycle(t *testing.T) {
 	}
 }
 
-// --- Mutual recursion chain: Root → A → B → C → A ---
+// Mutual recursion chain: Root → A → B → C → A
 // Three-way cycle where each struct references the next via pointer.
 
 type mutualChainA struct {

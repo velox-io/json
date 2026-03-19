@@ -424,7 +424,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 	}
 }
 
-// --- String Scanning ---
+// String Scanning
 
 func copyStringIfNeeded(raw []byte, copyStr bool) string {
 	if len(raw) == 0 {
@@ -638,7 +638,7 @@ func (sc *Parser) scanString(src []byte, idx int) (int, string, error) {
 	return n, "", errUnexpectedEOF
 }
 
-// --- Number Scanning ---
+// Number Scanning
 
 // scanNumberSpan finds the end of a JSON number starting at idx.
 // Returns (endIdx, isFloat, error).

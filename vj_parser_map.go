@@ -110,6 +110,7 @@ func (sc *Parser) scanMapStringString(src []byte, idx int, ptr unsafe.Pointer) (
 }
 
 // scanMapStringInt is a zero-reflection fast path for map[string]int.
+// It preserves encoding/json semantics: a JSON null writes the zero value.
 func (sc *Parser) scanMapStringInt(src []byte, idx int, ptr unsafe.Pointer) (int, error) {
 	idx++
 	idx = skipWSLong(src, idx)
@@ -238,6 +239,7 @@ func (sc *Parser) scanMapStringInt(src []byte, idx int, ptr unsafe.Pointer) (int
 }
 
 // scanMapStringInt64 is a zero-reflection fast path for map[string]int64.
+// It preserves encoding/json semantics: a JSON null writes the zero value.
 func (sc *Parser) scanMapStringInt64(src []byte, idx int, ptr unsafe.Pointer) (int, error) {
 	idx++
 	idx = skipWSLong(src, idx)

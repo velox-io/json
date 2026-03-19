@@ -265,7 +265,7 @@ func TestScanNumber_FloatToInt(t *testing.T) {
 	})
 }
 
-// --- scanNumberSpan RFC 8259 validation tests ---
+// scanNumberSpan RFC 8259 validation tests
 
 func TestScanNumberSpan_Valid(t *testing.T) {
 	tests := []struct {

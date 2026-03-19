@@ -9,7 +9,6 @@ import (
 	"unicode/utf8"
 )
 
-// ---------------------------------------------------------------------------
 // FuzzUnmarshalAny — the primary differential fuzzer.
 //
 // Feeds arbitrary bytes into both vjson.Unmarshal and encoding/json.Unmarshal
@@ -20,7 +19,6 @@ import (
 //
 // This single target covers strings, numbers, booleans, null, objects, arrays,
 // and all combinations thereof.
-// ---------------------------------------------------------------------------
 
 func FuzzUnmarshalAny(f *testing.F) {
 	seeds := []string{
@@ -106,12 +104,10 @@ func FuzzUnmarshalAny(f *testing.F) {
 	})
 }
 
-// ---------------------------------------------------------------------------
 // FuzzUnmarshalStruct — typed struct fuzzing.
 //
 // Exercises struct decoding (field lookup via perfect hash, type coercion,
 // nested structs, slices, pointers, maps) and compares with encoding/json.
-// ---------------------------------------------------------------------------
 
 func FuzzUnmarshalStruct(f *testing.F) {
 	seeds := []string{
@@ -173,12 +169,10 @@ func FuzzUnmarshalStruct(f *testing.F) {
 	})
 }
 
-// ---------------------------------------------------------------------------
 // FuzzUnmarshalNested — deeply nested struct with pointers and slices.
 //
 // Targets the pointer allocation path (ptrAlloc, unsafe_New, unsafe_NewArray)
 // and slice growth logic to stress GC safety of unsafe allocations.
-// ---------------------------------------------------------------------------
 
 func FuzzUnmarshalNested(f *testing.F) {
 	seeds := []string{
@@ -236,13 +230,11 @@ func FuzzUnmarshalNested(f *testing.F) {
 	})
 }
 
-// ---------------------------------------------------------------------------
 // FuzzNoCrash — pure crash-finding fuzzer.
 //
 // Feeds arbitrary bytes without checking correctness. Catches panics, OOB
 // reads from SWAR scanning, and infinite loops in the parser.
 // Targets multiple concrete types to cover all code paths.
-// ---------------------------------------------------------------------------
 
 func FuzzNoCrash(f *testing.F) {
 	seeds := []string{
@@ -289,7 +281,6 @@ func FuzzNoCrash(f *testing.F) {
 	})
 }
 
-// ---------------------------------------------------------------------------
 // FuzzMarshalString — differential fuzzer for string escaping.
 //
 // Takes an arbitrary string, wraps it in a struct field, and marshals with
@@ -297,7 +288,6 @@ func FuzzNoCrash(f *testing.F) {
 // This exercises all native string escape paths: SIMD (16/32-byte), SWAR
 // (8-byte), byte-by-byte, UTF-8 validation, HTML escaping, line terminators,
 // and surrogate replacement.
-// ---------------------------------------------------------------------------
 
 func FuzzMarshalString(f *testing.F) {
 	seeds := []string{
@@ -369,14 +359,12 @@ func FuzzMarshalString(f *testing.F) {
 	})
 }
 
-// ---------------------------------------------------------------------------
 // FuzzMarshalStruct — differential fuzzer for structured types.
 //
 // Builds a struct with diverse field types from fuzzer-provided entropy bytes,
 // then marshals with both vjson (WithStdCompat) and encoding/json. Exercises
 // the native C VM, string escaping, number formatting, bool encoding, slices,
 // maps, pointers, []byte (base64), and omitempty.
-// ---------------------------------------------------------------------------
 
 func FuzzMarshalStruct(f *testing.F) {
 	seeds := [][]byte{
@@ -484,12 +472,10 @@ func FuzzMarshalStruct(f *testing.F) {
 	})
 }
 
-// ---------------------------------------------------------------------------
 // FuzzMarshalNoCrash — pure crash finder for marshal.
 //
 // Constructs values from fuzz bytes and marshals them with every option
 // combination. Only checks that nothing panics or crashes.
-// ---------------------------------------------------------------------------
 
 func FuzzMarshalNoCrash(f *testing.F) {
 	seeds := [][]byte{
@@ -561,9 +547,7 @@ func FuzzMarshalNoCrash(f *testing.F) {
 	})
 }
 
-// ---------------------------------------------------------------------------
 // Marshal fuzz helpers
-// ---------------------------------------------------------------------------
 
 // fuzzReader consumes bytes from a fuzz input to deterministically build
 // structured Go values. When bytes are exhausted, returns zero values.
@@ -660,9 +644,7 @@ func (r *fuzzReader) readSafeString() string {
 	return string(b)
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 // deepEqualJSON compares two values produced by JSON unmarshaling into any.
 // Handles NaN (which reflect.DeepEqual would say != NaN) and provides

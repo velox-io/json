@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// --- Struct field: explicit json.Number ---
+// Struct field: explicit json.Number
 
 func TestNumber_StructField_Integer(t *testing.T) {
 	type Msg struct {
@@ -116,7 +116,7 @@ func TestNumber_StructField_Mixed(t *testing.T) {
 	}
 }
 
-// --- UseNumber + Unmarshal: interface{} gets json.Number ---
+// UseNumber + Unmarshal: interface{} gets json.Number
 
 func TestNumber_UseNumber_Unmarshal(t *testing.T) {
 	input := []byte(`{"n":42,"f":3.14,"big":9007199254740993}`)
@@ -196,7 +196,7 @@ func TestNumber_UseNumber_ArrayInterface(t *testing.T) {
 	}
 }
 
-// --- UseNumber + Decoder ---
+// UseNumber + Decoder
 
 func TestNumber_UseNumber_DecoderMethod_MultiValue(t *testing.T) {
 	input := `{"val":9007199254740993}` + "\n" + `{"val":42}`
@@ -269,7 +269,7 @@ func TestNumber_UseNumber_DecoderMethod_AfterFirstDecode(t *testing.T) {
 	}
 }
 
-// --- Marshal ---
+// Marshal
 
 func TestNumber_Marshal_Basic(t *testing.T) {
 	type Msg struct {
@@ -333,7 +333,7 @@ func TestNumber_Marshal_AnyField(t *testing.T) {
 	}
 }
 
-// --- Round-trip ---
+// Round-trip
 
 func TestNumber_RoundTrip(t *testing.T) {
 	type Msg struct {
@@ -370,7 +370,7 @@ func TestNumber_RoundTrip_UseNumber(t *testing.T) {
 	}
 }
 
-// --- Large integer precision ---
+// Large integer precision
 
 func TestNumber_LargeInteger_Preservation(t *testing.T) {
 	// 2^53 + 1 = 9007199254740993, cannot be represented exactly as float64
@@ -395,7 +395,7 @@ func TestNumber_LargeInteger_Preservation(t *testing.T) {
 	}
 }
 
-// --- json.Number in slice ---
+// json.Number in slice
 
 func TestNumber_InSlice(t *testing.T) {
 	type Msg struct {
@@ -417,7 +417,7 @@ func TestNumber_InSlice(t *testing.T) {
 	}
 }
 
-// --- json.Number pointer ---
+// json.Number pointer
 
 func TestNumber_Pointer(t *testing.T) {
 	type Msg struct {
@@ -446,7 +446,7 @@ func TestNumber_Pointer(t *testing.T) {
 	}
 }
 
-// --- Top-level json.Number ---
+// Top-level json.Number
 
 func TestNumber_TopLevel(t *testing.T) {
 	input := []byte(`42`)
@@ -459,7 +459,7 @@ func TestNumber_TopLevel(t *testing.T) {
 	}
 }
 
-// --- encoding/json compatibility ---
+// encoding/json compatibility
 
 func TestNumber_StdlibCompat(t *testing.T) {
 	type Msg struct {
@@ -504,7 +504,7 @@ func TestNumber_StdlibCompat(t *testing.T) {
 	}
 }
 
-// --- UseNumber: non-number values still correct ---
+// UseNumber: non-number values still correct
 
 func TestNumber_UseNumber_NonNumbers(t *testing.T) {
 	input := []byte(`{"s":"hello","b":true,"n":null,"a":[1]}`)

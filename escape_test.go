@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// ---------------------------------------------------------------------------
 // Low-level: appendEscapedString tests
-// ---------------------------------------------------------------------------
 
 func TestEscape_StdCompat(t *testing.T) {
 	cases := []struct {
@@ -121,9 +119,7 @@ func TestEscape_HTMLOnly(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Marshal-level escape tests
-// ---------------------------------------------------------------------------
 
 // TestMarshal_EscapeStdCompat verifies that Marshal with WithStdCompat()
 // produces identical output to encoding/json for all flag combinations.
@@ -132,7 +128,7 @@ func TestMarshal_EscapeStdCompat(t *testing.T) {
 		name string
 		s    string
 	}{
-		// --- ASCII ---
+		// ASCII
 		{"ascii_plain", "hello world"},
 		{"ascii_quote", `say "hello"`},
 		{"ascii_backslash", `path\to\file`},
@@ -158,13 +154,13 @@ func TestMarshal_EscapeStdCompat(t *testing.T) {
 		{"surrogate_high", "\xed\xb0\x80"},
 		{"surrogate_in_text", "a\xed\xa0\x80b"},
 
-		// --- HTML ---
+		// HTML
 		{"html_lt", "<script>alert(1)</script>"},
 		{"html_gt", "a>b"},
 		{"html_amp", "a&b"},
 		{"html_mixed", `<a href="x">&</a>`},
 
-		// --- Line terminators (U+2028, U+2029) ---
+		// Line terminators (U+2028, U+2029)
 		{"line_sep", "a\u2028b"},
 		{"para_sep", "a\u2029b"},
 		{"both_seps", "\u2028\u2029"},
@@ -172,14 +168,14 @@ func TestMarshal_EscapeStdCompat(t *testing.T) {
 		{"sep_at_end", "hello\u2029"},
 		{"sep_consecutive", "\u2028\u2028\u2028"},
 
-		// --- Non-ASCII / UTF-8 ---
+		// Non-ASCII / UTF-8
 		{"chinese", "中文测试"},
 		{"japanese", "日本語テスト"},
 		{"korean", "한국어"},
 		{"emoji", "\U0001F600\U0001F4A9"},
 		{"mixed_cjk", "hello中文world日本語"},
 
-		// --- Invalid UTF-8 ---
+		// Invalid UTF-8
 		{"invalid_0xff", "abc\xffdef"},
 		{"invalid_truncated_2byte", "abc\xc0def"},
 		{"invalid_truncated_3byte", "abc\xe0\x80def"},
@@ -187,11 +183,11 @@ func TestMarshal_EscapeStdCompat(t *testing.T) {
 		{"invalid_continuation", "abc\x80def"},
 		{"invalid_overlong_2byte", "\xc0\xaf"},
 
-		// --- Mixed ---
+		// Mixed
 		{"mixed_all", "hello\n\t\"world\"\x00<>&\u2028\xff中文\U0001F600"},
 		{"empty", ""},
 
-		// --- Long strings (exercise SIMD paths) ---
+		// Long strings (exercise SIMD paths)
 		{"long_ascii", longString('a', 256)},
 		{"long_chinese", longUTF8String("中文", 128)},
 		{"long_with_sep", longStringWithSep(128)},
@@ -542,9 +538,7 @@ func TestMarshal_EscapeLineTermTrailingBoundary(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 func longString(c byte, n int) string {
 	b := make([]byte, n)

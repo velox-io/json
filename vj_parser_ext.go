@@ -38,8 +38,9 @@ func bindScanArrayFn(ti *TypeInfo) {
 	}
 }
 
-// scanValueSpecial handles fields with non-zero Flags (Quoted, UnmarshalFn,
-// TextUnmarshalFn). Called only when ti.Flags != 0, keeping scanValue lean.
+// scanValueSpecial handles fields with non-zero unmarshal flags (for example
+// `,string`, RawMessage, Number, copy-string, or custom unmarshal hooks).
+// Called only when ti.UFlags != 0, keeping scanValue lean.
 func (sc *Parser) scanValueSpecial(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointer) (int, error) {
 	// Native json.RawMessage: skipValue + copy — no interface dispatch.
 	if ti.Flags&tiFlagRawMessage != 0 {

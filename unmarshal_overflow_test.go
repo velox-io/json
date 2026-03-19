@@ -28,7 +28,7 @@ func expectOverflowError(t *testing.T, label string, err error) {
 	}
 }
 
-// --- int8 ---
+// int8
 
 func TestOverflow_Int8_Above(t *testing.T) {
 	var v struct{ X int8 }
@@ -65,7 +65,7 @@ func TestOverflow_Int8_MinOK(t *testing.T) {
 	}
 }
 
-// --- int16 ---
+// int16
 
 func TestOverflow_Int16(t *testing.T) {
 	var v struct{ X int16 }
@@ -76,7 +76,7 @@ func TestOverflow_Int16(t *testing.T) {
 	expectOverflowError(t, "int16 -32769", err)
 }
 
-// --- int32 ---
+// int32
 
 func TestOverflow_Int32(t *testing.T) {
 	var v struct{ X int32 }
@@ -87,7 +87,7 @@ func TestOverflow_Int32(t *testing.T) {
 	expectOverflowError(t, "int32 -2147483649", err)
 }
 
-// --- int64 ---
+// int64
 
 func TestOverflow_Int64_Above(t *testing.T) {
 	var v struct{ X int64 }
@@ -121,7 +121,7 @@ func TestOverflow_Int64_MinOK(t *testing.T) {
 	}
 }
 
-// --- uint8 ---
+// uint8
 
 func TestOverflow_Uint8(t *testing.T) {
 	var v struct{ X uint8 }
@@ -139,7 +139,7 @@ func TestOverflow_Uint8_MaxOK(t *testing.T) {
 	}
 }
 
-// --- uint16 ---
+// uint16
 
 func TestOverflow_Uint16(t *testing.T) {
 	var v struct{ X uint16 }
@@ -147,7 +147,7 @@ func TestOverflow_Uint16(t *testing.T) {
 	expectOverflowError(t, "uint16 65536", err)
 }
 
-// --- uint32 ---
+// uint32
 
 func TestOverflow_Uint32(t *testing.T) {
 	var v struct{ X uint32 }
@@ -155,7 +155,7 @@ func TestOverflow_Uint32(t *testing.T) {
 	expectOverflowError(t, "uint32 4294967296", err)
 }
 
-// --- uint64 ---
+// uint64
 
 func TestOverflow_Uint64(t *testing.T) {
 	var v struct{ X uint64 }
@@ -173,7 +173,7 @@ func TestOverflow_Uint64_MaxOK(t *testing.T) {
 	}
 }
 
-// --- negative to unsigned ---
+// negative to unsigned
 
 func TestOverflow_NegativeToUnsigned(t *testing.T) {
 	var v struct{ X uint8 }
@@ -185,7 +185,7 @@ func TestOverflow_NegativeToUnsigned(t *testing.T) {
 	expectOverflowError(t, "uint64 -1", err)
 }
 
-// --- very large numbers ---
+// very large numbers
 
 func TestOverflow_HugeNumber(t *testing.T) {
 	var v struct{ X int64 }
@@ -197,7 +197,7 @@ func TestOverflow_HugeNumber(t *testing.T) {
 	expectOverflowError(t, "huge uint64", err)
 }
 
-// --- stdlib compatibility ---
+// stdlib compatibility
 
 func TestOverflow_StdlibCompat(t *testing.T) {
 	tests := []struct {
@@ -239,7 +239,7 @@ func TestOverflow_StdlibCompat(t *testing.T) {
 	}
 }
 
-// --- top-level integer ---
+// top-level integer
 
 func TestOverflow_TopLevel(t *testing.T) {
 	var v int8
@@ -250,7 +250,7 @@ func TestOverflow_TopLevel(t *testing.T) {
 	}
 }
 
-// ===================== ,string tag overflow =====================
+// ,string tag overflow
 
 func TestOverflow_StringTag_Int8(t *testing.T) {
 	var v struct {
@@ -407,7 +407,7 @@ func TestOverflow_StringTag_StdlibCompat(t *testing.T) {
 	}
 }
 
-// ===================== type mismatch: skip and continue =====================
+// type mismatch: skip and continue
 
 // TestTypeMismatch_ContinueDecode verifies that a type mismatch on one struct
 // field does not prevent subsequent fields from being decoded.

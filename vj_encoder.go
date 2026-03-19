@@ -7,8 +7,10 @@ import (
 	"unsafe"
 )
 
+// EncoderOption configures an [Encoder].
 type EncoderOption func(*Encoder)
 
+// EncoderSetIndent sets the indentation prefix and step for a new [Encoder].
 func EncoderSetIndent(prefix, indent string) EncoderOption {
 	return func(enc *Encoder) {
 		enc.prefix = prefix
@@ -16,6 +18,7 @@ func EncoderSetIndent(prefix, indent string) EncoderOption {
 	}
 }
 
+// EncoderSetEscapeHTML enables or disables escaping of <, >, and &.
 func EncoderSetEscapeHTML(on bool) EncoderOption {
 	return func(enc *Encoder) {
 		if on {
@@ -26,6 +29,7 @@ func EncoderSetEscapeHTML(on bool) EncoderOption {
 	}
 }
 
+// EncoderSetEscapeLineTerms enables or disables escaping of U+2028 and U+2029.
 func EncoderSetEscapeLineTerms(on bool) EncoderOption {
 	return func(enc *Encoder) {
 		if on {
@@ -69,11 +73,13 @@ func NewEncoder(w io.Writer, opts ...EncoderOption) *Encoder {
 	return enc
 }
 
+// SetIndent updates the indentation prefix and step.
 func (enc *Encoder) SetIndent(prefix, indent string) {
 	enc.prefix = prefix
 	enc.indent = indent
 }
 
+// SetEscapeHTML enables or disables escaping of <, >, and &.
 func (enc *Encoder) SetEscapeHTML(on bool) {
 	if on {
 		enc.flags |= uint32(escapeHTML)
@@ -82,6 +88,7 @@ func (enc *Encoder) SetEscapeHTML(on bool) {
 	}
 }
 
+// SetEscapeLineTerms enables or disables escaping of U+2028 and U+2029.
 func (enc *Encoder) SetEscapeLineTerms(on bool) {
 	if on {
 		enc.flags |= uint32(escapeLineTerms)

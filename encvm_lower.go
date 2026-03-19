@@ -10,7 +10,7 @@ import (
 func lower(insts []IRInst) (ops []byte, fallbacks map[int]*fbInfo, annotations map[int]string) {
 	fallbacks = make(map[int]*fbInfo)
 
-	// ── Pass 1: compute byte offset of each instruction and label positions ──
+	// Pass 1: compute byte offset of each instruction and label positions
 	labelOffsets := make(map[Label]int)
 	instOffsets := make([]int, len(insts))
 	offset := 0
@@ -31,7 +31,7 @@ func lower(insts []IRInst) (ops []byte, fallbacks map[int]*fbInfo, annotations m
 	}
 	totalSize := offset
 
-	// ── Pass 2: emit bytes ──
+	// Pass 2: emit bytes
 	ops = make([]byte, 0, totalSize)
 
 	for i := range insts {

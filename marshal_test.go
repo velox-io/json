@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// --- Test types ---
+// Test types
 
 type MarshalSmall struct {
 	Name  string `json:"name"`
@@ -36,7 +36,7 @@ type MarshalSkip struct {
 	Value  int    `json:"value"`
 }
 
-// --- Basic struct ---
+// Basic struct
 
 func TestMarshal_SmallStruct(t *testing.T) {
 	v := MarshalSmall{Name: "Alice", Age: 30, Score: 9.5}
@@ -55,7 +55,7 @@ func TestMarshal_SmallStruct(t *testing.T) {
 	}
 }
 
-// --- omitempty ---
+// omitempty
 
 func TestMarshal_OmitEmpty(t *testing.T) {
 	v := MarshalOmit{} // all zero
@@ -181,7 +181,7 @@ func TestMarshal_OmitEmpty_StdlibCompat(t *testing.T) {
 	}
 }
 
-// --- json:"-" ---
+// json:"-"
 
 func TestMarshal_SkipField(t *testing.T) {
 	v := MarshalSkip{Name: "test", Secret: "hidden", Value: 42}
@@ -201,7 +201,7 @@ func TestMarshal_SkipField(t *testing.T) {
 	}
 }
 
-// --- Nested struct + pointer ---
+// Nested struct + pointer
 
 func TestMarshal_Nested(t *testing.T) {
 	inner := MarshalSmall{Name: "inner", Age: 5, Score: 1.0}
@@ -228,7 +228,7 @@ func TestMarshal_Nested(t *testing.T) {
 	}
 }
 
-// --- Nil pointer ---
+// Nil pointer
 
 func TestMarshal_NilPointer(t *testing.T) {
 	v := MarshalNested{ID: 1, Ptr: nil, Items: nil}
@@ -245,7 +245,7 @@ func TestMarshal_NilPointer(t *testing.T) {
 	}
 }
 
-// --- Map ---
+// Map
 
 func TestMarshal_MapStringString(t *testing.T) {
 	v := map[string]string{"key1": "value1", "key2": "value2"}
@@ -277,7 +277,7 @@ func TestMarshal_MapStringInt(t *testing.T) {
 	}
 }
 
-// --- String escaping ---
+// String escaping
 
 func TestMarshal_StringEscape(t *testing.T) {
 	v := struct {
@@ -298,7 +298,7 @@ func TestMarshal_StringEscape(t *testing.T) {
 	}
 }
 
-// --- Bool ---
+// Bool
 
 func TestMarshal_Bool(t *testing.T) {
 	v := struct {
@@ -315,7 +315,7 @@ func TestMarshal_Bool(t *testing.T) {
 	}
 }
 
-// --- Empty slice ---
+// Empty slice
 
 func TestMarshal_EmptySlice(t *testing.T) {
 	v := struct {
@@ -331,7 +331,7 @@ func TestMarshal_EmptySlice(t *testing.T) {
 	}
 }
 
-// --- MarshalIndent ---
+// MarshalIndent
 
 func TestMarshalIndent_Basic(t *testing.T) {
 	v := MarshalSmall{Name: "Alice", Age: 30, Score: 9.5}
@@ -352,7 +352,7 @@ func TestMarshalIndent_Basic(t *testing.T) {
 	}
 }
 
-// --- AppendMarshal ---
+// AppendMarshal
 
 func TestAppendMarshal(t *testing.T) {
 	v := MarshalSmall{Name: "test", Age: 1, Score: 0.5}
@@ -370,7 +370,7 @@ func TestAppendMarshal(t *testing.T) {
 	}
 }
 
-// --- interface{} ---
+// interface{}
 
 func TestMarshal_AnyInterface(t *testing.T) {
 	v := struct {
@@ -395,7 +395,7 @@ func TestMarshal_AnyInterface(t *testing.T) {
 	}
 }
 
-// --- Byte slice (base64) ---
+// Byte slice (base64)
 
 func TestMarshal_ByteSlice(t *testing.T) {
 	v := struct {
@@ -505,7 +505,7 @@ func TestMarshal_NonByteSlice_Empty(t *testing.T) {
 	}
 }
 
-// --- Map HTML escape ---
+// Map HTML escape
 
 // TestMarshal_MapStringString_HTMLEscape verifies that the EscapeHTML flag
 // is correctly propagated into the Swiss Map iteration path
@@ -556,7 +556,7 @@ func TestMarshal_MapStringString_HTMLEscape(t *testing.T) {
 	}
 }
 
-// --- Nil map ---
+// Nil map
 
 func TestMarshal_NilMap(t *testing.T) {
 	v := struct {
@@ -572,7 +572,7 @@ func TestMarshal_NilMap(t *testing.T) {
 	}
 }
 
-// --- Various integer types ---
+// Various integer types
 
 func TestMarshal_IntTypes(t *testing.T) {
 	type Ints struct {
@@ -601,7 +601,7 @@ func TestMarshal_IntTypes(t *testing.T) {
 	}
 }
 
-// --- Large integer (beyond small cache) ---
+// Large integer (beyond small cache)
 
 func TestMarshal_LargeInt(t *testing.T) {
 	v := struct {

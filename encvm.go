@@ -32,7 +32,7 @@ const (
 	opInterface  uint16 = 15 // interface{} — noinline C encoder or yield
 	opRawMessage uint16 = 16 // json.RawMessage — direct byte copy
 	opNumber     uint16 = 17 // json.Number — direct string copy
-	opByteSlice  uint16 = 18 // []byte — base64, yield to Go
+	opByteSlice  uint16 = 18 // []byte — native base64 encoding
 
 	// Structural control-flow instructions (19-31).
 	opSkipIfZero uint16 = 19 // conditional forward jump (omitempty)
@@ -139,7 +139,6 @@ const (
 	fbReasonKeyPoolFull   int32 = 7 // global key pool exhausted (>64KB); key read from fbInfo.TI.Ext.KeyBytes
 )
 
-// ================================================================
 //  VMState — packed 64-bit VM state register (mirrors C layout)
 //
 //  Layout:
@@ -150,7 +149,6 @@ const (
 //    bits [32..39] = exit_code    (VM exit status)
 //    bits [40..47] = yield_reason (VjYieldReason, valid when exit_code=YIELD)
 //    bits [48..63] = reserved
-// ================================================================
 
 const (
 	vjStStackDepthMask = uint64(0x000000FF)
@@ -313,7 +311,7 @@ var _ [32]byte = [unsafe.Sizeof(VjStackFrame{})]byte{}
 //   1 = VJ_FRAME_ITER:              linear iteration (slice / array)
 //   2 = VJ_FRAME_ITER_STR_STR_LEAF: map[string]string iteration
 
-// --- ITER frame field accessors (read-only from Go side) ---
+// ITER frame field accessors (read-only from Go side)
 
 // iterData returns the pointer to the current slice/array element base (_union[0..7]).
 func (f *VjStackFrame) iterData() unsafe.Pointer {
@@ -430,14 +428,12 @@ func init() {
 	})
 }
 
-// ================================================================
 //  Global Key Pool — shared across all Blueprints
 //
 //  All pre-encoded JSON keys ("field_name":) are stored in a single
 //  contiguous byte pool. VjOpHdr.KeyOff indexes into this pool.
 //  Append-only + COW: offsets are stable forever once assigned.
 //  Deduplication: identical key bytes are stored only once.
-// ================================================================
 
 // globalKeyPool is the process-wide shared key name pool.
 var globalKeyPool struct {

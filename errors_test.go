@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// --- Type assertion tests ---
+// Type assertion tests
 
 func TestSyntaxError(t *testing.T) {
 	var m map[string]any
@@ -184,7 +184,7 @@ func TestUnsupportedValueError_Inf(t *testing.T) {
 	}
 }
 
-// --- encoding/json As() bridging tests ---
+// encoding/json As() bridging tests
 
 func TestSyntaxError_AsJSON(t *testing.T) {
 	var m map[string]any
@@ -241,7 +241,7 @@ func TestUnsupportedValueError_AsJSON(t *testing.T) {
 	}
 }
 
-// --- Error message sanity checks ---
+// Error message sanity checks
 
 func TestSyntaxError_Message(t *testing.T) {
 	se := &SyntaxError{msg: "test error", Offset: 42}

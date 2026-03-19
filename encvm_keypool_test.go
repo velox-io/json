@@ -7,13 +7,11 @@ import (
 	"github.com/velox-io/json/native/encvm"
 )
 
-// ================================================================
 // Key Pool overflow tests
 //
 // These tests verify that when the global key pool (64KB uint16 address
 // space) is full, the compiler gracefully falls back to Go-driven
 // encoding for affected fields instead of panicking.
-// ================================================================
 
 // saveAndInjectKeyPool saves the current key pool snapshot and replaces
 // it with a near-full fake snapshot. Returns a restore function.
@@ -61,7 +59,7 @@ func saveAndInjectKeyPoolWithKeys(used int, preload [][]byte) (restore func()) {
 	}
 }
 
-// --- Layer 1: Unit test globalKeyPoolInsert directly ---
+// Layer 1: Unit test globalKeyPoolInsert directly
 
 func TestGlobalKeyPoolInsert_OverflowReturnsFalse(t *testing.T) {
 	// Fill the pool to 65530 bytes — only 5 bytes of headroom.
@@ -130,7 +128,7 @@ func TestGlobalKeyPoolInsert_EmptyKeyAlwaysSucceeds(t *testing.T) {
 	}
 }
 
-// --- Layer 2: End-to-end Marshal test with pool overflow ---
+// Layer 2: End-to-end Marshal test with pool overflow
 
 // keyPoolOverflowStruct is a dedicated struct type used ONLY by the
 // key pool overflow end-to-end test. Its field names are chosen to be
@@ -244,7 +242,7 @@ func TestKeyPoolOverflow_MixedFieldTypes(t *testing.T) {
 	}
 }
 
-// --- Layer 3: Partial overflow — some fields native, some fallback ---
+// Layer 3: Partial overflow — some fields native, some fallback
 //
 // This tests the critical scenario where within a single struct's
 // Blueprint, some fields have their keys already in the pool (dedup hit

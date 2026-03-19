@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-// ================================================================
 // Benchmark scenarios for MAP_STR_ITER: C-native Swiss Map key
 // iteration with VM-dispatched value body vs Go-driven MAP_BEGIN.
 //
@@ -14,9 +13,8 @@ import (
 //  2. map[string][]string — nested slice values
 //  3. map[string]struct with many entries — large map iteration
 //  4. Struct with mixed fields including map — realistic struct
-// ================================================================
 
-// --- Scenario 1: map[string]struct{...} (small, 3 entries) ---
+// Scenario 1: map[string]struct{...} (small, 3 entries)
 
 type benchContact struct {
 	Phone string `json:"phone"`
@@ -66,7 +64,7 @@ func BenchmarkMarshal_MapStrStruct_StdJSON(b *testing.B) {
 	}
 }
 
-// --- Scenario 2: map[string][]string (slice values) ---
+// Scenario 2: map[string][]string (slice values)
 
 type benchWithSliceMap struct {
 	ID   int                 `json:"id"`
@@ -109,7 +107,7 @@ func BenchmarkMarshal_MapStrSlice_StdJSON(b *testing.B) {
 	}
 }
 
-// --- Scenario 3: map[string]struct with 50 entries (large map) ---
+// Scenario 3: map[string]struct with 50 entries (large map)
 
 type benchLargeMapItem struct {
 	Value  int    `json:"value"`
@@ -161,7 +159,7 @@ func BenchmarkMarshal_MapStrStruct50_StdJSON(b *testing.B) {
 	}
 }
 
-// --- Scenario 4: Realistic mixed struct (like the User example) ---
+// Scenario 4: Realistic mixed struct (like the User example)
 
 type benchAddr struct {
 	City   string `json:"city"`
@@ -226,7 +224,7 @@ func BenchmarkMarshal_MixedProfile_StdJSON(b *testing.B) {
 	}
 }
 
-// --- Scenario 5: map[string]struct with deep nesting ---
+// Scenario 5: map[string]struct with deep nesting
 
 type benchDeepValue struct {
 	Inner struct {
@@ -297,7 +295,7 @@ func BenchmarkMarshal_MapDeepStruct_StdJSON(b *testing.B) {
 	}
 }
 
-// --- Scenario 6: map[string]*struct (pointer values) ---
+// Scenario 6: map[string]*struct (pointer values)
 
 type benchPtrMapEntry struct {
 	ID    int    `json:"id"`

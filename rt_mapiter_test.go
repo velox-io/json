@@ -25,9 +25,7 @@ func mapHeaderPtr(mapVarPtr unsafe.Pointer) unsafe.Pointer {
 	return *(*unsafe.Pointer)(mapVarPtr)
 }
 
-// ==========================================================================
 // Tests for stack-based mapsIter (direct linkname to maps.Iter.Init/Next)
-// ==========================================================================
 
 func TestMapsIterStringString(t *testing.T) {
 	m := map[string]string{
@@ -211,9 +209,7 @@ func TestMapsIterLargeMap(t *testing.T) {
 	}
 }
 
-// ==========================================================================
 // Tests for legacy GoMapIterator (shim-based, kept for coverage)
-// ==========================================================================
 
 func TestLegacyMapIterStringString(t *testing.T) {
 	m := map[string]string{
@@ -258,9 +254,7 @@ func TestLegacyMapIterEmpty(t *testing.T) {
 	}
 }
 
-// ==========================================================================
 // Benchmark: stack-based mapsIter vs legacy GoMapIterator (shim)
-// ==========================================================================
 
 func BenchmarkMapsIterDirect(b *testing.B) {
 	m := make(map[string]string, 100)

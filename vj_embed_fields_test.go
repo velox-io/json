@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// ============================================================
 // Rule 1: Shallow fields win over deeper fields with the same name.
-// ============================================================
 
 type deepInner struct {
 	Name string `json:"name"`
@@ -91,9 +89,7 @@ func TestEmbedRule1_Depth1OverDepth2(t *testing.T) {
 	}
 }
 
-// ============================================================
 // Rule 2: Same-depth same-name fields cancel each other.
-// ============================================================
 
 type cancelA struct {
 	X string // JSON key "X" — no tag, relies on field name
@@ -182,9 +178,7 @@ func TestEmbedRule2_ThreeWayCancels(t *testing.T) {
 	}
 }
 
-// ============================================================
 // Rule 3: Embedded non-struct named types are promoted.
-// ============================================================
 
 type MyString string
 
@@ -265,9 +259,7 @@ func TestEmbedRule3_NonStructIntType(t *testing.T) {
 	}
 }
 
-// ============================================================
 // Rule 4: Exported fields from unexported embedded structs are promoted.
-// ============================================================
 
 type unexportedEmbed struct {
 	Visible string `json:"visible"`

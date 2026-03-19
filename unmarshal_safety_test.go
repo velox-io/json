@@ -8,10 +8,8 @@ import (
 	"testing"
 )
 
-// ---------------------------------------------------------------------------
 // Test types — cover strings (zero-copy + arena), pointer fields (batch alloc),
 // slices, maps, and nested structs.
-// ---------------------------------------------------------------------------
 
 type SafetyItem struct {
 	Name  string            `json:"name"`
@@ -45,9 +43,7 @@ func safetyInput(i int) ([]byte, SafetyItem) {
 	return []byte(json), want
 }
 
-// ---------------------------------------------------------------------------
 // 1. TestConcurrentUnmarshal — pool data race detection
-// ---------------------------------------------------------------------------
 
 func TestConcurrentUnmarshal(t *testing.T) {
 	procs := runtime.GOMAXPROCS(0)
@@ -88,9 +84,7 @@ func TestConcurrentUnmarshal(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // 2. TestConcurrentUnmarshal_GCStress — GC during concurrent parsing
-// ---------------------------------------------------------------------------
 
 func TestConcurrentUnmarshal_GCStress(t *testing.T) {
 	procs := runtime.GOMAXPROCS(0)
@@ -146,9 +140,7 @@ func TestConcurrentUnmarshal_GCStress(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // 3. TestArenaStringsSurviveGC — arena-backed strings must survive GC
-// ---------------------------------------------------------------------------
 
 func TestArenaStringsSurviveGC(t *testing.T) {
 	// Escaped strings force arena allocation in unescapeSinglePass.
@@ -186,9 +178,7 @@ func TestArenaStringsSurviveGC(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // 4. TestZeroCopyStringsSurviveGC — zero-copy strings reference input buffer
-// ---------------------------------------------------------------------------
 
 func TestZeroCopyStringsSurviveGC(t *testing.T) {
 	type S struct {
@@ -215,9 +205,7 @@ func TestZeroCopyStringsSurviveGC(t *testing.T) {
 	runtime.KeepAlive(input)
 }
 
-// ---------------------------------------------------------------------------
 // 5. TestPointerFieldAllocation_GCStress — batch allocator under GC
-// ---------------------------------------------------------------------------
 
 func TestPointerFieldAllocation_GCStress(t *testing.T) {
 	const N = 1000
@@ -256,9 +244,7 @@ func TestPointerFieldAllocation_GCStress(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // 6. TestConcurrentUnmarshal_DiverseTypes — pool reuse across type paths
-// ---------------------------------------------------------------------------
 
 func TestConcurrentUnmarshal_DiverseTypes(t *testing.T) {
 	const iters = 200
@@ -364,9 +350,7 @@ func TestConcurrentUnmarshal_DiverseTypes(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // 7. TestPoolReuse_ArenaIntegrity — sequential arena reuse stress
-// ---------------------------------------------------------------------------
 
 func TestPoolReuse_ArenaIntegrity(t *testing.T) {
 	type S struct {
@@ -401,9 +385,7 @@ func TestPoolReuse_ArenaIntegrity(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // 8. TestPointer_PreExistingValue — pointer field already has a value
-// ---------------------------------------------------------------------------
 
 // TestPointer_PreExistingValue verifies behavior when a pointer field already
 // points to an existing allocation. Unmarshal should reuse the existing
@@ -546,9 +528,7 @@ func TestPointer_PreExistingValue_GCStress(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // 9. TestPointer_StdlibCompat — compare behavior with encoding/json
-// ---------------------------------------------------------------------------
 
 // TestPointer_StdlibCompat_NewAllocation verifies that when pointer is nil,
 // both vjson and encoding/json allocate new memory and produce same result.
@@ -752,7 +732,6 @@ func TestPointer_NestedPointers_GCStress(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // 12. TestPointer_PointerFreeElem_GCStress — GC stress for the make([]byte)
 //     allocation path used by pointer-free element types (*int, *float64, etc.)
 //
@@ -762,7 +741,6 @@ func TestPointer_NestedPointers_GCStress(t *testing.T) {
 // the only GC-visible reference to the backing array is through the user
 // struct's typed pointer field (e.g., *int). If the GC failed to trace
 // this pointer, the backing array would be collected prematurely.
-// ---------------------------------------------------------------------------
 
 func TestPointer_PointerFreeElem_GCStress(t *testing.T) {
 	type S struct {
@@ -815,7 +793,6 @@ func TestPointer_PointerFreeElem_GCStress(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // 13. TestPointer_PreExistingStackLikeValue — test that Unmarshal handles
 //     a pointer field whose existing value was filled in-place.
 //
@@ -824,7 +801,6 @@ func TestPointer_PointerFreeElem_GCStress(t *testing.T) {
 // safe Go. What we CAN test is that Unmarshal correctly fills in-place
 // when the pointer field already holds a valid heap-allocated value,
 // and the old value's content is properly overwritten.
-// ---------------------------------------------------------------------------
 
 func TestPointer_PreExistingStackLikeValue(t *testing.T) {
 	type S struct {
@@ -861,10 +837,8 @@ func TestPointer_PreExistingStackLikeValue(t *testing.T) {
 	runtime.GC()
 }
 
-// ---------------------------------------------------------------------------
 // 14. TestPointer_PreExistingReuse_StdlibCompat — verify pointer reuse
 //     matches encoding/json for all common pointer-free types.
-// ---------------------------------------------------------------------------
 
 func TestPointer_PreExistingReuse_StdlibCompat(t *testing.T) {
 	t.Run("*int", func(t *testing.T) {

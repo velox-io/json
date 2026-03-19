@@ -78,6 +78,9 @@ const (
 		tiFlagQuoted | tiFlagRawMessage | tiFlagNumber | tiFlagCopyString
 )
 
+// TypeInfo holds pre-computed metadata for a type.
+// Hot-path fields (accessed per-field during scan/encode) live here;
+// cold fields (marshal key bytes, custom marshal/unmarshal funcs) live in Ext.
 type TypeInfo struct {
 	Kind          ElemTypeKind
 	Flags         tiFlag // all flags (used by marshal)
@@ -93,11 +96,8 @@ type TypeInfo struct {
 	ScanArrayFn   ArraySpecialScanner // specialized array element scanner (nil = generic path)
 }
 
-// TypeInfo holds pre-computed metadata for a type.
-// Hot-path fields (accessed per-field during scan/encode) live here;
-// cold fields (marshal key bytes, custom marshal/unmarshal funcs) live in Ext.
-// ArraySpecialScanner is a specialized array scanner that bypasses scanValue/scanNumber
-// dispatch for known element types (int*, uint*, float64).
+// ArraySpecialScanner is a specialized array scanner that bypasses
+// scanValue/scanNumber dispatch for known element types (int*, uint*, float64).
 type ArraySpecialScanner func(src []byte, idx int, arrayLen int, elemSize uintptr, ptr unsafe.Pointer) (int, error)
 
 // TypeInfoExt holds infrequently-accessed per-field metadata.

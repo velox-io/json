@@ -7,13 +7,11 @@ import (
 	"testing"
 )
 
-// ---------------------------------------------------------------------------
 // TestMarshal_StructFieldAndInterfaceRefSameType
 //
 // Struct A has a concrete field of type B and an interface field (any) that
 // dynamically holds a B instance. Both should marshal identically to
 // encoding/json.
-// ---------------------------------------------------------------------------
 
 func TestMarshal_StructFieldAndInterfaceRefSameType(t *testing.T) {
 	type B struct {
@@ -50,11 +48,9 @@ func TestMarshal_StructFieldAndInterfaceRefSameType(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // TestMarshal_StructWithMapStringAny
 //
 // Struct with a map[string]any field containing various dynamic value types.
-// ---------------------------------------------------------------------------
 
 func TestMarshal_StructWithMapStringAny(t *testing.T) {
 	type B struct {
@@ -147,12 +143,10 @@ func TestMarshal_StructWithMapStringAny(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // TestMarshal_NonEmptyInterface
 //
 // Struct fields with non-empty interface types (e.g. fmt.Stringer).
 // These yield to Go every time (not handled by C VM ifaceCache).
-// ---------------------------------------------------------------------------
 
 type testStringer struct {
 	Val string
@@ -213,14 +207,12 @@ func TestMarshal_NonEmptyInterface(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // TestMarshal_PlainNonEmptyInterface
 //
 // Struct fields with plain non-empty interface types (not Stringer, not
 // Marshaler). encoding/json serializes the concrete struct fields normally,
 // ignoring the interface methods. This exercises the makeEncodeIface path
 // for interfaces that have no special JSON behavior.
-// ---------------------------------------------------------------------------
 
 func TestMarshal_PlainNonEmptyInterface(t *testing.T) {
 	type S struct {
@@ -260,12 +252,10 @@ func TestMarshal_PlainNonEmptyInterface(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // TestMarshal_MultipleInterfaceTypes
 //
 // A struct with multiple different non-empty interface fields, mixing plain
 // interfaces with Stringer. Verifies correct dispatch for each field.
-// ---------------------------------------------------------------------------
 
 func TestMarshal_MultipleInterfaceTypes(t *testing.T) {
 	type S struct {

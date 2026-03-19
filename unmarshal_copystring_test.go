@@ -6,7 +6,7 @@ import (
 	"unsafe"
 )
 
-// ---------- helpers ----------
+// helpers
 
 // isZeroCopy returns true if the string data pointer lies within the given buffer.
 func isZeroCopy(s string, buf []byte) bool {
@@ -26,7 +26,7 @@ func corruptBuf(buf []byte) {
 	}
 }
 
-// ---------- field-level copy tag ----------
+// field-level copy tag
 
 func TestCopyTag_FieldLevel(t *testing.T) {
 	type S struct {
@@ -81,7 +81,7 @@ func TestCopyTag_OnlyAffectsStringKind(t *testing.T) {
 	}
 }
 
-// ---------- global WithCopyString option ----------
+// global WithCopyString option
 
 func TestWithCopyString_Struct(t *testing.T) {
 	type S struct {
@@ -176,7 +176,7 @@ func TestWithCopyString_Interface(t *testing.T) {
 	}
 }
 
-// ---------- escaped strings ----------
+// escaped strings
 
 func TestCopyTag_EscapedString(t *testing.T) {
 	type S struct {
@@ -222,7 +222,7 @@ func TestWithCopyString_EscapedString(t *testing.T) {
 	}
 }
 
-// ---------- priority: tag OR global ----------
+// priority: tag OR global
 
 func TestCopyString_Priority(t *testing.T) {
 	type S struct {
@@ -276,7 +276,7 @@ func TestCopyString_Priority(t *testing.T) {
 	}
 }
 
-// ---------- default behavior (zero-copy preserved) ----------
+// default behavior (zero-copy preserved)
 
 func TestDefault_ZeroCopy(t *testing.T) {
 	type S struct {
@@ -293,7 +293,7 @@ func TestDefault_ZeroCopy(t *testing.T) {
 	}
 }
 
-// ---------- Decoder ----------
+// Decoder
 
 func TestDecoder_CopyString_Option(t *testing.T) {
 	type S struct {
@@ -326,7 +326,7 @@ func TestDecoder_CopyString_Method(t *testing.T) {
 	}
 }
 
-// ---------- combined options ----------
+// combined options
 
 func TestCopyString_WithUseNumber(t *testing.T) {
 	type S struct {
@@ -352,7 +352,7 @@ func TestCopyString_WithUseNumber(t *testing.T) {
 	}
 }
 
-// ---------- empty string ----------
+// empty string
 
 func TestCopyString_EmptyString(t *testing.T) {
 	type S struct {

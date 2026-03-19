@@ -6,9 +6,7 @@ import (
 	"testing"
 )
 
-// =============================================================================
 // Test Helpers
-// =============================================================================
 
 // lookupField is a test helper that wraps LookupFieldBytes for string input.
 func lookupField(dec *StructCodec, key string) *TypeInfo {
@@ -33,9 +31,7 @@ func makeTestStructCodec(names []string) *StructCodec {
 	return dec
 }
 
-// =============================================================================
 // toLowerASCII Tests
-// =============================================================================
 
 func TestToLowerASCII_AllLower(t *testing.T) {
 	s := "hello_world"
@@ -80,9 +76,7 @@ func TestToLowerASCII_NonASCII(t *testing.T) {
 	}
 }
 
-// =============================================================================
 // Build Correctness Tests
-// =============================================================================
 
 func TestBuildLookup_Empty(t *testing.T) {
 	dec := makeTestStructCodec(nil)
@@ -215,9 +209,7 @@ func TestBuildLookup_MapFallback(t *testing.T) {
 	}
 }
 
-// =============================================================================
 // Case-Insensitive Lookup Tests
-// =============================================================================
 
 func TestLookup_CaseInsensitive(t *testing.T) {
 	dec := makeTestStructCodec([]string{"Name", "Age", "Email"})
@@ -278,9 +270,7 @@ func TestLookup_CaseInsensitive_Bitmap(t *testing.T) {
 	}
 }
 
-// =============================================================================
 // Edge Case Tests
-// =============================================================================
 
 func TestLookup_UnknownKeys(t *testing.T) {
 	dec := makeTestStructCodec([]string{"id", "name", "email", "phone", "address"})
@@ -367,9 +357,7 @@ func TestLookup_RealisticStruct(t *testing.T) {
 	}
 }
 
-// =============================================================================
 // Integration with reflect
-// =============================================================================
 
 func TestLookup_ViaReflect(t *testing.T) {
 	type User struct {
@@ -442,9 +430,7 @@ func TestLookup_ViaReflect_LargeStruct(t *testing.T) {
 	}
 }
 
-// =============================================================================
 // lookupFieldBytes Tests
-// =============================================================================
 
 func TestLookupFieldBytes(t *testing.T) {
 	dec := makeTestStructCodec([]string{"id", "name", "email", "phone", "address"})
@@ -476,9 +462,7 @@ func TestLookupFieldBytes(t *testing.T) {
 	}
 }
 
-// =============================================================================
 // Benchmarks
-// =============================================================================
 
 // BenchmarkLookup compares linear, perfect hash, and map lookup across field counts.
 func BenchmarkLookup_Linear_4fields(b *testing.B) {

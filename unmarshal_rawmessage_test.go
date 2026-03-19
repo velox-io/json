@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// --- Unmarshal: various JSON value types in a RawMessage field ---
+// Unmarshal: various JSON value types in a RawMessage field
 
 func TestRawMessage_UnmarshalObject(t *testing.T) {
 	type Msg struct {
@@ -114,7 +114,7 @@ func TestRawMessage_UnmarshalNested(t *testing.T) {
 	}
 }
 
-// --- Marshal round-trip ---
+// Marshal round-trip
 
 func TestRawMessage_MarshalRoundTrip(t *testing.T) {
 	type Msg struct {
@@ -135,7 +135,7 @@ func TestRawMessage_MarshalRoundTrip(t *testing.T) {
 	}
 }
 
-// --- Marshal nil / empty RawMessage ---
+// Marshal nil / empty RawMessage
 
 func TestRawMessage_MarshalNil(t *testing.T) {
 	type Msg struct {
@@ -168,7 +168,7 @@ func TestRawMessage_MarshalEmpty(t *testing.T) {
 	}
 }
 
-// --- Top-level RawMessage ---
+// Top-level RawMessage
 
 func TestRawMessage_TopLevelUnmarshal(t *testing.T) {
 	input := []byte(`{"key":"value","n":123}`)
@@ -192,7 +192,7 @@ func TestRawMessage_TopLevelMarshal(t *testing.T) {
 	}
 }
 
-// --- RawMessage in slice ---
+// RawMessage in slice
 
 func TestRawMessage_InSlice(t *testing.T) {
 	type Msg struct {
@@ -223,7 +223,7 @@ func TestRawMessage_InSlice(t *testing.T) {
 	}
 }
 
-// --- RawMessage pointer ---
+// RawMessage pointer
 
 func TestRawMessage_Pointer(t *testing.T) {
 	type Msg struct {
@@ -252,7 +252,7 @@ func TestRawMessage_Pointer(t *testing.T) {
 	}
 }
 
-// --- RawMessage with omitempty ---
+// RawMessage with omitempty
 
 func TestRawMessage_OmitEmpty(t *testing.T) {
 	type Msg struct {
@@ -270,7 +270,7 @@ func TestRawMessage_OmitEmpty(t *testing.T) {
 	}
 }
 
-// --- Byte independence: source mutation must not affect result ---
+// Byte independence: source mutation must not affect result
 
 func TestRawMessage_ByteIndependence(t *testing.T) {
 	type Msg struct {
@@ -294,7 +294,7 @@ func TestRawMessage_ByteIndependence(t *testing.T) {
 	}
 }
 
-// --- encoding/json compatibility ---
+// encoding/json compatibility
 
 func TestRawMessage_StdlibCompat(t *testing.T) {
 	type Msg struct {
@@ -347,7 +347,7 @@ func TestRawMessage_StdlibCompat(t *testing.T) {
 	}
 }
 
-// --- Deeply nested RawMessage ---
+// Deeply nested RawMessage
 
 func TestRawMessage_DeeplyNested(t *testing.T) {
 	type Inner struct {
@@ -371,7 +371,7 @@ func TestRawMessage_DeeplyNested(t *testing.T) {
 	}
 }
 
-// --- RawMessage with whitespace in original JSON ---
+// RawMessage with whitespace in original JSON
 
 func TestRawMessage_PreservesCompactForm(t *testing.T) {
 	// Note: skipValue does not preserve whitespace — it captures the
@@ -392,7 +392,7 @@ func TestRawMessage_PreservesCompactForm(t *testing.T) {
 	}
 }
 
-// --- RawMessage with escaped strings inside ---
+// RawMessage with escaped strings inside
 
 func TestRawMessage_EscapedStringsInside(t *testing.T) {
 	type Msg struct {

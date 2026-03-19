@@ -13,7 +13,7 @@ func scanInt64(src []byte, idx int) (end int, value int64, isFloat bool, ok bool
 	pos := idx
 	negative := false
 
-	// ── Sign ──
+	// Sign
 
 	if pos < length && sliceAt(src, pos) == '-' {
 		negative = true
@@ -24,7 +24,7 @@ func scanInt64(src []byte, idx int) (end int, value int64, isFloat bool, ok bool
 		return pos, 0, false, false
 	}
 
-	// ── Leading zero ──
+	// Leading zero
 
 	if sliceAt(src, pos) == '0' {
 		pos++
@@ -40,7 +40,7 @@ func scanInt64(src []byte, idx int) (end int, value int64, isFloat bool, ok bool
 		return pos, 0, false, true
 	}
 
-	// ── Accumulate digits ──
+	// Accumulate digits
 
 	var absValue uint64
 	absValue = uint64(sliceAt(src, pos) - '0')
@@ -58,7 +58,7 @@ func scanInt64(src []byte, idx int) (end int, value int64, isFloat bool, ok bool
 		pos++
 	}
 
-	// ── 19th digit ──
+	// 19th digit
 
 	if pos < length && sliceAt(src, pos) >= '0' && sliceAt(src, pos) <= '9' {
 		d := uint64(sliceAt(src, pos) - '0')
@@ -72,7 +72,7 @@ func scanInt64(src []byte, idx int) (end int, value int64, isFloat bool, ok bool
 	}
 
 done:
-	// ── Float detection ──
+	// Float detection
 
 	if pos < length {
 		c := sliceAt(src, pos)
@@ -81,7 +81,7 @@ done:
 		}
 	}
 
-	// ── Convert to int64 with sign ──
+	// Convert to int64 with sign
 
 	if negative {
 		if absValue > uint64(math.MaxInt64)+1 {
@@ -116,7 +116,7 @@ func scanUint64(src []byte, idx int) (end int, value uint64, isFloat bool, ok bo
 	length := len(src)
 	pos := idx
 
-	// ── Reject negative ──
+	// Reject negative
 
 	if pos < length && sliceAt(src, pos) == '-' {
 		// Scan past the number to report correct end position.
@@ -137,7 +137,7 @@ func scanUint64(src []byte, idx int) (end int, value uint64, isFloat bool, ok bo
 		return pos, 0, false, false
 	}
 
-	// ── Leading zero ──
+	// Leading zero
 
 	if sliceAt(src, pos) == '0' {
 		pos++
@@ -153,7 +153,7 @@ func scanUint64(src []byte, idx int) (end int, value uint64, isFloat bool, ok bo
 		return pos, 0, false, true
 	}
 
-	// ── Accumulate digits ──
+	// Accumulate digits
 
 	var absValue uint64
 	absValue = uint64(sliceAt(src, pos) - '0')
@@ -170,7 +170,7 @@ func scanUint64(src []byte, idx int) (end int, value uint64, isFloat bool, ok bo
 		pos++
 	}
 
-	// ── 20th digit: check overflow ──
+	// 20th digit: check overflow
 
 	if pos < length && sliceAt(src, pos) >= '0' && sliceAt(src, pos) <= '9' {
 		d := uint64(sliceAt(src, pos) - '0')
@@ -190,7 +190,7 @@ func scanUint64(src []byte, idx int) (end int, value uint64, isFloat bool, ok bo
 	}
 
 done:
-	// ── Float detection ──
+	// Float detection
 
 	if pos < length {
 		c := sliceAt(src, pos)

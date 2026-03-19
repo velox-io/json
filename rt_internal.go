@@ -379,7 +379,7 @@ func probeSwissMapSlotSize(mapType reflect.Type, valSize uintptr) (slotSize uint
 	return expectedSlotSize, true
 }
 
-// ---- Low-level map iteration via go:linkname ----
+// Low-level map iteration via go:linkname
 //
 // We bypass both reflect.MapRange (which allocates reflect.Values per entry)
 // and the runtime's linknameIter shim (which heap-allocates a maps.Iter via
@@ -474,7 +474,7 @@ func _mapsIterInit(it unsafe.Pointer, typ unsafe.Pointer, m unsafe.Pointer)
 //go:noescape
 func _mapsIterNext(it unsafe.Pointer)
 
-// ---- Legacy shim-based iteration (kept for reference/fallback) ----
+// Legacy shim-based iteration (kept for reference/fallback)
 
 // GoMapIterator mirrors runtime.linknameIter. The runtime's mapiterinit
 // heap-allocates a maps.Iter internally (new(maps.Iter)). Prefer the

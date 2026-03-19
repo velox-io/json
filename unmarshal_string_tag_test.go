@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// ---------- Test types for ,string tag ----------
+// Test types for ,string tag
 
 type StringTagInt struct {
 	Count int `json:"count,string"`
@@ -56,7 +56,7 @@ type StringTagIgnored struct {
 	Map   map[string]int `json:"map,string"`   //nolint:staticcheck // intentionally invalid
 }
 
-// ---------- Marshal tests ----------
+// Marshal tests
 
 func TestMarshal_StringTag_Int(t *testing.T) {
 	v := StringTagInt{Count: 123}
@@ -157,7 +157,7 @@ func TestMarshal_StringTag_Pointer(t *testing.T) {
 	}
 }
 
-// ---------- Unmarshal tests ----------
+// Unmarshal tests
 
 func TestUnmarshal_StringTag_Int(t *testing.T) {
 	var v StringTagInt
@@ -280,7 +280,7 @@ func TestUnmarshal_StringTag_Null(t *testing.T) {
 	}
 }
 
-// ---------- Roundtrip tests ----------
+// Roundtrip tests
 
 func TestRoundtrip_StringTag(t *testing.T) {
 	original := StringTagAll{
@@ -335,7 +335,7 @@ func TestRoundtrip_StringTag_Pointer(t *testing.T) {
 	}
 }
 
-// ---------- Stdlib compatibility ----------
+// Stdlib compatibility
 
 func TestStringTag_StdlibCompat_Marshal(t *testing.T) {
 	cases := []struct {
@@ -428,7 +428,7 @@ func TestStringTag_StdlibCompat_Pointer(t *testing.T) {
 	}
 }
 
-// ---------- Ignored for non-quotable types ----------
+// Ignored for non-quotable types
 
 func TestStringTag_IgnoredForComplexTypes(t *testing.T) {
 	v := StringTagIgnored{

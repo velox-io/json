@@ -40,7 +40,7 @@ func scanFloat64(src []byte, idx int) (end int, value float64, err error) {
 	pos := idx
 	negative := false
 
-	// ── Sign ──
+	// Sign
 
 	if pos < length && sliceAt(src, pos) == '-' {
 		negative = true
@@ -55,7 +55,7 @@ func scanFloat64(src []byte, idx int) (end int, value float64, err error) {
 	digitCount := 0
 	fracStart := -1 // digit index where fractional part begins; -1 means no fraction
 
-	// ── Integer digits ──
+	// Integer digits
 
 	if sliceAt(src, pos) == '0' {
 		pos++
@@ -90,7 +90,7 @@ func scanFloat64(src []byte, idx int) (end int, value float64, err error) {
 		}
 	}
 
-	// ── Fractional digits ──
+	// Fractional digits
 
 	if pos < length && sliceAt(src, pos) == '.' {
 		pos++
@@ -135,7 +135,7 @@ func scanFloat64(src []byte, idx int) (end int, value float64, err error) {
 		}
 	}
 
-	// ── Exponent (e.g. "e+10", "E-5") ──
+	// Exponent (e.g. "e+10", "E-5")
 
 	exponent := 0
 	power10 := 0
@@ -174,7 +174,7 @@ func scanFloat64(src []byte, idx int) (end int, value float64, err error) {
 		power10 -= (digitCount - fracStart)
 	}
 
-	// ── Tier 1: Exact pow10 (≤15 significant digits, |power10| ≤ 22) ──
+	// Tier 1: Exact pow10 (≤15 significant digits, |power10| ≤ 22)
 	// float64 has ~15.95 decimal digits of precision. With ≤15 digits and exact
 	// powers of 10, the multiplication/division is correctly rounded.
 	if digitCount <= 15 && power10 >= -22 && power10 <= 22 {
@@ -190,7 +190,7 @@ func scanFloat64(src []byte, idx int) (end int, value float64, err error) {
 		return end, f, nil
 	}
 
-	// ── Tier 2: Eisel-Lemire (≤19 significant digits) ──
+	// Tier 2: Eisel-Lemire (≤19 significant digits)
 	if digitCount > 19 {
 		goto fallback
 	}
@@ -211,7 +211,7 @@ func scanFloat64(src []byte, idx int) (end int, value float64, err error) {
 	}
 
 fallback:
-	// ── Tier 3: strconv.ParseFloat ──
+	// Tier 3: strconv.ParseFloat
 	end = pos
 	s := (*byte)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(src)), 1*uintptr(idx))) // 1 == unsafe.Sizeof(*new(byte))
 	f, err := strconv.ParseFloat(unsafe.String(s, pos-idx), 64)
