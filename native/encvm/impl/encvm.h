@@ -1200,6 +1200,7 @@ vj_op_map_str_iter: {
     VM_CHECK(op->key_len + 1 + 1 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE
              + VM_INDENT_PAD(indent_depth + 1));
     VM_WRITE_KEY();
+    VM_TRACE_KEY("MAP_STR_ITER");
     *buf++ = '{';
     VM_INDENT_INC();
     VM_WRITE_INDENT();
@@ -1251,7 +1252,6 @@ vj_op_map_str_iter: {
     /* Set base to value ptr, first=1 for body encoding */
     base = val_ptr;
     VJ_ST_SET_FIRST_1(vmstate);
-    VM_TRACE_KEY("MAP_STR_ITER");
     VM_NEXT_LONG(); /* enter body */
   }
 
