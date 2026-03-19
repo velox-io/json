@@ -74,12 +74,12 @@ func TestMarshal_StructWithMapStringAny(t *testing.T) {
 		{"primitives", WithMap{
 			Label: "prim",
 			Meta: map[string]any{
-				"str":   "hello",
-				"num":   float64(42),
-				"bool":  true,
-				"null":  nil,
-				"neg":   float64(-3.14),
-				"zero":  float64(0),
+				"str":  "hello",
+				"num":  float64(42),
+				"bool": true,
+				"null": nil,
+				"neg":  float64(-3.14),
+				"zero": float64(0),
 			},
 		}},
 		{"nested_map", WithMap{
