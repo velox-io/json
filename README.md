@@ -14,6 +14,8 @@ Velox is currently focused on **binding-style** JSON ↔ typed Go value conversi
 - **Go-first evolution.** Core decode logic is implemented in Go so the project can evolve with Go compiler/runtime improvements and remain maintainable.
 - **Native where it matters.** Marshal hot paths use the native C VM backend, while preserving the same Go-facing API and fallback behavior.
 
+For a deeper look at the architecture — why unmarshal uses pure Go and marshal uses a C VM — see [How Velox JSON Works](docs/architecture.md).
+
 ## Install
 
 ```bash
