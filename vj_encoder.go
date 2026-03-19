@@ -135,7 +135,7 @@ func EncodeValue[T any](enc *Encoder, v *T) error {
 	if enc.err != nil {
 		return enc.err
 	}
-	return enc.encodePtr(getCodec(reflect.TypeFor[T]()), unsafe.Pointer(v))
+	return enc.encodePtr(codecCacheMarshal.getCodec(reflect.TypeFor[T]()), unsafe.Pointer(v))
 }
 
 // encodePtr is the shared encoding core for Encode and EncodeValue.

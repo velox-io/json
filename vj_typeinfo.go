@@ -220,13 +220,61 @@ func isQuotableKind(k ElemTypeKind) bool {
 	return false
 }
 
-// getCodec returns the cached *TypeInfo for the given type.
+// codecFastCacheTable is a fixed-size direct-mapped cache that sits in front
+// of the sync.Map (codecCache).  Each slot stores a (rtype-pointer, *TypeInfo)
+// pair atomically.  On hit the cost is one atomic load + one uintptr compare;
+// on miss we fall through to the sync.Map and then populate the slot.
+//
+// 32 slots is enough for most programs (few hot types) while keeping the
+// table small enough to stay in L1.  Collisions simply evict the old entry.
+//
+// Marshal and unmarshal use separate tables so that interleaved encode/decode
+// workloads do not thrash each other's cache entries.
+const codecFastCacheSize = 32 // must be power of two
+
+type codecCachePair struct {
+	key uintptr   // rtype pointer
+	val *TypeInfo // cached result (never nil once stored)
+}
+
+type codecFastCacheTable [codecFastCacheSize]atomic.Pointer[codecCachePair]
+
+var (
+	codecCacheMarshal   codecFastCacheTable
+	codecCacheUnmarshal codecFastCacheTable
+)
+
+// codecFastCacheIndex hashes an rtype pointer to a slot index.
+// rtype pointers are at least 8-byte aligned so the low 3 bits are zero;
+// a multiply-shift distributes entropy across all index bits.
+func codecFastCacheIndex(rtp uintptr) uintptr {
+	// Fibonacci hashing: multiply by a large odd constant, then shift.
+	const magic = 0x9e3779b97f4a7c15 // golden-ratio × 2^64
+	return (rtp * magic) >> (64 - 5) // 5 = log2(32)
+}
+
+func (c *codecFastCacheTable) getCodec(t reflect.Type) *TypeInfo {
+	rtp := uintptr(rtypePtr(t))
+	idx := codecFastCacheIndex(rtp)
+	if p := c[idx].Load(); p != nil && p.key == rtp {
+		return p.val
+	}
+	ti := getCodecViaMap(t)
+	c[idx].Store(&codecCachePair{key: rtp, val: ti})
+	return ti
+}
+
+// getCodec returns the cached *TypeInfo for the given type (shared/uncategorized callers).
 // Thread-safe; blocks until the codec is fully initialized.
 func getCodec(t reflect.Type) *TypeInfo {
+	return getCodecViaMap(t)
+}
+
+func getCodecViaMap(t reflect.Type) *TypeInfo {
 	if v, ok := codecCache.Load(t); ok {
 		switch e := v.(type) {
 		case *TypeInfo:
-			return e // hot path: no synchronization
+			return e
 		case *codecEntry:
 			<-e.done
 			return e.ti

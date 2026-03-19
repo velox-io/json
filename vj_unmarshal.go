@@ -38,8 +38,10 @@ func (p *parserPool) Put(sc *Parser) {
 		sc.arenaData = nil
 		sc.arenaOff = 0
 	}
-	for _, a := range sc.ptrAllocs {
-		a.reset()
+	if len(sc.ptrAllocs) > 0 {
+		for _, a := range sc.ptrAllocs {
+			a.reset()
+		}
 	}
 
 	sc.useNumber = false
@@ -89,7 +91,7 @@ func Unmarshal[T any](data []byte, v *T, opts ...UnmarshalOption) error {
 	}
 
 	// Fast path: avoid interface boxing and reflect.ValueOf.
-	ti := getCodec(reflect.TypeFor[T]())
+	ti := codecCacheUnmarshal.getCodec(reflect.TypeFor[T]())
 	ptr := unsafe.Pointer(v)
 
 	idx := skipWS(data, 0)

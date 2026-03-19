@@ -196,19 +196,6 @@ func scanFloat64(src []byte, idx int) (end int, value float64, err error) {
 	}
 
 	// ── Tier 2: Eisel-Lemire (≤19 significant digits) ──
-	//
-	// Converts mantissa × 10^power10 → float64 by:
-	//  1. Normalizing the mantissa (shift left so MSB = bit 63).
-	//  2. Looking up a 128-bit approximation of 10^power10 from a precomputed table.
-	//  3. Computing the 128-bit product: mantissa × pow10_approx.
-	//  4. Extracting the top 54 bits as the float64 mantissa, rounding to nearest even.
-	//
-	// The algorithm gives up (goto fallback) when:
-	//  - digitCount > 19: mantissa doesn't fit in uint64.
-	//  - power10 out of table range [-348, 347].
-	//  - 128-bit product lands on a rounding boundary (ambiguous halfway).
-	//  - Result would be subnormal or overflow.
-
 	if digitCount > 19 {
 		goto fallback
 	}
@@ -221,66 +208,7 @@ func scanFloat64(src []byte, idx int) (end int, value float64, err error) {
 		return end, 0, nil
 	}
 
-	if power10 < elPow10Min || power10 > elPow10Max {
-		goto fallback
-	}
-
-	{
-		// Look up the 128-bit approximation of 10^power10.
-		power := elPow10Tab[power10-elPow10Min]
-
-		// Estimate the binary exponent: 10^e ≈ 2^(e × log₂10).
-		// 108853 / 2^15 ≈ 3.321928... ≈ log₂(10).
-		binaryExp := 1 + (power10*108853)>>15
-
-		// Normalize: shift mantissa so its leading bit is at position 63.
-		leadingZeros := bits.LeadingZeros64(mantissa)
-		mantissa <<= uint(leadingZeros)
-		resultExp := uint64(binaryExp+63-exponentBias) - uint64(leadingZeros)
-
-		// 128-bit multiply: mantissa × power[0] (high 64 bits of 10^exp10)
-		prodHi, prodLo := bits.Mul64(mantissa, power[0])
-
-		// If the product falls near a rounding boundary (low 9 bits all set)
-		// and prodLo overflowed, refine with power[1] (low 64 bits).
-		if prodHi&0x1FF == 0x1FF && prodLo+mantissa < mantissa {
-			crossHi, crossLo := bits.Mul64(mantissa, power[1])
-			refinedLo := prodLo + crossHi
-			if refinedLo < prodLo {
-				prodHi++ // carry
-			}
-			if prodHi&0x1FF == 0x1FF && refinedLo+1 == 0 && crossLo+mantissa < mantissa {
-				goto fallback // still ambiguous after refinement
-			}
-			prodLo = refinedLo
-		}
-
-		// Extract 54-bit mantissa from the 128-bit product.
-		// Bit 63 determines the shift: if set, shift by 10; otherwise by 9.
-		topBit := prodHi >> 63
-		resultMantissa := prodHi >> (topBit + 9)
-		resultExp -= 1 ^ topBit
-
-		// Ambiguous: exactly halfway and rounding direction is uncertain.
-		if prodLo == 0 && prodHi&0x1FF == 0 && resultMantissa&3 == 1 {
-			goto fallback
-		}
-
-		// Round to nearest even.
-		resultMantissa += resultMantissa & 1
-		resultMantissa >>= 1
-		if resultMantissa>>53 > 0 {
-			resultMantissa >>= 1
-			resultExp++
-		}
-
-		// Overflow or underflow.
-		if resultExp-1 >= 0x7FF-1 {
-			goto fallback
-		}
-
-		// Assemble IEEE 754 float64 bit pattern.
-		resultBits := resultExp<<mantissaBits | resultMantissa&(1<<mantissaBits-1)
+	if resultBits, ok := eiselLemire(mantissa, power10); ok {
 		if negative {
 			resultBits |= 1 << 63
 		}
@@ -293,4 +221,83 @@ fallback:
 	s := (*byte)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(src)), 1*uintptr(idx))) // 1 == unsafe.Sizeof(*new(byte))
 	f, err := strconv.ParseFloat(unsafe.String(s, pos-idx), 64)
 	return end, f, err
+}
+
+// eiselLemire converts mantissa × 10^power10 to a float64 bit pattern using the
+// Eisel-Lemire algorithm. Returns (bits, true) on success, (0, false) when the
+// result is ambiguous or out of range and the caller must fall back to
+// strconv.ParseFloat.
+//
+// Preconditions: mantissa != 0, 1 ≤ digitCount ≤ 19.
+//
+// Kept as a separate function (not inlined into scanFloat64) so the compiler
+// can allocate registers freely for this algorithm without interference from
+// the many live variables in the surrounding digit-scanning loops.
+//
+//go:noinline
+func eiselLemire(mantissa uint64, power10 int) (uint64, bool) {
+	const (
+		mantissaBits = 52
+		exponentBias = -1023
+	)
+
+	if power10 < elPow10Min || power10 > elPow10Max {
+		return 0, false
+	}
+
+	// Look up the 128-bit approximation of 10^power10.
+	power := elPow10Tab[power10-elPow10Min]
+
+	// Estimate the binary exponent: 10^e ≈ 2^(e × log₂10).
+	// 108853 / 2^15 ≈ 3.321928... ≈ log₂(10).
+	binaryExp := 1 + (power10*108853)>>15
+
+	// Normalize: shift mantissa so its leading bit is at position 63.
+	leadingZeros := bits.LeadingZeros64(mantissa)
+	mantissa <<= uint(leadingZeros)
+	resultExp := uint64(binaryExp+63-exponentBias) - uint64(leadingZeros)
+
+	// 128-bit multiply: mantissa × power[0] (high 64 bits of 10^exp10)
+	prodHi, prodLo := bits.Mul64(mantissa, power[0])
+
+	// If the product falls near a rounding boundary (low 9 bits all set)
+	// and prodLo overflowed, refine with power[1] (low 64 bits).
+	if prodHi&0x1FF == 0x1FF && prodLo+mantissa < mantissa {
+		crossHi, crossLo := bits.Mul64(mantissa, power[1])
+		refinedLo := prodLo + crossHi
+		if refinedLo < prodLo {
+			prodHi++ // carry
+		}
+		if prodHi&0x1FF == 0x1FF && refinedLo+1 == 0 && crossLo+mantissa < mantissa {
+			return 0, false // still ambiguous after refinement
+		}
+		prodLo = refinedLo
+	}
+
+	// Extract 54-bit mantissa from the 128-bit product.
+	// Bit 63 determines the shift: if set, shift by 10; otherwise by 9.
+	topBit := prodHi >> 63
+	resultMantissa := prodHi >> (topBit + 9)
+	resultExp -= 1 ^ topBit
+
+	// Ambiguous: exactly halfway and rounding direction is uncertain.
+	if prodLo == 0 && prodHi&0x1FF == 0 && resultMantissa&3 == 1 {
+		return 0, false
+	}
+
+	// Round to nearest even.
+	resultMantissa += resultMantissa & 1
+	resultMantissa >>= 1
+	if resultMantissa>>53 > 0 {
+		resultMantissa >>= 1
+		resultExp++
+	}
+
+	// Overflow or underflow.
+	if resultExp-1 >= 0x7FF-1 {
+		return 0, false
+	}
+
+	// Assemble IEEE 754 float64 bit pattern (without sign).
+	return resultExp<<mantissaBits | resultMantissa&(1<<mantissaBits-1), true
 }

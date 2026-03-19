@@ -553,7 +553,7 @@ func Marshal[T any](v *T, opts ...MarshalOption) ([]byte, error) {
 		o(m)
 	}
 
-	ti := getCodec(reflect.TypeFor[T]())
+	ti := codecCacheMarshal.getCodec(reflect.TypeFor[T]())
 
 	if ti.HintBytes > cap(m.buf) {
 		m.buf = make([]byte, 0, ti.HintBytes)
@@ -577,7 +577,7 @@ func MarshalIndent[T any](v *T, prefix, indent string, opts ...MarshalOption) ([
 	m.prefix = prefix
 	m.indent = indent
 
-	ti := getCodec(reflect.TypeFor[T]())
+	ti := codecCacheMarshal.getCodec(reflect.TypeFor[T]())
 	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
 		putMarshaler(m)
 		return nil, err
@@ -595,7 +595,7 @@ func AppendMarshal[T any](dst []byte, v *T, opts ...MarshalOption) ([]byte, erro
 
 	m.buf = dst
 
-	ti := getCodec(reflect.TypeFor[T]())
+	ti := codecCacheMarshal.getCodec(reflect.TypeFor[T]())
 	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
 		m.buf = nil // detach caller's buffer before pooling
 		putMarshaler(m)

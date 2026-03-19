@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/bits"
 	"strconv"
 	"unsafe"
@@ -729,11 +730,9 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 		*(*float32)(ptr) = float32(v)
 		return end, nil
 
-	case KindInt, KindInt8, KindInt16, KindInt32, KindInt64:
+	case KindInt, KindInt64:
 		end, v, isFloat, ok := scanInt64(src, idx)
 		if isFloat {
-			// scanInt64SinglePass stopped at '.' or 'e/E'; need to scan
-			// through the full float to report correct end position.
 			numEnd, _, numErr := scanNumberSpan(src, idx)
 			if numErr != nil {
 				return numEnd, numErr
@@ -741,20 +740,54 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 			return numEnd, newUnmarshalTypeError("number", ti.Ext.Type, numEnd)
 		}
 		if !ok {
-			// Syntax error or overflow — distinguish by checking if we
-			// actually scanned any digits.
 			if end == idx || (end == idx+1 && sliceAt(src, idx) == '-') {
 				return end, newSyntaxError(fmt.Sprintf("vjson: invalid number at offset %d", idx), idx)
 			}
 			return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
 		}
-		if !intFitsKind(v, ti.Kind) {
-			return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
+		// KindInt and KindInt64 always fit — no overflow check needed.
+		if ti.Kind == KindInt {
+			*(*int)(ptr) = int(v)
+		} else {
+			*(*int64)(ptr) = v
 		}
-		writeIntValue(ptr, ti.Kind, v)
 		return end, nil
 
-	case KindUint, KindUint8, KindUint16, KindUint32, KindUint64:
+	case KindInt8, KindInt16, KindInt32:
+		end, v, isFloat, ok := scanInt64(src, idx)
+		if isFloat {
+			numEnd, _, numErr := scanNumberSpan(src, idx)
+			if numErr != nil {
+				return numEnd, numErr
+			}
+			return numEnd, newUnmarshalTypeError("number", ti.Ext.Type, numEnd)
+		}
+		if !ok {
+			if end == idx || (end == idx+1 && sliceAt(src, idx) == '-') {
+				return end, newSyntaxError(fmt.Sprintf("vjson: invalid number at offset %d", idx), idx)
+			}
+			return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
+		}
+		switch ti.Kind {
+		case KindInt8:
+			if v < math.MinInt8 || v > math.MaxInt8 {
+				return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
+			}
+			*(*int8)(ptr) = int8(v)
+		case KindInt16:
+			if v < math.MinInt16 || v > math.MaxInt16 {
+				return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
+			}
+			*(*int16)(ptr) = int16(v)
+		default: // KindInt32
+			if v < math.MinInt32 || v > math.MaxInt32 {
+				return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
+			}
+			*(*int32)(ptr) = int32(v)
+		}
+		return end, nil
+
+	case KindUint, KindUint64:
 		end, v, isFloat, ok := scanUint64(src, idx)
 		if isFloat {
 			numEnd, _, numErr := scanNumberSpan(src, idx)
@@ -769,10 +802,46 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *TypeInfo, ptr unsafe.Point
 			}
 			return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
 		}
-		if !uintFitsKind(v, ti.Kind) {
+		// KindUint and KindUint64 always fit — no overflow check needed.
+		if ti.Kind == KindUint {
+			*(*uint)(ptr) = uint(v)
+		} else {
+			*(*uint64)(ptr) = v
+		}
+		return end, nil
+
+	case KindUint8, KindUint16, KindUint32:
+		end, v, isFloat, ok := scanUint64(src, idx)
+		if isFloat {
+			numEnd, _, numErr := scanNumberSpan(src, idx)
+			if numErr != nil {
+				return numEnd, numErr
+			}
+			return numEnd, newUnmarshalTypeError("number", ti.Ext.Type, numEnd)
+		}
+		if !ok {
+			if end == idx {
+				return end, newSyntaxError(fmt.Sprintf("vjson: invalid number at offset %d", idx), idx)
+			}
 			return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
 		}
-		writeUintValue(ptr, ti.Kind, v)
+		switch ti.Kind {
+		case KindUint8:
+			if v > math.MaxUint8 {
+				return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
+			}
+			*(*uint8)(ptr) = uint8(v)
+		case KindUint16:
+			if v > math.MaxUint16 {
+				return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
+			}
+			*(*uint16)(ptr) = uint16(v)
+		default: // KindUint32
+			if v > math.MaxUint32 {
+				return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Ext.Type, end)
+			}
+			*(*uint32)(ptr) = uint32(v)
+		}
 		return end, nil
 
 	case KindAny:
@@ -836,7 +905,6 @@ func (sc *Parser) scanNumberAny(src []byte, idx int) (int, any, error) {
 	}
 	return end, v, nil
 }
-
 
 func (sc *Parser) scanMap(src []byte, idx int, mDec *MapCodec, ptr unsafe.Pointer) (int, error) {
 	// Fast path for map[string]V with known V — zero reflection
