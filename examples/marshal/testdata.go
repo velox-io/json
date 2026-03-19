@@ -60,8 +60,12 @@ type User struct {
 	Status   Status            `json:"status"`  // json.Marshaler in the middle position
 	Tags     []Tag             `json:"tags"`    // slice of nested structs
 	Meta     map[string]string `json:"meta"`    // map field
-	Nickname string            `json:"nickname"`
-	Extra    any               `json:"extra"` // any field
+	Contacts map[string]struct {
+		Phone string `json:"phone"`
+		Email string `json:"email"`
+	} `json:"contacts"` // map of anonymous structs
+	Nickname string `json:"nickname"`
+	Extra    any    `json:"extra"` // any field
 }
 
 // NewTestUser creates a new test User instance with predefined data.
@@ -96,6 +100,13 @@ func NewTestUser() User {
 			"cc":     "cn-east",
 		},
 		Nickname: "lambit",
+		Contacts: map[string]struct {
+			Phone string `json:"phone"`
+			Email string `json:"email"`
+		}{
+			"alice": {Phone: "13800001111", Email: "alice@example.com"},
+			"bob":   {Phone: "13900002222", Email: "bob@example.com"},
+		},
 		Extra: Address{
 			City:   "Shenzhen",
 			Street: "Keyuan Rd",

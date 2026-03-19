@@ -482,13 +482,13 @@ func TestNativeMap_Nested(t *testing.T) {
 func TestNativeMap_InStruct(t *testing.T) {
 
 	type MapStruct struct {
-		Data      map[string]string `json:"data"`
-		Optional  map[string]int    `json:"optional,omitempty"`
-		Pointer   *map[string]int   `json:"pointer"`
-		Ignored   map[string]string `json:"-"`
-		Named     map[string]string `json:"named_field"`
-		Counters  map[string]int64  `json:"counters"`
-		OptInt64  map[string]int64  `json:"opt_int64,omitempty"`
+		Data     map[string]string `json:"data"`
+		Optional map[string]int    `json:"optional,omitempty"`
+		Pointer  *map[string]int   `json:"pointer"`
+		Ignored  map[string]string `json:"-"`
+		Named    map[string]string `json:"named_field"`
+		Counters map[string]int64  `json:"counters"`
+		OptInt64 map[string]int64  `json:"opt_int64,omitempty"`
 	}
 
 	cases := []struct {
