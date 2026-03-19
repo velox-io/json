@@ -160,6 +160,27 @@ type testStringer struct {
 
 func (s testStringer) String() string { return s.Val }
 
+// Plain non-empty interface — not Stringer, not Marshaler.
+// encoding/json ignores Speak() and serializes struct fields normally.
+type Animal interface {
+	Speak() string
+}
+
+type Dog struct {
+	Name  string `json:"name"`
+	Breed string `json:"breed"`
+}
+
+func (d Dog) Speak() string { return "woof" }
+
+type Cat struct {
+	Name  string `json:"name"`
+	Color string `json:"color"`
+	Lives int    `json:"lives"`
+}
+
+func (c Cat) Speak() string { return "meow" }
+
 func TestMarshal_NonEmptyInterface(t *testing.T) {
 	type S struct {
 		Label string       `json:"label"`
@@ -176,6 +197,101 @@ func TestMarshal_NonEmptyInterface(t *testing.T) {
 		{"pointer", S{Label: "test", Name: &testStringer{"bob"}}},
 		{"omitempty_nil", S{Label: "test", Name: testStringer{"x"}, Extra: nil}},
 		{"omitempty_present", S{Label: "test", Name: testStringer{"x"}, Extra: testStringer{"y"}}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Marshal(&tc.val)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, _ := json.Marshal(tc.val)
+			if string(got) != string(want) {
+				t.Errorf("mismatch:\n  got:  %s\n  want: %s", got, want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMarshal_PlainNonEmptyInterface
+//
+// Struct fields with plain non-empty interface types (not Stringer, not
+// Marshaler). encoding/json serializes the concrete struct fields normally,
+// ignoring the interface methods. This exercises the makeEncodeIface path
+// for interfaces that have no special JSON behavior.
+// ---------------------------------------------------------------------------
+
+func TestMarshal_PlainNonEmptyInterface(t *testing.T) {
+	type S struct {
+		Label string `json:"label"`
+		Pet   Animal `json:"pet"`
+		Extra Animal `json:"extra,omitempty"`
+	}
+
+	dog := Dog{Name: "Rex", Breed: "Labrador"}
+	cat := Cat{Name: "Whiskers", Color: "orange", Lives: 9}
+
+	cases := []struct {
+		name string
+		val  S
+	}{
+		{"nil", S{Label: "test", Pet: nil}},
+		{"dog_value", S{Label: "test", Pet: dog}},
+		{"dog_pointer", S{Label: "test", Pet: &dog}},
+		{"cat_value", S{Label: "test", Pet: cat}},
+		{"cat_pointer", S{Label: "test", Pet: &cat}},
+		{"omitempty_nil", S{Label: "test", Pet: dog, Extra: nil}},
+		{"omitempty_present", S{Label: "test", Pet: dog, Extra: cat}},
+		{"both_pointers", S{Label: "test", Pet: &dog, Extra: &cat}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Marshal(&tc.val)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, _ := json.Marshal(tc.val)
+			if string(got) != string(want) {
+				t.Errorf("mismatch:\n  got:  %s\n  want: %s", got, want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMarshal_MultipleInterfaceTypes
+//
+// A struct with multiple different non-empty interface fields, mixing plain
+// interfaces with Stringer. Verifies correct dispatch for each field.
+// ---------------------------------------------------------------------------
+
+func TestMarshal_MultipleInterfaceTypes(t *testing.T) {
+	type S struct {
+		Label   string       `json:"label"`
+		Pet     Animal       `json:"pet"`
+		Display fmt.Stringer `json:"display"`
+		Wild    any          `json:"wild"`
+	}
+
+	cases := []struct {
+		name string
+		val  S
+	}{
+		{"all_nil", S{Label: "test"}},
+		{"all_set", S{
+			Label:   "mixed",
+			Pet:     Dog{Name: "Rex", Breed: "Labrador"},
+			Display: testStringer{"hello"},
+			Wild:    Cat{Name: "Mimi", Color: "black", Lives: 7},
+		}},
+		{"all_pointers", S{
+			Label:   "ptrs",
+			Pet:     &Dog{Name: "Rex", Breed: "Labrador"},
+			Display: &testStringer{"hello"},
+			Wild:    &Cat{Name: "Mimi", Color: "black", Lives: 7},
+		}},
 	}
 
 	for _, tc := range cases {

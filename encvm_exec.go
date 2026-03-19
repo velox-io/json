@@ -80,6 +80,11 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	ctx := &m.vmCtx
 	ctx.OpsPtr = unsafe.Pointer(&bp.Ops[0])
 	ctx.PC = 0
+	// SAFETY: base must point to heap memory. If it pointed to the goroutine
+	// stack, a stack growth during yield-to-Go would relocate the stack but
+	// NOT update this heap-stored pointer, leaving CurBase dangling.
+	// Currently guaranteed because Marshal's escape analysis marks v as
+	// heap-escaping (via indirect EncodeFn call). See Marshal doc comment.
 	ctx.CurBase = base
 
 	// Build initial vmstate: first=1, flags from m.flags,

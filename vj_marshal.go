@@ -164,6 +164,19 @@ func WithFastEscape() MarshalOption {
 }
 
 // Marshal returns the compact JSON encoding of *v.
+//
+// Stack-move safety: v is converted to unsafe.Pointer and stored in the
+// heap-allocated Marshaler.vmCtx.CurBase for the C VM to read. If v were
+// on the goroutine stack, a stack growth during a VM yield-to-Go could
+// relocate the stack, leaving CurBase as a dangling pointer.
+//
+// This is currently safe because encodeValue dispatches through EncodeFn,
+// a function value (indirect call). The escape analysis cannot see through
+// it, so the compiler conservatively marks v as "leaks to heap", forcing
+// the caller to heap-allocate v before entering Marshal. Should EncodeFn
+// ever become a direct (devirtualisable) call, this implicit guarantee
+// would break — add an explicit forceEscape or runtime.Pinner at that
+// point.
 func Marshal[T any](v *T, opts ...MarshalOption) ([]byte, error) {
 	m := getMarshaler()
 	for _, o := range opts {
@@ -185,6 +198,7 @@ func Marshal[T any](v *T, opts ...MarshalOption) ([]byte, error) {
 }
 
 // MarshalIndent returns the indented JSON encoding of *v.
+// See Marshal for stack-move safety discussion.
 func MarshalIndent[T any](v *T, prefix, indent string, opts ...MarshalOption) ([]byte, error) {
 	m := getMarshaler()
 	for _, o := range opts {
@@ -204,6 +218,7 @@ func MarshalIndent[T any](v *T, prefix, indent string, opts ...MarshalOption) ([
 }
 
 // AppendMarshal appends the compact JSON encoding of *v to dst.
+// See Marshal for stack-move safety discussion.
 func AppendMarshal[T any](dst []byte, v *T, opts ...MarshalOption) ([]byte, error) {
 	m := getMarshaler()
 	for _, o := range opts {
@@ -234,13 +249,13 @@ func (m *Marshaler) finalize() []byte {
 	return result
 }
 
-// encodeValue dispatches encoding via pre-bound EncodeFn (hot path),
-// falling back to encodeValueSlow for dynamically-obtained TypeInfo (e.g. encodeAnyReflect).
+// encodeValue dispatches encoding via pre-bound EncodeFn.
+// All supported types have EncodeFn set by bindEncodeFn at codec construction time.
 func (m *Marshaler) encodeValue(ti *TypeInfo, ptr unsafe.Pointer) error {
 	if fn := ti.EncodeFn; fn != nil {
 		return fn(m, ptr)
 	}
-	return m.encodeValueSlow(ti, ptr)
+	return &UnsupportedTypeError{Type: ti.Ext.Type}
 }
 
 func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
@@ -335,12 +350,8 @@ func (m *Marshaler) encodeMap(dec *MapCodec, ptr unsafe.Pointer) error {
 // bindEncodeFn assigns EncodeFn on ti based on priority:
 //   MarshalFn > TextMarshalFn > Kind-specific.
 //
-// This is the "hot path" setup: at codec construction time, each TypeInfo
-// gets a pre-bound EncodeFn so that encodeValue can call it directly
-// without any runtime dispatch overhead.
-//
-// The cold-path counterpart is encodeValueSlow, which handles
-// dynamically-obtained TypeInfo (e.g. encodeAnyReflect).
+// At codec construction time, every TypeInfo gets a pre-bound EncodeFn
+// so that encodeValue can call it directly without runtime dispatch.
 
 func bindEncodeFn(ti *TypeInfo) {
 	if ti.Flags&tiFlagHasMarshalFn != 0 && ti.Ext != nil && ti.Ext.MarshalFn != nil {
@@ -411,6 +422,8 @@ func bindEncodeFn(ti *TypeInfo) {
 			return
 		}
 		ti.EncodeFn = makeEncodeMap(ti.Codec.(*MapCodec))
+	case KindIface:
+		ti.EncodeFn = makeEncodeIface(ti)
 	}
 }
 

@@ -10,9 +10,8 @@ import (
 	"unsafe"
 )
 
-// Two-layer dispatch design:
-//   Hot path — bindEncodeFn pre-binds EncodeFn per TypeInfo; encodeValue calls it directly.
-//   Cold path — encodeValueSlow handles dynamically-obtained TypeInfo (e.g. encodeAnyReflect),
+// All types have EncodeFn pre-bound at codec construction time (see bindEncodeFn).
+// encodeValue dispatches directly via the function pointer — no runtime switch needed.
 
 // Pre-computed string representations for 0-999.
 var smallInts [1000]string
@@ -226,6 +225,18 @@ func makeEncodeMap(dec *MapCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
 	}
 }
 
+func makeEncodeIface(ti *TypeInfo) func(m *Marshaler, ptr unsafe.Pointer) error {
+	ifaceType := ti.Ext.Type
+	return func(m *Marshaler, ptr unsafe.Pointer) error {
+		rv := reflect.NewAt(ifaceType, ptr).Elem()
+		if rv.IsNil() {
+			m.buf = append(m.buf, litNull...)
+			return nil
+		}
+		return m.encodeAnyReflect(rv.Elem().Interface())
+	}
+}
+
 // Closure builders for custom marshalers.
 
 func makeEncodeMarshalJSON(marshalFn func(ptr unsafe.Pointer) ([]byte, error)) func(m *Marshaler, ptr unsafe.Pointer) error {
@@ -247,79 +258,6 @@ func makeEncodeTextMarshal(textMarshalFn func(ptr unsafe.Pointer) ([]byte, error
 		}
 		m.encodeString(string(text))
 		return nil
-	}
-}
-
-// encodeValueSlow is the cold-path fallback for dynamically-obtained TypeInfo
-// (e.g. encodeAnyReflect) where EncodeFn was not pre-bound at codec construction.
-// It delegates to the same per-Kind EncodeFn wrappers used by the hot path,
-// so all actual encoding logic appears only once.
-func (m *Marshaler) encodeValueSlow(ti *TypeInfo, ptr unsafe.Pointer) error {
-	if ti.Flags&tiFlagHasMarshalFn != 0 {
-		data, err := ti.Ext.MarshalFn(ptr)
-		if err != nil {
-			return err
-		}
-		m.buf = append(m.buf, data...)
-		return nil
-	}
-	if ti.Flags&tiFlagHasTextMarshalFn != 0 {
-		text, err := ti.Ext.TextMarshalFn(ptr)
-		if err != nil {
-			return err
-		}
-		m.encodeString(string(text))
-		return nil
-	}
-	switch ti.Kind {
-	case KindBool:
-		return encodeBool(m, ptr)
-	case KindInt:
-		return encodeInt(m, ptr)
-	case KindInt8:
-		return encodeInt8(m, ptr)
-	case KindInt16:
-		return encodeInt16(m, ptr)
-	case KindInt32:
-		return encodeInt32(m, ptr)
-	case KindInt64:
-		return encodeInt64Fn(m, ptr)
-	case KindUint:
-		return encodeUint(m, ptr)
-	case KindUint8:
-		return encodeUint8(m, ptr)
-	case KindUint16:
-		return encodeUint16(m, ptr)
-	case KindUint32:
-		return encodeUint32(m, ptr)
-	case KindUint64:
-		return encodeUint64Fn(m, ptr)
-	case KindFloat32:
-		return encodeFloat32Value(m, ptr)
-	case KindFloat64:
-		return encodeFloat64Value(m, ptr)
-	case KindString:
-		return encodeStringValue(m, ptr)
-	case KindStruct:
-		return m.encodeStruct(ti.resolveCodec().(*StructCodec), ptr)
-	case KindSlice:
-		return m.encodeSlice(ti.resolveCodec().(*SliceCodec), ptr)
-	case KindArray:
-		return m.encodeArray(ti.resolveCodec().(*ArrayCodec), ptr)
-	case KindPointer:
-		return m.encodePointer(ti.resolveCodec().(*PointerCodec), ptr)
-	case KindMap:
-		return m.encodeMap(ti.resolveCodec().(*MapCodec), ptr)
-	case KindRawMessage:
-		return encodeRawMessageFn(m, ptr)
-	case KindNumber:
-		return encodeNumberFn(m, ptr)
-	case KindAny:
-		return m.encodeAny(*(*any)(ptr))
-	case KindIface:
-		return m.encodeIface(ti, ptr)
-	default:
-		return &UnsupportedTypeError{Type: ti.Ext.Type}
 	}
 }
 
@@ -722,19 +660,6 @@ func (m *Marshaler) encodeMapGeneric(dec *MapCodec, ptr unsafe.Pointer) error {
 }
 
 // any / interface encoding
-
-// encodeIface encodes a non-empty interface field (e.g. fmt.Stringer).
-// It extracts the dynamic value via reflect and marshals it, matching
-// encoding/json behavior.
-func (m *Marshaler) encodeIface(ti *TypeInfo, ptr unsafe.Pointer) error {
-	rv := reflect.NewAt(ti.Ext.Type, ptr).Elem()
-	if rv.IsNil() {
-		m.buf = append(m.buf, litNull...)
-		return nil
-	}
-	// Unwrap the interface to get the dynamic value, then marshal via encodeAnyReflect.
-	return m.encodeAnyReflect(rv.Elem().Interface())
-}
 
 // encodeAny encodes an arbitrary Go value stored in an interface{}.
 // Hot types (string, float64, bool, []any, map[string]any) are handled
