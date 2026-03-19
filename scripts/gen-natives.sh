@@ -326,6 +326,12 @@ if [ "$DISABLE_PRELINK" = true ]; then
 elif [ "$USE_ZIG" = true ] && [ "$TARGET_OS" = "darwin" ]; then
     USE_LTO=false
     echo "Note: LTO disabled (zig cc does not support -flto for darwin targets)"
+elif [ "$TARGET_OS" = "linux" ] && [ "$TARGET_ARCH" = "arm64" ]; then
+    USE_LTO=false
+    echo "Note: LTO disabled for linux/arm64 (prelink uses native object format, not LLVM IR bitcode)"
+elif [ "$TARGET_OS" = "windows" ]; then
+    USE_LTO=false
+    echo "Note: LTO disabled (windows uses relocatable -r path which requires native object format, not LLVM IR bitcode)"
 fi
 
 LTO_FLAG=""
@@ -545,7 +551,7 @@ echo ""
 needs_prelink() {
     if [ "$DISABLE_PRELINK" = true ]; then return 1; fi
     if [ "$TARGET_OS" = "darwin" ]; then return 0; fi
-    if [ "$TARGET_OS" = "linux" ] && [ "$TARGET_ARCH" = "amd64" ]; then return 0; fi
+    if [ "$TARGET_OS" = "linux" ]; then return 0; fi
     return 1
 }
 

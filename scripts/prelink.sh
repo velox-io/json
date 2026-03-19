@@ -43,10 +43,10 @@
 #   Platform strategies:
 #     Linux (ELF):
 #       1. Link with -shared + custom linker script to merge .rodata into .text
-#       2. Use so-to-obj tool to convert ET_DYN to ET_REL
+#       2. Use prelink-obj tool to convert ET_DYN to ET_REL
 #     Darwin (Mach-O):
 #       1. Link with -dynamiclib + export list to resolve all relocations
-#       2. Use dylib_to_obj.py to convert dylib to MH_OBJECT
+#       2. Use prelink-obj tool to convert dylib to MH_OBJECT
 #
 #   The output has zero relocations — it can be used as input to any downstream
 #   linker without needing to resolve any relocations.
@@ -255,7 +255,7 @@ link_elf_shared() {
             ;;
     esac
 
-    $CC_CMD -shared $lto_flag -nostdlib $symbolic_flag -Wl,-T,"$ldscript" $objs -o "$out"
+    $CC_CMD -shared $lto_flag -nostdlib $symbolic_flag -Wl,--build-id=none -Wl,-T,"$ldscript" $objs -o "$out"
 }
 
 # Link Darwin dylib
@@ -332,8 +332,16 @@ done
 mkdir -p "$WORKDIR"
 mkdir -p "$(dirname "$OUTPUT")"
 
+# Build unified prelink-obj tool (used by both ELF and Mach-O paths)
+PRELINK_OBJ="$REPO_ROOT/build/bin/prelink-obj"
+if [ ! -x "$PRELINK_OBJ" ]; then
+    log "  Building prelink-obj..."
+    mkdir -p "$(dirname "$PRELINK_OBJ")"
+    (cd "$REPO_ROOT/scripts/cmd/prelink-obj" && go build -o "$PRELINK_OBJ" .)
+fi
+
 if [ "$TARGET_OS" = "darwin" ]; then
-    # ── Darwin (Mach-O): -dynamiclib → dylib_to_obj.py ──
+    # ── Darwin (Mach-O): -dynamiclib → prelink-obj ──
     DYLIB_TMP="$WORKDIR/${BASENAME_NOEXT}.dylib"
 
     log "  Linking dylib..."
@@ -341,10 +349,13 @@ if [ "$TARGET_OS" = "darwin" ]; then
     link_darwin_dylib "$DYLIB_TMP" $ALL_OBJS
 
     log "  Converting dylib to object..."
-    python3 "$REPO_ROOT/scripts/dylib_to_obj.py" "$DYLIB_TMP" "$OUTPUT"
-    #rm -f "$DYLIB_TMP"
+    if [ "$QUIET" = true ]; then
+        "$PRELINK_OBJ" -q -o "$OUTPUT" "$DYLIB_TMP"
+    else
+        "$PRELINK_OBJ" -o "$OUTPUT" "$DYLIB_TMP"
+    fi
 else
-    # ── ELF (Linux, Windows, etc.): -shared + linker script → so-to-obj ──
+    # ── ELF (Linux, Windows, etc.): -shared + linker script → prelink-obj ──
     MERGED_SO="$WORKDIR/${BASENAME_NOEXT}.so"
 
     # Create linker script that merges .rodata into .text
@@ -373,22 +384,13 @@ EOF
     log "  Linking..."
     link_elf_shared "$MERGED_SO" "$TMPDIR/merge.ld" $ALL_OBJS
 
-    # Use so-to-obj to convert ET_DYN to ET_REL
-    SO_TO_OBJ="$REPO_ROOT/build/bin/so-to-obj"
-
-    if [ ! -x "$SO_TO_OBJ" ]; then
-        log "  Building so-to-obj..."
-        mkdir -p "$(dirname "$SO_TO_OBJ")"
-        (cd "$REPO_ROOT/scripts/cmd/so-to-obj" && go build -o "$SO_TO_OBJ" .)
-    fi
-
-    # Build so-to-obj flags.
+    # Build prelink-obj flags.
     # If EXPORT_LIST is provided, derive an export prefix from the first symbol
-    # in the list and pass it via -export-prefix so that so-to-obj demotes
+    # in the list and pass it via -export-prefix so that prelink-obj demotes
     # non-matching symbols to STB_LOCAL in the output ET_REL.
     # This avoids using --version-script during LTO linking, which would change
     # symbol visibility and alter the optimizer's inlining decisions.
-    SO_TO_OBJ_FLAGS=""
+    PRELINK_FLAGS=""
     if [ -n "$EXPORT_LIST" ] && [ -f "$EXPORT_LIST" ]; then
         # Read the first non-empty symbol and strip trailing _<mode>_<isa> suffix
         # to get the bare prefix (e.g. "vj_vm_exec_fast_sse42" → "vj_vm_exec").
@@ -396,15 +398,15 @@ EOF
         if [ -n "$_first_sym" ]; then
             # Strip the last two underscore-delimited tokens (mode and isa)
             _prefix=$(printf '%s' "$_first_sym" | sed 's/_[^_]*_[^_]*$//')
-            SO_TO_OBJ_FLAGS="-export-prefix $_prefix"
+            PRELINK_FLAGS="-export-prefix $_prefix"
         fi
     fi
 
     log "  Creating object file..."
     if [ "$QUIET" = true ]; then
-        "$SO_TO_OBJ" -q $SO_TO_OBJ_FLAGS -o "$OUTPUT" "$MERGED_SO"
+        "$PRELINK_OBJ" -q $PRELINK_FLAGS -o "$OUTPUT" "$MERGED_SO"
     else
-        "$SO_TO_OBJ" $SO_TO_OBJ_FLAGS -o "$OUTPUT" "$MERGED_SO"
+        "$PRELINK_OBJ" $PRELINK_FLAGS -o "$OUTPUT" "$MERGED_SO"
     fi
 fi
 
