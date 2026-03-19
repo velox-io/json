@@ -3,8 +3,22 @@ package vjson
 import (
 	"math"
 	"reflect"
+	"strings"
 	"unsafe"
 )
+
+// typeName returns a compact type name; truncates anonymous structs for trace readability.
+func typeName(t reflect.Type) string {
+	s := t.String()
+	if !strings.HasPrefix(s, "struct {") {
+		return s
+	}
+	const maxLen = 48
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + " ...}"
+}
 
 // alignedOps returns a copy of data backed by 8-byte aligned memory.
 // Uses a []uint64 as the backing store to guarantee alignment, since
@@ -37,7 +51,7 @@ func compileBlueprint(dec *StructCodec) *Blueprint {
 	// Emit top-level struct as OBJ_OPEN + body + OBJ_CLOSE.
 	b.emit(IRInst{
 		Op:         opObjOpen,
-		Annotation: dec.Typ.String(),
+		Annotation: typeName(dec.Typ),
 		SourceType: dec.Typ,
 	})
 
@@ -58,7 +72,7 @@ func compileBlueprint(dec *StructCodec) *Blueprint {
 	ops, fallbacks, annotations := lower(insts)
 
 	return &Blueprint{
-		Name:        dec.Typ.String(),
+		Name:        typeName(dec.Typ),
 		Ops:         alignedOps(ops),
 		Fallbacks:   fallbacks,
 		Annotations: annotations,
@@ -334,8 +348,7 @@ func emitPrimitive(b *irBuilder, fi *TypeInfo, fieldOff uintptr) {
 	})
 }
 
-// emitQuotedInt emits a keyed quoted integer instruction (opKQInt or opKQInt64)
-// for struct fields with the `,string` tag. Only supports KindInt and KindInt64.
+// emitQuotedInt emits opKQInt/opKQInt64 for `,string`-tagged int/int64 fields.
 func emitQuotedInt(b *irBuilder, fi *TypeInfo, fieldOff uintptr) {
 	keyOff, keyLen, ok := b.addKey(fi.Ext.KeyBytes)
 	if !ok {
@@ -371,7 +384,7 @@ func emitNestedStruct(b *irBuilder, fi *TypeInfo, fieldOff uintptr, subDec *Stru
 		Op:         opObjOpen,
 		KeyLen:     keyLen,
 		KeyOff:     keyOff,
-		Annotation: subDec.Typ.String(),
+		Annotation: typeName(subDec.Typ),
 		SourceType: subDec.Typ,
 	})
 
@@ -461,7 +474,7 @@ func emitDerefBody(b *irBuilder, elemTI *TypeInfo) {
 		b.visiting[subDec.Typ] = InvalidLabel
 		b.emit(IRInst{
 			Op:         opObjOpen,
-			Annotation: subDec.Typ.String(),
+			Annotation: typeName(subDec.Typ),
 			SourceType: subDec.Typ,
 		})
 		emitStructBody(b, subDec, 0)
@@ -728,7 +741,7 @@ func emitElementBody(b *irBuilder, elemTI *TypeInfo) {
 		b.visiting[subDec.Typ] = InvalidLabel
 		b.emit(IRInst{
 			Op:         opObjOpen,
-			Annotation: subDec.Typ.String(),
+			Annotation: typeName(subDec.Typ),
 			SourceType: subDec.Typ,
 		})
 		emitStructBody(b, subDec, 0)
@@ -994,7 +1007,7 @@ func emitCall(b *irBuilder, dec *StructCodec, fieldOff uintptr) {
 			Op:         opCall,
 			FieldOff:   uint16(fieldOff),
 			Target:     existingLabel,
-			Annotation: dec.Typ.String(),
+			Annotation: typeName(dec.Typ),
 		})
 	} else {
 		// Check if a subroutine is already pending for this type.
@@ -1021,7 +1034,7 @@ func emitCall(b *irBuilder, dec *StructCodec, fieldOff uintptr) {
 			Op:         opCall,
 			FieldOff:   uint16(fieldOff),
 			Target:     targetLabel,
-			Annotation: dec.Typ.String(),
+			Annotation: typeName(dec.Typ),
 		})
 	}
 }

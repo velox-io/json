@@ -24,3 +24,20 @@ func TestMarshalTwitterSingleStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func loadSyntheaFHIRSingleEntry() *jsonbench.SyntheaRoot {
+	root, err := jsonbench.LoadSyntheaFHIR()
+	if err != nil {
+		panic("load synthea_fhir: " + err.Error())
+	}
+	root.Entry = root.Entry[:1]
+	return root
+}
+
+func TestMarshalSyntheaFHIRSingleEntry(t *testing.T) {
+	root := loadSyntheaFHIRSingleEntry()
+	_, err := vjson.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
