@@ -28,7 +28,7 @@ Giving up SIMD pre-scanning doesn't mean giving up optimization. The parser does
 
 - **SWAR bulk processing**
 
-  No SIMD, but Velox makes heavy use of SWAR (SIMD Within A Register) — packing 8 bytes into a `uint64` and using bitwise operations to detect quotes, backslashes, and control characters simultaneously. This applies to both string scanning and number parsing. For example, when scanning a string, 8 bytes are loaded at once and checked for `"`, `\`, or characters below 0x20:
+  No SIMD, but Velox makes heavy use of SWAR (SIMD Within A Register) — packing 8 bytes into a `uint64` and using bitwise operations to detect quotes, backslashes, and control characters simultaneously. This applies to both string scanning and number parsing. For example, when scanning a string, 8 bytes are loaded at once and checked for `"`, `\`, or characters below 0x20.
 
 - **Hot/cold path splitting**
 
