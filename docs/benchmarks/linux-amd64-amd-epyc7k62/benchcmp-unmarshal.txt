@@ -4,50 +4,50 @@ pkg: dev.local/benchmark
 cpu: AMD EPYC 7K62 48-Core Processor
                                  │    Velox     │                StdJSON                │                Sonic                │
                                  │    sec/op    │    sec/op      vs base                │    sec/op     vs base               │
-_Unmarshal_Tiny-16                 309.1n ± ∞ ¹   2394.0n ± ∞ ¹  +674.51% (p=0.008 n=5)   477.3n ± ∞ ¹  +54.42% (p=0.008 n=5)
-_Unmarshal_TinyCompact-16          303.6n ± ∞ ¹   2274.0n ± ∞ ¹  +649.01% (p=0.008 n=5)   465.3n ± ∞ ¹  +53.26% (p=0.008 n=5)
-_Unmarshal_Small-16                1.686µ ± ∞ ¹   12.433µ ± ∞ ¹  +637.43% (p=0.008 n=5)   1.999µ ± ∞ ¹  +18.56% (p=0.008 n=5)
-_Unmarshal_SmallCompact-16         1.417µ ± ∞ ¹   10.322µ ± ∞ ¹  +628.44% (p=0.008 n=5)   1.722µ ± ∞ ¹  +21.52% (p=0.008 n=5)
-_Unmarshal_EscapeHeavy-16          6.012µ ± ∞ ¹   50.560µ ± ∞ ¹  +740.98% (p=0.008 n=5)   7.355µ ± ∞ ¹  +22.34% (p=0.008 n=5)
-_Unmarshal_EscapeHeavyCompact-16   5.305µ ± ∞ ¹   39.271µ ± ∞ ¹  +640.26% (p=0.008 n=5)   6.134µ ± ∞ ¹  +15.63% (p=0.008 n=5)
-_Unmarshal_KubePods-16             38.05µ ± ∞ ¹   365.20µ ± ∞ ¹  +859.88% (p=0.008 n=5)   48.42µ ± ∞ ¹  +27.27% (p=0.008 n=5)
-_Unmarshal_KubePodsCompact-16      31.97µ ± ∞ ¹   254.80µ ± ∞ ¹  +696.97% (p=0.008 n=5)   40.08µ ± ∞ ¹  +25.37% (p=0.008 n=5)
-_Unmarshal_Twitter-16              657.5µ ± ∞ ¹   6595.2µ ± ∞ ¹  +903.13% (p=0.008 n=5)   867.6µ ± ∞ ¹  +31.96% (p=0.008 n=5)
-_Unmarshal_TwitterCompact-16       572.1µ ± ∞ ¹   5165.6µ ± ∞ ¹  +802.95% (p=0.008 n=5)   742.8µ ± ∞ ¹  +29.83% (p=0.008 n=5)
-_Unmarshal_TwitterTyped-16         527.7µ ± ∞ ¹   5196.7µ ± ∞ ¹  +884.76% (p=0.008 n=5)   661.5µ ± ∞ ¹  +25.36% (p=0.008 n=5)
-geomean                            12.96µ          107.8µ        +732.08%                 16.72µ        +29.05%
+_Unmarshal_Tiny-16                 321.3n ± ∞ ¹   2424.0n ± ∞ ¹  +654.44% (p=0.008 n=5)   497.8n ± ∞ ¹  +54.93% (p=0.008 n=5)
+_Unmarshal_TinyCompact-16          313.1n ± ∞ ¹   2290.0n ± ∞ ¹  +631.40% (p=0.008 n=5)   472.7n ± ∞ ¹  +50.97% (p=0.008 n=5)
+_Unmarshal_Small-16                1.667µ ± ∞ ¹   12.325µ ± ∞ ¹  +639.35% (p=0.008 n=5)   1.993µ ± ∞ ¹  +19.56% (p=0.008 n=5)
+_Unmarshal_SmallCompact-16         1.381µ ± ∞ ¹   10.316µ ± ∞ ¹  +646.99% (p=0.008 n=5)   1.728µ ± ∞ ¹  +25.13% (p=0.008 n=5)
+_Unmarshal_EscapeHeavy-16          6.038µ ± ∞ ¹   49.694µ ± ∞ ¹  +723.02% (p=0.008 n=5)   7.344µ ± ∞ ¹  +21.63% (p=0.008 n=5)
+_Unmarshal_EscapeHeavyCompact-16   5.282µ ± ∞ ¹   39.123µ ± ∞ ¹  +640.69% (p=0.008 n=5)   6.138µ ± ∞ ¹  +16.21% (p=0.008 n=5)
+_Unmarshal_KubePods-16             38.78µ ± ∞ ¹   358.63µ ± ∞ ¹  +824.75% (p=0.008 n=5)   48.18µ ± ∞ ¹  +24.23% (p=0.008 n=5)
+_Unmarshal_KubePodsCompact-16      31.73µ ± ∞ ¹   253.96µ ± ∞ ¹  +700.52% (p=0.008 n=5)   39.89µ ± ∞ ¹  +25.74% (p=0.008 n=5)
+_Unmarshal_Twitter-16              658.6µ ± ∞ ¹   6756.0µ ± ∞ ¹  +925.86% (p=0.008 n=5)   883.6µ ± ∞ ¹  +34.18% (p=0.008 n=5)
+_Unmarshal_TwitterCompact-16       569.0µ ± ∞ ¹   5275.8µ ± ∞ ¹  +827.28% (p=0.008 n=5)   750.2µ ± ∞ ¹  +31.85% (p=0.008 n=5)
+_Unmarshal_TwitterTyped-16         521.4µ ± ∞ ¹   5283.6µ ± ∞ ¹  +913.31% (p=0.008 n=5)   666.3µ ± ∞ ¹  +27.79% (p=0.008 n=5)
+geomean                            12.99µ          108.1µ        +732.19%                 16.85µ        +29.70%
 ¹ need >= 6 samples for confidence interval at level 0.95
 
                                  │     Velox      │               StdJSON                │                 Sonic                 │
                                  │      B/s       │      B/s       vs base               │      B/s        vs base               │
-_Unmarshal_Tiny-16                 388.80Mi ± ∞ ¹   50.19Mi ± ∞ ¹  -87.09% (p=0.008 n=5)   251.77Mi ± ∞ ¹  -35.24% (p=0.008 n=5)
-_Unmarshal_TinyCompact-16          345.52Mi ± ∞ ¹   46.14Mi ± ∞ ¹  -86.65% (p=0.008 n=5)   225.45Mi ± ∞ ¹  -34.75% (p=0.008 n=5)
-_Unmarshal_Small-16                336.54Mi ± ∞ ¹   45.64Mi ± ∞ ¹  -86.44% (p=0.008 n=5)   283.90Mi ± ∞ ¹  -15.64% (p=0.008 n=5)
-_Unmarshal_SmallCompact-16         245.59Mi ± ∞ ¹   33.72Mi ± ∞ ¹  -86.27% (p=0.008 n=5)   202.08Mi ± ∞ ¹  -17.72% (p=0.008 n=5)
-_Unmarshal_EscapeHeavy-16          648.98Mi ± ∞ ¹   77.16Mi ± ∞ ¹  -88.11% (p=0.008 n=5)   530.47Mi ± ∞ ¹  -18.26% (p=0.008 n=5)
-_Unmarshal_EscapeHeavyCompact-16   505.12Mi ± ∞ ¹   68.24Mi ± ∞ ¹  -86.49% (p=0.008 n=5)   436.89Mi ± ∞ ¹  -13.51% (p=0.008 n=5)
-_Unmarshal_KubePods-16             639.66Mi ± ∞ ¹   66.64Mi ± ∞ ¹  -89.58% (p=0.008 n=5)   502.61Mi ± ∞ ¹  -21.43% (p=0.008 n=5)
-_Unmarshal_KubePodsCompact-16      392.26Mi ± ∞ ¹   49.22Mi ± ∞ ¹  -87.45% (p=0.008 n=5)   312.87Mi ± ∞ ¹  -20.24% (p=0.008 n=5)
-_Unmarshal_Twitter-16              916.04Mi ± ∞ ¹   91.31Mi ± ∞ ¹  -90.03% (p=0.008 n=5)   694.19Mi ± ∞ ¹  -24.22% (p=0.008 n=5)
-_Unmarshal_TwitterCompact-16       778.34Mi ± ∞ ¹   86.20Mi ± ∞ ¹  -88.92% (p=0.008 n=5)   599.49Mi ± ∞ ¹  -22.98% (p=0.008 n=5)
-_Unmarshal_TwitterTyped-16         843.78Mi ± ∞ ¹   85.69Mi ± ∞ ¹  -89.84% (p=0.008 n=5)   673.11Mi ± ∞ ¹  -20.23% (p=0.008 n=5)
-geomean                             505.4Mi         60.74Mi        -87.98%                  391.6Mi        -22.51%
+_Unmarshal_Tiny-16                 373.95Mi ± ∞ ¹   49.57Mi ± ∞ ¹  -86.74% (p=0.008 n=5)   241.37Mi ± ∞ ¹  -35.46% (p=0.008 n=5)
+_Unmarshal_TinyCompact-16          335.06Mi ± ∞ ¹   45.81Mi ± ∞ ¹  -86.33% (p=0.008 n=5)   221.92Mi ± ∞ ¹  -33.77% (p=0.008 n=5)
+_Unmarshal_Small-16                340.48Mi ± ∞ ¹   46.04Mi ± ∞ ¹  -86.48% (p=0.008 n=5)   284.66Mi ± ∞ ¹  -16.39% (p=0.008 n=5)
+_Unmarshal_SmallCompact-16         252.02Mi ± ∞ ¹   33.74Mi ± ∞ ¹  -86.61% (p=0.008 n=5)   201.44Mi ± ∞ ¹  -20.07% (p=0.008 n=5)
+_Unmarshal_EscapeHeavy-16          646.19Mi ± ∞ ¹   78.51Mi ± ∞ ¹  -87.85% (p=0.008 n=5)   531.27Mi ± ∞ ¹  -17.78% (p=0.008 n=5)
+_Unmarshal_EscapeHeavyCompact-16   507.34Mi ± ∞ ¹   68.49Mi ± ∞ ¹  -86.50% (p=0.008 n=5)   436.59Mi ± ∞ ¹  -13.94% (p=0.008 n=5)
+_Unmarshal_KubePods-16             627.54Mi ± ∞ ¹   67.86Mi ± ∞ ¹  -89.19% (p=0.008 n=5)   505.16Mi ± ∞ ¹  -19.50% (p=0.008 n=5)
+_Unmarshal_KubePodsCompact-16      395.30Mi ± ∞ ¹   49.38Mi ± ∞ ¹  -87.51% (p=0.008 n=5)   314.38Mi ± ∞ ¹  -20.47% (p=0.008 n=5)
+_Unmarshal_Twitter-16              914.50Mi ± ∞ ¹   89.15Mi ± ∞ ¹  -90.25% (p=0.008 n=5)   681.56Mi ± ∞ ¹  -25.47% (p=0.008 n=5)
+_Unmarshal_TwitterCompact-16       782.62Mi ± ∞ ¹   84.40Mi ± ∞ ¹  -89.22% (p=0.008 n=5)   593.56Mi ± ∞ ¹  -24.16% (p=0.008 n=5)
+_Unmarshal_TwitterTyped-16         853.98Mi ± ∞ ¹   84.28Mi ± ∞ ¹  -90.13% (p=0.008 n=5)   668.28Mi ± ∞ ¹  -21.75% (p=0.008 n=5)
+geomean                             504.1Mi         60.58Mi        -87.98%                  388.7Mi        -22.90%
 ¹ need >= 6 samples for confidence interval at level 0.95
 
                                  │     Velox     │                StdJSON                │                 Sonic                 │
                                  │     B/op      │     B/op       vs base                │     B/op       vs base                │
 _Unmarshal_Tiny-16                   48.00 ± ∞ ¹    288.00 ± ∞ ¹  +500.00% (p=0.008 n=5)    208.00 ± ∞ ¹  +333.33% (p=0.008 n=5)
 _Unmarshal_TinyCompact-16            48.00 ± ∞ ¹    288.00 ± ∞ ¹  +500.00% (p=0.008 n=5)    192.00 ± ∞ ¹  +300.00% (p=0.008 n=5)
-_Unmarshal_Small-16                  387.0 ± ∞ ¹     936.0 ± ∞ ¹  +141.86% (p=0.008 n=5)    1169.0 ± ∞ ¹  +202.07% (p=0.008 n=5)
+_Unmarshal_Small-16                  387.0 ± ∞ ¹     936.0 ± ∞ ¹  +141.86% (p=0.008 n=5)    1168.0 ± ∞ ¹  +201.81% (p=0.008 n=5)
 _Unmarshal_SmallCompact-16           387.0 ± ∞ ¹     936.0 ± ∞ ¹  +141.86% (p=0.008 n=5)     912.0 ± ∞ ¹  +135.66% (p=0.008 n=5)
-_Unmarshal_EscapeHeavy-16          2.918Ki ± ∞ ¹   5.438Ki ± ∞ ¹   +86.35% (p=0.008 n=5)   6.988Ki ± ∞ ¹  +139.49% (p=0.008 n=5)
-_Unmarshal_EscapeHeavyCompact-16   2.918Ki ± ∞ ¹   5.438Ki ± ∞ ¹   +86.35% (p=0.008 n=5)   5.985Ki ± ∞ ¹  +105.12% (p=0.008 n=5)
-_Unmarshal_KubePods-16             12.28Ki ± ∞ ¹   24.32Ki ± ∞ ¹   +97.98% (p=0.008 n=5)   43.81Ki ± ∞ ¹  +256.63% (p=0.008 n=5)
-_Unmarshal_KubePodsCompact-16      12.28Ki ± ∞ ¹   24.32Ki ± ∞ ¹   +97.98% (p=0.008 n=5)   30.43Ki ± ∞ ¹  +147.73% (p=0.008 n=5)
+_Unmarshal_EscapeHeavy-16          2.918Ki ± ∞ ¹   5.438Ki ± ∞ ¹   +86.35% (p=0.008 n=5)   6.987Ki ± ∞ ¹  +139.46% (p=0.008 n=5)
+_Unmarshal_EscapeHeavyCompact-16   2.918Ki ± ∞ ¹   5.438Ki ± ∞ ¹   +86.35% (p=0.008 n=5)   5.986Ki ± ∞ ¹  +105.15% (p=0.008 n=5)
+_Unmarshal_KubePods-16             12.28Ki ± ∞ ¹   24.32Ki ± ∞ ¹   +97.98% (p=0.008 n=5)   43.81Ki ± ∞ ¹  +256.64% (p=0.008 n=5)
+_Unmarshal_KubePodsCompact-16      12.28Ki ± ∞ ¹   24.32Ki ± ∞ ¹   +97.98% (p=0.008 n=5)   30.43Ki ± ∞ ¹  +147.74% (p=0.008 n=5)
 _Unmarshal_Twitter-16              163.6Ki ± ∞ ¹   428.6Ki ± ∞ ¹  +162.03% (p=0.008 n=5)   946.1Ki ± ∞ ¹  +478.44% (p=0.008 n=5)
-_Unmarshal_TwitterCompact-16       163.6Ki ± ∞ ¹   428.6Ki ± ∞ ¹  +162.03% (p=0.008 n=5)   778.0Ki ± ∞ ¹  +375.70% (p=0.008 n=5)
-_Unmarshal_TwitterTyped-16         116.0Ki ± ∞ ¹   352.5Ki ± ∞ ¹  +203.83% (p=0.008 n=5)   692.2Ki ± ∞ ¹  +496.60% (p=0.008 n=5)
-geomean                            3.584Ki         9.740Ki        +171.79%                 12.44Ki        +247.03%
+_Unmarshal_TwitterCompact-16       163.6Ki ± ∞ ¹   428.6Ki ± ∞ ¹  +162.03% (p=0.008 n=5)   778.0Ki ± ∞ ¹  +375.72% (p=0.008 n=5)
+_Unmarshal_TwitterTyped-16         116.0Ki ± ∞ ¹   352.5Ki ± ∞ ¹  +203.83% (p=0.008 n=5)   692.2Ki ± ∞ ¹  +496.58% (p=0.008 n=5)
+geomean                            3.584Ki         9.740Ki        +171.79%                 12.44Ki        +247.01%
 ¹ need >= 6 samples for confidence interval at level 0.95
 
                                  │    Velox     │                StdJSON                │                Sonic                 │

@@ -38,9 +38,9 @@
   <text x="512" y="212" class="col-hdr">B/op</text>
   <text x="762" y="212" class="col-hdr">allocs/op</text>
   <text x="44" y="234" class="lib-label" fill="#e67e22">StdJSON</text>
-  <rect x="112" y="220" width="230" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="347" y="234" class="bar-val">157.5ns </text>
-  <text x="399" y="234" class="badge-ratio">2.54x</text>
+  <rect x="112" y="220" width="211" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
+  <text x="328" y="234" class="bar-val">145.6ns </text>
+  <text x="380" y="234" class="badge-ratio">2.41x</text>
   <rect x="512" y="220" width="79" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="596" y="234" class="bar-val">112B</text>
   <text x="624" y="234" class="badge-fast"> ★</text>
@@ -49,16 +49,16 @@
   <text x="824" y="234" class="badge-fast"> ★</text>
   <text x="44" y="261" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="247" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="397" y="261" class="bar-val">191.7ns </text>
-  <text x="449" y="261" class="badge-ratio">3.09x</text>
+  <text x="397" y="261" class="bar-val">192.6ns </text>
+  <text x="449" y="261" class="badge-ratio">3.18x</text>
   <rect x="512" y="247" width="90" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="607" y="261" class="bar-val">128B</text>
   <rect x="762" y="247" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="261" class="bar-val">2</text>
   <text x="44" y="288" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="274" width="134" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="251" y="288" class="bar-val">92.3ns </text>
-  <text x="296" y="288" class="badge-ratio">1.49x</text>
+  <rect x="112" y="274" width="127" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="244" y="288" class="bar-val">88.0ns </text>
+  <text x="289" y="288" class="badge-ratio">1.45x</text>
   <rect x="512" y="274" width="79" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="596" y="288" class="bar-val">112B</text>
   <text x="624" y="288" class="badge-fast"> ★</text>
@@ -66,17 +66,17 @@
   <text x="817" y="288" class="bar-val">1</text>
   <text x="824" y="288" class="badge-fast"> ★</text>
   <text x="44" y="315" class="lib-label" fill="#e74c8b">EasyJSON</text>
-  <rect x="112" y="301" width="167" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="284" y="315" class="bar-val">114.5ns </text>
-  <text x="336" y="315" class="badge-ratio">1.85x</text>
+  <rect x="112" y="301" width="163" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="280" y="315" class="bar-val">112.8ns </text>
+  <text x="332" y="315" class="badge-ratio">1.87x</text>
   <rect x="512" y="301" width="170" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="687" y="315" class="bar-val">240B</text>
   <rect x="762" y="301" width="100" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="867" y="315" class="bar-val">2</text>
   <text x="44" y="342" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="328" width="90" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="207" y="342" class="bar-val">62.0ns </text>
-  <text x="252" y="342" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="328" width="87" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="204" y="342" class="bar-val">60.5ns </text>
+  <text x="249" y="342" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="328" width="79" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="596" y="342" class="bar-val">112B</text>
   <text x="624" y="342" class="badge-fast"> ★</text>
@@ -92,9 +92,9 @@
   <text x="512" y="413" class="col-hdr">B/op</text>
   <text x="762" y="413" class="col-hdr">allocs/op</text>
   <text x="44" y="435" class="lib-label" fill="#e67e22">StdJSON</text>
-  <rect x="112" y="421" width="210" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="327" y="435" class="bar-val">565.1ns </text>
-  <text x="379" y="435" class="badge-ratio">3.48x</text>
+  <rect x="112" y="421" width="187" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
+  <text x="304" y="435" class="bar-val">524.6ns </text>
+  <text x="356" y="435" class="badge-ratio">3.38x</text>
   <rect x="512" y="421" width="60" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="577" y="435" class="bar-val">384B</text>
   <text x="605" y="435" class="badge-fast"> ★</text>
@@ -103,16 +103,16 @@
   <text x="794" y="435" class="badge-fast"> ★</text>
   <text x="44" y="462" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="448" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="397" y="462" class="bar-val">750.7ns </text>
-  <text x="449" y="462" class="badge-ratio">4.62x</text>
+  <text x="397" y="462" class="bar-val">784.5ns </text>
+  <text x="449" y="462" class="badge-ratio">5.05x</text>
   <rect x="512" y="448" width="63" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="580" y="462" class="bar-val">400B</text>
   <rect x="762" y="448" width="40" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="807" y="462" class="bar-val">2</text>
   <text x="44" y="489" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="475" width="134" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="251" y="489" class="bar-val">359.3ns </text>
-  <text x="303" y="489" class="badge-ratio">2.21x</text>
+  <rect x="112" y="475" width="117" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="234" y="489" class="bar-val">329.9ns </text>
+  <text x="286" y="489" class="badge-ratio">2.12x</text>
   <rect x="512" y="475" width="60" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="577" y="489" class="bar-val">384B</text>
   <text x="605" y="489" class="badge-fast"> ★</text>
@@ -120,17 +120,17 @@
   <text x="787" y="489" class="bar-val">1</text>
   <text x="794" y="489" class="badge-fast"> ★</text>
   <text x="44" y="516" class="lib-label" fill="#e74c8b">EasyJSON</text>
-  <rect x="112" y="502" width="170" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="287" y="516" class="bar-val">457.3ns </text>
-  <text x="339" y="516" class="badge-ratio">2.81x</text>
+  <rect x="112" y="502" width="165" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="282" y="516" class="bar-val">462.8ns </text>
+  <text x="334" y="516" class="badge-ratio">2.98x</text>
   <rect x="512" y="502" width="170" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="687" y="516" class="bar-val">1.0KB</text>
   <rect x="762" y="502" width="100" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="867" y="516" class="bar-val">5</text>
   <text x="44" y="543" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="529" width="60" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="177" y="543" class="bar-val">162.6ns </text>
-  <text x="229" y="543" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="529" width="55" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="172" y="543" class="bar-val">155.4ns </text>
+  <text x="224" y="543" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="529" width="60" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="577" y="543" class="bar-val">384B</text>
   <text x="605" y="543" class="badge-fast"> ★</text>
@@ -146,9 +146,9 @@
   <text x="512" y="614" class="col-hdr">B/op</text>
   <text x="762" y="614" class="col-hdr">allocs/op</text>
   <text x="44" y="636" class="lib-label" fill="#e67e22">StdJSON</text>
-  <rect x="112" y="622" width="207" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="324" y="636" class="bar-val">2.7µs </text>
-  <text x="369" y="636" class="badge-ratio">2.66x</text>
+  <rect x="112" y="622" width="200" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
+  <text x="317" y="636" class="bar-val">2.6µs </text>
+  <text x="362" y="636" class="badge-ratio">2.79x</text>
   <rect x="512" y="622" width="136" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="653" y="636" class="bar-val">3.0KB</text>
   <text x="688" y="636" class="badge-fast"> ★</text>
@@ -158,15 +158,15 @@
   <text x="44" y="663" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="649" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="397" y="663" class="bar-val">3.6µs </text>
-  <text x="442" y="663" class="badge-ratio">3.59x</text>
-  <rect x="512" y="649" width="137" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="654" y="663" class="bar-val">3.0KB</text>
+  <text x="442" y="663" class="badge-ratio">3.90x</text>
+  <rect x="512" y="649" width="136" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="653" y="663" class="bar-val">3.0KB</text>
   <rect x="762" y="649" width="25" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="792" y="663" class="bar-val">2</text>
   <text x="44" y="690" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="676" width="124" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="241" y="690" class="bar-val">1.6µs </text>
-  <text x="286" y="690" class="badge-ratio">1.59x</text>
+  <rect x="112" y="676" width="123" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="240" y="690" class="bar-val">1.6µs </text>
+  <text x="285" y="690" class="badge-ratio">1.73x</text>
   <rect x="512" y="676" width="136" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="653" y="690" class="bar-val">3.0KB</text>
   <text x="688" y="690" class="badge-fast"> ★</text>
@@ -174,17 +174,17 @@
   <text x="779" y="690" class="bar-val">1</text>
   <text x="786" y="690" class="badge-fast"> ★</text>
   <text x="44" y="717" class="lib-label" fill="#e74c8b">EasyJSON</text>
-  <rect x="112" y="703" width="163" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="280" y="717" class="bar-val">2.1µs </text>
-  <text x="325" y="717" class="badge-ratio">2.10x</text>
+  <rect x="112" y="703" width="167" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="284" y="717" class="bar-val">2.2µs </text>
+  <text x="329" y="717" class="badge-ratio">2.34x</text>
   <rect x="512" y="703" width="170" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="687" y="717" class="bar-val">3.7KB</text>
   <rect x="762" y="703" width="100" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="867" y="717" class="bar-val">8</text>
   <text x="44" y="744" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="730" width="77" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="194" y="744" class="bar-val">1.0µs </text>
-  <text x="239" y="744" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="730" width="71" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="188" y="744" class="bar-val">930.0ns </text>
+  <text x="240" y="744" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="730" width="136" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="653" y="744" class="bar-val">3.0KB</text>
   <text x="688" y="744" class="badge-fast"> ★</text>
@@ -200,43 +200,43 @@
   <text x="512" y="815" class="col-hdr">B/op</text>
   <text x="762" y="815" class="col-hdr">allocs/op</text>
   <text x="44" y="837" class="lib-label" fill="#e67e22">StdJSON</text>
-  <rect x="112" y="823" width="201" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="318" y="837" class="bar-val">13.6µs </text>
-  <text x="370" y="837" class="badge-ratio">4.90x</text>
+  <rect x="112" y="823" width="190" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
+  <text x="307" y="837" class="bar-val">13.2µs </text>
+  <text x="359" y="837" class="badge-ratio">4.89x</text>
   <rect x="512" y="823" width="168" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="685" y="837" class="bar-val">14.1KB</text>
   <rect x="762" y="823" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="837" class="bar-val">31</text>
   <text x="44" y="864" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="850" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="397" y="864" class="bar-val">18.9µs </text>
-  <text x="449" y="864" class="badge-ratio">6.80x</text>
+  <text x="397" y="864" class="bar-val">19.5µs </text>
+  <text x="449" y="864" class="badge-ratio">7.18x</text>
   <rect x="512" y="850" width="165" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="682" y="864" class="bar-val">13.8KB</text>
   <rect x="762" y="850" width="25" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="792" y="864" class="bar-val">8</text>
   <text x="44" y="891" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="877" width="95" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="212" y="891" class="bar-val">6.4µs </text>
-  <text x="257" y="891" class="badge-ratio">2.31x</text>
+  <rect x="112" y="877" width="92" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="209" y="891" class="bar-val">6.4µs </text>
+  <text x="254" y="891" class="badge-ratio">2.36x</text>
   <rect x="512" y="877" width="170" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="687" y="891" class="bar-val">14.2KB</text>
   <rect x="762" y="877" width="32" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="799" y="891" class="bar-val">10</text>
   <text x="44" y="918" class="lib-label" fill="#e74c8b">EasyJSON</text>
-  <rect x="112" y="904" width="103" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="220" y="918" class="bar-val">7.0µs </text>
-  <text x="265" y="918" class="badge-ratio">2.53x</text>
+  <rect x="112" y="904" width="109" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="226" y="918" class="bar-val">7.6µs </text>
+  <text x="271" y="918" class="badge-ratio">2.80x</text>
   <rect x="512" y="904" width="167" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="684" y="918" class="bar-val">14.0KB</text>
   <rect x="762" y="904" width="32" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="799" y="918" class="bar-val">10</text>
   <text x="44" y="945" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="931" width="41" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="158" y="945" class="bar-val">2.8µs </text>
-  <text x="203" y="945" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="931" width="38" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="155" y="945" class="bar-val">2.7µs </text>
+  <text x="200" y="945" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="931" width="158" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="675" y="945" class="bar-val">13.2KB</text>
+  <text x="675" y="945" class="bar-val">13.3KB</text>
   <text x="717" y="945" class="badge-fast"> ★</text>
   <rect x="762" y="931" width="4" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="771" y="945" class="bar-val">1</text>
@@ -251,40 +251,40 @@
   <text x="762" y="1016" class="col-hdr">allocs/op</text>
   <text x="44" y="1038" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="1024" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="1038" class="bar-val">260.8µs </text>
-  <text x="456" y="1038" class="badge-ratio">5.90x</text>
+  <text x="397" y="1038" class="bar-val">251.0µs </text>
+  <text x="456" y="1038" class="badge-ratio">5.99x</text>
   <rect x="512" y="1024" width="156" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="673" y="1038" class="bar-val">292.1KB</text>
   <rect x="762" y="1024" width="43" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="810" y="1038" class="bar-val">1111</text>
   <text x="44" y="1065" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="1051" width="227" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="344" y="1065" class="bar-val">211.7µs </text>
-  <text x="403" y="1065" class="badge-ratio">4.79x</text>
+  <rect x="112" y="1051" width="244" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="361" y="1065" class="bar-val">219.2µs </text>
+  <text x="420" y="1065" class="badge-ratio">5.23x</text>
   <rect x="512" y="1051" width="142" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="659" y="1065" class="bar-val">265.9KB</text>
   <rect x="762" y="1051" width="4" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="771" y="1065" class="bar-val">106</text>
   <text x="44" y="1092" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="1078" width="197" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="314" y="1092" class="bar-val">183.9µs </text>
-  <text x="373" y="1092" class="badge-ratio">4.16x</text>
+  <rect x="112" y="1078" width="200" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="317" y="1092" class="bar-val">180.0µs </text>
+  <text x="376" y="1092" class="badge-ratio">4.30x</text>
   <rect x="512" y="1078" width="143" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="660" y="1092" class="bar-val">269.1KB</text>
   <rect x="762" y="1078" width="4" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="771" y="1092" class="bar-val">119</text>
   <text x="44" y="1119" class="lib-label" fill="#e74c8b">EasyJSON</text>
-  <rect x="112" y="1105" width="257" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="374" y="1119" class="bar-val">239.6µs </text>
-  <text x="433" y="1119" class="badge-ratio">5.42x</text>
+  <rect x="112" y="1105" width="264" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="381" y="1119" class="bar-val">237.3µs </text>
+  <text x="440" y="1119" class="badge-ratio">5.67x</text>
   <rect x="512" y="1105" width="170" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="687" y="1119" class="bar-val">318.0KB</text>
   <rect x="762" y="1105" width="100" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="867" y="1119" class="bar-val">2544</text>
   <text x="44" y="1146" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="1132" width="47" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="164" y="1146" class="bar-val">44.2µs </text>
-  <text x="216" y="1146" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="1132" width="46" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="163" y="1146" class="bar-val">41.9µs </text>
+  <text x="215" y="1146" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="1132" width="136" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="653" y="1146" class="bar-val">256.0KB</text>
   <text x="702" y="1146" class="badge-fast"> ★</text>
@@ -301,34 +301,34 @@
   <text x="762" y="1217" class="col-hdr">allocs/op</text>
   <text x="44" y="1239" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="1225" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="1239" class="bar-val">207.9µs </text>
-  <text x="456" y="1239" class="badge-ratio">5.92x</text>
+  <text x="397" y="1239" class="bar-val">198.9µs </text>
+  <text x="456" y="1239" class="badge-ratio">6.00x</text>
   <rect x="512" y="1225" width="169" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="686" y="1239" class="bar-val">256.0KB</text>
   <rect x="762" y="1225" width="50" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="817" y="1239" class="bar-val">1</text>
   <text x="824" y="1239" class="badge-fast"> ★</text>
   <text x="44" y="1266" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="1252" width="225" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="342" y="1266" class="bar-val">167.4µs </text>
-  <text x="401" y="1266" class="badge-ratio">4.76x</text>
+  <rect x="112" y="1252" width="248" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="365" y="1266" class="bar-val">176.5µs </text>
+  <text x="424" y="1266" class="badge-ratio">5.32x</text>
   <rect x="512" y="1252" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="687" y="1266" class="bar-val">256.1KB</text>
   <rect x="762" y="1252" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="1266" class="bar-val">2</text>
   <text x="44" y="1293" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="1279" width="179" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="296" y="1293" class="bar-val">133.1µs </text>
-  <text x="355" y="1293" class="badge-ratio">3.79x</text>
+  <rect x="112" y="1279" width="181" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="298" y="1293" class="bar-val">128.8µs </text>
+  <text x="357" y="1293" class="badge-ratio">3.88x</text>
   <rect x="512" y="1279" width="169" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="686" y="1293" class="bar-val">256.1KB</text>
+  <text x="686" y="1293" class="bar-val">256.0KB</text>
   <rect x="762" y="1279" width="50" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="817" y="1293" class="bar-val">1</text>
   <text x="824" y="1293" class="badge-fast"> ★</text>
   <text x="44" y="1320" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="1306" width="47" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="164" y="1320" class="bar-val">35.1µs </text>
-  <text x="216" y="1320" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="1306" width="46" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="163" y="1320" class="bar-val">33.2µs </text>
+  <text x="215" y="1320" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="1306" width="169" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="686" y="1320" class="bar-val">256.0KB</text>
   <rect x="762" y="1306" width="50" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
@@ -344,32 +344,32 @@
   <text x="762" y="1391" class="col-hdr">allocs/op</text>
   <text x="44" y="1413" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="1399" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="1413" class="bar-val">56.0µs </text>
-  <text x="449" y="1413" class="badge-ratio">6.32x</text>
+  <text x="397" y="1413" class="bar-val">55.8µs </text>
+  <text x="449" y="1413" class="badge-ratio">6.42x</text>
   <rect x="512" y="1399" width="170" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="687" y="1413" class="bar-val">51.2KB</text>
   <rect x="762" y="1399" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="1413" class="bar-val">1234</text>
   <text x="44" y="1440" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="1426" width="277" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="394" y="1440" class="bar-val">55.4µs </text>
-  <text x="446" y="1440" class="badge-ratio">6.26x</text>
+  <rect x="112" y="1426" width="278" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="395" y="1440" class="bar-val">55.5µs </text>
+  <text x="447" y="1440" class="badge-ratio">6.39x</text>
   <rect x="512" y="1426" width="99" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="616" y="1440" class="bar-val">30.1KB</text>
   <rect x="762" y="1426" width="14" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="781" y="1440" class="bar-val">181</text>
   <text x="44" y="1467" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="1453" width="229" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="346" y="1467" class="bar-val">45.8µs </text>
-  <text x="398" y="1467" class="badge-ratio">5.18x</text>
+  <rect x="112" y="1453" width="233" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="350" y="1467" class="bar-val">46.5µs </text>
+  <text x="402" y="1467" class="badge-ratio">5.35x</text>
   <rect x="512" y="1453" width="143" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="660" y="1467" class="bar-val">43.2KB</text>
   <rect x="762" y="1453" width="18" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="785" y="1467" class="bar-val">231</text>
   <text x="44" y="1494" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="1480" width="44" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="161" y="1494" class="bar-val">8.8µs </text>
-  <text x="206" y="1494" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="1480" width="43" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="160" y="1494" class="bar-val">8.7µs </text>
+  <text x="205" y="1494" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="1480" width="43" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="560" y="1494" class="bar-val">13.2KB</text>
   <text x="602" y="1494" class="badge-fast"> ★</text>
@@ -386,16 +386,16 @@
   <text x="762" y="1565" class="col-hdr">allocs/op</text>
   <text x="44" y="1587" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="1573" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="397" y="1587" class="bar-val">612.0µs </text>
-  <text x="456" y="1587" class="badge-ratio">2.17x</text>
+  <text x="397" y="1587" class="bar-val">629.8µs </text>
+  <text x="456" y="1587" class="badge-ratio">2.25x</text>
   <rect x="512" y="1573" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="687" y="1587" class="bar-val">272.0KB</text>
   <rect x="762" y="1573" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="1587" class="bar-val">2</text>
   <text x="44" y="1614" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="1600" width="129" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="246" y="1614" class="bar-val">282.0µs </text>
-  <text x="305" y="1614" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="1600" width="124" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="241" y="1614" class="bar-val">280.5µs </text>
+  <text x="300" y="1614" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="1600" width="169" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="686" y="1614" class="bar-val">272.0KB</text>
   <rect x="762" y="1600" width="50" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
@@ -411,16 +411,16 @@
   <text x="762" y="1685" class="col-hdr">allocs/op</text>
   <text x="44" y="1707" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="1693" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="397" y="1707" class="bar-val">589.0µs </text>
-  <text x="456" y="1707" class="badge-ratio">3.38x</text>
+  <text x="397" y="1707" class="bar-val">630.2µs </text>
+  <text x="456" y="1707" class="badge-ratio">3.63x</text>
   <rect x="512" y="1693" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="687" y="1707" class="bar-val">496.8KB</text>
   <rect x="762" y="1693" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="1707" class="bar-val">10</text>
   <text x="44" y="1734" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="1720" width="82" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="199" y="1734" class="bar-val">174.3µs </text>
-  <text x="258" y="1734" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="1720" width="77" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="194" y="1734" class="bar-val">173.8µs </text>
+  <text x="253" y="1734" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="1720" width="169" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="686" y="1734" class="bar-val">496.0KB</text>
   <rect x="762" y="1720" width="10" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
@@ -436,17 +436,17 @@
   <text x="762" y="1805" class="col-hdr">allocs/op</text>
   <text x="44" y="1827" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="1813" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="397" y="1827" class="bar-val">2.6ms </text>
-  <text x="435" y="1827" class="badge-ratio">3.79x</text>
+  <text x="397" y="1827" class="bar-val">2.7ms </text>
+  <text x="435" y="1827" class="badge-ratio">3.91x</text>
   <rect x="512" y="1813" width="142" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="659" y="1827" class="bar-val">7.4MB</text>
   <text x="694" y="1827" class="badge-fast"> ★</text>
   <rect x="762" y="1813" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="1827" class="bar-val">21</text>
   <text x="44" y="1854" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="1840" width="73" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="190" y="1854" class="bar-val">681.3µs </text>
-  <text x="249" y="1854" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="1840" width="71" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="188" y="1854" class="bar-val">684.3µs </text>
+  <text x="247" y="1854" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="1840" width="170" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="687" y="1854" class="bar-val">8.8MB</text>
   <rect x="762" y="1840" width="42" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
@@ -462,16 +462,16 @@
   <text x="762" y="1925" class="col-hdr">allocs/op</text>
   <text x="44" y="1947" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="1933" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="397" y="1947" class="bar-val">3.3µs </text>
-  <text x="442" y="1947" class="badge-ratio">2.13x</text>
+  <text x="397" y="1947" class="bar-val">3.4µs </text>
+  <text x="442" y="1947" class="badge-ratio">2.23x</text>
   <rect x="512" y="1933" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="687" y="1947" class="bar-val">18.0KB</text>
   <rect x="762" y="1933" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="1947" class="bar-val">2</text>
   <text x="44" y="1974" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="1960" width="131" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="248" y="1974" class="bar-val">1.5µs </text>
-  <text x="293" y="1974" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="1960" width="125" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="242" y="1974" class="bar-val">1.5µs </text>
+  <text x="287" y="1974" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="1960" width="169" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="686" y="1974" class="bar-val">18.0KB</text>
   <rect x="762" y="1960" width="50" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
@@ -487,16 +487,16 @@
   <text x="762" y="2045" class="col-hdr">allocs/op</text>
   <text x="44" y="2067" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="2053" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="397" y="2067" class="bar-val">4.2ms </text>
-  <text x="435" y="2067" class="badge-ratio">5.15x</text>
+  <text x="397" y="2067" class="bar-val">4.4ms </text>
+  <text x="435" y="2067" class="badge-ratio">5.45x</text>
   <rect x="512" y="2053" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="687" y="2067" class="bar-val">18.1MB</text>
   <rect x="762" y="2053" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="2067" class="bar-val">15976</text>
   <text x="44" y="2094" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="2080" width="54" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="171" y="2094" class="bar-val">813.8µs </text>
-  <text x="230" y="2094" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="2080" width="51" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="168" y="2094" class="bar-val">810.4µs </text>
+  <text x="227" y="2094" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="2080" width="124" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="641" y="2094" class="bar-val">13.3MB</text>
   <text x="683" y="2094" class="badge-fast"> ★</text>
@@ -513,16 +513,16 @@
   <text x="762" y="2165" class="col-hdr">allocs/op</text>
   <text x="44" y="2187" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="2173" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="397" y="2187" class="bar-val">322.8µs </text>
-  <text x="456" y="2187" class="badge-ratio">4.51x</text>
+  <text x="397" y="2187" class="bar-val">339.8µs </text>
+  <text x="456" y="2187" class="badge-ratio">4.76x</text>
   <rect x="512" y="2173" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="687" y="2187" class="bar-val">489.9KB</text>
   <rect x="762" y="2173" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="2187" class="bar-val">22</text>
   <text x="44" y="2214" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="2200" width="62" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="179" y="2214" class="bar-val">71.6µs </text>
-  <text x="231" y="2214" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="2200" width="58" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="175" y="2214" class="bar-val">71.3µs </text>
+  <text x="227" y="2214" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="2200" width="169" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="686" y="2214" class="bar-val">488.0KB</text>
   <rect x="762" y="2200" width="4" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
@@ -542,32 +542,32 @@
   <text x="762" y="2339" class="col-hdr">allocs/op</text>
   <text x="44" y="2361" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="2347" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="2361" class="bar-val">687.1ns </text>
-  <text x="449" y="2361" class="badge-ratio">7.80x</text>
+  <text x="397" y="2361" class="bar-val">732.9ns </text>
+  <text x="449" y="2361" class="badge-ratio">7.94x</text>
   <rect x="512" y="2347" width="170" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="687" y="2361" class="bar-val">288B</text>
   <rect x="762" y="2347" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="2361" class="bar-val">6</text>
   <text x="44" y="2388" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="2374" width="93" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="210" y="2388" class="bar-val">230.2ns </text>
-  <text x="262" y="2388" class="badge-ratio">2.61x</text>
-  <rect x="512" y="2374" width="164" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="681" y="2388" class="bar-val">279B</text>
+  <rect x="112" y="2374" width="85" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="202" y="2388" class="bar-val">224.6ns </text>
+  <text x="254" y="2388" class="badge-ratio">2.43x</text>
+  <rect x="512" y="2374" width="163" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="680" y="2388" class="bar-val">277B</text>
   <rect x="762" y="2374" width="66" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="833" y="2388" class="bar-val">4</text>
   <text x="44" y="2415" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="2401" width="56" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="173" y="2415" class="bar-val">139.7ns </text>
-  <text x="225" y="2415" class="badge-ratio">1.59x</text>
+  <rect x="112" y="2401" width="53" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="170" y="2415" class="bar-val">138.9ns </text>
+  <text x="222" y="2415" class="badge-ratio">1.51x</text>
   <rect x="512" y="2401" width="103" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="620" y="2415" class="bar-val">176B</text>
   <rect x="762" y="2401" width="33" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="800" y="2415" class="bar-val">2</text>
   <text x="44" y="2442" class="lib-label" fill="#e74c8b">EasyJSON</text>
-  <rect x="112" y="2428" width="79" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="196" y="2442" class="bar-val">195.0ns </text>
-  <text x="248" y="2442" class="badge-ratio">2.21x</text>
+  <rect x="112" y="2428" width="73" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="190" y="2442" class="bar-val">193.2ns </text>
+  <text x="242" y="2442" class="badge-ratio">2.09x</text>
   <rect x="512" y="2428" width="14" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="531" y="2442" class="bar-val">24B</text>
   <text x="552" y="2442" class="badge-fast"> ★</text>
@@ -576,7 +576,7 @@
   <text x="790" y="2442" class="badge-fast"> ★</text>
   <text x="44" y="2469" class="lib-label" fill="#27ae60">Velox</text>
   <rect x="112" y="2455" width="35" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="152" y="2469" class="bar-val">88.1ns </text>
+  <text x="152" y="2469" class="bar-val">92.3ns </text>
   <text x="197" y="2469" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="2455" width="28" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="545" y="2469" class="bar-val">48B</text>
@@ -593,32 +593,32 @@
   <text x="762" y="2540" class="col-hdr">allocs/op</text>
   <text x="44" y="2562" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="2548" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="2562" class="bar-val">639.9ns </text>
-  <text x="449" y="2562" class="badge-ratio">7.89x</text>
+  <text x="397" y="2562" class="bar-val">686.7ns </text>
+  <text x="449" y="2562" class="badge-ratio">8.23x</text>
   <rect x="512" y="2548" width="170" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="687" y="2562" class="bar-val">288B</text>
   <rect x="762" y="2548" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="2562" class="bar-val">6</text>
   <text x="44" y="2589" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="2575" width="92" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="209" y="2589" class="bar-val">212.3ns </text>
-  <text x="261" y="2589" class="badge-ratio">2.62x</text>
-  <rect x="512" y="2575" width="155" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="672" y="2589" class="bar-val">263B</text>
+  <rect x="112" y="2575" width="85" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="202" y="2589" class="bar-val">208.6ns </text>
+  <text x="254" y="2589" class="badge-ratio">2.50x</text>
+  <rect x="512" y="2575" width="154" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="671" y="2589" class="bar-val">261B</text>
   <rect x="762" y="2575" width="66" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="833" y="2589" class="bar-val">4</text>
   <text x="44" y="2616" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="2602" width="58" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="175" y="2616" class="bar-val">133.5ns </text>
-  <text x="227" y="2616" class="badge-ratio">1.65x</text>
+  <rect x="112" y="2602" width="52" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="169" y="2616" class="bar-val">129.4ns </text>
+  <text x="221" y="2616" class="badge-ratio">1.55x</text>
   <rect x="512" y="2602" width="94" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="611" y="2616" class="bar-val">160B</text>
   <rect x="762" y="2602" width="33" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="800" y="2616" class="bar-val">2</text>
   <text x="44" y="2643" class="lib-label" fill="#e74c8b">EasyJSON</text>
-  <rect x="112" y="2629" width="78" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="195" y="2643" class="bar-val">179.0ns </text>
-  <text x="247" y="2643" class="badge-ratio">2.21x</text>
+  <rect x="112" y="2629" width="72" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="189" y="2643" class="bar-val">177.9ns </text>
+  <text x="241" y="2643" class="badge-ratio">2.13x</text>
   <rect x="512" y="2629" width="14" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="531" y="2643" class="bar-val">24B</text>
   <text x="552" y="2643" class="badge-fast"> ★</text>
@@ -626,9 +626,9 @@
   <text x="783" y="2643" class="bar-val">1</text>
   <text x="790" y="2643" class="badge-fast"> ★</text>
   <text x="44" y="2670" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="2656" width="35" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="152" y="2670" class="bar-val">81.1ns </text>
-  <text x="197" y="2670" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="2656" width="34" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="151" y="2670" class="bar-val">83.4ns </text>
+  <text x="196" y="2670" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="2656" width="28" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="545" y="2670" class="bar-val">48B</text>
   <rect x="762" y="2656" width="16" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
@@ -644,39 +644,39 @@
   <text x="762" y="2741" class="col-hdr">allocs/op</text>
   <text x="44" y="2763" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="2749" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="2763" class="bar-val">3.7µs </text>
+  <text x="397" y="2763" class="bar-val">3.8µs </text>
   <text x="442" y="2763" class="badge-ratio">7.70x</text>
-  <rect x="512" y="2749" width="125" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="642" y="2763" class="bar-val">936B</text>
+  <rect x="512" y="2749" width="126" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
+  <text x="643" y="2763" class="bar-val">936B</text>
   <rect x="762" y="2749" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="2763" class="bar-val">26</text>
   <text x="44" y="2790" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="2776" width="81" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="198" y="2790" class="bar-val">1.1µs </text>
-  <text x="243" y="2790" class="badge-ratio">2.23x</text>
+  <rect x="112" y="2776" width="77" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="194" y="2790" class="bar-val">1.1µs </text>
+  <text x="239" y="2790" class="badge-ratio">2.13x</text>
   <rect x="512" y="2776" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="687" y="2790" class="bar-val">1.2KB</text>
   <rect x="762" y="2776" width="53" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="820" y="2790" class="bar-val">14</text>
   <text x="44" y="2817" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="2803" width="57" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="174" y="2817" class="bar-val">768.1ns </text>
-  <text x="226" y="2817" class="badge-ratio">1.58x</text>
-  <rect x="512" y="2803" width="160" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="677" y="2817" class="bar-val">1.2KB</text>
+  <rect x="112" y="2803" width="54" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="171" y="2817" class="bar-val">752.4ns </text>
+  <text x="223" y="2817" class="badge-ratio">1.51x</text>
+  <rect x="512" y="2803" width="161" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="678" y="2817" class="bar-val">1.2KB</text>
   <rect x="762" y="2803" width="73" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="840" y="2817" class="bar-val">19</text>
   <text x="44" y="2844" class="lib-label" fill="#e74c8b">EasyJSON</text>
-  <rect x="112" y="2830" width="79" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="196" y="2844" class="bar-val">1.1µs </text>
-  <text x="241" y="2844" class="badge-ratio">2.17x</text>
-  <rect x="512" y="2830" width="68" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="585" y="2844" class="bar-val">512B</text>
+  <rect x="112" y="2830" width="75" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="192" y="2844" class="bar-val">1.0µs </text>
+  <text x="237" y="2844" class="badge-ratio">2.07x</text>
+  <rect x="512" y="2830" width="69" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="586" y="2844" class="bar-val">512B</text>
   <rect x="762" y="2830" width="50" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="817" y="2844" class="bar-val">13</text>
   <text x="44" y="2871" class="lib-label" fill="#27ae60">Velox</text>
   <rect x="112" y="2857" width="36" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="153" y="2871" class="bar-val">485.7ns </text>
+  <text x="153" y="2871" class="bar-val">499.0ns </text>
   <text x="205" y="2871" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="2857" width="52" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="569" y="2871" class="bar-val">387B</text>
@@ -694,40 +694,40 @@
   <text x="762" y="2942" class="col-hdr">allocs/op</text>
   <text x="44" y="2964" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="2950" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="2964" class="bar-val">2.9µs </text>
-  <text x="442" y="2964" class="badge-ratio">7.54x</text>
-  <rect x="512" y="2950" width="158" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="675" y="2964" class="bar-val">936B</text>
+  <text x="397" y="2964" class="bar-val">3.0µs </text>
+  <text x="442" y="2964" class="badge-ratio">7.68x</text>
+  <rect x="512" y="2950" width="159" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
+  <text x="676" y="2964" class="bar-val">936B</text>
   <rect x="762" y="2950" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="2964" class="bar-val">26</text>
   <text x="44" y="2991" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="2977" width="90" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="207" y="2991" class="bar-val">934.5ns </text>
-  <text x="259" y="2991" class="badge-ratio">2.43x</text>
+  <rect x="112" y="2977" width="86" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="203" y="2991" class="bar-val">930.8ns </text>
+  <text x="255" y="2991" class="badge-ratio">2.36x</text>
   <rect x="512" y="2977" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="687" y="2991" class="bar-val">1001B</text>
+  <text x="687" y="2991" class="bar-val">998B</text>
   <rect x="762" y="2977" width="53" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="820" y="2991" class="bar-val">14</text>
   <text x="44" y="3018" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="3004" width="62" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="179" y="3018" class="bar-val">645.8ns </text>
-  <text x="231" y="3018" class="badge-ratio">1.68x</text>
-  <rect x="512" y="3004" width="158" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="675" y="3018" class="bar-val">936B</text>
+  <rect x="112" y="3004" width="58" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="175" y="3018" class="bar-val">633.2ns </text>
+  <text x="227" y="3018" class="badge-ratio">1.61x</text>
+  <rect x="512" y="3004" width="159" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="676" y="3018" class="bar-val">936B</text>
   <rect x="762" y="3004" width="73" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="840" y="3018" class="bar-val">19</text>
   <text x="44" y="3045" class="lib-label" fill="#e74c8b">EasyJSON</text>
-  <rect x="112" y="3031" width="90" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="207" y="3045" class="bar-val">939.6ns </text>
-  <text x="259" y="3045" class="badge-ratio">2.44x</text>
-  <rect x="512" y="3031" width="86" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="603" y="3045" class="bar-val">512B</text>
+  <rect x="112" y="3031" width="85" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="202" y="3045" class="bar-val">925.0ns </text>
+  <text x="254" y="3045" class="badge-ratio">2.35x</text>
+  <rect x="512" y="3031" width="87" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="604" y="3045" class="bar-val">512B</text>
   <rect x="762" y="3031" width="50" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="817" y="3045" class="bar-val">13</text>
   <text x="44" y="3072" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="3058" width="37" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="154" y="3072" class="bar-val">384.7ns </text>
-  <text x="206" y="3072" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="3058" width="36" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="153" y="3072" class="bar-val">393.6ns </text>
+  <text x="205" y="3072" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="3058" width="65" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="582" y="3072" class="bar-val">387B</text>
   <text x="610" y="3072" class="badge-fast"> ★</text>
@@ -744,43 +744,43 @@
   <text x="762" y="3143" class="col-hdr">allocs/op</text>
   <text x="44" y="3165" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="3151" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="3165" class="bar-val">16.9µs </text>
-  <text x="449" y="3165" class="badge-ratio">7.92x</text>
-  <rect x="512" y="3151" width="148" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="665" y="3165" class="bar-val">5.4KB</text>
+  <text x="397" y="3165" class="bar-val">17.7µs </text>
+  <text x="449" y="3165" class="badge-ratio">8.25x</text>
+  <rect x="512" y="3151" width="149" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
+  <text x="666" y="3165" class="bar-val">5.4KB</text>
   <rect x="762" y="3151" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="3165" class="bar-val">65</text>
   <text x="44" y="3192" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="3178" width="45" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="162" y="3192" class="bar-val">2.7µs </text>
-  <text x="207" y="3192" class="badge-ratio">1.29x</text>
+  <rect x="112" y="3178" width="43" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="160" y="3192" class="bar-val">2.8µs </text>
+  <text x="205" y="3192" class="badge-ratio">1.29x</text>
   <rect x="512" y="3178" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="687" y="3192" class="bar-val">6.2KB</text>
   <rect x="762" y="3178" width="15" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="782" y="3192" class="bar-val">10</text>
   <text x="44" y="3219" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="3205" width="56" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="173" y="3219" class="bar-val">3.4µs </text>
-  <text x="218" y="3219" class="badge-ratio">1.60x</text>
-  <rect x="512" y="3205" width="147" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="664" y="3219" class="bar-val">5.4KB</text>
+  <rect x="112" y="3205" width="53" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="170" y="3219" class="bar-val">3.4µs </text>
+  <text x="215" y="3219" class="badge-ratio">1.59x</text>
+  <rect x="512" y="3205" width="148" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="665" y="3219" class="bar-val">5.4KB</text>
   <rect x="762" y="3205" width="20" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="787" y="3219" class="bar-val">13</text>
   <text x="44" y="3246" class="lib-label" fill="#e74c8b">EasyJSON</text>
-  <rect x="112" y="3232" width="130" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="247" y="3246" class="bar-val">7.9µs </text>
-  <text x="292" y="3246" class="badge-ratio">3.69x</text>
-  <rect x="512" y="3232" width="94" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="611" y="3246" class="bar-val">3.5KB</text>
+  <rect x="112" y="3232" width="104" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="221" y="3246" class="bar-val">6.7µs </text>
+  <text x="266" y="3246" class="badge-ratio">3.09x</text>
+  <rect x="512" y="3232" width="95" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="612" y="3246" class="bar-val">3.5KB</text>
   <rect x="762" y="3232" width="80" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="847" y="3246" class="bar-val">52</text>
   <text x="44" y="3273" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="3259" width="35" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="152" y="3273" class="bar-val">2.1µs </text>
-  <text x="197" y="3273" class="badge-fast">★ 1.00x</text>
-  <rect x="512" y="3259" width="79" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="596" y="3273" class="bar-val">2.9KB</text>
-  <text x="631" y="3273" class="badge-fast"> ★</text>
+  <rect x="112" y="3259" width="33" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="150" y="3273" class="bar-val">2.1µs </text>
+  <text x="195" y="3273" class="badge-fast">★ 1.00x</text>
+  <rect x="512" y="3259" width="80" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="597" y="3273" class="bar-val">2.9KB</text>
+  <text x="632" y="3273" class="badge-fast"> ★</text>
   <rect x="762" y="3259" width="6" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="773" y="3273" class="bar-val">4</text>
   <text x="780" y="3273" class="badge-fast"> ★</text>
@@ -794,40 +794,40 @@
   <text x="762" y="3344" class="col-hdr">allocs/op</text>
   <text x="44" y="3366" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="3352" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="3366" class="bar-val">13.0µs </text>
-  <text x="449" y="3366" class="badge-ratio">7.23x</text>
+  <text x="397" y="3366" class="bar-val">13.9µs </text>
+  <text x="449" y="3366" class="badge-ratio">7.55x</text>
   <rect x="512" y="3352" width="170" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="687" y="3366" class="bar-val">5.4KB</text>
   <rect x="762" y="3352" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="3366" class="bar-val">65</text>
   <text x="44" y="3393" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="3379" width="52" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="169" y="3393" class="bar-val">2.4µs </text>
-  <text x="214" y="3393" class="badge-ratio">1.35x</text>
-  <rect x="512" y="3379" width="162" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="679" y="3393" class="bar-val">5.2KB</text>
+  <rect x="112" y="3379" width="49" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="166" y="3393" class="bar-val">2.5µs </text>
+  <text x="211" y="3393" class="badge-ratio">1.34x</text>
+  <rect x="512" y="3379" width="161" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="678" y="3393" class="bar-val">5.2KB</text>
   <rect x="762" y="3379" width="15" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="782" y="3393" class="bar-val">10</text>
   <text x="44" y="3420" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="3406" width="61" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="178" y="3420" class="bar-val">2.9µs </text>
-  <text x="223" y="3420" class="badge-ratio">1.59x</text>
+  <rect x="112" y="3406" width="57" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="174" y="3420" class="bar-val">2.8µs </text>
+  <text x="219" y="3420" class="badge-ratio">1.55x</text>
   <rect x="512" y="3406" width="137" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="654" y="3420" class="bar-val">4.4KB</text>
   <rect x="762" y="3406" width="20" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="787" y="3420" class="bar-val">13</text>
   <text x="44" y="3447" class="lib-label" fill="#e74c8b">EasyJSON</text>
-  <rect x="112" y="3433" width="155" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="272" y="3447" class="bar-val">7.2µs </text>
-  <text x="317" y="3447" class="badge-ratio">4.01x</text>
+  <rect x="112" y="3433" width="118" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="235" y="3447" class="bar-val">5.9µs </text>
+  <text x="280" y="3447" class="badge-ratio">3.20x</text>
   <rect x="512" y="3433" width="108" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="625" y="3447" class="bar-val">3.5KB</text>
   <rect x="762" y="3433" width="80" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="847" y="3447" class="bar-val">52</text>
   <text x="44" y="3474" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="3460" width="38" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="155" y="3474" class="bar-val">1.8µs </text>
-  <text x="200" y="3474" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="3460" width="37" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="154" y="3474" class="bar-val">1.8µs </text>
+  <text x="199" y="3474" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="3460" width="91" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="608" y="3474" class="bar-val">2.9KB</text>
   <text x="643" y="3474" class="badge-fast"> ★</text>
@@ -844,40 +844,40 @@
   <text x="762" y="3545" class="col-hdr">allocs/op</text>
   <text x="44" y="3567" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="3553" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="3567" class="bar-val">121.6µs </text>
-  <text x="456" y="3567" class="badge-ratio">8.65x</text>
+  <text x="397" y="3567" class="bar-val">125.3µs </text>
+  <text x="456" y="3567" class="badge-ratio">8.88x</text>
   <rect x="512" y="3553" width="92" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="609" y="3567" class="bar-val">24.3KB</text>
   <rect x="762" y="3553" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="3567" class="bar-val">540</text>
   <text x="44" y="3594" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="3580" width="47" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="164" y="3594" class="bar-val">20.7µs </text>
-  <text x="216" y="3594" class="badge-ratio">1.47x</text>
+  <rect x="112" y="3580" width="46" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="163" y="3594" class="bar-val">20.8µs </text>
+  <text x="215" y="3594" class="badge-ratio">1.47x</text>
   <rect x="512" y="3580" width="146" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="663" y="3594" class="bar-val">38.5KB</text>
   <rect x="762" y="3580" width="31" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="798" y="3594" class="bar-val">171</text>
   <text x="44" y="3621" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="3607" width="48" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="165" y="3621" class="bar-val">21.3µs </text>
-  <text x="217" y="3621" class="badge-ratio">1.51x</text>
+  <rect x="112" y="3607" width="47" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="164" y="3621" class="bar-val">21.4µs </text>
+  <text x="216" y="3621" class="badge-ratio">1.52x</text>
   <rect x="512" y="3607" width="170" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="687" y="3621" class="bar-val">44.6KB</text>
   <rect x="762" y="3607" width="48" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="815" y="3621" class="bar-val">264</text>
   <text x="44" y="3648" class="lib-label" fill="#e74c8b">EasyJSON</text>
-  <rect x="112" y="3634" width="71" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="188" y="3648" class="bar-val">31.3µs </text>
-  <text x="240" y="3648" class="badge-ratio">2.22x</text>
+  <rect x="112" y="3634" width="67" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="184" y="3648" class="bar-val">30.0µs </text>
+  <text x="236" y="3648" class="badge-ratio">2.13x</text>
   <rect x="512" y="3634" width="89" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="606" y="3648" class="bar-val">23.6KB</text>
   <rect x="762" y="3634" width="92" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="859" y="3648" class="bar-val">500</text>
   <text x="44" y="3675" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="3661" width="32" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="149" y="3675" class="bar-val">14.1µs </text>
-  <text x="201" y="3675" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="3661" width="31" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="148" y="3675" class="bar-val">14.1µs </text>
+  <text x="200" y="3675" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="3661" width="46" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="563" y="3675" class="bar-val">12.3KB</text>
   <text x="605" y="3675" class="badge-fast"> ★</text>
@@ -894,40 +894,40 @@
   <text x="762" y="3746" class="col-hdr">allocs/op</text>
   <text x="44" y="3768" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="3754" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="3768" class="bar-val">78.1µs </text>
-  <text x="449" y="3768" class="badge-ratio">7.13x</text>
+  <text x="397" y="3768" class="bar-val">84.6µs </text>
+  <text x="449" y="3768" class="badge-ratio">7.49x</text>
   <rect x="512" y="3754" width="132" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="649" y="3768" class="bar-val">24.3KB</text>
   <rect x="762" y="3754" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="3768" class="bar-val">540</text>
   <text x="44" y="3795" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="3781" width="64" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="181" y="3795" class="bar-val">17.9µs </text>
-  <text x="233" y="3795" class="badge-ratio">1.64x</text>
+  <rect x="112" y="3781" width="59" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="176" y="3795" class="bar-val">17.9µs </text>
+  <text x="228" y="3795" class="badge-ratio">1.59x</text>
   <rect x="512" y="3781" width="136" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="653" y="3795" class="bar-val">25.1KB</text>
   <rect x="762" y="3781" width="31" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="798" y="3795" class="bar-val">171</text>
   <text x="44" y="3822" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="3808" width="59" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="176" y="3822" class="bar-val">16.6µs </text>
-  <text x="228" y="3822" class="badge-ratio">1.52x</text>
+  <rect x="112" y="3808" width="54" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="171" y="3822" class="bar-val">16.5µs </text>
+  <text x="223" y="3822" class="badge-ratio">1.46x</text>
   <rect x="512" y="3808" width="170" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="687" y="3822" class="bar-val">31.3KB</text>
   <rect x="762" y="3808" width="48" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="815" y="3822" class="bar-val">264</text>
   <text x="44" y="3849" class="lib-label" fill="#e74c8b">EasyJSON</text>
-  <rect x="112" y="3835" width="84" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="201" y="3849" class="bar-val">23.5µs </text>
-  <text x="253" y="3849" class="badge-ratio">2.15x</text>
+  <rect x="112" y="3835" width="73" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="190" y="3849" class="bar-val">22.3µs </text>
+  <text x="242" y="3849" class="badge-ratio">1.98x</text>
   <rect x="512" y="3835" width="128" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="645" y="3849" class="bar-val">23.6KB</text>
   <rect x="762" y="3835" width="92" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="859" y="3849" class="bar-val">500</text>
   <text x="44" y="3876" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="3862" width="39" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="156" y="3876" class="bar-val">10.9µs </text>
-  <text x="208" y="3876" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="3862" width="37" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="154" y="3876" class="bar-val">11.3µs </text>
+  <text x="206" y="3876" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="3862" width="66" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="583" y="3876" class="bar-val">12.3KB</text>
   <text x="625" y="3876" class="badge-fast"> ★</text>
@@ -944,40 +944,40 @@
   <text x="762" y="3947" class="col-hdr">allocs/op</text>
   <text x="44" y="3969" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="3955" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="3969" class="bar-val">2.4ms </text>
-  <text x="435" y="3969" class="badge-ratio">10.63x</text>
+  <text x="397" y="3969" class="bar-val">2.6ms </text>
+  <text x="435" y="3969" class="badge-ratio">11.07x</text>
   <rect x="512" y="3955" width="83" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="600" y="3969" class="bar-val">428.6KB</text>
   <rect x="762" y="3955" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="3969" class="bar-val">5073</text>
   <text x="44" y="3996" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="3982" width="49" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="166" y="3996" class="bar-val">426.7µs </text>
-  <text x="225" y="3996" class="badge-ratio">1.87x</text>
-  <rect x="512" y="3982" width="154" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="671" y="3996" class="bar-val">793.7KB</text>
+  <rect x="112" y="3982" width="46" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="163" y="3996" class="bar-val">428.0µs </text>
+  <text x="222" y="3996" class="badge-ratio">1.83x</text>
+  <rect x="512" y="3982" width="153" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="670" y="3996" class="bar-val">791.5KB</text>
   <rect x="762" y="3982" width="30" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="797" y="3996" class="bar-val">1525</text>
   <text x="44" y="4023" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="4009" width="55" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="172" y="4023" class="bar-val">480.6µs </text>
-  <text x="231" y="4023" class="badge-ratio">2.11x</text>
+  <rect x="112" y="4009" width="53" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="170" y="4023" class="bar-val">495.2µs </text>
+  <text x="229" y="4023" class="badge-ratio">2.12x</text>
   <rect x="512" y="4009" width="170" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="687" y="4023" class="bar-val">875.5KB</text>
+  <text x="687" y="4023" class="bar-val">875.2KB</text>
   <rect x="762" y="4009" width="55" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="822" y="4023" class="bar-val">2793</text>
   <text x="44" y="4050" class="lib-label" fill="#e74c8b">EasyJSON</text>
-  <rect x="112" y="4036" width="139" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="256" y="4050" class="bar-val">1.2ms </text>
-  <text x="294" y="4050" class="badge-ratio">5.29x</text>
+  <rect x="112" y="4036" width="134" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="251" y="4050" class="bar-val">1.2ms </text>
+  <text x="289" y="4050" class="badge-ratio">5.31x</text>
   <rect x="512" y="4036" width="77" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="594" y="4050" class="bar-val">398.1KB</text>
   <rect x="762" y="4036" width="85" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="852" y="4050" class="bar-val">4346</text>
   <text x="44" y="4077" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="4063" width="26" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="143" y="4077" class="bar-val">228.3µs </text>
-  <text x="202" y="4077" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="4063" width="25" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="142" y="4077" class="bar-val">234.1µs </text>
+  <text x="201" y="4077" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="4063" width="31" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="548" y="4077" class="bar-val">163.6KB</text>
   <text x="597" y="4077" class="badge-fast"> ★</text>
@@ -994,40 +994,40 @@
   <text x="762" y="4148" class="col-hdr">allocs/op</text>
   <text x="44" y="4170" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="4156" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="4170" class="bar-val">1.9ms </text>
-  <text x="435" y="4170" class="badge-ratio">9.53x</text>
+  <text x="397" y="4170" class="bar-val">2.1ms </text>
+  <text x="435" y="4170" class="badge-ratio">10.06x</text>
   <rect x="512" y="4156" width="103" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="620" y="4170" class="bar-val">428.6KB</text>
   <rect x="762" y="4156" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="4170" class="bar-val">5073</text>
   <text x="44" y="4197" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="4183" width="54" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="171" y="4197" class="bar-val">368.9µs </text>
-  <text x="230" y="4197" class="badge-ratio">1.84x</text>
-  <rect x="512" y="4183" width="150" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="667" y="4197" class="bar-val">624.7KB</text>
+  <rect x="112" y="4183" width="49" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="166" y="4197" class="bar-val">368.6µs </text>
+  <text x="225" y="4197" class="badge-ratio">1.79x</text>
+  <rect x="512" y="4183" width="149" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="666" y="4197" class="bar-val">623.4KB</text>
   <rect x="762" y="4183" width="30" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="797" y="4197" class="bar-val">1525</text>
   <text x="44" y="4224" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="4210" width="57" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="174" y="4224" class="bar-val">390.8µs </text>
-  <text x="233" y="4224" class="badge-ratio">1.95x</text>
+  <rect x="112" y="4210" width="53" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="170" y="4224" class="bar-val">391.7µs </text>
+  <text x="229" y="4224" class="badge-ratio">1.91x</text>
   <rect x="512" y="4210" width="170" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="687" y="4224" class="bar-val">707.1KB</text>
   <rect x="762" y="4210" width="55" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="822" y="4224" class="bar-val">2793</text>
   <text x="44" y="4251" class="lib-label" fill="#e74c8b">EasyJSON</text>
-  <rect x="112" y="4237" width="136" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
-  <text x="253" y="4251" class="bar-val">930.2µs </text>
-  <text x="312" y="4251" class="badge-ratio">4.65x</text>
+  <rect x="112" y="4237" width="129" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
+  <text x="246" y="4251" class="bar-val">953.0µs </text>
+  <text x="305" y="4251" class="badge-ratio">4.64x</text>
   <rect x="512" y="4237" width="95" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="612" y="4251" class="bar-val">398.1KB</text>
   <rect x="762" y="4237" width="85" height="20" rx="3" fill="#e74c8b" opacity="0.80"/>
   <text x="852" y="4251" class="bar-val">4346</text>
   <text x="44" y="4278" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="4264" width="29" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="146" y="4278" class="bar-val">200.0µs </text>
-  <text x="205" y="4278" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="4264" width="27" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="144" y="4278" class="bar-val">205.4µs </text>
+  <text x="203" y="4278" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="4264" width="39" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="556" y="4278" class="bar-val">163.6KB</text>
   <text x="605" y="4278" class="badge-fast"> ★</text>
@@ -1044,32 +1044,32 @@
   <text x="762" y="4349" class="col-hdr">allocs/op</text>
   <text x="44" y="4371" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="4357" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="4371" class="bar-val">1.9ms </text>
-  <text x="435" y="4371" class="badge-ratio">10.08x</text>
+  <text x="397" y="4371" class="bar-val">2.1ms </text>
+  <text x="435" y="4371" class="badge-ratio">10.56x</text>
   <rect x="512" y="4357" width="95" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="612" y="4371" class="bar-val">352.5KB</text>
   <rect x="762" y="4357" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="4371" class="bar-val">3423</text>
   <text x="44" y="4398" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="4384" width="51" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="168" y="4398" class="bar-val">352.2µs </text>
-  <text x="227" y="4398" class="badge-ratio">1.85x</text>
+  <rect x="112" y="4384" width="47" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="164" y="4398" class="bar-val">350.4µs </text>
+  <text x="223" y="4398" class="badge-ratio">1.79x</text>
   <rect x="512" y="4384" width="155" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="672" y="4398" class="bar-val">571.9KB</text>
+  <text x="672" y="4398" class="bar-val">571.1KB</text>
   <rect x="762" y="4384" width="20" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="787" y="4398" class="bar-val">708</text>
   <text x="44" y="4425" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="4411" width="50" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="167" y="4425" class="bar-val">344.2µs </text>
-  <text x="226" y="4425" class="badge-ratio">1.81x</text>
+  <rect x="112" y="4411" width="48" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="165" y="4425" class="bar-val">354.9µs </text>
+  <text x="224" y="4425" class="badge-ratio">1.81x</text>
   <rect x="512" y="4411" width="170" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="687" y="4425" class="bar-val">626.4KB</text>
+  <text x="687" y="4425" class="bar-val">626.3KB</text>
   <rect x="762" y="4411" width="22" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
   <text x="789" y="4425" class="bar-val">762</text>
   <text x="44" y="4452" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="4438" width="27" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="144" y="4452" class="bar-val">190.3µs </text>
-  <text x="203" y="4452" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="4438" width="26" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="143" y="4452" class="bar-val">195.6µs </text>
+  <text x="202" y="4452" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="4438" width="31" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="548" y="4452" class="bar-val">116.0KB</text>
   <text x="597" y="4452" class="badge-fast"> ★</text>
@@ -1086,16 +1086,16 @@
   <text x="762" y="4523" class="col-hdr">allocs/op</text>
   <text x="44" y="4545" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="4531" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="397" y="4545" class="bar-val">354.4µs </text>
-  <text x="456" y="4545" class="badge-ratio">1.39x</text>
+  <text x="397" y="4545" class="bar-val">358.6µs </text>
+  <text x="456" y="4545" class="badge-ratio">1.41x</text>
   <rect x="512" y="4531" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="687" y="4545" class="bar-val">412.3KB</text>
+  <text x="687" y="4545" class="bar-val">412.1KB</text>
   <rect x="762" y="4531" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="4545" class="bar-val">968</text>
   <text x="44" y="4572" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="4558" width="201" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="318" y="4572" class="bar-val">254.5µs </text>
-  <text x="377" y="4572" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="4558" width="198" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="315" y="4572" class="bar-val">254.0µs </text>
+  <text x="374" y="4572" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="4558" width="156" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="673" y="4572" class="bar-val">380.6KB</text>
   <text x="722" y="4572" class="badge-fast"> ★</text>
@@ -1112,16 +1112,16 @@
   <text x="762" y="4643" class="col-hdr">allocs/op</text>
   <text x="44" y="4665" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="4651" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="397" y="4665" class="bar-val">864.5µs </text>
-  <text x="456" y="4665" class="badge-ratio">1.20x</text>
+  <text x="397" y="4665" class="bar-val">885.1µs </text>
+  <text x="456" y="4665" class="badge-ratio">1.29x</text>
   <rect x="512" y="4651" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="687" y="4665" class="bar-val">2.1MB</text>
   <rect x="762" y="4651" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="4665" class="bar-val">4019</text>
   <text x="44" y="4692" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="4678" width="234" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="351" y="4692" class="bar-val">723.2µs </text>
-  <text x="410" y="4692" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="4678" width="216" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="333" y="4692" class="bar-val">683.5µs </text>
+  <text x="392" y="4692" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="4678" width="57" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="574" y="4692" class="bar-val">727.0KB</text>
   <text x="623" y="4692" class="badge-fast"> ★</text>
@@ -1139,15 +1139,15 @@
   <text x="44" y="4785" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="4771" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="397" y="4785" class="bar-val">2.0ms </text>
-  <text x="435" y="4785" class="badge-ratio">1.29x</text>
+  <text x="435" y="4785" class="badge-ratio">1.37x</text>
   <rect x="512" y="4771" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="687" y="4785" class="bar-val">13.9MB</text>
   <rect x="762" y="4771" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="4785" class="bar-val">1406</text>
   <text x="44" y="4812" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="4798" width="217" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="334" y="4812" class="bar-val">1.5ms </text>
-  <text x="372" y="4812" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="4798" width="203" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="320" y="4812" class="bar-val">1.5ms </text>
+  <text x="358" y="4812" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="4798" width="35" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="552" y="4812" class="bar-val">2.9MB</text>
   <text x="587" y="4812" class="badge-fast"> ★</text>
@@ -1165,15 +1165,15 @@
   <text x="44" y="4905" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="4891" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="397" y="4905" class="bar-val">4.3µs </text>
-  <text x="442" y="4905" class="badge-ratio">1.49x</text>
+  <text x="442" y="4905" class="badge-ratio">1.56x</text>
   <rect x="512" y="4891" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="687" y="4905" class="bar-val">19.6KB</text>
   <rect x="762" y="4891" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="4905" class="bar-val">6</text>
   <text x="44" y="4932" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="4918" width="187" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="304" y="4932" class="bar-val">2.9µs </text>
-  <text x="349" y="4932" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="4918" width="179" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="296" y="4932" class="bar-val">2.8µs </text>
+  <text x="341" y="4932" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="4918" width="14" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="531" y="4932" class="bar-val">1.7KB</text>
   <text x="566" y="4932" class="badge-fast"> ★</text>
@@ -1191,15 +1191,15 @@
   <text x="44" y="5025" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="5011" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="397" y="5025" class="bar-val">1.9ms </text>
-  <text x="435" y="5025" class="badge-ratio">1.48x</text>
+  <text x="435" y="5025" class="badge-ratio">1.54x</text>
   <rect x="512" y="5011" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="687" y="5025" class="bar-val">9.6MB</text>
   <rect x="762" y="5011" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="5025" class="bar-val">15611</text>
   <text x="44" y="5052" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="5038" width="189" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="306" y="5052" class="bar-val">1.3ms </text>
-  <text x="344" y="5052" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="5038" width="181" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="298" y="5052" class="bar-val">1.2ms </text>
+  <text x="336" y="5052" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="5038" width="56" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="573" y="5052" class="bar-val">3.2MB</text>
   <text x="608" y="5052" class="badge-fast"> ★</text>
@@ -1216,16 +1216,16 @@
   <text x="762" y="5123" class="col-hdr">allocs/op</text>
   <text x="44" y="5145" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="5131" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="397" y="5145" class="bar-val">569.4µs </text>
-  <text x="456" y="5145" class="badge-ratio">1.80x</text>
+  <text x="397" y="5145" class="bar-val">569.5µs </text>
+  <text x="456" y="5145" class="badge-ratio">1.91x</text>
   <rect x="512" y="5131" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="687" y="5145" class="bar-val">873.6KB</text>
+  <text x="687" y="5145" class="bar-val">873.3KB</text>
   <rect x="762" y="5131" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="5145" class="bar-val">1102</text>
   <text x="44" y="5172" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="5158" width="155" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="272" y="5172" class="bar-val">317.2µs </text>
-  <text x="331" y="5172" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="5158" width="146" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="263" y="5172" class="bar-val">297.7µs </text>
+  <text x="322" y="5172" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="5158" width="49" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="566" y="5172" class="bar-val">256.2KB</text>
   <text x="615" y="5172" class="badge-fast"> ★</text>
@@ -1245,9 +1245,9 @@
   <text x="512" y="5297" class="col-hdr">B/op</text>
   <text x="762" y="5297" class="col-hdr">allocs/op</text>
   <text x="44" y="5319" class="lib-label" fill="#e67e22">StdJSON</text>
-  <rect x="112" y="5305" width="221" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="338" y="5319" class="bar-val">339.1ns </text>
-  <text x="390" y="5319" class="badge-ratio">1.90x</text>
+  <rect x="112" y="5305" width="226" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
+  <text x="343" y="5319" class="bar-val">331.5ns </text>
+  <text x="395" y="5319" class="badge-ratio">1.91x</text>
   <rect x="512" y="5305" width="166" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="683" y="5319" class="bar-val">3.0KB</text>
   <text x="718" y="5319" class="badge-fast"> ★</text>
@@ -1256,16 +1256,16 @@
   <text x="824" y="5319" class="badge-fast"> ★</text>
   <text x="44" y="5346" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="5332" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="397" y="5346" class="bar-val">428.1ns </text>
-  <text x="449" y="5346" class="badge-ratio">2.40x</text>
+  <text x="397" y="5346" class="bar-val">409.7ns </text>
+  <text x="449" y="5346" class="badge-ratio">2.36x</text>
   <rect x="512" y="5332" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="687" y="5346" class="bar-val">3.1KB</text>
   <rect x="762" y="5332" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="5346" class="bar-val">2</text>
   <text x="44" y="5373" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="5359" width="116" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="233" y="5373" class="bar-val">178.4ns </text>
-  <text x="285" y="5373" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="5359" width="118" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="235" y="5373" class="bar-val">173.6ns </text>
+  <text x="287" y="5373" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="5359" width="166" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="683" y="5373" class="bar-val">3.0KB</text>
   <text x="718" y="5373" class="badge-fast"> ★</text>
@@ -1281,25 +1281,25 @@
   <text x="512" y="5444" class="col-hdr">B/op</text>
   <text x="762" y="5444" class="col-hdr">allocs/op</text>
   <text x="44" y="5466" class="lib-label" fill="#e67e22">StdJSON</text>
-  <rect x="112" y="5452" width="225" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="342" y="5466" class="bar-val">1.7µs </text>
-  <text x="387" y="5466" class="badge-ratio">3.09x</text>
+  <rect x="112" y="5452" width="228" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
+  <text x="345" y="5466" class="bar-val">1.7µs </text>
+  <text x="390" y="5466" class="badge-ratio">3.09x</text>
   <rect x="512" y="5452" width="170" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="687" y="5466" class="bar-val">14.1KB</text>
   <rect x="762" y="5452" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="5466" class="bar-val">31</text>
   <text x="44" y="5493" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="5479" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="397" y="5493" class="bar-val">2.2µs </text>
-  <text x="442" y="5493" class="badge-ratio">3.84x</text>
+  <text x="397" y="5493" class="bar-val">2.1µs </text>
+  <text x="442" y="5493" class="badge-ratio">3.78x</text>
   <rect x="512" y="5479" width="168" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="685" y="5493" class="bar-val">14.0KB</text>
   <rect x="762" y="5479" width="25" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="792" y="5493" class="bar-val">8</text>
   <text x="44" y="5520" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="5506" width="73" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="190" y="5520" class="bar-val">563.2ns </text>
-  <text x="242" y="5520" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="5506" width="74" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="191" y="5520" class="bar-val">559.5ns </text>
+  <text x="243" y="5520" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="5506" width="159" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="676" y="5520" class="bar-val">13.3KB</text>
   <text x="718" y="5520" class="badge-fast"> ★</text>
@@ -1316,23 +1316,23 @@
   <text x="762" y="5591" class="col-hdr">allocs/op</text>
   <text x="44" y="5613" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="5599" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="5613" class="bar-val">31.0µs </text>
-  <text x="449" y="5613" class="badge-ratio">5.22x</text>
+  <text x="397" y="5613" class="bar-val">31.4µs </text>
+  <text x="449" y="5613" class="badge-ratio">5.25x</text>
   <rect x="512" y="5599" width="170" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="687" y="5613" class="bar-val">292.1KB</text>
   <rect x="762" y="5599" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="5613" class="bar-val">1111</text>
   <text x="44" y="5640" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="5626" width="224" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="341" y="5640" class="bar-val">24.8µs </text>
-  <text x="393" y="5640" class="badge-ratio">4.19x</text>
+  <rect x="112" y="5626" width="229" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="346" y="5640" class="bar-val">25.7µs </text>
+  <text x="398" y="5640" class="badge-ratio">4.30x</text>
   <rect x="512" y="5626" width="155" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="672" y="5640" class="bar-val">266.7KB</text>
+  <text x="672" y="5640" class="bar-val">266.8KB</text>
   <rect x="762" y="5626" width="9" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="776" y="5640" class="bar-val">106</text>
   <text x="44" y="5667" class="lib-label" fill="#27ae60">Velox</text>
   <rect x="112" y="5653" width="53" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="170" y="5667" class="bar-val">5.9µs </text>
+  <text x="170" y="5667" class="bar-val">6.0µs </text>
   <text x="215" y="5667" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="5653" width="149" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="666" y="5667" class="bar-val">256.0KB</text>
@@ -1355,23 +1355,23 @@
   <text x="44" y="5814" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="5800" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="397" y="5814" class="bar-val">1.9µs </text>
-  <text x="442" y="5814" class="badge-ratio">4.64x</text>
-  <rect x="512" y="5800" width="133" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="650" y="5814" class="bar-val">5.4KB</text>
+  <text x="442" y="5814" class="badge-ratio">5.14x</text>
+  <rect x="512" y="5800" width="132" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
+  <text x="649" y="5814" class="bar-val">5.4KB</text>
   <rect x="762" y="5800" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="5814" class="bar-val">65</text>
   <text x="44" y="5841" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="5827" width="83" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="200" y="5841" class="bar-val">570.0ns </text>
-  <text x="252" y="5841" class="badge-ratio">1.38x</text>
+  <rect x="112" y="5827" width="79" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="196" y="5841" class="bar-val">538.9ns </text>
+  <text x="248" y="5841" class="badge-ratio">1.45x</text>
   <rect x="512" y="5827" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="687" y="5841" class="bar-val">6.9KB</text>
+  <text x="687" y="5841" class="bar-val">7.0KB</text>
   <rect x="762" y="5827" width="15" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="782" y="5841" class="bar-val">10</text>
   <text x="44" y="5868" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="5854" width="60" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="177" y="5868" class="bar-val">412.9ns </text>
-  <text x="229" y="5868" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="5854" width="54" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="171" y="5868" class="bar-val">371.0ns </text>
+  <text x="223" y="5868" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="5854" width="74" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="591" y="5868" class="bar-val">3.0KB</text>
   <text x="626" y="5868" class="badge-fast"> ★</text>
@@ -1388,24 +1388,24 @@
   <text x="762" y="5939" class="col-hdr">allocs/op</text>
   <text x="44" y="5961" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="5947" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="5961" class="bar-val">12.7µs </text>
-  <text x="449" y="5961" class="badge-ratio">5.38x</text>
+  <text x="397" y="5961" class="bar-val">13.1µs </text>
+  <text x="449" y="5961" class="badge-ratio">5.77x</text>
   <rect x="512" y="5947" width="103" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="620" y="5961" class="bar-val">24.3KB</text>
   <rect x="762" y="5947" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="5961" class="bar-val">540</text>
   <text x="44" y="5988" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="5974" width="60" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="177" y="5988" class="bar-val">2.7µs </text>
-  <text x="222" y="5988" class="badge-ratio">1.16x</text>
+  <rect x="112" y="5974" width="57" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="174" y="5988" class="bar-val">2.7µs </text>
+  <text x="219" y="5988" class="badge-ratio">1.19x</text>
   <rect x="512" y="5974" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="687" y="5988" class="bar-val">39.9KB</text>
+  <text x="687" y="5988" class="bar-val">39.8KB</text>
   <rect x="762" y="5974" width="31" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="798" y="5988" class="bar-val">171</text>
   <text x="44" y="6015" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="6001" width="52" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="169" y="6015" class="bar-val">2.4µs </text>
-  <text x="214" y="6015" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="6001" width="48" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="165" y="6015" class="bar-val">2.3µs </text>
+  <text x="210" y="6015" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="6001" width="52" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="569" y="6015" class="bar-val">12.3KB</text>
   <text x="611" y="6015" class="badge-fast"> ★</text>
@@ -1422,24 +1422,24 @@
   <text x="762" y="6086" class="col-hdr">allocs/op</text>
   <text x="44" y="6108" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="6094" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="6108" class="bar-val">259.0µs </text>
-  <text x="456" y="6108" class="badge-ratio">8.99x</text>
+  <text x="397" y="6108" class="bar-val">267.0µs </text>
+  <text x="456" y="6108" class="badge-ratio">9.74x</text>
   <rect x="512" y="6094" width="90" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="607" y="6108" class="bar-val">428.6KB</text>
   <rect x="762" y="6094" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="6108" class="bar-val">5073</text>
   <text x="44" y="6135" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="6121" width="55" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="172" y="6135" class="bar-val">51.3µs </text>
-  <text x="224" y="6135" class="badge-ratio">1.78x</text>
+  <rect x="112" y="6121" width="53" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="170" y="6135" class="bar-val">51.3µs </text>
+  <text x="222" y="6135" class="badge-ratio">1.87x</text>
   <rect x="512" y="6121" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="687" y="6135" class="bar-val">805.3KB</text>
+  <text x="687" y="6135" class="bar-val">805.6KB</text>
   <rect x="762" y="6121" width="30" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="797" y="6135" class="bar-val">1525</text>
   <text x="44" y="6162" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="6148" width="31" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="148" y="6162" class="bar-val">28.8µs </text>
-  <text x="200" y="6162" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="6148" width="28" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="145" y="6162" class="bar-val">27.4µs </text>
+  <text x="197" y="6162" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="6148" width="34" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="551" y="6162" class="bar-val">163.6KB</text>
   <text x="600" y="6162" class="badge-fast"> ★</text>
@@ -1460,25 +1460,25 @@
   <text x="762" y="6287" class="col-hdr">allocs/op</text>
   <text x="44" y="6309" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="6295" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="6309" class="bar-val">62.8µs </text>
-  <text x="449" y="6309" class="badge-ratio">5.81x</text>
+  <text x="397" y="6309" class="bar-val">66.0µs </text>
+  <text x="449" y="6309" class="badge-ratio">6.36x</text>
   <rect x="512" y="6295" width="12" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="529" y="6309" class="bar-val">9.5KB</text>
   <text x="564" y="6309" class="badge-fast"> ★</text>
   <rect x="762" y="6295" width="68" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="835" y="6309" class="bar-val">209</text>
   <text x="44" y="6336" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="6322" width="109" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="226" y="6336" class="bar-val">24.5µs </text>
-  <text x="278" y="6336" class="badge-ratio">2.27x</text>
+  <rect x="112" y="6322" width="102" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="219" y="6336" class="bar-val">24.1µs </text>
+  <text x="271" y="6336" class="badge-ratio">2.33x</text>
   <rect x="512" y="6322" width="29" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="546" y="6336" class="bar-val">22.7KB</text>
   <rect x="762" y="6322" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="6336" class="bar-val">305</text>
   <text x="44" y="6363" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="6349" width="48" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="165" y="6363" class="bar-val">10.8µs </text>
-  <text x="217" y="6363" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="6349" width="44" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="161" y="6363" class="bar-val">10.4µs </text>
+  <text x="213" y="6363" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="6349" width="170" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="687" y="6363" class="bar-val">133.0KB</text>
   <rect x="762" y="6349" width="34" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
@@ -1494,25 +1494,25 @@
   <text x="762" y="6434" class="col-hdr">allocs/op</text>
   <text x="44" y="6456" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="6442" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="6456" class="bar-val">296.8µs </text>
-  <text x="456" y="6456" class="badge-ratio">6.33x</text>
+  <text x="397" y="6456" class="bar-val">310.5µs </text>
+  <text x="456" y="6456" class="badge-ratio">7.15x</text>
   <rect x="512" y="6442" width="66" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="583" y="6456" class="bar-val">65.3KB</text>
   <text x="625" y="6456" class="badge-fast"> ★</text>
   <rect x="762" y="6442" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="6456" class="bar-val">1914</text>
   <text x="44" y="6483" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="6469" width="96" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="213" y="6483" class="bar-val">102.1µs </text>
-  <text x="272" y="6483" class="badge-ratio">2.18x</text>
+  <rect x="112" y="6469" width="91" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="208" y="6483" class="bar-val">101.1µs </text>
+  <text x="267" y="6483" class="badge-ratio">2.33x</text>
   <rect x="512" y="6469" width="97" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="614" y="6483" class="bar-val">95.2KB</text>
+  <text x="614" y="6483" class="bar-val">95.0KB</text>
   <rect x="762" y="6469" width="68" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="835" y="6483" class="bar-val">1305</text>
   <text x="44" y="6510" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="6496" width="44" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="161" y="6510" class="bar-val">46.9µs </text>
-  <text x="213" y="6510" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="6496" width="39" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="156" y="6510" class="bar-val">43.4µs </text>
+  <text x="208" y="6510" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="6496" width="170" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="687" y="6510" class="bar-val">166.3KB</text>
   <rect x="762" y="6496" width="31" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
@@ -1528,25 +1528,25 @@
   <text x="762" y="6581" class="col-hdr">allocs/op</text>
   <text x="44" y="6603" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="6589" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="6603" class="bar-val">688.3µs </text>
-  <text x="456" y="6603" class="badge-ratio">6.35x</text>
+  <text x="397" y="6603" class="bar-val">709.0µs </text>
+  <text x="456" y="6603" class="badge-ratio">6.82x</text>
   <rect x="512" y="6589" width="103" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="620" y="6603" class="bar-val">252.1KB</text>
   <text x="669" y="6603" class="badge-fast"> ★</text>
   <rect x="762" y="6589" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="6603" class="bar-val">2769</text>
   <text x="44" y="6630" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="6616" width="59" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="176" y="6630" class="bar-val">146.1µs </text>
-  <text x="235" y="6630" class="badge-ratio">1.35x</text>
+  <rect x="112" y="6616" width="57" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="174" y="6630" class="bar-val">145.5µs </text>
+  <text x="233" y="6630" class="badge-ratio">1.40x</text>
   <rect x="512" y="6616" width="106" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="623" y="6630" class="bar-val">260.5KB</text>
+  <text x="623" y="6630" class="bar-val">259.6KB</text>
   <rect x="762" y="6616" width="16" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="783" y="6630" class="bar-val">455</text>
   <text x="44" y="6657" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="6643" width="44" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="161" y="6657" class="bar-val">108.4µs </text>
-  <text x="220" y="6657" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="6643" width="41" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="158" y="6657" class="bar-val">103.9µs </text>
+  <text x="217" y="6657" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="6643" width="170" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="687" y="6657" class="bar-val">414.9KB</text>
   <rect x="762" y="6643" width="8" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
@@ -1562,25 +1562,25 @@
   <text x="762" y="6728" class="col-hdr">allocs/op</text>
   <text x="44" y="6750" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="6736" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="6750" class="bar-val">4.1ms </text>
-  <text x="435" y="6750" class="badge-ratio">6.67x</text>
+  <text x="397" y="6750" class="bar-val">4.3ms </text>
+  <text x="435" y="6750" class="badge-ratio">7.16x</text>
   <rect x="512" y="6736" width="152" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="669" y="6750" class="bar-val">1.2MB</text>
   <text x="704" y="6750" class="badge-fast"> ★</text>
   <rect x="762" y="6736" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="6750" class="bar-val">26424</text>
   <text x="44" y="6777" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="6763" width="68" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="185" y="6777" class="bar-val">1.0ms </text>
-  <text x="223" y="6777" class="badge-ratio">1.62x</text>
-  <rect x="512" y="6763" width="159" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="676" y="6777" class="bar-val">1.2MB</text>
+  <rect x="112" y="6763" width="64" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="181" y="6777" class="bar-val">995.8µs </text>
+  <text x="240" y="6777" class="badge-ratio">1.64x</text>
+  <rect x="512" y="6763" width="158" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="675" y="6777" class="bar-val">1.2MB</text>
   <rect x="762" y="6763" width="32" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="799" y="6777" class="bar-val">8505</text>
   <text x="44" y="6804" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="6790" width="41" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="158" y="6804" class="bar-val">618.0µs </text>
-  <text x="217" y="6804" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="6790" width="39" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="156" y="6804" class="bar-val">606.8µs </text>
+  <text x="215" y="6804" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="6790" width="170" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="687" y="6804" class="bar-val">1.3MB</text>
   <rect x="762" y="6790" width="18" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
@@ -1596,25 +1596,25 @@
   <text x="762" y="6875" class="col-hdr">allocs/op</text>
   <text x="44" y="6897" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="6883" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="6897" class="bar-val">20.8ms </text>
-  <text x="442" y="6897" class="badge-ratio">8.54x</text>
+  <text x="397" y="6897" class="bar-val">21.2ms </text>
+  <text x="442" y="6897" class="badge-ratio">9.11x</text>
   <rect x="512" y="6883" width="114" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="631" y="6897" class="bar-val">5.2MB</text>
   <text x="666" y="6897" class="badge-fast"> ★</text>
   <rect x="762" y="6883" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="6897" class="bar-val">50648</text>
   <text x="44" y="6924" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="6910" width="58" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="175" y="6924" class="bar-val">4.3ms </text>
-  <text x="213" y="6924" class="badge-ratio">1.79x</text>
+  <rect x="112" y="6910" width="56" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="173" y="6924" class="bar-val">4.3ms </text>
+  <text x="211" y="6924" class="badge-ratio">1.85x</text>
   <rect x="512" y="6910" width="134" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="651" y="6924" class="bar-val">6.1MB</text>
   <rect x="762" y="6910" width="30" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="797" y="6924" class="bar-val">15245</text>
   <text x="44" y="6951" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="6937" width="32" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="149" y="6951" class="bar-val">2.4ms </text>
-  <text x="187" y="6951" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="6937" width="30" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="147" y="6951" class="bar-val">2.3ms </text>
+  <text x="185" y="6951" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="6937" width="170" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="687" y="6951" class="bar-val">7.7MB</text>
   <rect x="762" y="6937" width="20" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
@@ -1631,28 +1631,28 @@
   <text x="44" y="7044" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="7030" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="397" y="7044" class="bar-val">2.1ms </text>
-  <text x="435" y="7044" class="badge-ratio">8.76x</text>
+  <text x="435" y="7044" class="badge-ratio">9.49x</text>
   <rect x="512" y="7030" width="170" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="687" y="7044" class="bar-val">1.4MB</text>
   <rect x="762" y="7030" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="7044" class="bar-val">5089</text>
   <text x="44" y="7071" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="7057" width="57" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="174" y="7071" class="bar-val">425.0µs </text>
-  <text x="233" y="7071" class="badge-ratio">1.80x</text>
+  <rect x="112" y="7057" width="55" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="172" y="7071" class="bar-val">424.8µs </text>
+  <text x="231" y="7071" class="badge-ratio">1.88x</text>
   <rect x="512" y="7057" width="73" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="590" y="7071" class="bar-val">624.9KB</text>
+  <text x="590" y="7071" class="bar-val">623.6KB</text>
   <text x="639" y="7071" class="badge-fast"> ★</text>
   <rect x="762" y="7057" width="30" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="797" y="7071" class="bar-val">1527</text>
   <text x="44" y="7098" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="7084" width="31" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="148" y="7098" class="bar-val">236.7µs </text>
-  <text x="207" y="7098" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="7084" width="29" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="146" y="7098" class="bar-val">226.2µs </text>
+  <text x="205" y="7098" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="7084" width="140" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="657" y="7098" class="bar-val">1.2MB</text>
   <rect x="762" y="7084" width="20" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="787" y="7098" class="bar-val">1025</text>
+  <text x="787" y="7098" class="bar-val">1024</text>
   <text x="815" y="7098" class="badge-fast"> ★</text>
 
   <!-- Decoder_EmptyObj -->
@@ -1664,8 +1664,8 @@
   <text x="762" y="7169" class="col-hdr">allocs/op</text>
   <text x="44" y="7191" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="7177" width="96" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="213" y="7191" class="bar-val">66.5µs </text>
-  <text x="265" y="7191" class="badge-ratio">1.34x</text>
+  <text x="213" y="7191" class="bar-val">67.2µs </text>
+  <text x="265" y="7191" class="badge-ratio">1.37x</text>
   <rect x="512" y="7177" width="32" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="549" y="7191" class="bar-val">57.1KB</text>
   <text x="591" y="7191" class="badge-fast"> ★</text>
@@ -1674,16 +1674,16 @@
   <text x="828" y="7191" class="badge-fast"> ★</text>
   <text x="44" y="7218" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="7204" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="397" y="7218" class="bar-val">192.0µs </text>
-  <text x="456" y="7218" class="badge-ratio">3.87x</text>
+  <text x="397" y="7218" class="bar-val">194.0µs </text>
+  <text x="456" y="7218" class="badge-ratio">3.96x</text>
   <rect x="512" y="7204" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="687" y="7218" class="bar-val">297.8KB</text>
+  <text x="687" y="7218" class="bar-val">297.7KB</text>
   <rect x="762" y="7204" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="867" y="7218" class="bar-val">6005</text>
   <text x="44" y="7245" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="7231" width="72" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="189" y="7245" class="bar-val">49.6µs </text>
-  <text x="241" y="7245" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="7231" width="70" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="187" y="7245" class="bar-val">49.0µs </text>
+  <text x="239" y="7245" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="7231" width="108" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="625" y="7245" class="bar-val">190.7KB</text>
   <rect x="762" y="7231" width="50" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
@@ -1698,25 +1698,25 @@
   <text x="762" y="7316" class="col-hdr">allocs/op</text>
   <text x="44" y="7338" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="7324" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="7338" class="bar-val">17.5ms </text>
-  <text x="442" y="7338" class="badge-ratio">14.17x</text>
+  <text x="397" y="7338" class="bar-val">18.6ms </text>
+  <text x="442" y="7338" class="badge-ratio">15.40x</text>
   <rect x="512" y="7324" width="145" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="662" y="7338" class="bar-val">10.1MB</text>
   <rect x="762" y="7324" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="7338" class="bar-val">20899</text>
   <text x="44" y="7365" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="7351" width="31" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="148" y="7365" class="bar-val">2.0ms </text>
-  <text x="186" y="7365" class="badge-ratio">1.58x</text>
+  <rect x="112" y="7351" width="29" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="146" y="7365" class="bar-val">2.0ms </text>
+  <text x="184" y="7365" class="badge-ratio">1.63x</text>
   <rect x="512" y="7351" width="133" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="650" y="7365" class="bar-val">9.3MB</text>
   <text x="685" y="7365" class="badge-fast"> ★</text>
   <rect x="762" y="7351" width="4" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="771" y="7365" class="bar-val">545</text>
   <text x="44" y="7392" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="7378" width="19" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="136" y="7392" class="bar-val">1.2ms </text>
-  <text x="174" y="7392" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="7378" width="18" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="135" y="7392" class="bar-val">1.2ms </text>
+  <text x="173" y="7392" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="7378" width="170" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="687" y="7392" class="bar-val">11.8MB</text>
   <rect x="762" y="7378" width="4" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
@@ -1732,27 +1732,27 @@
   <text x="762" y="7463" class="col-hdr">allocs/op</text>
   <text x="44" y="7485" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="7471" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="7485" class="bar-val">10.4ms </text>
-  <text x="442" y="7485" class="badge-ratio">18.96x</text>
-  <rect x="512" y="7471" width="167" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="684" y="7485" class="bar-val">3.8MB</text>
+  <text x="397" y="7485" class="bar-val">11.1ms </text>
+  <text x="442" y="7485" class="badge-ratio">20.61x</text>
+  <rect x="512" y="7471" width="168" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
+  <text x="685" y="7485" class="bar-val">3.8MB</text>
   <rect x="762" y="7471" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="7485" class="bar-val">12520</text>
   <text x="44" y="7512" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="7498" width="26" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="143" y="7512" class="bar-val">995.8µs </text>
-  <text x="202" y="7512" class="badge-ratio">1.81x</text>
+  <rect x="112" y="7498" width="25" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="142" y="7512" class="bar-val">997.5µs </text>
+  <text x="201" y="7512" class="badge-ratio">1.85x</text>
   <rect x="512" y="7498" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="687" y="7512" class="bar-val">3.8MB</text>
   <rect x="762" y="7498" width="4" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="771" y="7512" class="bar-val">255</text>
   <text x="44" y="7539" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="7525" width="14" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="131" y="7539" class="bar-val">550.1µs </text>
-  <text x="190" y="7539" class="badge-fast">★ 1.00x</text>
-  <rect x="512" y="7525" width="157" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="674" y="7539" class="bar-val">3.5MB</text>
-  <text x="709" y="7539" class="badge-fast"> ★</text>
+  <rect x="112" y="7525" width="13" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="130" y="7539" class="bar-val">539.4µs </text>
+  <text x="189" y="7539" class="badge-fast">★ 1.00x</text>
+  <rect x="512" y="7525" width="158" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="675" y="7539" class="bar-val">3.5MB</text>
+  <text x="710" y="7539" class="badge-fast"> ★</text>
   <rect x="762" y="7525" width="4" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="771" y="7539" class="bar-val">112</text>
   <text x="792" y="7539" class="badge-fast"> ★</text>
@@ -1766,25 +1766,25 @@
   <text x="762" y="7610" class="col-hdr">allocs/op</text>
   <text x="44" y="7632" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="7618" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="7632" class="bar-val">14.0ms </text>
-  <text x="442" y="7632" class="badge-ratio">18.58x</text>
+  <text x="397" y="7632" class="bar-val">14.8ms </text>
+  <text x="442" y="7632" class="badge-ratio">20.07x</text>
   <rect x="512" y="7618" width="168" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="685" y="7632" class="bar-val">5.3MB</text>
   <rect x="762" y="7618" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="867" y="7632" class="bar-val">16570</text>
   <text x="44" y="7659" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="7645" width="27" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="144" y="7659" class="bar-val">1.4ms </text>
-  <text x="182" y="7659" class="badge-ratio">1.80x</text>
-  <rect x="512" y="7645" width="148" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="665" y="7659" class="bar-val">4.7MB</text>
-  <text x="700" y="7659" class="badge-fast"> ★</text>
+  <rect x="112" y="7645" width="25" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="142" y="7659" class="bar-val">1.4ms </text>
+  <text x="180" y="7659" class="badge-ratio">1.83x</text>
+  <rect x="512" y="7645" width="147" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="664" y="7659" class="bar-val">4.7MB</text>
+  <text x="699" y="7659" class="badge-fast"> ★</text>
   <rect x="762" y="7645" width="4" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="771" y="7659" class="bar-val">255</text>
   <text x="44" y="7686" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="7672" width="15" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="132" y="7686" class="bar-val">752.6µs </text>
-  <text x="191" y="7686" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="7672" width="13" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="130" y="7686" class="bar-val">738.8µs </text>
+  <text x="189" y="7686" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="7672" width="170" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="687" y="7686" class="bar-val">5.4MB</text>
   <rect x="762" y="7672" width="4" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
@@ -1800,29 +1800,29 @@
   <text x="762" y="7757" class="col-hdr">allocs/op</text>
   <text x="44" y="7779" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="7765" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="7779" class="bar-val">249.0ms </text>
-  <text x="449" y="7779" class="badge-ratio">8.89x</text>
+  <text x="397" y="7779" class="bar-val">253.9ms </text>
+  <text x="449" y="7779" class="badge-ratio">9.18x</text>
   <rect x="512" y="7765" width="153" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="670" y="7779" class="bar-val">115.7MB</text>
   <text x="719" y="7779" class="badge-fast"> ★</text>
   <rect x="762" y="7765" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="867" y="7779" class="bar-val">1182986</text>
+  <text x="867" y="7779" class="bar-val">1182985</text>
   <text x="44" y="7806" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="7792" width="57" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="174" y="7806" class="bar-val">51.5ms </text>
-  <text x="219" y="7806" class="badge-ratio">1.84x</text>
+  <rect x="112" y="7792" width="56" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="173" y="7806" class="bar-val">51.2ms </text>
+  <text x="218" y="7806" class="badge-ratio">1.85x</text>
   <rect x="512" y="7792" width="170" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="687" y="7806" class="bar-val">128.1MB</text>
+  <text x="687" y="7806" class="bar-val">127.8MB</text>
   <rect x="762" y="7792" width="33" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="800" y="7806" class="bar-val">390485</text>
+  <text x="800" y="7806" class="bar-val">390483</text>
   <text x="44" y="7833" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="7819" width="31" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="148" y="7833" class="bar-val">28.0ms </text>
-  <text x="193" y="7833" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="7819" width="30" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="147" y="7833" class="bar-val">27.6ms </text>
+  <text x="192" y="7833" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="7819" width="162" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="679" y="7833" class="bar-val">122.2MB</text>
   <rect x="762" y="7819" width="17" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="784" y="7833" class="bar-val">208111</text>
+  <text x="784" y="7833" class="bar-val">208110</text>
   <text x="826" y="7833" class="badge-fast"> ★</text>
 
   <!-- Section: Encoder -->
@@ -1837,33 +1837,33 @@
   <text x="512" y="7958" class="col-hdr">B/op</text>
   <text x="762" y="7958" class="col-hdr">allocs/op</text>
   <text x="44" y="7980" class="lib-label" fill="#e67e22">StdJSON</text>
-  <rect x="112" y="7966" width="201" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="318" y="7980" class="bar-val">661.7µs </text>
-  <text x="377" y="7980" class="badge-ratio">5.55x</text>
+  <rect x="112" y="7966" width="190" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
+  <text x="307" y="7980" class="bar-val">643.5µs </text>
+  <text x="366" y="7980" class="badge-ratio">5.46x</text>
   <rect x="512" y="7966" width="153" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="670" y="7980" class="bar-val">44.6KB</text>
+  <text x="670" y="7980" class="bar-val">44.5KB</text>
   <rect x="762" y="7966" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="867" y="7980" class="bar-val">1502</text>
+  <text x="867" y="7980" class="bar-val">1501</text>
   <text x="44" y="8007" class="lib-label" fill="#3498db">Sonic</text>
   <rect x="112" y="7993" width="280" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="397" y="8007" class="bar-val">920.5µs </text>
-  <text x="456" y="8007" class="badge-ratio">7.72x</text>
+  <text x="397" y="8007" class="bar-val">946.9µs </text>
+  <text x="456" y="8007" class="badge-ratio">8.04x</text>
   <rect x="512" y="7993" width="100" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="617" y="8007" class="bar-val">29.0KB</text>
   <rect x="762" y="7993" width="26" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="793" y="8007" class="bar-val">402</text>
   <text x="44" y="8034" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="8020" width="89" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="206" y="8034" class="bar-val">293.4µs </text>
-  <text x="265" y="8034" class="badge-ratio">2.46x</text>
+  <rect x="112" y="8020" width="86" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="203" y="8034" class="bar-val">292.7µs </text>
+  <text x="262" y="8034" class="badge-ratio">2.48x</text>
   <rect x="512" y="8020" width="170" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="687" y="8034" class="bar-val">49.3KB</text>
+  <text x="687" y="8034" class="bar-val">49.2KB</text>
   <rect x="762" y="8020" width="30" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="797" y="8034" class="bar-val">452</text>
+  <text x="797" y="8034" class="bar-val">451</text>
   <text x="44" y="8061" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="8047" width="36" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="153" y="8061" class="bar-val">119.2µs </text>
-  <text x="212" y="8061" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="8047" width="34" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="151" y="8061" class="bar-val">117.8µs </text>
+  <text x="210" y="8061" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="8047" width="4" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="521" y="8061" class="bar-val">888B</text>
   <text x="549" y="8061" class="badge-fast"> ★</text>
@@ -1880,32 +1880,32 @@
   <text x="762" y="8132" class="col-hdr">allocs/op</text>
   <text x="44" y="8154" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="8140" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="8154" class="bar-val">2.6ms </text>
-  <text x="435" y="8154" class="badge-ratio">6.43x</text>
+  <text x="397" y="8154" class="bar-val">2.5ms </text>
+  <text x="435" y="8154" class="badge-ratio">6.31x</text>
   <rect x="512" y="8140" width="170" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="687" y="8154" class="bar-val">360.6KB</text>
+  <text x="687" y="8154" class="bar-val">360.5KB</text>
   <rect x="762" y="8140" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="867" y="8154" class="bar-val">11102</text>
+  <text x="867" y="8154" class="bar-val">11101</text>
   <text x="44" y="8181" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="8167" width="229" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="346" y="8181" class="bar-val">2.1ms </text>
-  <text x="384" y="8181" class="badge-ratio">5.28x</text>
+  <rect x="112" y="8167" width="245" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="362" y="8181" class="bar-val">2.2ms </text>
+  <text x="400" y="8181" class="badge-ratio">5.54x</text>
   <rect x="512" y="8167" width="46" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="563" y="8181" class="bar-val">97.7KB</text>
   <rect x="762" y="8167" width="9" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="776" y="8181" class="bar-val">1062</text>
   <text x="44" y="8208" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="8194" width="196" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="313" y="8208" class="bar-val">1.8ms </text>
-  <text x="351" y="8208" class="badge-ratio">4.51x</text>
+  <rect x="112" y="8194" width="202" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="319" y="8208" class="bar-val">1.8ms </text>
+  <text x="357" y="8208" class="badge-ratio">4.56x</text>
   <rect x="512" y="8194" width="61" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="578" y="8208" class="bar-val">130.4KB</text>
+  <text x="578" y="8208" class="bar-val">130.3KB</text>
   <rect x="762" y="8194" width="10" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="777" y="8208" class="bar-val">1182</text>
+  <text x="777" y="8208" class="bar-val">1181</text>
   <text x="44" y="8235" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="8221" width="43" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="160" y="8235" class="bar-val">396.5µs </text>
-  <text x="219" y="8235" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="8221" width="44" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="161" y="8235" class="bar-val">392.4µs </text>
+  <text x="220" y="8235" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="8221" width="4" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="521" y="8235" class="bar-val">248B</text>
   <text x="549" y="8235" class="badge-fast"> ★</text>
@@ -1922,32 +1922,32 @@
   <text x="762" y="8306" class="col-hdr">allocs/op</text>
   <text x="44" y="8328" class="lib-label" fill="#e67e22">StdJSON</text>
   <rect x="112" y="8314" width="280" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="397" y="8328" class="bar-val">253.9µs </text>
-  <text x="456" y="8328" class="badge-ratio">6.47x</text>
+  <text x="397" y="8328" class="bar-val">248.3µs </text>
+  <text x="456" y="8328" class="badge-ratio">6.33x</text>
   <rect x="512" y="8314" width="170" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
   <text x="687" y="8328" class="bar-val">36.1KB</text>
   <rect x="762" y="8314" width="100" height="20" rx="3" fill="#e67e22" opacity="0.80"/>
-  <text x="867" y="8328" class="bar-val">1112</text>
+  <text x="867" y="8328" class="bar-val">1111</text>
   <text x="44" y="8355" class="lib-label" fill="#3498db">Sonic</text>
-  <rect x="112" y="8341" width="230" height="20" rx="3" fill="#3498db" opacity="0.80"/>
-  <text x="347" y="8355" class="bar-val">208.6µs </text>
-  <text x="406" y="8355" class="badge-ratio">5.32x</text>
+  <rect x="112" y="8341" width="244" height="20" rx="3" fill="#3498db" opacity="0.80"/>
+  <text x="361" y="8355" class="bar-val">216.6µs </text>
+  <text x="420" y="8355" class="badge-ratio">5.52x</text>
   <rect x="512" y="8341" width="46" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="563" y="8355" class="bar-val">9.8KB</text>
   <rect x="762" y="8341" width="9" height="20" rx="3" fill="#3498db" opacity="0.80"/>
   <text x="776" y="8355" class="bar-val">108</text>
   <text x="44" y="8382" class="lib-label" fill="#8e44ad">GoJSON</text>
-  <rect x="112" y="8368" width="197" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="314" y="8382" class="bar-val">179.0µs </text>
-  <text x="373" y="8382" class="badge-ratio">4.56x</text>
+  <rect x="112" y="8368" width="199" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
+  <text x="316" y="8382" class="bar-val">176.6µs </text>
+  <text x="375" y="8382" class="badge-ratio">4.50x</text>
   <rect x="512" y="8368" width="61" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="578" y="8382" class="bar-val">13.1KB</text>
+  <text x="578" y="8382" class="bar-val">13.0KB</text>
   <rect x="762" y="8368" width="10" height="20" rx="3" fill="#8e44ad" opacity="0.80"/>
-  <text x="777" y="8382" class="bar-val">120</text>
+  <text x="777" y="8382" class="bar-val">119</text>
   <text x="44" y="8409" class="lib-label" fill="#27ae60">Velox</text>
-  <rect x="112" y="8395" width="43" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
-  <text x="160" y="8409" class="bar-val">39.2µs </text>
-  <text x="212" y="8409" class="badge-fast">★ 1.00x</text>
+  <rect x="112" y="8395" width="44" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
+  <text x="161" y="8409" class="bar-val">39.2µs </text>
+  <text x="213" y="8409" class="badge-fast">★ 1.00x</text>
   <rect x="512" y="8395" width="4" height="20" rx="3" fill="#27ae60" opacity="0.80"/>
   <text x="521" y="8409" class="bar-val">104B</text>
   <text x="549" y="8409" class="badge-fast"> ★</text>

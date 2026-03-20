@@ -6,15 +6,21 @@
 #
 # Automatically selects local/bin/vjson-benchmark_${os}_${arch}.
 # Each run creates a timestamped directory: local/benchdata/YYYYMMDD-HHMM/
+# By default, the benchmark binary is rebuilt from source before each collect run
+# to ensure results reflect current code. Use --no-build to skip (e.g. on remote
+# machines where only the precompiled binary is available).
 #
 # Usage:
-#   scripts/bench-run.sh                          Collect full benchmark suite
+#   scripts/bench-run.sh                          Collect full benchmark suite (rebuilds binary)
+#   scripts/bench-run.sh --no-build               Collect using existing precompiled binary
 #   scripts/bench-run.sh [bench.sh options]       Collect with custom options (pass-through)
 #   scripts/bench-run.sh --analyze [DIR]          Analyze collected data in DIR (default: latest)
 #
 # Examples:
-#   scripts/bench-run.sh                          # collect on remote machine
-#   scripts/bench-run.sh -f Marshal_Tiny -c 3     # collect subset
+#   scripts/bench-run.sh                          # build + collect locally
+#   scripts/bench-run.sh --no-build               # collect on remote machine (no source)
+#   scripts/bench-run.sh -f Marshal_Tiny -c 3     # collect subset (rebuilds binary)
+#   scripts/bench-run.sh --no-build -f Marshal_Tiny -c 3  # subset, skip build
 #   scripts/bench-run.sh --analyze                # analyze latest run (on dev machine)
 #   scripts/bench-run.sh --analyze local/benchdata/20260315-1423
 
@@ -25,6 +31,20 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 
 BENCH_SH="$SCRIPT_DIR/bench.sh"
+
+# --- Flags ---
+AUTO_BUILD=true
+
+# Consume --no-build from $@ before suite configuration so it works in all modes.
+_args=()
+for _arg in "$@"; do
+    if [[ "$_arg" == "--no-build" ]]; then
+        AUTO_BUILD=false
+    else
+        _args+=("$_arg")
+    fi
+done
+set -- "${_args[@]+"${_args[@]}"}"
 
 # --- Suite configuration (override via environment) ---
 BENCH_COUNT="${BENCH_COUNT:-5}"
@@ -51,6 +71,11 @@ detect_binary() {
         exit 1
     fi
     echo "$binary"
+}
+
+build_binary() {
+    echo "--- building benchmark binary ---" >&2
+    make bench-build
 }
 
 # Strip library suffix from benchmark names for benchstat matching.
@@ -131,6 +156,10 @@ do_analyze() {
 # --- Phase 1: Collect ---
 
 do_collect() {
+    if $AUTO_BUILD; then
+        build_binary
+    fi
+
     local binary
     binary=$(detect_binary)
 
@@ -171,7 +200,11 @@ case "${1:-}" in
         do_collect
         ;;
     *)
-        # Pass-through mode
+        # Pass-through mode: forward remaining args to bench.sh.
+        # Binary is rebuilt by default unless --no-build was given.
+        if $AUTO_BUILD; then
+            build_binary
+        fi
         binary=$(detect_binary)
         exec bash "$BENCH_SH" -b "$binary" "$@"
         ;;

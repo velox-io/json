@@ -4,26 +4,26 @@ pkg: dev.local/benchmark
 cpu: Unknown(jws) Model
                         │    Velox     │                StdJSON                │                 Sonic                 │
                         │    sec/op    │    sec/op      vs base                │    sec/op      vs base                │
-_Marshal_Tiny-4           331.9n ± ∞ ¹    767.7n ± ∞ ¹  +131.30% (p=0.008 n=5)    680.5n ± ∞ ¹  +105.03% (p=0.008 n=5)
-_Marshal_Small-4          817.3n ± ∞ ¹   2736.0n ± ∞ ¹  +234.76% (p=0.008 n=5)   2535.0n ± ∞ ¹  +210.17% (p=0.008 n=5)
-_Marshal_EscapeHeavy-4    3.336µ ± ∞ ¹   10.826µ ± ∞ ¹  +224.52% (p=0.008 n=5)   10.285µ ± ∞ ¹  +208.30% (p=0.008 n=5)
-_Marshal_KubePods-4       10.01µ ± ∞ ¹    54.95µ ± ∞ ¹  +448.83% (p=0.008 n=5)    58.38µ ± ∞ ¹  +483.06% (p=0.008 n=5)
-_Marshal_Twitter-4        229.1µ ± ∞ ¹   1116.0µ ± ∞ ¹  +387.10% (p=0.008 n=5)    718.7µ ± ∞ ¹  +213.66% (p=0.008 n=5)
-_Marshal_TwitterTyped-4   145.6µ ± ∞ ¹    841.7µ ± ∞ ¹  +478.06% (p=0.008 n=5)    573.0µ ± ∞ ¹  +293.53% (p=0.008 n=5)
-_Marshal_MapAny-4         59.30µ ± ∞ ¹   237.49µ ± ∞ ¹  +300.51% (p=0.008 n=5)   175.20µ ± ∞ ¹  +195.46% (p=0.008 n=5)
-geomean                   10.87µ          43.16µ        +297.03%                  35.76µ        +228.97%
+_Marshal_Tiny-4           331.1n ± ∞ ¹    778.9n ± ∞ ¹  +135.25% (p=0.008 n=5)    673.9n ± ∞ ¹  +103.53% (p=0.008 n=5)
+_Marshal_Small-4          819.4n ± ∞ ¹   2689.0n ± ∞ ¹  +228.17% (p=0.008 n=5)   2505.0n ± ∞ ¹  +205.71% (p=0.008 n=5)
+_Marshal_EscapeHeavy-4    3.368µ ± ∞ ¹   10.233µ ± ∞ ¹  +203.83% (p=0.008 n=5)   10.263µ ± ∞ ¹  +204.72% (p=0.008 n=5)
+_Marshal_KubePods-4       10.46µ ± ∞ ¹    54.60µ ± ∞ ¹  +422.23% (p=0.008 n=5)    58.41µ ± ∞ ¹  +458.65% (p=0.008 n=5)
+_Marshal_Twitter-4        190.0µ ± ∞ ¹   1090.3µ ± ∞ ¹  +473.84% (p=0.008 n=5)    718.9µ ± ∞ ¹  +278.37% (p=0.008 n=5)
+_Marshal_TwitterTyped-4   153.1µ ± ∞ ¹    827.2µ ± ∞ ¹  +440.42% (p=0.008 n=5)    572.5µ ± ∞ ¹  +274.00% (p=0.008 n=5)
+_Marshal_MapAny-4         33.56µ ± ∞ ¹   235.83µ ± ∞ ¹  +602.73% (p=0.008 n=5)   173.01µ ± ∞ ¹  +415.54% (p=0.008 n=5)
+geomean                   9.901µ          42.46µ        +328.89%                  35.57µ        +259.28%
 ¹ need >= 6 samples for confidence interval at level 0.95
 
                         │     Velox      │               StdJSON                │                Sonic                 │
                         │      B/s       │      B/s       vs base               │      B/s       vs base               │
-_Marshal_Tiny-4            316.1Mi ± ∞ ¹   136.6Mi ± ∞ ¹  -56.77% (p=0.008 n=5)   154.1Mi ± ∞ ¹  -51.24% (p=0.008 n=5)
-_Marshal_Small-4           425.9Mi ± ∞ ¹   127.2Mi ± ∞ ¹  -70.14% (p=0.008 n=5)   137.3Mi ± ∞ ¹  -67.77% (p=0.008 n=5)
-_Marshal_EscapeHeavy-4     803.2Mi ± ∞ ¹   247.5Mi ± ∞ ¹  -69.18% (p=0.008 n=5)   260.5Mi ± ∞ ¹  -67.56% (p=0.008 n=5)
-_Marshal_KubePods-4       1254.9Mi ± ∞ ¹   228.6Mi ± ∞ ¹  -81.78% (p=0.008 n=5)   215.2Mi ± ∞ ¹  -82.85% (p=0.008 n=5)
-_Marshal_Twitter-4        1072.0Mi ± ∞ ¹   220.1Mi ± ∞ ¹  -79.47% (p=0.008 n=5)   341.8Mi ± ∞ ¹  -68.12% (p=0.008 n=5)
-_Marshal_TwitterTyped-4   1686.7Mi ± ∞ ¹   291.8Mi ± ∞ ¹  -82.70% (p=0.008 n=5)   428.6Mi ± ∞ ¹  -74.59% (p=0.008 n=5)
-_Marshal_MapAny-4         211.49Mi ± ∞ ¹   52.80Mi ± ∞ ¹  -75.03% (p=0.008 n=5)   71.58Mi ± ∞ ¹  -66.15% (p=0.008 n=5)
-geomean                    655.3Mi         165.0Mi        -74.81%                 199.2Mi        -69.60%
+_Marshal_Tiny-4            316.8Mi ± ∞ ¹   134.7Mi ± ∞ ¹  -57.49% (p=0.008 n=5)   155.7Mi ± ∞ ¹  -50.87% (p=0.008 n=5)
+_Marshal_Small-4           424.8Mi ± ∞ ¹   129.5Mi ± ∞ ¹  -69.52% (p=0.008 n=5)   138.9Mi ± ∞ ¹  -67.30% (p=0.008 n=5)
+_Marshal_EscapeHeavy-4     795.7Mi ± ∞ ¹   261.9Mi ± ∞ ¹  -67.09% (p=0.008 n=5)   261.1Mi ± ∞ ¹  -67.19% (p=0.008 n=5)
+_Marshal_KubePods-4       1201.7Mi ± ∞ ¹   230.1Mi ± ∞ ¹  -80.85% (p=0.008 n=5)   215.1Mi ± ∞ ¹  -82.10% (p=0.008 n=5)
+_Marshal_Twitter-4        1292.7Mi ± ∞ ¹   225.3Mi ± ∞ ¹  -82.57% (p=0.008 n=5)   341.6Mi ± ∞ ¹  -73.57% (p=0.008 n=5)
+_Marshal_TwitterTyped-4   1604.6Mi ± ∞ ¹   296.9Mi ± ∞ ¹  -81.50% (p=0.008 n=5)   429.0Mi ± ∞ ¹  -73.26% (p=0.008 n=5)
+_Marshal_MapAny-4         373.70Mi ± ∞ ¹   53.18Mi ± ∞ ¹  -85.77% (p=0.008 n=5)   72.49Mi ± ∞ ¹  -80.60% (p=0.008 n=5)
+geomean                    719.4Mi         167.7Mi        -76.68%                 200.2Mi        -72.17%
 ¹ need >= 6 samples for confidence interval at level 0.95
 
                         │     Velox     │                 StdJSON                 │                 Sonic                 │
@@ -33,9 +33,9 @@ _Marshal_Small-4            384.0 ± ∞ ¹     384.0 ± ∞ ¹         ~ (p=1.0
 _Marshal_EscapeHeavy-4    3.000Ki ± ∞ ¹   3.000Ki ± ∞ ¹         ~ (p=1.000 n=5) ²   3.018Ki ± ∞ ¹    +0.59% (p=0.008 n=5)
 _Marshal_KubePods-4       13.25Ki ± ∞ ¹   14.14Ki ± ∞ ¹    +6.72% (p=0.008 n=5)     13.83Ki ± ∞ ¹    +4.40% (p=0.008 n=5)
 _Marshal_Twitter-4        256.0Ki ± ∞ ¹   292.0Ki ± ∞ ¹   +14.07% (p=0.008 n=5)     266.0Ki ± ∞ ¹    +3.90% (p=0.008 n=5)
-_Marshal_TwitterTyped-4   256.0Ki ± ∞ ¹   256.0Ki ± ∞ ¹    -0.01% (p=0.024 n=5)     256.2Ki ± ∞ ¹         ~ (p=0.079 n=5)
-_Marshal_MapAny-4         13.25Ki ± ∞ ¹   51.20Ki ± ∞ ¹  +286.44% (p=0.008 n=5)     30.06Ki ± ∞ ¹  +126.87% (p=0.008 n=5)
-geomean                   7.564Ki         9.436Ki         +24.76%                   8.827Ki         +16.71%
+_Marshal_TwitterTyped-4   256.0Ki ± ∞ ¹   256.0Ki ± ∞ ¹         ~ (p=0.167 n=5)     256.2Ki ± ∞ ¹    +0.08% (p=0.008 n=5)
+_Marshal_MapAny-4         13.25Ki ± ∞ ¹   51.20Ki ± ∞ ¹  +286.44% (p=0.008 n=5)     30.06Ki ± ∞ ¹  +126.84% (p=0.008 n=5)
+geomean                   7.564Ki         9.436Ki         +24.76%                   8.827Ki         +16.70%
 ¹ need >= 6 samples for confidence interval at level 0.95
 ² all samples are equal
 
