@@ -1020,7 +1020,10 @@ func makeIsZeroStruct(t reflect.Type) func(unsafe.Pointer) bool {
 		}
 	}
 	if len(checks) == 0 {
-		return func(_ unsafe.Pointer) bool { return true }
+		// No exported fields to check (e.g. time.Time has only unexported fields).
+		// Return nil so the field is never omitted — matching encoding/json behavior
+		// which does not apply omitempty to struct values.
+		return nil
 	}
 	return func(ptr unsafe.Pointer) bool {
 		for _, c := range checks {
