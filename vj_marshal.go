@@ -251,9 +251,20 @@ func (m *Marshaler) finalize() []byte {
 
 // encodeValue dispatches encoding via pre-bound EncodeFn.
 // All supported types have EncodeFn set by bindEncodeFn at codec construction time.
+// For types involved in indirect cycles, EncodeFn may still be nil because the
+// codec was value-copied before the cycle was fully resolved; in that case we
+// lazily resolve the codec and bind EncodeFn on first use.
 func (m *Marshaler) encodeValue(ti *TypeInfo, ptr unsafe.Pointer) error {
 	if fn := ti.EncodeFn; fn != nil {
 		return fn(m, ptr)
+	}
+	// Lazy resolution for cycle-detected types whose Codec was nil
+	// at value-copy time (see getCodecForCycle / resolveCodec).
+	if ti.resolveCodec() != nil {
+		bindEncodeFn(ti)
+		if fn := ti.EncodeFn; fn != nil {
+			return fn(m, ptr)
+		}
 	}
 	return &UnsupportedTypeError{Type: ti.Ext.Type}
 }
