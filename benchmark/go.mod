@@ -1,6 +1,6 @@
 module dev.local/benchmark
 
-go 1.24.1
+go 1.24.0
 
 require (
 	github.com/bytedance/sonic v1.15.0

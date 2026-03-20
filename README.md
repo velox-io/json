@@ -16,6 +16,12 @@ Velox is currently focused on **binding-style** JSON ↔ typed Go value conversi
 
 For a deeper look at the architecture — why unmarshal uses pure Go and marshal uses a C VM — see [How Velox JSON Works](docs/architecture.md).
 
+## Requirements
+
+- Go 1.24 or later
+- **No CGo required** — native C VM artifacts are pre-built (`.syso`), so a standard `go build` is all you need; no C compiler or toolchain is necessary.
+- Native marshal acceleration is available on `darwin/arm64`, `linux/amd64`, `linux/arm64`, and `windows/amd64`. All other platforms automatically use the pure-Go fallback with the same API.
+
 ## Install
 
 ```bash
