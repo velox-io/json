@@ -12,7 +12,9 @@ fmt:
 
 test:
 	go test -race .
+	go test -race -tags vj_noencvm .
 	cd benchmark && go test -race .
+	cd benchmark && go test -tags vj_noencvm -race .
 
 test-coverage:
 	go test -race -coverprofile=coverage.out .
