@@ -126,16 +126,16 @@ jobs:
           fuzz-corpus-
 
     - name: Run FuzzUnmarshalAny
-      run: go test -fuzz=FuzzUnmarshalAny -fuzztime=30s .
+      run: go test -fuzz=FuzzUnmarshalAny -fuzztime=30s -timeout=2m .
 
     - name: Run FuzzUnmarshalStruct
-      run: go test -fuzz=FuzzUnmarshalStruct -fuzztime=30s .
+      run: go test -fuzz=FuzzUnmarshalStruct -fuzztime=30s -timeout=2m .
 
     - name: Run FuzzUnmarshalNested
-      run: go test -fuzz=FuzzUnmarshalNested -fuzztime=30s .
+      run: go test -fuzz=FuzzUnmarshalNested -fuzztime=30s -timeout=2m .
 
     - name: Run FuzzNoCrash
-      run: go test -fuzz=FuzzNoCrash -fuzztime=30s .
+      run: go test -fuzz=FuzzNoCrash -fuzztime=30s -timeout=2m .
 
   pr-check:
     name: PR Check
