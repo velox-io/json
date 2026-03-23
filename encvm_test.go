@@ -110,7 +110,7 @@ func TestNativeEncodeOmitemptyZeroValues(t *testing.T) {
 		Count  int32   `json:"count,omitempty"`
 	}
 	v := S{ID: 42} // only ID is non-zero; rest are omitempty + zero
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestNativeEncodeOmitemptyNonZero(t *testing.T) {
 		Active bool    `json:"active,omitempty"`
 	}
 	v := S{ID: 1, Name: "hello", Score: 3.14, Active: true}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestNativeEncodeOmitemptyMixed(t *testing.T) {
 		E int    `json:"e"`
 	}
 	v := S{A: 0, B: "always", C: 99, D: "", E: 0}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestNativeEncodeOmitemptyAllZero(t *testing.T) {
 		D bool    `json:"d,omitempty"`
 	}
 	v := S{}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestNativeEncodeOmitemptyFirstFieldSkipped(t *testing.T) {
 		B string `json:"b"`
 	}
 	v := S{A: 0, B: "hello"}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestNativeEncodeOmitemptyAllTypes(t *testing.T) {
 	}
 	// All zero → empty object.
 	v := S{}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestNativeEncodeOmitemptyAllTypes(t *testing.T) {
 		U: 6, U8: 7, U16: 8, U32: 9, U64: 10,
 		F32: 1.5, F64: 2.5, S: "hi",
 	}
-	got2, err := Marshal(&v2)
+	got2, err := Marshal(v2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestNativeEncodeOmitemptyConsistency(t *testing.T) {
 		{},
 	}
 	for i, v := range tests {
-		got, err := Marshal(&v)
+		got, err := Marshal(v)
 		if err != nil {
 			t.Fatalf("case %d: %v", i, err)
 		}
@@ -285,7 +285,7 @@ func TestHotResumeMapFieldMiddle(t *testing.T) {
 	}
 
 	v := S{ID: 42, Tags: map[string]string{"a": "1"}, Name: "hello"}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestHotResumeMapFieldFirst(t *testing.T) {
 	}
 
 	v := S{Tags: map[string]string{"x": "y"}, ID: 1, Name: "test"}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestHotResumeMapFieldLast(t *testing.T) {
 	}
 
 	v := S{ID: 42, Name: "hello", Tags: map[string]string{"k": "v"}}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +354,7 @@ func TestHotResumeSliceField(t *testing.T) {
 	}
 
 	v := S{ID: 1, Items: []int{10, 20, 30}, Name: "test"}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +377,7 @@ func TestHotResumeInterfaceField(t *testing.T) {
 	}
 
 	v := S{ID: 1, Value: "dynamic", Name: "test"}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +401,7 @@ func TestNativePointerField(t *testing.T) {
 
 	name := "Alice"
 	v := S{ID: 1, Name: &name, Age: 30}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +424,7 @@ func TestNativePointerFieldNil(t *testing.T) {
 	}
 
 	v := S{ID: 1, Name: nil, Age: 30}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -477,7 +477,7 @@ func TestNativePointerPrimitiveTypes(t *testing.T) {
 		PUint: &u, PUint8: &u8, PUint16: &u16, PUint32: &u32, PUint64: &u64,
 		PFloat32: &f32, PFloat64: &f64, PString: &s,
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -500,7 +500,7 @@ func TestNativePointerAllNil(t *testing.T) {
 	}
 
 	v := S{}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,7 +526,7 @@ func TestNativePointerStruct(t *testing.T) {
 	}
 
 	v := Outer{ID: 1, P: &Inner{X: 42, Y: "hello"}}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,7 +551,7 @@ func TestNativePointerStructNil(t *testing.T) {
 	}
 
 	v := Outer{ID: 1, P: nil}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -573,7 +573,7 @@ func TestNativePointerOmitemptyNil(t *testing.T) {
 	}
 
 	v := S{ID: 1, Val: nil}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -596,7 +596,7 @@ func TestNativePointerOmitemptyNonNil(t *testing.T) {
 
 	val := 42
 	v := S{ID: 1, Val: &val}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -620,7 +620,7 @@ func TestNativePointerOmitemptyZeroValue(t *testing.T) {
 
 	zero := 0
 	v := S{ID: 1, Val: &zero}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -649,7 +649,7 @@ func TestNativePointerMixedWithRegularFields(t *testing.T) {
 
 	name := "test"
 	v := S{ID: 1, Name: &name, Score: 99.5, Inner: &Inner{A: 7}, OK: true}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -674,7 +674,7 @@ func TestHotResumePointerToNonNativeStruct(t *testing.T) {
 	}
 
 	v := Outer{ID: 1, P: &Inner{Tags: map[string]string{"a": "b"}}}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -698,7 +698,7 @@ func TestHotResumePointerToPointer(t *testing.T) {
 	inner := 42
 	ptr := &inner
 	v := S{ID: 1, Val: &ptr}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -748,7 +748,7 @@ func TestNativePointerConsistencyWithStdlib(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Marshal(&tt.val)
+			got, err := Marshal(tt.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -773,7 +773,7 @@ func TestNativePointerToCustomMarshaler(t *testing.T) {
 	}
 
 	w := Wallet{Owner: "alice", Balance: new(big.Int).SetInt64(42)}
-	got, err := Marshal(&w)
+	got, err := Marshal(w)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -804,7 +804,7 @@ func TestHotResumeMultipleFallbacks(t *testing.T) {
 		D: []int{10, 20},
 		E: true,
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -831,7 +831,7 @@ func TestHotResumeAllFallbackFields(t *testing.T) {
 		B: []int{1, 2},
 		C: 42,
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -856,7 +856,7 @@ func TestHotResumeWithOmitempty(t *testing.T) {
 
 	// Case 1: omitempty fields are zero, skipped.
 	v1 := S{ID: 42, Tags: map[string]string{"a": "1"}}
-	got1, err := Marshal(&v1)
+	got1, err := Marshal(v1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -867,7 +867,7 @@ func TestHotResumeWithOmitempty(t *testing.T) {
 
 	// Case 2: omitempty fields are non-zero.
 	v2 := S{ID: 42, Empty: "yes", Tags: map[string]string{"a": "1"}, Name: "bob"}
-	got2, err := Marshal(&v2)
+	got2, err := Marshal(v2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -890,7 +890,7 @@ func TestHotResumeEmptyMapField(t *testing.T) {
 	}
 
 	v := S{ID: 1, Tags: map[string]string{}, Name: "test"}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -913,7 +913,7 @@ func TestHotResumeNilMapField(t *testing.T) {
 	}
 
 	v := S{ID: 1, Tags: nil, Name: "test"}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -940,7 +940,7 @@ func TestHotResumeNestedImpureStruct(t *testing.T) {
 	}
 
 	v := Outer{ID: 1, Inner: Inner{X: 42, Items: []int{1, 2, 3}}, Name: "test"}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1026,7 +1026,7 @@ func TestHotResumeConsistencyWithStdlib(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Marshal(&tt.val)
+			got, err := Marshal(tt.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1065,7 +1065,7 @@ func TestNativeSliceOfStruct(t *testing.T) {
 		{ID: 3, Name: "charlie"},
 	}
 
-	got, err := Marshal(&items)
+	got, err := Marshal(items)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1085,7 +1085,7 @@ func TestNativeSliceOfStructEmpty(t *testing.T) {
 	}
 
 	items := []Item{}
-	got, err := Marshal(&items)
+	got, err := Marshal(items)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1105,7 +1105,7 @@ func TestNativeSliceOfStructNil(t *testing.T) {
 	}
 
 	var items []Item
-	got, err := Marshal(&items)
+	got, err := Marshal(items)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1128,7 +1128,7 @@ func TestNativeSliceOfStructSingleElement(t *testing.T) {
 	}
 
 	items := []Item{{A: 42, B: "hello", C: 3.14, D: true}}
-	got, err := Marshal(&items)
+	got, err := Marshal(items)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1155,7 +1155,7 @@ func TestNativeSliceOfStructLarge(t *testing.T) {
 		items[i] = Item{ID: i, Name: "user_name_with_some_length", Score: i * 100}
 	}
 
-	got, err := Marshal(&items)
+	got, err := Marshal(items)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1185,7 +1185,7 @@ func TestNativeSliceOfStructNested(t *testing.T) {
 		{ID: 2, Inner: Inner{X: 20, Y: "b"}},
 	}
 
-	got, err := Marshal(&items)
+	got, err := Marshal(items)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1214,7 +1214,7 @@ func TestNativeSliceOfStructWithPointers(t *testing.T) {
 		{ID: 2, Name: nil, Val: nil},
 	}
 
-	got, err := Marshal(&items)
+	got, err := Marshal(items)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1241,7 +1241,7 @@ func TestNativeSliceOfStructWithOmitempty(t *testing.T) {
 		{ID: 3, Name: "charlie", Val: 0},
 	}
 
-	got, err := Marshal(&items)
+	got, err := Marshal(items)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1267,7 +1267,7 @@ func TestSliceOfNonNativeStructFallsBack(t *testing.T) {
 		{ID: 2, Tags: map[string]string{"c": "d"}},
 	}
 
-	got, err := Marshal(&items)
+	got, err := Marshal(items)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1301,7 +1301,7 @@ func TestNativeSliceOfStructConsistencyWithStdlib(t *testing.T) {
 		{ID: 3, Score: -1.5, Inner: Inner{A: -1, B: "hello \"world\""}, OK: true},
 	}
 
-	got, err := Marshal(&items)
+	got, err := Marshal(items)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1327,7 +1327,7 @@ func TestNativeSliceInStructField(t *testing.T) {
 	}
 
 	w := Wrapper{Name: "test", Items: []Item{{X: 1}, {X: 2}, {X: 3}}}
-	got, err := Marshal(&w)
+	got, err := Marshal(w)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1373,7 +1373,7 @@ func TestNativeEncode_ByteSlice_StdlibCompat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Marshal(&tt.val)
+			got, err := Marshal(tt.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1407,7 +1407,7 @@ func TestNativeEncode_ByteSlice_Omitempty(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Marshal(&tt.val)
+			got, err := Marshal(tt.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1439,7 +1439,7 @@ func TestNativeEncode_ByteSlice_OnlyField(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Marshal(&tt.val)
+			got, err := Marshal(tt.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1468,7 +1468,7 @@ func TestNativeEncode_ByteSlice_MultipleFields(t *testing.T) {
 		C: []byte{0x01, 0x02, 0x03},
 	}
 
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1493,7 +1493,7 @@ func TestNativeEncode_ByteSlice_Nested(t *testing.T) {
 
 	v := Outer{ID: 1, Inner: Inner{Payload: []byte("nested data")}}
 
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1522,7 +1522,7 @@ func TestNativeEncode_ByteSlice_InSlice(t *testing.T) {
 		{Data: []byte{0xFF}},
 	}}
 
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1552,7 +1552,7 @@ func TestNativeEncode_ByteSlice_BehindPointer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Marshal(&tt.val)
+			got, err := Marshal(tt.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1586,7 +1586,7 @@ func TestNativeEncode_ByteSlice_MultiLevelPointer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Marshal(&tt.val)
+			got, err := Marshal(tt.val)
 			if err != nil {
 				t.Fatal(err)
 			}

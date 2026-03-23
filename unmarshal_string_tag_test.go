@@ -60,7 +60,7 @@ type StringTagIgnored struct {
 
 func TestMarshal_StringTag_Int(t *testing.T) {
 	v := StringTagInt{Count: 123}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestMarshal_StringTag_Int(t *testing.T) {
 
 func TestMarshal_StringTag_NegativeInt(t *testing.T) {
 	v := StringTagInt{Count: -42}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestMarshal_StringTag_NegativeInt(t *testing.T) {
 
 func TestMarshal_StringTag_Bool(t *testing.T) {
 	v := StringTagBool{Flag: true}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestMarshal_StringTag_Bool(t *testing.T) {
 	}
 
 	v.Flag = false
-	got, err = Marshal(&v)
+	got, err = Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestMarshal_StringTag_Bool(t *testing.T) {
 
 func TestMarshal_StringTag_Float(t *testing.T) {
 	v64 := StringTagFloat64{Rate: 1.5}
-	got, err := Marshal(&v64)
+	got, err := Marshal(v64)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestMarshal_StringTag_Float(t *testing.T) {
 	}
 
 	v32 := StringTagFloat32{Rate: 2.25}
-	got, err = Marshal(&v32)
+	got, err = Marshal(v32)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestMarshal_StringTag_Float(t *testing.T) {
 
 func TestMarshal_StringTag_String(t *testing.T) {
 	v := StringTagString{Name: "hello"}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestMarshal_StringTag_String(t *testing.T) {
 func TestMarshal_StringTag_Pointer(t *testing.T) {
 	n := 42
 	v := StringTagPtr{Ptr: &n}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestMarshal_StringTag_Pointer(t *testing.T) {
 
 	// nil pointer → null
 	v2 := StringTagPtr{}
-	got, err = Marshal(&v2)
+	got, err = Marshal(v2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestRoundtrip_StringTag(t *testing.T) {
 		Big: 9007199254740993, Small: 255, Normal: 100,
 	}
 
-	data, err := Marshal(&original)
+	data, err := Marshal(original)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestRoundtrip_StringTag(t *testing.T) {
 
 func TestRoundtrip_StringTag_ZeroValues(t *testing.T) {
 	original := StringTagAll{}
-	data, err := Marshal(&original)
+	data, err := Marshal(original)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestRoundtrip_StringTag_ZeroValues(t *testing.T) {
 func TestRoundtrip_StringTag_Pointer(t *testing.T) {
 	n := 42
 	original := StringTagPtr{Ptr: &n}
-	data, err := Marshal(&original)
+	data, err := Marshal(original)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +407,7 @@ func TestStringTag_StdlibCompat_Unmarshal(t *testing.T) {
 func TestStringTag_StdlibCompat_Pointer(t *testing.T) {
 	n := 42
 	v := StringTagPtr{Ptr: &n}
-	vjsonOut, err := Marshal(&v)
+	vjsonOut, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +418,7 @@ func TestStringTag_StdlibCompat_Pointer(t *testing.T) {
 
 	// nil pointer
 	v2 := StringTagPtr{}
-	vjsonOut, err = Marshal(&v2)
+	vjsonOut, err = Marshal(v2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +437,7 @@ func TestStringTag_IgnoredForComplexTypes(t *testing.T) {
 		Map:   map[string]int{"a": 1},
 	}
 
-	vjsonOut, err := Marshal(&v)
+	vjsonOut, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -162,7 +162,7 @@ func TestInvalidUnmarshalError_NilPointer(t *testing.T) {
 
 func TestUnsupportedValueError_NaN(t *testing.T) {
 	v := math.NaN()
-	_, err := Marshal(&v)
+	_, err := Marshal(v)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -174,7 +174,7 @@ func TestUnsupportedValueError_NaN(t *testing.T) {
 
 func TestUnsupportedValueError_Inf(t *testing.T) {
 	v := math.Inf(1)
-	_, err := Marshal(&v)
+	_, err := Marshal(v)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -231,7 +231,7 @@ func TestInvalidUnmarshalError_AsJSON(t *testing.T) {
 
 func TestUnsupportedValueError_AsJSON(t *testing.T) {
 	v := math.NaN()
-	_, err := Marshal(&v)
+	_, err := Marshal(v)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -271,7 +271,7 @@ func TestUnsupportedTypeError_Message(t *testing.T) {
 		Ch chan int
 	}
 	val := S{Ch: make(chan int)}
-	_, err := Marshal(&val)
+	_, err := Marshal(val)
 	if err == nil {
 		t.Fatal("expected error for unsupported type chan, got nil")
 	}
@@ -295,7 +295,7 @@ func TestUnsupportedTypeError_Func(t *testing.T) {
 		Fn func()
 	}
 	val := S{Fn: func() {}}
-	_, err := Marshal(&val)
+	_, err := Marshal(val)
 	if err == nil {
 		t.Fatal("expected error for unsupported type func, got nil")
 	}

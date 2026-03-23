@@ -31,7 +31,7 @@ type wrapMapStrMap struct {
 func marshalMapStrStr(t *testing.T, val map[string]string) []byte {
 	t.Helper()
 	w := wrapMapStrStr{M: val}
-	got, err := Marshal(&w)
+	got, err := Marshal(w)
 	if err != nil {
 		t.Fatalf("Marshal(%v) error: %v", val, err)
 	}
@@ -50,7 +50,7 @@ func stdlibMapStrStr(t *testing.T, val map[string]string) []byte {
 func marshalMapStrInt(t *testing.T, val map[string]int) []byte {
 	t.Helper()
 	w := wrapMapStrInt{M: val}
-	got, err := Marshal(&w)
+	got, err := Marshal(w)
 	if err != nil {
 		t.Fatalf("Marshal(%v) error: %v", val, err)
 	}
@@ -69,7 +69,7 @@ func stdlibMapStrInt(t *testing.T, val map[string]int) []byte {
 func marshalMapStrInt64(t *testing.T, val map[string]int64) []byte {
 	t.Helper()
 	w := wrapMapStrInt64{M: val}
-	got, err := Marshal(&w)
+	got, err := Marshal(w)
 	if err != nil {
 		t.Fatalf("Marshal(%v) error: %v", val, err)
 	}
@@ -88,7 +88,7 @@ func stdlibMapStrInt64(t *testing.T, val map[string]int64) []byte {
 func marshalMapIntStr(t *testing.T, val map[int]string) []byte {
 	t.Helper()
 	w := wrapMapIntStr{M: val}
-	got, err := Marshal(&w)
+	got, err := Marshal(w)
 	if err != nil {
 		t.Fatalf("Marshal(%v) error: %v", val, err)
 	}
@@ -399,7 +399,7 @@ func TestNativeMap_Nested(t *testing.T) {
 			"empty": {},
 		}
 		w := wrapMapStrSlice{M: val}
-		got, err := Marshal(&w)
+		got, err := Marshal(w)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -416,7 +416,7 @@ func TestNativeMap_Nested(t *testing.T) {
 			"empty":  {},
 		}
 		w := wrapMapStrMap{M: val}
-		got, err := Marshal(&w)
+		got, err := Marshal(w)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -439,7 +439,7 @@ func TestNativeMap_Nested(t *testing.T) {
 				"second": {Data: map[string]string{"b": "2", "c": "3"}},
 			},
 		}
-		got, err := Marshal(&val)
+		got, err := Marshal(val)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -502,7 +502,7 @@ func TestNativeMap_InStruct(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Marshal(&tc.val)
+			got, err := Marshal(tc.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -526,7 +526,7 @@ func TestNativeMap_WithIndent(t *testing.T) {
 			"delta":   "fourth",
 			"epsilon": "fifth",
 		}
-		got, err := MarshalIndent(&val, "", "  ")
+		got, err := MarshalIndent(val, "", "  ")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -541,7 +541,7 @@ func TestNativeMap_WithIndent(t *testing.T) {
 			"alpha": 1, "beta": 2, "gamma": 3,
 			"delta": -100, "epsilon": 0,
 		}
-		got, err := MarshalIndent(&val, "", "  ")
+		got, err := MarshalIndent(val, "", "  ")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -555,7 +555,7 @@ func TestNativeMap_WithIndent(t *testing.T) {
 		val := map[string]int64{
 			"small": 42, "large": 1<<62 - 1, "negative": -999999999999,
 		}
-		got, err := MarshalIndent(&val, "", "\t")
+		got, err := MarshalIndent(val, "", "\t")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -577,7 +577,7 @@ func TestNativeMap_EscapeHTML(t *testing.T) {
 			"amp":    "tom & jerry",
 			"quote":  `"quoted"`,
 		}
-		got, err := Marshal(&val, WithEscapeHTML())
+		got, err := Marshal(val, WithEscapeHTML())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -594,7 +594,7 @@ func TestNativeMap_EscapeHTML(t *testing.T) {
 			"a&b":         2,
 			"normal":      3,
 		}
-		got, err := Marshal(&val, WithEscapeHTML())
+		got, err := Marshal(val, WithEscapeHTML())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -609,7 +609,7 @@ func TestNativeMap_EscapeHTML(t *testing.T) {
 			"<tag>": 999999999999,
 			"a&b":   -42,
 		}
-		got, err := Marshal(&val, WithEscapeHTML())
+		got, err := Marshal(val, WithEscapeHTML())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -630,7 +630,7 @@ func TestNativeMap_Roundtrip(t *testing.T) {
 			"key2": "value2",
 			"key3": "value with spaces",
 		}
-		got, err := Marshal(&original)
+		got, err := Marshal(original)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -652,7 +652,7 @@ func TestNativeMap_Roundtrip(t *testing.T) {
 
 	t.Run("string_int", func(t *testing.T) {
 		original := map[string]int{"a": 1, "b": 2, "c": -100}
-		got, err := Marshal(&original)
+		got, err := Marshal(original)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -673,7 +673,7 @@ func TestNativeMap_Roundtrip(t *testing.T) {
 		original := map[string]int64{
 			"small": 42, "large": 1<<62 - 1, "negative": -999999999999,
 		}
-		got, err := Marshal(&original)
+		got, err := Marshal(original)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -715,7 +715,7 @@ func TestNativeMap_Marshaler(t *testing.T) {
 		},
 	}
 
-	got, err := Marshal(&val)
+	got, err := Marshal(val)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -743,7 +743,7 @@ func TestNativeMap_SliceOfMap(t *testing.T) {
 		},
 	}
 
-	got, err := Marshal(&val)
+	got, err := Marshal(val)
 	if err != nil {
 		t.Fatal(err)
 	}

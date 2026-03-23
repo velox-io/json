@@ -10,12 +10,12 @@ import (
 func Benchmark_Marshal_Velox(b *testing.B) {
 	testUser := NewTestUser()
 	// warm up: ensure Blueprint + iface cache are compiled
-	json.Marshal(&testUser)
+	json.Marshal(testUser)
 
 	b.ReportAllocs()
 
 	for b.Loop() {
-		_, err := json.Marshal(&testUser)
+		_, err := json.Marshal(testUser)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -36,12 +36,12 @@ func Benchmark_Marshal_std(b *testing.B) {
 
 func Benchmark_MarshalIndent_Velox(b *testing.B) {
 	testUser := NewTestUser()
-	json.MarshalIndent(&testUser, "", "  ")
+	json.MarshalIndent(testUser, "", "  ")
 
 	b.ReportAllocs()
 
 	for b.Loop() {
-		_, err := json.MarshalIndent(&testUser, "", "  ")
+		_, err := json.MarshalIndent(testUser, "", "  ")
 		if err != nil {
 			b.Fatal(err)
 		}

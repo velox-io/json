@@ -126,7 +126,7 @@ func TestRawMessage_MarshalRoundTrip(t *testing.T) {
 	if err := Unmarshal(original, &msg); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Marshal(&msg)
+	got, err := Marshal(msg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestRawMessage_MarshalNil(t *testing.T) {
 		Data json.RawMessage `json:"data"`
 	}
 	msg := Msg{Data: nil}
-	got, err := Marshal(&msg)
+	got, err := Marshal(msg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestRawMessage_MarshalEmpty(t *testing.T) {
 		Data json.RawMessage `json:"data"`
 	}
 	msg := Msg{Data: json.RawMessage{}}
-	got, err := Marshal(&msg)
+	got, err := Marshal(msg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestRawMessage_TopLevelUnmarshal(t *testing.T) {
 
 func TestRawMessage_TopLevelMarshal(t *testing.T) {
 	raw := json.RawMessage(`[1,2,3]`)
-	got, err := Marshal(&raw)
+	got, err := Marshal(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestRawMessage_InSlice(t *testing.T) {
 	}
 
 	// Marshal round-trip
-	got, err := Marshal(&msg)
+	got, err := Marshal(msg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +260,7 @@ func TestRawMessage_OmitEmpty(t *testing.T) {
 		Data json.RawMessage `json:"data,omitempty"`
 	}
 	msg := Msg{Name: "test", Data: nil}
-	got, err := Marshal(&msg)
+	got, err := Marshal(msg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestRawMessage_StdlibCompat(t *testing.T) {
 		}
 
 		// Marshal both and compare
-		vOut, err := Marshal(&vMsg)
+		vOut, err := Marshal(vMsg)
 		if err != nil {
 			t.Fatalf("vjson marshal: %v", err)
 		}

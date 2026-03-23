@@ -1529,7 +1529,7 @@ func TestUnmarshal_ByteSlice_InvalidBase64(t *testing.T) {
 func TestUnmarshal_ByteSlice_Roundtrip(t *testing.T) {
 	original := ByteSliceStruct{Data: []byte("hello, world!")}
 
-	data, err := Marshal(&original)
+	data, err := Marshal(original)
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
@@ -1609,7 +1609,7 @@ func (p *ptrUnmarshalType) UnmarshalJSON(data []byte) error {
 
 func TestMarshal_JSONMarshaler(t *testing.T) {
 	v := customMarshalType{Value: "hello"}
-	data, err := Marshal(&v)
+	data, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1631,7 +1631,7 @@ func TestUnmarshal_JSONUnmarshaler(t *testing.T) {
 
 func TestRoundtrip_JSONMarshaler(t *testing.T) {
 	original := customMarshalType{Value: "roundtrip"}
-	data, err := Marshal(&original)
+	data, err := Marshal(original)
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
@@ -1651,7 +1651,7 @@ func TestRoundtrip_JSONMarshaler(t *testing.T) {
 
 func TestMarshal_JSONMarshaler_PointerReceiver(t *testing.T) {
 	v := ptrMarshalType{N: 42}
-	data, err := Marshal(&v)
+	data, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1673,7 +1673,7 @@ func TestUnmarshal_JSONUnmarshaler_PointerReceiver(t *testing.T) {
 
 func TestMarshal_TimeTime(t *testing.T) {
 	ts := time.Date(2024, 6, 15, 12, 30, 0, 0, time.UTC)
-	data, err := Marshal(&ts)
+	data, err := Marshal(ts)
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
@@ -1701,7 +1701,7 @@ func TestMarshal_JSONMarshaler_Null(t *testing.T) {
 		T *time.Time `json:"t"`
 	}
 	s := S{T: nil}
-	data, err := Marshal(&s)
+	data, err := Marshal(s)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1731,7 +1731,7 @@ func TestUnmarshal_JSONMarshaler_InStruct(t *testing.T) {
 	}
 
 	// Marshal roundtrip
-	data, err := Marshal(&ev)
+	data, err := Marshal(ev)
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
@@ -1795,7 +1795,7 @@ func (b bothMarshalerType) MarshalText() ([]byte, error) {
 
 func TestMarshal_TextMarshaler(t *testing.T) {
 	v := textMarshalType{Value: "hello"}
-	data, err := Marshal(&v)
+	data, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1817,7 +1817,7 @@ func TestUnmarshal_TextUnmarshaler(t *testing.T) {
 
 func TestRoundtrip_TextMarshaler(t *testing.T) {
 	original := textMarshalType{Value: "roundtrip"}
-	data, err := Marshal(&original)
+	data, err := Marshal(original)
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
@@ -1834,7 +1834,7 @@ func TestRoundtrip_TextMarshaler(t *testing.T) {
 
 func TestMarshal_TextMarshaler_PointerReceiver(t *testing.T) {
 	v := ptrTextMarshalType{N: 42}
-	data, err := Marshal(&v)
+	data, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1857,7 +1857,7 @@ func TestUnmarshal_TextUnmarshaler_PointerReceiver(t *testing.T) {
 func TestMarshal_TextMarshaler_Priority(t *testing.T) {
 	// json.Marshaler should take precedence over TextMarshaler for value encoding
 	v := bothMarshalerType{Value: "test"}
-	data, err := Marshal(&v)
+	data, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1868,7 +1868,7 @@ func TestMarshal_TextMarshaler_Priority(t *testing.T) {
 
 func TestMarshal_MapIntString(t *testing.T) {
 	m := map[int]string{1: "one", 2: "two"}
-	data, err := Marshal(&m)
+	data, err := Marshal(m)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1896,7 +1896,7 @@ func TestUnmarshal_MapIntString(t *testing.T) {
 
 func TestRoundtrip_MapIntString(t *testing.T) {
 	original := map[int]string{10: "ten", 20: "twenty"}
-	data, err := Marshal(&original)
+	data, err := Marshal(original)
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
@@ -1913,7 +1913,7 @@ func TestRoundtrip_MapIntString(t *testing.T) {
 
 func TestMarshal_MapUintKey(t *testing.T) {
 	m := map[uint64]string{100: "hundred"}
-	data, err := Marshal(&m)
+	data, err := Marshal(m)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1961,7 +1961,7 @@ func TestMarshal_MapTextMarshalerKey(t *testing.T) {
 	m := map[textKeyType]string{
 		{A: "x", B: "y"}: "val1",
 	}
-	data, err := Marshal(&m)
+	data, err := Marshal(m)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1991,7 +1991,7 @@ func TestRoundtrip_MapTextMarshalerKey(t *testing.T) {
 	original := map[textKeyType]int{
 		{A: "foo", B: "bar"}: 42,
 	}
-	data, err := Marshal(&original)
+	data, err := Marshal(original)
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
@@ -2014,7 +2014,7 @@ func TestMarshal_TextMarshaler_InStruct(t *testing.T) {
 	}
 
 	s := S{Name: "test", Val: textMarshalType{Value: "hello"}}
-	data, err := Marshal(&s)
+	data, err := Marshal(s)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2064,7 +2064,7 @@ func TestUnmarshal_TextUnmarshaler_NonString(t *testing.T) {
 
 func TestMarshal_MapIntInt(t *testing.T) {
 	m := map[int]int{1: 10, 2: 20}
-	data, err := Marshal(&m)
+	data, err := Marshal(m)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2084,7 +2084,7 @@ func TestMarshal_MapIntInt(t *testing.T) {
 func TestMarshal_MapIntString_StdlibCompat(t *testing.T) {
 	m := map[int]string{1: "a", 2: "b"}
 
-	vjsonData, err := Marshal(&m)
+	vjsonData, err := Marshal(m)
 	if err != nil {
 		t.Fatalf("vjson marshal error: %v", err)
 	}
@@ -2300,7 +2300,7 @@ func compareMapRoundtrip[T any](t *testing.T, m *T) {
 
 func TestRoundtrip_NetIP(t *testing.T) {
 	ip := net.ParseIP("192.168.1.1")
-	data, err := Marshal(&ip)
+	data, err := Marshal(ip)
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
@@ -2320,7 +2320,7 @@ func TestRoundtrip_NetIP(t *testing.T) {
 
 func TestRoundtrip_NetIP_IPv6(t *testing.T) {
 	ip := net.ParseIP("::1")
-	data, err := Marshal(&ip)
+	data, err := Marshal(ip)
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
@@ -2362,7 +2362,7 @@ func TestUnmarshal_NetIP_InStruct(t *testing.T) {
 
 func TestRoundtrip_BigInt(t *testing.T) {
 	v := new(big.Int).SetInt64(123456789012345)
-	data, err := Marshal(&v)
+	data, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
@@ -2382,7 +2382,7 @@ func TestRoundtrip_BigInt(t *testing.T) {
 
 func TestRoundtrip_BigInt_Negative(t *testing.T) {
 	v := new(big.Int).SetInt64(-99999999999)
-	data, err := Marshal(&v)
+	data, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
@@ -2406,7 +2406,7 @@ func TestRoundtrip_BigInt_InStruct(t *testing.T) {
 		Balance *big.Int `json:"balance"`
 	}
 	w := Wallet{Owner: "alice", Balance: new(big.Int).SetInt64(42)}
-	data, err := Marshal(&w)
+	data, err := Marshal(w)
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
@@ -2429,7 +2429,7 @@ func TestRoundtrip_BigInt_InStruct(t *testing.T) {
 
 func TestRoundtrip_BigFloat(t *testing.T) {
 	v := new(big.Float).SetFloat64(3.14159265358979)
-	data, err := Marshal(&v)
+	data, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
@@ -2456,7 +2456,7 @@ func TestRoundtrip_MapTimeKey(t *testing.T) {
 	t2 := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
 	m := map[time.Time]string{t1: "new year", t2: "mid year"}
 
-	data, err := Marshal(&m)
+	data, err := Marshal(m)
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
@@ -2500,7 +2500,7 @@ func TestRoundtrip_MapNetIPKey(t *testing.T) {
 		{Addr: net.ParseIP("10.0.0.1"), Port: 80},
 		{Addr: net.ParseIP("10.0.0.2"), Port: 443},
 	}
-	data, err := Marshal(&entries)
+	data, err := Marshal(entries)
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
@@ -2682,7 +2682,7 @@ func TestMarshal_TimeTime_StdlibCompat(t *testing.T) {
 		{}, // zero value
 	}
 	for _, ts := range times {
-		vjsonData, err := Marshal(&ts)
+		vjsonData, err := Marshal(ts)
 		if err != nil {
 			t.Fatalf("marshal %v: %v", ts, err)
 		}

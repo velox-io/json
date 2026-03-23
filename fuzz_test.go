@@ -339,7 +339,7 @@ func FuzzMarshalString(f *testing.F) {
 	f.Fuzz(func(t *testing.T, s string) {
 		v := S{V: s}
 
-		vjOut, vjErr := Marshal(&v, WithStdCompat())
+		vjOut, vjErr := Marshal(v, WithStdCompat())
 		stdOut, stdErr := json.Marshal(v)
 
 		if vjErr != nil && stdErr == nil {
@@ -440,7 +440,7 @@ func FuzzMarshalStruct(f *testing.F) {
 			v.Data = r.readBytes(n)
 		}
 
-		vjOut, vjErr := Marshal(&v, WithStdCompat())
+		vjOut, vjErr := Marshal(v, WithStdCompat())
 		stdOut, stdErr := json.Marshal(v)
 
 		if vjErr != nil && stdErr == nil {
@@ -530,20 +530,20 @@ func FuzzMarshalNoCrash(f *testing.F) {
 		}
 
 		// Marshal with every option combination — must not panic.
-		Marshal(&v)
-		Marshal(&v, WithStdCompat())
-		Marshal(&v, WithFastEscape())
-		Marshal(&v, WithEscapeHTML())
-		Marshal(&v, WithoutUTF8Correction())
+		Marshal(v)
+		Marshal(v, WithStdCompat())
+		Marshal(v, WithFastEscape())
+		Marshal(v, WithEscapeHTML())
+		Marshal(v, WithoutUTF8Correction())
 
 		// Also test bare string marshaling
 		s := v.A
-		Marshal(&s)
-		Marshal(&s, WithStdCompat())
+		Marshal(s)
+		Marshal(s, WithStdCompat())
 
 		// Also test MarshalIndent
-		MarshalIndent(&v, "", "  ")
-		MarshalIndent(&v, ">", "\t", WithStdCompat())
+		MarshalIndent(v, "", "  ")
+		MarshalIndent(v, ">", "\t", WithStdCompat())
 	})
 }
 

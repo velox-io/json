@@ -276,7 +276,7 @@ func TestNumber_Marshal_Basic(t *testing.T) {
 		N json.Number `json:"n"`
 	}
 	msg := Msg{N: json.Number("12345")}
-	got, err := Marshal(&msg)
+	got, err := Marshal(msg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestNumber_Marshal_Empty(t *testing.T) {
 		N json.Number `json:"n"`
 	}
 	msg := Msg{N: json.Number("")}
-	got, err := Marshal(&msg)
+	got, err := Marshal(msg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +307,7 @@ func TestNumber_Marshal_OmitEmpty(t *testing.T) {
 		N    json.Number `json:"n,omitempty"`
 	}
 	msg := Msg{Name: "test", N: ""}
-	got, err := Marshal(&msg)
+	got, err := Marshal(msg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +323,7 @@ func TestNumber_Marshal_AnyField(t *testing.T) {
 		Data any `json:"data"`
 	}
 	msg := Msg{Data: json.Number("99.99")}
-	got, err := Marshal(&msg)
+	got, err := Marshal(msg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +345,7 @@ func TestNumber_RoundTrip(t *testing.T) {
 	if err := Unmarshal(original, &msg); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Marshal(&msg)
+	got, err := Marshal(msg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestNumber_RoundTrip_UseNumber(t *testing.T) {
 	if err := Unmarshal(original, &result, WithUseNumber()); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Marshal(&result)
+	got, err := Marshal(result)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +490,7 @@ func TestNumber_StdlibCompat(t *testing.T) {
 			t.Errorf("unmarshal mismatch for %q:\nvjson:  %+v\nstdlib: %+v", input, vMsg, sMsg)
 		}
 
-		vOut, err := Marshal(&vMsg)
+		vOut, err := Marshal(vMsg)
 		if err != nil {
 			t.Fatalf("vjson marshal: %v", err)
 		}

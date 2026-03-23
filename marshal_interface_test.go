@@ -36,7 +36,7 @@ func TestMarshal_StructFieldAndInterfaceRefSameType(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Marshal(&tc.val)
+			got, err := Marshal(tc.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -122,7 +122,7 @@ func TestMarshal_StructWithMapStringAny(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Marshal(&tc.val)
+			got, err := Marshal(tc.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -195,7 +195,7 @@ func TestMarshal_NonEmptyInterface(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Marshal(&tc.val)
+			got, err := Marshal(tc.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -240,7 +240,7 @@ func TestMarshal_PlainNonEmptyInterface(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Marshal(&tc.val)
+			got, err := Marshal(tc.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -286,7 +286,7 @@ func TestMarshal_MultipleInterfaceTypes(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Marshal(&tc.val)
+			got, err := Marshal(tc.val)
 			if err != nil {
 				t.Fatal(err)
 			}

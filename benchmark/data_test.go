@@ -49,7 +49,7 @@ func TestMarshalMapAny(t *testing.T) {
 	if err := vjson.Unmarshal(LoadPodsCompactJSON(), &m); err != nil {
 		t.Fatal("load map[string]any:", err)
 	}
-	_, err := vjson.Marshal(&m)
+	_, err := vjson.Marshal(m)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestMarshalSliceAny(t *testing.T) {
 		}
 		s = []any{m, "hello", float64(42), true, nil}
 	}
-	_, err := vjson.Marshal(&s)
+	_, err := vjson.Marshal(s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestMarshalTwitter(t *testing.T) {
 		t.Fatal("load twitter:", err)
 	}
 	tv.Statuses = tv.Statuses[:1]
-	_, err := vjson.Marshal(&tv)
+	_, err := vjson.Marshal(tv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestMarshalOmitemptyMap(t *testing.T) {
 		Tags:  map[string]string{"a": "b", "c": "d"},
 		Extra: nil,
 	}
-	got, err := vjson.Marshal(&v)
+	got, err := vjson.Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestMarshalKubePods(t *testing.T) {
 	if err := json.Unmarshal(LoadPodsCompactJSON(), &pods); err != nil {
 		t.Fatal("load pods:", err)
 	}
-	_, err := vjson.Marshal(&pods)
+	_, err := vjson.Marshal(pods)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,7 +10,7 @@ import (
 func marshalUser() {
 	u := NewTestUser()
 
-	b2, err := json.MarshalIndent(&u, "", "  ")
+	b2, err := json.MarshalIndent(u, "", "  ")
 	if err != nil {
 		panic(err)
 	}
@@ -22,14 +22,14 @@ func marshalUser() {
 func marshalCanada() {
 	c := NewCanadaRoot()
 
-	b, err := json.Marshal(&c)
+	b, err := json.Marshal(c)
 	if err != nil {
 		panic(err)
 	}
 	fmt.Printf("--- canada (compact, %d bytes) ---\n", len(b))
 	fmt.Println(string(b[:200]) + "...")
 
-	// b2, err := json.MarshalIndent(&c, "", "  ")
+	// b2, err := json.MarshalIndent(c, "", "  ")
 	// if err != nil {
 	// 	panic(err)
 	// }

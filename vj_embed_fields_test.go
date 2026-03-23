@@ -53,7 +53,7 @@ func TestEmbedRule1_ShallowOverDeep(t *testing.T) {
 
 	// Marshal: the shallow field should be output
 	stdOut, _ := json.Marshal(stdVal)
-	vjOut, _ := Marshal(&vjVal)
+	vjOut, _ := Marshal(vjVal)
 	if string(vjOut) != string(stdOut) {
 		t.Errorf("Rule 1 marshal: vjson=%s, stdlib=%s", vjOut, stdOut)
 	}
@@ -83,7 +83,7 @@ func TestEmbedRule1_Depth1OverDepth2(t *testing.T) {
 
 	// Marshal round-trip
 	stdOut, _ := json.Marshal(stdVal)
-	vjOut, _ := Marshal(&vjVal)
+	vjOut, _ := Marshal(vjVal)
 	if string(vjOut) != string(stdOut) {
 		t.Errorf("Rule 1 depth-1>depth-2 marshal: vjson=%s, stdlib=%s", vjOut, stdOut)
 	}
@@ -117,7 +117,7 @@ func TestEmbedRule2_SameDepthCancels(t *testing.T) {
 		t.Fatalf("stdlib marshal: %v", err)
 	}
 
-	vjOut, err := Marshal(&val)
+	vjOut, err := Marshal(val)
 	if err != nil {
 		t.Fatalf("vjson marshal: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestEmbedRule2_ThreeWayCancels(t *testing.T) {
 	}
 
 	stdOut, _ := json.Marshal(val)
-	vjOut, _ := Marshal(&val)
+	vjOut, _ := Marshal(val)
 
 	if string(vjOut) != string(stdOut) {
 		t.Errorf("Rule 2 three-way marshal: vjson=%s, stdlib=%s", vjOut, stdOut)
@@ -198,7 +198,7 @@ func TestEmbedRule3_NonStructNamedType(t *testing.T) {
 		t.Fatalf("stdlib marshal: %v", err)
 	}
 
-	vjOut, err := Marshal(&val)
+	vjOut, err := Marshal(val)
 	if err != nil {
 		t.Fatalf("vjson marshal: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestEmbedRule3_NonStructIntType(t *testing.T) {
 		t.Fatalf("stdlib marshal: %v", err)
 	}
 
-	vjOut, err := Marshal(&val)
+	vjOut, err := Marshal(val)
 	if err != nil {
 		t.Fatalf("vjson marshal: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestEmbedRule4_UnexportedStructExportedFields(t *testing.T) {
 		t.Fatalf("stdlib marshal: %v", err)
 	}
 
-	vjOut, err := Marshal(&val)
+	vjOut, err := Marshal(val)
 	if err != nil {
 		t.Fatalf("vjson marshal: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestEmbedRule4_DeepUnexportedEmbed(t *testing.T) {
 	}
 
 	stdOut, _ := json.Marshal(val)
-	vjOut, _ := Marshal(&val)
+	vjOut, _ := Marshal(val)
 
 	if string(vjOut) != string(stdOut) {
 		t.Errorf("Rule 4 deep marshal: vjson=%s, stdlib=%s", vjOut, stdOut)

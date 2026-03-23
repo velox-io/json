@@ -165,7 +165,7 @@ func TestNativeEncoder_GoroutineStackStress_Simple(t *testing.T) {
 	v := stackTestSimple{A: 42, B: "hello", C: true}
 
 	runStackStressTest(t, 500, func(t *testing.T, id int) {
-		got, err := Marshal(&v)
+		got, err := Marshal(v)
 		verifyMarshalResult(t, &v, got, err, fmt.Sprintf("goroutine=%d", id))
 	})
 }
@@ -180,7 +180,7 @@ func TestNativeEncoder_GoroutineStackStress_Nested(t *testing.T) {
 	}
 
 	runStackStressTest(t, 500, func(t *testing.T, id int) {
-		got, err := Marshal(&v)
+		got, err := Marshal(v)
 		verifyMarshalResult(t, &v, got, err, fmt.Sprintf("g=%d", id))
 	})
 }
@@ -193,7 +193,7 @@ func TestNativeEncoder_GoroutineStackStress_DeepNesting(t *testing.T) {
 	v.Level1.Level2.Level3.Y = "deep"
 
 	runStackStressTest(t, 500, func(t *testing.T, id int) {
-		got, err := Marshal(&v)
+		got, err := Marshal(v)
 		verifyMarshalResult(t, &v, got, err, fmt.Sprintf("g=%d", id))
 	})
 }
@@ -211,7 +211,7 @@ func TestNativeEncoder_GoroutineStackStress_Slices(t *testing.T) {
 	}
 
 	runStackStressTest(t, 500, func(t *testing.T, id int) {
-		got, err := Marshal(&v)
+		got, err := Marshal(v)
 		verifyMarshalResult(t, &v, got, err, fmt.Sprintf("g=%d", id))
 	})
 }
@@ -227,7 +227,7 @@ func TestNativeEncoder_GoroutineStackStress_Interface(t *testing.T) {
 	}
 
 	runStackStressTest(t, 500, func(t *testing.T, id int) {
-		got, err := Marshal(&v)
+		got, err := Marshal(v)
 		verifyMarshalResult(t, &v, got, err, fmt.Sprintf("g=%d", id))
 	})
 }
@@ -244,7 +244,7 @@ func TestNativeEncoder_GoroutineStackStress_Pointer(t *testing.T) {
 	}
 
 	runStackStressTest(t, 500, func(t *testing.T, id int) {
-		got, err := Marshal(&v)
+		got, err := Marshal(v)
 		verifyMarshalResult(t, &v, got, err, fmt.Sprintf("g=%d", id))
 	})
 }
@@ -273,7 +273,7 @@ func TestNativeEncoder_GoroutineStackStress_Complex(t *testing.T) {
 	}
 
 	runStackStressTest(t, 500, func(t *testing.T, id int) {
-		got, err := Marshal(&v)
+		got, err := Marshal(v)
 		verifyMarshalResult(t, &v, got, err, fmt.Sprintf("g=%d", id))
 	})
 }
@@ -289,7 +289,7 @@ func TestNativeEncoder_GoroutineStackStress_Indent(t *testing.T) {
 	}
 
 	runStackStressTest(t, 500, func(t *testing.T, id int) {
-		got, err := MarshalIndent(&v, "", "  ")
+		got, err := MarshalIndent(v, "", "  ")
 		label := fmt.Sprintf("g=%d", id)
 		if err != nil {
 			t.Errorf("[%s] MarshalIndent error: %v", label, err)
@@ -330,7 +330,7 @@ func TestNativeEncoder_GoroutineStackStress_ManyOptions(t *testing.T) {
 
 	runStackStressTest(t, 300, func(t *testing.T, id int) {
 		for _, c := range cases {
-			got, err := Marshal(&v, c.opts...)
+			got, err := Marshal(v, c.opts...)
 			if err != nil {
 				t.Errorf("[g=%d opt=%s] error: %v", id, c.name, err)
 				continue
@@ -395,7 +395,7 @@ func TestNativeEncoder_GoroutineStackStress_TinyStack(t *testing.T) {
 			start.Wait()
 
 			// Immediately marshal — no warm-up, no recursion.
-			got, err := Marshal(&v)
+			got, err := Marshal(v)
 			if err != nil {
 				errCh <- fmt.Sprintf("goroutine %d marshal error: %v", id, err)
 				return
@@ -452,7 +452,7 @@ func TestNativeEncoder_GoroutineStackStress_RapidSpawn(t *testing.T) {
 					}
 				}()
 
-				got, err := Marshal(&v)
+				got, err := Marshal(v)
 				verifyMarshalResult(t, &v, got, err, fmt.Sprintf("iter=%d g=%d", iter, id))
 			}(i)
 		}
@@ -495,7 +495,7 @@ func TestNativeEncoder_GoroutineStackStress_LargeStrings(t *testing.T) {
 	}
 
 	runStackStressTest(t, 200, func(t *testing.T, id int) {
-		got, err := Marshal(&v)
+		got, err := Marshal(v)
 		verifyMarshalResult(t, &v, got, err, fmt.Sprintf("g=%d", id))
 	})
 }

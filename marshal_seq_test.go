@@ -26,7 +26,7 @@ func TestMarshal_SeqFloat64(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Marshal(&tc.val)
+			got, err := Marshal(tc.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -59,7 +59,7 @@ func TestMarshal_SeqInt(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Marshal(&tc.val)
+			got, err := Marshal(tc.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -92,7 +92,7 @@ func TestMarshal_SeqInt64(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Marshal(&tc.val)
+			got, err := Marshal(tc.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -127,7 +127,7 @@ func TestMarshal_SeqString(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Marshal(&tc.val)
+			got, err := Marshal(tc.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -178,7 +178,7 @@ func TestMarshal_SeqOmitempty(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Marshal(&tc.val)
+			got, err := Marshal(tc.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -216,7 +216,7 @@ func TestMarshal_SeqPointer(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Marshal(&tc.val)
+			got, err := Marshal(tc.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -269,7 +269,7 @@ func TestMarshal_SeqMultiField(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Marshal(&tc.val)
+			got, err := Marshal(tc.val)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -298,7 +298,7 @@ func TestMarshal_SeqIndent(t *testing.T) {
 		Strings: []string{"a", "b", "c"},
 	}
 
-	got, err := MarshalIndent(&val, "", "  ")
+	got, err := MarshalIndent(val, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +322,7 @@ func TestMarshal_SeqEscapeHTML(t *testing.T) {
 		"normal",
 	}}
 
-	got, err := Marshal(&val, WithEscapeHTML())
+	got, err := Marshal(val, WithEscapeHTML())
 	if err != nil {
 		t.Fatal(err)
 	}

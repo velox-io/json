@@ -199,7 +199,7 @@ func marshalGoOnly[T any](v *T) ([]byte, error) {
 func BenchmarkMarshal_Flat5_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&flat5Val); err != nil {
+		if _, err := Marshal(flat5Val); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -219,7 +219,7 @@ func BenchmarkMarshal_Flat5_GoOnly(b *testing.B) {
 func BenchmarkMarshal_Flat10_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&flat10Val); err != nil {
+		if _, err := Marshal(flat10Val); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -239,7 +239,7 @@ func BenchmarkMarshal_Flat10_GoOnly(b *testing.B) {
 func BenchmarkMarshal_Nested_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&nestedVal); err != nil {
+		if _, err := Marshal(nestedVal); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -259,7 +259,7 @@ func BenchmarkMarshal_Nested_GoOnly(b *testing.B) {
 func BenchmarkMarshal_Deep_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&deepVal); err != nil {
+		if _, err := Marshal(deepVal); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -279,7 +279,7 @@ func BenchmarkMarshal_Deep_GoOnly(b *testing.B) {
 func BenchmarkMarshal_Deep5_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&deep5Val); err != nil {
+		if _, err := Marshal(deep5Val); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -299,7 +299,7 @@ func BenchmarkMarshal_Deep5_GoOnly(b *testing.B) {
 func BenchmarkMarshal_MultiNest_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&multiNestVal); err != nil {
+		if _, err := Marshal(multiNestVal); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -319,7 +319,7 @@ func BenchmarkMarshal_MultiNest_GoOnly(b *testing.B) {
 func BenchmarkMarshal_Wide_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&wideVal); err != nil {
+		if _, err := Marshal(wideVal); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -355,7 +355,7 @@ var stringHeavyVal = benchStringHeavy{
 func BenchmarkMarshal_StringHeavy_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&stringHeavyVal); err != nil {
+		if _, err := Marshal(stringHeavyVal); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -389,7 +389,7 @@ var floatVal = benchWithFloats{
 func BenchmarkMarshal_WithFloats_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&floatVal); err != nil {
+		if _, err := Marshal(floatVal); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -424,7 +424,7 @@ var omitVal = benchOmitempty{
 func BenchmarkMarshal_Omitempty_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&omitVal); err != nil {
+		if _, err := Marshal(omitVal); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -459,7 +459,7 @@ var sliceVal100 = func() []benchSliceItem {
 func BenchmarkMarshal_Slice100_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&sliceVal100); err != nil {
+		if _, err := Marshal(sliceVal100); err != nil {
 			b.Fatal(err)
 		}
 	}

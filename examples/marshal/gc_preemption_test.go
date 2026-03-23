@@ -89,7 +89,7 @@ func TestVMExecGCPreemption(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for !stop.Load() {
-				_, err := json.Marshal(&payload)
+				_, err := json.Marshal(payload)
 				if err != nil {
 					errOnce.Do(func() { testErr = err })
 					stop.Store(true)
@@ -168,7 +168,7 @@ func TestVMExecGCPreemptionIndent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for !stop.Load() {
-				_, err := json.MarshalIndent(&payload, "", "  ")
+				_, err := json.MarshalIndent(payload, "", "  ")
 				if err != nil {
 					errOnce.Do(func() { testErr = err })
 					stop.Store(true)
@@ -246,7 +246,7 @@ func TestVMExecGCPreemptionWithHTMLEscape(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for !stop.Load() {
-				_, err := json.Marshal(&payload, json.WithEscapeHTML())
+				_, err := json.Marshal(payload, json.WithEscapeHTML())
 				if err != nil {
 					errOnce.Do(func() { testErr = err })
 					stop.Store(true)
@@ -319,7 +319,7 @@ func TestVMExecStackGrowth(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for !stop.Load() {
-				_, err := json.Marshal(&payload)
+				_, err := json.Marshal(payload)
 				if err != nil {
 					errOnce.Do(func() { testErr = err })
 					stop.Store(true)
@@ -438,7 +438,7 @@ func TestVMExecPreemptionSignal(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for !stop.Load() {
-				_, err := json.Marshal(&payload)
+				_, err := json.Marshal(payload)
 				if err != nil {
 					t.Errorf("Marshal error: %v", err)
 					stop.Store(true)

@@ -41,7 +41,7 @@ func Benchmark_ParallelMarshal_EscapeHeavy_Velox(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			if _, err := vjson.Marshal(&escapeHeavyValue); err != nil {
+			if _, err := vjson.Marshal(escapeHeavyValue); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -81,7 +81,7 @@ func Benchmark_ParallelMarshal_KubePods_Velox(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			if _, err := vjson.Marshal(&podsValue); err != nil {
+			if _, err := vjson.Marshal(podsValue); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -121,7 +121,7 @@ func Benchmark_ParallelMarshal_Twitter_Velox(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			if _, err := vjson.Marshal(&twitterValue); err != nil {
+			if _, err := vjson.Marshal(twitterValue); err != nil {
 				b.Fatal(err)
 			}
 		}

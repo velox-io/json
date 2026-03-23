@@ -25,7 +25,7 @@ func TestMarshal_TimeTime_Timezones(t *testing.T) {
 		time.Date(2024, 3, 15, 10, 0, 0, 0, time.Local),
 	}
 	for _, ts := range times {
-		vjData, err := Marshal(&ts)
+		vjData, err := Marshal(ts)
 		if err != nil {
 			t.Fatalf("marshal %v: %v", ts, err)
 		}
@@ -50,7 +50,7 @@ func TestMarshal_TimeTime_Nanoseconds(t *testing.T) {
 		time.Date(2024, 1, 1, 0, 0, 0, 999999999, time.UTC), // .999999999
 	}
 	for _, ts := range cases {
-		vjData, err := Marshal(&ts)
+		vjData, err := Marshal(ts)
 		if err != nil {
 			t.Fatalf("marshal %v: %v", ts, err)
 		}
@@ -72,7 +72,7 @@ func TestMarshal_TimeTime_EdgeYears(t *testing.T) {
 		time.Date(2024, 2, 29, 12, 0, 0, 0, time.UTC),    // leap day 2024
 	}
 	for _, ts := range cases {
-		vjData, err := Marshal(&ts)
+		vjData, err := Marshal(ts)
 		if err != nil {
 			t.Fatalf("marshal %v: %v", ts, err)
 		}
@@ -105,7 +105,7 @@ func TestMarshal_TimeTime_StructFields(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			vjData, err := Marshal(&tc.val)
+			vjData, err := Marshal(tc.val)
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
 			}
@@ -123,7 +123,7 @@ func TestMarshal_TimeTime_Slice(t *testing.T) {
 		time.Date(2024, 6, 15, 12, 30, 45, 123456789, time.UTC),
 		time.Date(2024, 12, 31, 23, 59, 59, 0, time.FixedZone("", -7*3600)),
 	}
-	vjData, err := Marshal(&times)
+	vjData, err := Marshal(times)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestMarshal_TimeTime_Slice(t *testing.T) {
 
 	// Empty slice
 	empty := []time.Time{}
-	vjData, err = Marshal(&empty)
+	vjData, err = Marshal(empty)
 	if err != nil {
 		t.Fatalf("marshal empty: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestMarshal_TimeTime_Slice(t *testing.T) {
 
 	// Nil slice
 	var nilSlice []time.Time
-	vjData, err = Marshal(&nilSlice)
+	vjData, err = Marshal(nilSlice)
 	if err != nil {
 		t.Fatalf("marshal nil: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestMarshal_TimeTime_PointerDeref(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			vjData, err := Marshal(&tc.val)
+			vjData, err := Marshal(tc.val)
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
 			}
@@ -193,7 +193,7 @@ func TestMarshal_TimeTime_Indent(t *testing.T) {
 		Name: "deploy",
 		At:   time.Date(2024, 6, 15, 12, 30, 0, 0, time.UTC),
 	}
-	vjData, err := MarshalIndent(&ev, "", "  ")
+	vjData, err := MarshalIndent(ev, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal indent: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestMarshal_TimeTime_Indent(t *testing.T) {
 		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		time.Date(2024, 6, 15, 0, 0, 0, 0, time.FixedZone("", 8*3600)),
 	}
-	vjData, err = MarshalIndent(&times, "", "\t")
+	vjData, err = MarshalIndent(times, "", "\t")
 	if err != nil {
 		t.Fatalf("marshal indent slice: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestMarshal_TimeTime_Nested(t *testing.T) {
 			End:   time.Date(2024, 3, 31, 23, 59, 59, 0, time.UTC),
 		},
 	}
-	vjData, err := Marshal(&val)
+	vjData, err := Marshal(val)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestMarshal_TimeTime_Omitempty(t *testing.T) {
 	}
 	// Zero time with omitempty — stdlib omits zero time
 	zero := S{Name: "test"}
-	vjData, err := Marshal(&zero)
+	vjData, err := Marshal(zero)
 	if err != nil {
 		t.Fatalf("marshal zero: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestMarshal_TimeTime_Omitempty(t *testing.T) {
 
 	// Non-zero time with omitempty
 	nonZero := S{Name: "test", T: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}
-	vjData, err = Marshal(&nonZero)
+	vjData, err = Marshal(nonZero)
 	if err != nil {
 		t.Fatalf("marshal non-zero: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestMarshal_TimeTime_Now(t *testing.T) {
 	// time.Now() — local timezone, monotonic clock bit set.
 	// The C VM should yield to Go for DST timezones and still produce correct output.
 	now := time.Now()
-	vjData, err := Marshal(&now)
+	vjData, err := Marshal(now)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}

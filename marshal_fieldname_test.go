@@ -64,7 +64,7 @@ func TestMarshal_StructFieldNames_StdlibCompat(t *testing.T) {
 		NoTag:     "visible",
 	}
 
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestMarshal_StructInAny_StdlibCompat(t *testing.T) {
 		},
 	}
 
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestMarshal_NestedAnyChain_StdlibCompat(t *testing.T) {
 		},
 	}
 
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestMarshal_MultipleDistinctTypesInAny_StdlibCompat(t *testing.T) {
 		},
 	}
 
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestMarshalIndent_StructInAny_StdlibCompat(t *testing.T) {
 		},
 	}
 
-	got, err := MarshalIndent(&v, "", "  ")
+	got, err := MarshalIndent(v, "", "  ")
 	if err != nil {
 		t.Fatalf("MarshalIndent failed: %v", err)
 	}

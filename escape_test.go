@@ -200,7 +200,7 @@ func TestMarshal_EscapeStdCompat(t *testing.T) {
 			}
 			s := S{V: tc.s}
 
-			got, err := Marshal(&s, WithStdCompat())
+			got, err := Marshal(s, WithStdCompat())
 			if err != nil {
 				t.Fatalf("velox error: %v", err)
 			}
@@ -223,7 +223,7 @@ func TestMarshal_DefaultEscapesSafe(t *testing.T) {
 	}
 	s := S{V: "abc\xffdef"}
 
-	got, err := Marshal(&s, WithStdCompat())
+	got, err := Marshal(s, WithStdCompat())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestMarshal_EscapeDefault(t *testing.T) {
 			type S struct {
 				V string `json:"v"`
 			}
-			got, err := Marshal(&S{V: tc.s})
+			got, err := Marshal(S{V: tc.s})
 			if err != nil {
 				t.Fatalf("error: %v", err)
 			}
@@ -293,7 +293,7 @@ func TestMarshal_EscapeLineTerms(t *testing.T) {
 			type S struct {
 				V string `json:"v"`
 			}
-			got, err := Marshal(&S{V: tc.s}, WithEscapeLineTerms())
+			got, err := Marshal(S{V: tc.s}, WithEscapeLineTerms())
 			if err != nil {
 				t.Fatalf("error: %v", err)
 			}
@@ -329,7 +329,7 @@ func TestMarshal_EscapeFastPath(t *testing.T) {
 			type S struct {
 				V string `json:"v"`
 			}
-			got, err := Marshal(&S{V: tc.s}, WithFastEscape())
+			got, err := Marshal(S{V: tc.s}, WithFastEscape())
 			if err != nil {
 				t.Fatalf("error: %v", err)
 			}
@@ -362,7 +362,7 @@ func TestMarshal_EscapeUTF8Only(t *testing.T) {
 			type S struct {
 				V string `json:"v"`
 			}
-			got, err := Marshal(&S{V: tc.s}, WithFastEscape(), WithUTF8Correction())
+			got, err := Marshal(S{V: tc.s}, WithFastEscape(), WithUTF8Correction())
 			if err != nil {
 				t.Fatalf("error: %v", err)
 			}
@@ -393,7 +393,7 @@ func TestMarshal_EscapeHTMLOnly(t *testing.T) {
 			type S struct {
 				V string `json:"v"`
 			}
-			got, err := Marshal(&S{V: tc.s}, WithFastEscape(), WithEscapeHTML())
+			got, err := Marshal(S{V: tc.s}, WithFastEscape(), WithEscapeHTML())
 			if err != nil {
 				t.Fatalf("error: %v", err)
 			}
@@ -420,7 +420,7 @@ func TestMarshal_EscapeLongStrings(t *testing.T) {
 	asciiHTML := ascii[:50] + "<" + ascii[50:100] + ">" + ascii[100:150] + "&" + ascii[150:]
 
 	t.Run("StdCompat_long_cjk_with_sep", func(t *testing.T) {
-		got, err := Marshal(&S{V: cjkWithSep}, WithStdCompat())
+		got, err := Marshal(S{V: cjkWithSep}, WithStdCompat())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -431,7 +431,7 @@ func TestMarshal_EscapeLongStrings(t *testing.T) {
 	})
 
 	t.Run("StdCompat_long_ascii_html", func(t *testing.T) {
-		got, err := Marshal(&S{V: asciiHTML}, WithStdCompat())
+		got, err := Marshal(S{V: asciiHTML}, WithStdCompat())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -442,7 +442,7 @@ func TestMarshal_EscapeLongStrings(t *testing.T) {
 	})
 
 	t.Run("Default_long_cjk_with_sep", func(t *testing.T) {
-		got, err := Marshal(&S{V: cjkWithSep})
+		got, err := Marshal(S{V: cjkWithSep})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -457,7 +457,7 @@ func TestMarshal_EscapeLongStrings(t *testing.T) {
 	})
 
 	t.Run("FastEscape_long_passthrough", func(t *testing.T) {
-		got, err := Marshal(&S{V: cjkWithSep}, WithFastEscape())
+		got, err := Marshal(S{V: cjkWithSep}, WithFastEscape())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -512,7 +512,7 @@ func TestMarshal_EscapeLineTermTrailingBoundary(t *testing.T) {
 			}
 
 			// Test with WithEscapeLineTerms (line terms escaped, HTML/UTF8 passthrough)
-			got, err := Marshal(&S{V: tc.input}, WithEscapeLineTerms())
+			got, err := Marshal(S{V: tc.input}, WithEscapeLineTerms())
 			if err != nil {
 				t.Fatalf("Marshal error: %v", err)
 			}

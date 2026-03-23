@@ -163,7 +163,7 @@ func TestKeyPoolOverflow_MarshalProducesCorrectJSON(t *testing.T) {
 		KpOvfEpsilon: 999,
 	}
 
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestKeyPoolOverflow_MixedFieldTypes(t *testing.T) {
 		KpOvfMxTrail: "end",
 	}
 
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestKeyPoolOverflow_PartialOverflowInterleaved(t *testing.T) {
 		Tag:           "also-native",
 	}
 
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
 	}

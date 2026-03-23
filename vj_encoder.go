@@ -135,14 +135,15 @@ func (enc *Encoder) Encode(v any) error {
 }
 
 // EncodeValue is a generic, zero-allocation alternative to [Encoder.Encode].
-// Because the type parameter provides compile-time type information and the
-// caller passes a typed pointer directly, it avoids interface boxing, reflect
-// overhead, and the eface data-pointer extraction needed by Encode.
-func EncodeValue[T any](enc *Encoder, v *T) error {
+// The type parameter provides compile-time type information, avoiding
+// interface boxing and reflect overhead. When T is a pointer type, the
+// pointer is unwrapped to encode the element directly.
+func EncodeValue[T any](enc *Encoder, v T) error {
 	if enc.err != nil {
 		return enc.err
 	}
-	return enc.encodePtr(codecCacheMarshal.getCodec(reflect.TypeFor[T]()), unsafe.Pointer(v))
+	ti, ptr := marshalTarget[T](&v)
+	return enc.encodePtr(ti, ptr)
 }
 
 // encodePtr is the shared encoding core for Encode and EncodeValue.

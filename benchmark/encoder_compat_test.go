@@ -37,7 +37,7 @@ func TestNativeEncoder_Twitter(t *testing.T) {
 	}
 
 	// 3. Marshal with velox (StdCompat for HTML escaping parity).
-	vjOut, err := vjson.Marshal(&tw, vjson.WithStdCompat())
+	vjOut, err := vjson.Marshal(tw, vjson.WithStdCompat())
 	if err != nil {
 		t.Fatalf("velox Marshal: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestNativeEncoder_Twitter_ByteExact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stdlib Marshal: %v", err)
 	}
-	vjOut, err := vjson.Marshal(&tw.SearchMetadata, vjson.WithStdCompat())
+	vjOut, err := vjson.Marshal(tw.SearchMetadata, vjson.WithStdCompat())
 	if err != nil {
 		t.Fatalf("velox Marshal: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestNativeEncoder_Twitter_Statuses(t *testing.T) {
 		if err != nil {
 			t.Fatalf("status[%d] stdlib Marshal: %v", i, err)
 		}
-		vjOut, err := vjson.Marshal(&status, vjson.WithStdCompat())
+		vjOut, err := vjson.Marshal(status, vjson.WithStdCompat())
 		if err != nil {
 			t.Fatalf("status[%d] velox Marshal: %v", i, err)
 		}
@@ -112,7 +112,7 @@ func TestNativeEncoder_Twitter_Users(t *testing.T) {
 		if err != nil {
 			t.Fatalf("user[%d] stdlib Marshal: %v", i, err)
 		}
-		vjOut, err := vjson.Marshal(&status.User, vjson.WithStdCompat())
+		vjOut, err := vjson.Marshal(status.User, vjson.WithStdCompat())
 		if err != nil {
 			t.Fatalf("user[%d] velox Marshal: %v", i, err)
 		}

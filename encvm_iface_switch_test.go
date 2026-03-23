@@ -29,7 +29,7 @@ func TestIfaceSwitchOps_StructWithFallback(t *testing.T) {
 		V: Inner{T: now},
 	}
 
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestIfaceSwitchOps_StructWithStringAndFallback(t *testing.T) {
 	var got []byte
 	var err error
 	go func() {
-		got, err = Marshal(&v)
+		got, err = Marshal(v)
 		close(done)
 	}()
 

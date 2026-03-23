@@ -163,33 +163,32 @@ func WithFastEscape() MarshalOption {
 	return func(m *Marshaler) { m.flags &^= uint32(escapeHTML | escapeLineTerms | escapeInvalidUTF8) }
 }
 
-// Marshal returns the compact JSON encoding of *v.
+// Marshal returns the compact JSON encoding of v.
 //
-// Stack-move safety: v is converted to unsafe.Pointer and stored in the
-// heap-allocated Marshaler.vmCtx.CurBase for the C VM to read. If v were
-// on the goroutine stack, a stack growth during a VM yield-to-Go could
-// relocate the stack, leaving CurBase as a dangling pointer.
+// When T is a pointer type (e.g. Marshal(&s)), the pointer is unwrapped so
+// the codec operates on the element type directly — zero overhead compared
+// to non-pointer values. When T is a non-pointer type (e.g. Marshal(myMap)),
+// the value is encoded directly.
 //
-// This is currently safe because encodeValue dispatches through EncodeFn,
-// a function value (indirect call). The escape analysis cannot see through
-// it, so the compiler conservatively marks v as "leaks to heap", forcing
-// the caller to heap-allocate v before entering Marshal. Should EncodeFn
-// ever become a direct (devirtualisable) call, this implicit guarantee
-// would break — add an explicit forceEscape or runtime.Pinner at that
-// point.
-func Marshal[T any](v *T, opts ...MarshalOption) ([]byte, error) {
+// Stack-move safety: the C VM stores a raw pointer to the data being encoded
+// in Marshaler.vmCtx.CurBase. This pointer must not be invalidated by a
+// goroutine stack move. Currently safe because encodeValue dispatches through
+// EncodeFn (indirect call), which prevents escape analysis from proving v is
+// stack-only — the compiler heap-allocates v. If EncodeFn is ever devirtualised,
+// add an explicit forceEscape or runtime.Pinner.
+func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
 	m := getMarshaler()
 	for _, o := range opts {
 		o(m)
 	}
 
-	ti := codecCacheMarshal.getCodec(reflect.TypeFor[T]())
+	ti, ptr := marshalTarget[T](&v)
 
 	if ti.HintBytes > cap(m.buf) {
 		m.buf = make([]byte, 0, ti.HintBytes)
 	}
 
-	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
+	if err := m.encodeValue(ti, ptr); err != nil {
 		putMarshaler(m)
 		return nil, err
 	}
@@ -197,9 +196,8 @@ func Marshal[T any](v *T, opts ...MarshalOption) ([]byte, error) {
 	return m.finalize(), nil
 }
 
-// MarshalIndent returns the indented JSON encoding of *v.
-// See Marshal for stack-move safety discussion.
-func MarshalIndent[T any](v *T, prefix, indent string, opts ...MarshalOption) ([]byte, error) {
+// MarshalIndent returns the indented JSON encoding of v.
+func MarshalIndent[T any](v T, prefix, indent string, opts ...MarshalOption) ([]byte, error) {
 	m := getMarshaler()
 	for _, o := range opts {
 		o(m)
@@ -208,8 +206,8 @@ func MarshalIndent[T any](v *T, prefix, indent string, opts ...MarshalOption) ([
 	m.prefix = prefix
 	m.indent = indent
 
-	ti := codecCacheMarshal.getCodec(reflect.TypeFor[T]())
-	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
+	ti, ptr := marshalTarget[T](&v)
+	if err := m.encodeValue(ti, ptr); err != nil {
 		putMarshaler(m)
 		return nil, err
 	}
@@ -217,9 +215,8 @@ func MarshalIndent[T any](v *T, prefix, indent string, opts ...MarshalOption) ([
 	return m.finalize(), nil
 }
 
-// AppendMarshal appends the compact JSON encoding of *v to dst.
-// See Marshal for stack-move safety discussion.
-func AppendMarshal[T any](dst []byte, v *T, opts ...MarshalOption) ([]byte, error) {
+// AppendMarshal appends the compact JSON encoding of v to dst.
+func AppendMarshal[T any](dst []byte, v T, opts ...MarshalOption) ([]byte, error) {
 	m := getMarshaler()
 	for _, o := range opts {
 		o(m)
@@ -227,8 +224,8 @@ func AppendMarshal[T any](dst []byte, v *T, opts ...MarshalOption) ([]byte, erro
 
 	m.buf = dst
 
-	ti := codecCacheMarshal.getCodec(reflect.TypeFor[T]())
-	if err := m.encodeValue(ti, unsafe.Pointer(v)); err != nil {
+	ti, ptr := marshalTarget[T](&v)
+	if err := m.encodeValue(ti, ptr); err != nil {
 		m.buf = nil // detach caller's buffer before pooling
 		putMarshaler(m)
 		return dst, err
@@ -238,6 +235,28 @@ func AppendMarshal[T any](dst []byte, v *T, opts ...MarshalOption) ([]byte, erro
 	m.buf = nil // detach caller's buffer before pooling
 	putMarshaler(m)
 	return result, nil
+}
+
+// marshalTarget resolves the TypeInfo and data pointer for encoding v.
+//
+// When T is a pointer type, the pointer is unwrapped: the element type's
+// codec is returned and ptr points directly to the element (same code path
+// as if the caller had passed a non-pointer element). Nil pointers fall
+// back to the PointerCodec which emits "null".
+//
+// When T is a non-pointer type, the codec for T is returned and ptr
+// points to v itself.
+func marshalTarget[T any](vp *T) (*TypeInfo, unsafe.Pointer) {
+	rt := reflect.TypeFor[T]()
+	if rt.Kind() == reflect.Pointer {
+		elemPtr := *(*unsafe.Pointer)(unsafe.Pointer(vp))
+		if elemPtr == nil {
+			// nil → PointerCodec emits "null"
+			return codecCacheMarshal.getCodec(rt), unsafe.Pointer(vp)
+		}
+		return codecCacheMarshal.getCodec(rt.Elem()), elemPtr
+	}
+	return codecCacheMarshal.getCodec(rt), unsafe.Pointer(vp)
 }
 
 // finalize copies the result to a new slice and recycles the Marshaler.

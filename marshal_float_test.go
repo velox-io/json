@@ -20,7 +20,7 @@ type wrapF32 struct {
 func marshalFloat64(t *testing.T, val float64) string {
 	t.Helper()
 	w := wrapF64{V: val}
-	got, err := Marshal(&w, WithFloatExpAuto())
+	got, err := Marshal(w, WithFloatExpAuto())
 	if err != nil {
 		t.Fatalf("Marshal(%v) error: %v", val, err)
 	}
@@ -31,7 +31,7 @@ func marshalFloat64(t *testing.T, val float64) string {
 func marshalFloat32(t *testing.T, val float32) string {
 	t.Helper()
 	w := wrapF32{V: val}
-	got, err := Marshal(&w, WithFloatExpAuto())
+	got, err := Marshal(w, WithFloatExpAuto())
 	if err != nil {
 		t.Fatalf("Marshal(%v) error: %v", val, err)
 	}
@@ -287,7 +287,7 @@ func TestNativeFloat_SpecialValues(t *testing.T) {
 
 	t.Run("float64_NaN", func(t *testing.T) {
 		w := wrapF64{V: math.NaN()}
-		_, err := Marshal(&w)
+		_, err := Marshal(w)
 		if err == nil {
 			t.Fatal("expected error for NaN, got nil")
 		}
@@ -297,31 +297,31 @@ func TestNativeFloat_SpecialValues(t *testing.T) {
 	})
 	t.Run("float64_PosInf", func(t *testing.T) {
 		w := wrapF64{V: math.Inf(1)}
-		if _, err := Marshal(&w); err == nil {
+		if _, err := Marshal(w); err == nil {
 			t.Fatal("expected error for +Inf, got nil")
 		}
 	})
 	t.Run("float64_NegInf", func(t *testing.T) {
 		w := wrapF64{V: math.Inf(-1)}
-		if _, err := Marshal(&w); err == nil {
+		if _, err := Marshal(w); err == nil {
 			t.Fatal("expected error for -Inf, got nil")
 		}
 	})
 	t.Run("float32_NaN", func(t *testing.T) {
 		w := wrapF32{V: float32(math.NaN())}
-		if _, err := Marshal(&w); err == nil {
+		if _, err := Marshal(w); err == nil {
 			t.Fatal("expected error for float32 NaN, got nil")
 		}
 	})
 	t.Run("float32_PosInf", func(t *testing.T) {
 		w := wrapF32{V: float32(math.Inf(1))}
-		if _, err := Marshal(&w); err == nil {
+		if _, err := Marshal(w); err == nil {
 			t.Fatal("expected error for float32 +Inf, got nil")
 		}
 	})
 	t.Run("float32_NegInf", func(t *testing.T) {
 		w := wrapF32{V: float32(math.Inf(-1))}
-		if _, err := Marshal(&w); err == nil {
+		if _, err := Marshal(w); err == nil {
 			t.Fatal("expected error for float32 -Inf, got nil")
 		}
 	})
@@ -491,7 +491,7 @@ func TestNativeFloat_InStruct(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Marshal(&tc.val, WithFloatExpAuto())
+			got, err := Marshal(tc.val, WithFloatExpAuto())
 			if err != nil {
 				t.Fatalf("Marshal error: %v", err)
 			}
@@ -660,7 +660,7 @@ func TestNativeFloat_ValidJSON(t *testing.T) {
 
 	for _, val := range values {
 		w := wrapF64{V: val}
-		got, err := Marshal(&w)
+		got, err := Marshal(w)
 		if err != nil {
 			t.Fatalf("Marshal(%v) error: %v", val, err)
 		}

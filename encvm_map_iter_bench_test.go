@@ -40,7 +40,7 @@ var contactMapVal = benchWithContactMap{
 func BenchmarkMarshal_MapStrStruct_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&contactMapVal); err != nil {
+		if _, err := Marshal(contactMapVal); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -83,7 +83,7 @@ var sliceMapVal = benchWithSliceMap{
 func BenchmarkMarshal_MapStrSlice_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&sliceMapVal); err != nil {
+		if _, err := Marshal(sliceMapVal); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -135,7 +135,7 @@ var largeMapVal = func() benchLargeMap {
 func BenchmarkMarshal_MapStrStruct50_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&largeMapVal); err != nil {
+		if _, err := Marshal(largeMapVal); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -200,7 +200,7 @@ var profileVal = benchProfile{
 func BenchmarkMarshal_MixedProfile_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&profileVal); err != nil {
+		if _, err := Marshal(profileVal); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -271,7 +271,7 @@ var deepMapVal = benchDeepMap{
 func BenchmarkMarshal_MapDeepStruct_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&deepMapVal); err != nil {
+		if _, err := Marshal(deepMapVal); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -321,7 +321,7 @@ var ptrMapVal = benchWithPtrMap{
 func BenchmarkMarshal_MapStrPtrStruct_Native(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&ptrMapVal); err != nil {
+		if _, err := Marshal(ptrMapVal); err != nil {
 			b.Fatal(err)
 		}
 	}

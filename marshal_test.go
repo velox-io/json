@@ -40,7 +40,7 @@ type MarshalSkip struct {
 
 func TestMarshal_SmallStruct(t *testing.T) {
 	v := MarshalSmall{Name: "Alice", Age: 30, Score: 9.5}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestMarshal_SmallStruct(t *testing.T) {
 
 func TestMarshal_OmitEmpty(t *testing.T) {
 	v := MarshalOmit{} // all zero
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestMarshal_OmitEmpty(t *testing.T) {
 	}
 
 	v2 := MarshalOmit{Name: "Bob", Age: 0, Score: 1.5}
-	got2, err := Marshal(&v2)
+	got2, err := Marshal(v2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestMarshal_OmitEmpty_EmptySlice(t *testing.T) {
 		HasData    []int `json:"has_data,omitempty"`
 	}
 	v := S{NilSlice: nil, EmptySlice: []int{}, HasData: []int{1}}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestMarshal_OmitEmpty_EmptyByteSlice(t *testing.T) {
 		Data  []byte `json:"data,omitempty"`
 	}
 	v := S{Nil: nil, Empty: []byte{}, Data: []byte("hi")}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestMarshal_OmitEmpty_EmptyMap(t *testing.T) {
 		HasData  map[string]int `json:"has_data,omitempty"`
 	}
 	v := S{NilMap: nil, EmptyMap: map[string]int{}, HasData: map[string]int{"k": 1}}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestMarshal_OmitEmpty_StdlibCompat(t *testing.T) {
 	}
 	// All zero/empty/nil
 	v := S{}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestMarshal_OmitEmpty_StdlibCompat(t *testing.T) {
 
 	// Empty non-nil containers
 	v2 := S{Slice: []int{}, Map: map[string]int{}, Bytes: []byte{}}
-	got2, err := Marshal(&v2)
+	got2, err := Marshal(v2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestMarshal_OmitEmpty_StdlibCompat(t *testing.T) {
 
 func TestMarshal_SkipField(t *testing.T) {
 	v := MarshalSkip{Name: "test", Secret: "hidden", Value: 42}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestMarshal_Nested(t *testing.T) {
 		Ptr:   &inner,
 		Items: []int{10, 20, 30},
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestMarshal_Nested(t *testing.T) {
 
 func TestMarshal_NilPointer(t *testing.T) {
 	v := MarshalNested{ID: 1, Ptr: nil, Items: nil}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestMarshal_NilPointer(t *testing.T) {
 
 func TestMarshal_MapStringString(t *testing.T) {
 	v := map[string]string{"key1": "value1", "key2": "value2"}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestMarshal_MapStringString(t *testing.T) {
 
 func TestMarshal_MapStringInt(t *testing.T) {
 	v := map[string]int{"a": 1, "b": 2}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestMarshal_StringEscape(t *testing.T) {
 	v := struct {
 		S string `json:"s"`
 	}{S: "hello \"world\"\nnewline\ttab\\back"}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestMarshal_Bool(t *testing.T) {
 		A bool `json:"a"`
 		B bool `json:"b"`
 	}{A: true, B: false}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestMarshal_EmptySlice(t *testing.T) {
 	v := struct {
 		Items []int `json:"items"`
 	}{Items: []int{}}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +335,7 @@ func TestMarshal_EmptySlice(t *testing.T) {
 
 func TestMarshalIndent_Basic(t *testing.T) {
 	v := MarshalSmall{Name: "Alice", Age: 30, Score: 9.5}
-	got, err := MarshalIndent(&v, "", "  ")
+	got, err := MarshalIndent(v, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +357,7 @@ func TestMarshalIndent_Basic(t *testing.T) {
 func TestAppendMarshal(t *testing.T) {
 	v := MarshalSmall{Name: "test", Age: 1, Score: 0.5}
 	prefix := []byte("PREFIX:")
-	got, err := AppendMarshal(prefix, &v)
+	got, err := AppendMarshal(prefix, v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +381,7 @@ func TestMarshal_AnyInterface(t *testing.T) {
 		"ok":   true,
 		"arr":  []any{float64(1), "two", nil},
 	}}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +401,7 @@ func TestMarshal_ByteSlice(t *testing.T) {
 	v := struct {
 		Data []byte `json:"data"`
 	}{Data: []byte("hello world")}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +421,7 @@ func TestMarshal_ByteSlice_Nil(t *testing.T) {
 		Data []byte `json:"data"`
 	}
 	v := S{Data: nil}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,7 @@ func TestMarshal_ByteSlice_Empty(t *testing.T) {
 		Data []byte `json:"data"`
 	}
 	v := S{Data: []byte{}}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +461,7 @@ func TestMarshal_ByteSlice_NilVsEmpty_StdlibCompat(t *testing.T) {
 		Data  []byte `json:"data_field"`
 	}
 	v := S{Nil: nil, Empty: []byte{}, Data: []byte("abc")}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,7 +478,7 @@ func TestMarshal_NonByteSlice_Nil(t *testing.T) {
 		Strs []string `json:"strs"`
 	}
 	v := S{Ints: nil, Strs: nil}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +495,7 @@ func TestMarshal_NonByteSlice_Empty(t *testing.T) {
 		Strs []string `json:"strs"`
 	}
 	v := S{Ints: []int{}, Strs: []string{}}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,13 +522,13 @@ func TestMarshal_MapStringString_HTMLEscape(t *testing.T) {
 	}}
 
 	// Default: no HTML escaping — <, > appear literally.
-	gotDefault, err := Marshal(&v)
+	gotDefault, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// With HTML escaping — <, > must become \u003c, \u003e.
-	gotHTML, err := Marshal(&v, WithEscapeHTML())
+	gotHTML, err := Marshal(v, WithEscapeHTML())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -562,7 +562,7 @@ func TestMarshal_NilMap(t *testing.T) {
 	v := struct {
 		M map[string]string `json:"m"`
 	}{M: nil}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -588,7 +588,7 @@ func TestMarshal_IntTypes(t *testing.T) {
 		U64 uint64 `json:"u64"`
 	}
 	v := Ints{I: -1, I8: -8, I16: -16, I32: -32, I64: -64, U: 1, U8: 8, U16: 16, U32: 32, U64: 64}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,7 +607,7 @@ func TestMarshal_LargeInt(t *testing.T) {
 	v := struct {
 		N int64 `json:"n"`
 	}{N: 1234567890}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -638,7 +638,7 @@ func TestAppendMarshal_BufferRetainedInPool(t *testing.T) {
 	copy(dst, prefix)
 
 	v1 := small{X: 1}
-	result1, err := AppendMarshal(dst, &v1)
+	result1, err := AppendMarshal(dst, v1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -652,7 +652,7 @@ func TestAppendMarshal_BufferRetainedInPool(t *testing.T) {
 	// Now do a second marshal. If the pool still holds our backing array,
 	// this call will scribble over result1's content.
 	v2 := small{X: 999}
-	_, err = Marshal(&v2)
+	_, err = Marshal(v2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -663,5 +663,18 @@ func TestAppendMarshal_BufferRetainedInPool(t *testing.T) {
 			"  before: %q\n"+
 			"  after:  %q\n"+
 			"The pool retained the caller's buffer.", snapshot, got)
+	}
+}
+
+// Nil pointer passed as value
+
+func TestMarshal_NilPointerValue(t *testing.T) {
+	// Marshal((*T)(nil)) should produce "null"
+	got, err := Marshal((*MarshalSmall)(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "null" {
+		t.Fatalf("nil pointer value: got %s, want null", got)
 	}
 }

@@ -25,7 +25,7 @@ type circB struct {
 
 func TestMarshal_CircularMutual_AllNil(t *testing.T) {
 	v := circA{Name: "root", B: nil}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestMarshal_CircularMutual_OneLevel(t *testing.T) {
 			A:     nil, // terminate
 		},
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestMarshal_CircularMutual_TwoLevels(t *testing.T) {
 			},
 		},
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -95,7 +95,7 @@ type selfRef struct {
 
 func TestMarshal_SelfRef_Nil(t *testing.T) {
 	v := selfRef{ID: 1, Next: nil}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestMarshal_SelfRef_Chain(t *testing.T) {
 			},
 		},
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -151,7 +151,7 @@ type cycleTriC struct {
 
 func TestMarshal_TriangleCycle_AllNil(t *testing.T) {
 	v := cycleTriA{Name: "start", B: nil}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestMarshal_TriangleCycle_FullChain(t *testing.T) {
 			},
 		},
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -200,7 +200,7 @@ type treeNode struct {
 
 func TestMarshal_TreeCycle_Nil(t *testing.T) {
 	v := treeNode{Name: "root", Children: nil}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestMarshal_TreeCycle_TwoLevels(t *testing.T) {
 			},
 		},
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestMarshal_SelfRefViaEmbed_Nil(t *testing.T) {
 		selfViaEmbedInner: selfViaEmbedInner{Back: nil},
 		ID:                1,
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestMarshal_SelfRefViaEmbed_OneLevel(t *testing.T) {
 		},
 		ID: 1,
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestMarshal_EmbedSelfRef_InnerDirect(t *testing.T) {
 		},
 		V: 1,
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -378,7 +378,7 @@ func TestRoundtrip_IndirectSelfRef(t *testing.T) {
 	}
 
 	// Marshal — before fix: panic (nil Codec type-asserted as *PointerCodec)
-	data, err := Marshal(&orig)
+	data, err := Marshal(orig)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -423,7 +423,7 @@ type circOmitB struct {
 
 func TestMarshal_CircularOmitempty_AllNil(t *testing.T) {
 	v := circOmitA{Name: "root"}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -444,7 +444,7 @@ func TestMarshal_CircularOmitempty_Partial(t *testing.T) {
 			// A is nil → omitted
 		},
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -555,7 +555,7 @@ func TestRoundtrip_CircularMutual(t *testing.T) {
 		},
 	}
 
-	data, err := Marshal(&orig)
+	data, err := Marshal(orig)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -591,7 +591,7 @@ func TestRoundtrip_SelfRef(t *testing.T) {
 		},
 	}
 
-	data, err := Marshal(&orig)
+	data, err := Marshal(orig)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -635,7 +635,7 @@ func TestEmbed_ShadowedFieldRoundtrip(t *testing.T) {
 		Name: "visible",
 		ID:   1,
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -681,7 +681,7 @@ func TestEmbed_MixedFieldTypes(t *testing.T) {
 		C:               true,
 		D:               999,
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -727,7 +727,7 @@ func TestEmbed_ThreeLevelValue(t *testing.T) {
 		},
 		Z: true,
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -778,7 +778,7 @@ func TestMarshal_TransitiveSelfRef_ViaEmbed(t *testing.T) {
 		},
 		Label: "wrap",
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -796,7 +796,7 @@ func TestMarshal_TransitiveSelfRef_ViaEmbed_NilChain(t *testing.T) {
 		transInner1: transInner1{Next: nil, V: 0},
 		Label:       "empty",
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -851,7 +851,7 @@ func TestRoundtrip_TransitiveSelfRef_ViaEmbed(t *testing.T) {
 		Label: "deep",
 	}
 
-	data, err := Marshal(&orig)
+	data, err := Marshal(orig)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -899,7 +899,7 @@ func TestMarshal_TransitiveSelfRef_NamedField(t *testing.T) {
 			},
 		},
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -945,7 +945,7 @@ func TestRoundtrip_TransitiveSelfRef_NamedField(t *testing.T) {
 		},
 	}
 
-	data, err := Marshal(&orig)
+	data, err := Marshal(orig)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -1002,7 +1002,7 @@ func TestMarshal_TransitiveMutualRecursion(t *testing.T) {
 			},
 		},
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -1060,7 +1060,7 @@ func TestRoundtrip_TransitiveMutualRecursion(t *testing.T) {
 		},
 	}
 
-	data, err := Marshal(&orig)
+	data, err := Marshal(orig)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -1108,7 +1108,7 @@ func TestMarshal_TransitiveSelfRef_ViaSlice(t *testing.T) {
 			{ID: 2, Next: nil},
 		},
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -1163,7 +1163,7 @@ func TestMarshal_TransitiveSelfRef_ViaMap(t *testing.T) {
 			"x": {Data: "hello", Ref: &transInner5{Data: "world", Ref: nil}},
 		},
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -1213,7 +1213,7 @@ func TestMarshalIndent_TransitiveSelfRef(t *testing.T) {
 			},
 		},
 	}
-	got, err := MarshalIndent(&v, "", "  ")
+	got, err := MarshalIndent(v, "", "  ")
 	if err != nil {
 		t.Fatalf("MarshalIndent error: %v", err)
 	}
@@ -1246,7 +1246,7 @@ type indirectCycleRoot struct {
 
 func TestMarshal_IndirectCycle_Nil(t *testing.T) {
 	v := indirectCycleRoot{ID: 1, A: nil}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -1275,7 +1275,7 @@ func TestMarshal_IndirectCycle_TwoLevels(t *testing.T) {
 			},
 		},
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -1301,7 +1301,7 @@ func TestRoundtrip_IndirectCycle(t *testing.T) {
 			},
 		},
 	}
-	data, err := Marshal(&orig)
+	data, err := Marshal(orig)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -1310,7 +1310,7 @@ func TestRoundtrip_IndirectCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unmarshal error: %v", err)
 	}
-	data2, err := Marshal(&got)
+	data2, err := Marshal(got)
 	if err != nil {
 		t.Fatalf("re-Marshal error: %v", err)
 	}
@@ -1344,7 +1344,7 @@ type mutualChainRoot struct {
 
 func TestMarshal_MutualChain_Nil(t *testing.T) {
 	v := mutualChainRoot{ID: 1, A: nil}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -1377,7 +1377,7 @@ func TestMarshal_MutualChain_FullLoop(t *testing.T) {
 			},
 		},
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -1404,7 +1404,7 @@ func TestMarshal_MutualChain_PartialNil(t *testing.T) {
 			},
 		},
 	}
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -1434,7 +1434,7 @@ func TestRoundtrip_MutualChain(t *testing.T) {
 			},
 		},
 	}
-	data, err := Marshal(&orig)
+	data, err := Marshal(orig)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -1443,7 +1443,7 @@ func TestRoundtrip_MutualChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unmarshal error: %v", err)
 	}
-	data2, err := Marshal(&got)
+	data2, err := Marshal(got)
 	if err != nil {
 		t.Fatalf("re-Marshal error: %v", err)
 	}

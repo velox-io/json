@@ -62,7 +62,7 @@ func makeGolangRootFixture() GolangRoot {
 func TestMarshal_GolangRoot(t *testing.T) {
 	v := makeGolangRootFixture()
 
-	got, err := Marshal(&v)
+	got, err := Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func BenchmarkMarshal_GolangRoot(b *testing.B) {
 	v := makeGolangRootFixture()
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Marshal(&v); err != nil {
+		if _, err := Marshal(v); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -103,7 +103,7 @@ func BenchmarkMarshal_GolangRoot_Compare(b *testing.B) {
 	b.Run("vjson", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			if _, err := Marshal(&v); err != nil {
+			if _, err := Marshal(v); err != nil {
 				b.Fatal(err)
 			}
 		}
