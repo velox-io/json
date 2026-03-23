@@ -32,7 +32,7 @@ var (
 
 // Primitive encoding
 
-func (m *Marshaler) appendInt64(v int64) error {
+func (m *marshaler) appendInt64(v int64) error {
 	if v >= 0 && v < 1000 {
 		m.buf = append(m.buf, smallInts[v]...)
 		return nil
@@ -41,7 +41,7 @@ func (m *Marshaler) appendInt64(v int64) error {
 	return nil
 }
 
-func (m *Marshaler) appendUint64(v uint64) error {
+func (m *marshaler) appendUint64(v uint64) error {
 	if v < 1000 {
 		m.buf = append(m.buf, smallInts[v]...)
 		return nil
@@ -50,13 +50,13 @@ func (m *Marshaler) appendUint64(v uint64) error {
 	return nil
 }
 
-func (m *Marshaler) appendQuotedInt64(v int64) {
+func (m *marshaler) appendQuotedInt64(v int64) {
 	m.buf = append(m.buf, '"')
 	m.buf = strconv.AppendInt(m.buf, v, 10)
 	m.buf = append(m.buf, '"')
 }
 
-func (m *Marshaler) appendQuotedUint64(v uint64) {
+func (m *marshaler) appendQuotedUint64(v uint64) {
 	m.buf = append(m.buf, '"')
 	m.buf = strconv.AppendUint(m.buf, v, 10)
 	m.buf = append(m.buf, '"')
@@ -65,7 +65,7 @@ func (m *Marshaler) appendQuotedUint64(v uint64) {
 // appendJSONFloat64 appends a float64. When vjEncFloatExpAuto is set, uses
 // encoding/json format: scientific notation for |f| < 1e-6 or |f| >= 1e21.
 // Otherwise uses fixed-point notation.
-func (m *Marshaler) appendJSONFloat64(f float64) {
+func (m *marshaler) appendJSONFloat64(f float64) {
 	if m.flags&vjEncFloatExpAuto != 0 {
 		abs := math.Abs(f)
 		if abs != 0 && (abs < 1e-6 || abs >= 1e21) {
@@ -84,7 +84,7 @@ func (m *Marshaler) appendJSONFloat64(f float64) {
 // appendJSONFloat32 appends a float32. When vjEncFloatExpAuto is set, uses
 // encoding/json format: scientific notation for |f| < 1e-6 or |f| >= 1e21.
 // Otherwise uses fixed-point notation.
-func (m *Marshaler) appendJSONFloat32(f float64) {
+func (m *marshaler) appendJSONFloat32(f float64) {
 	if m.flags&vjEncFloatExpAuto != 0 {
 		abs := float32(math.Abs(f))
 		if abs != 0 && (abs < 1e-6 || abs >= 1e21) {
@@ -100,7 +100,7 @@ func (m *Marshaler) appendJSONFloat32(f float64) {
 	m.buf = strconv.AppendFloat(m.buf, f, 'f', -1, 32)
 }
 
-func (m *Marshaler) encodeFloat32(ptr unsafe.Pointer) error {
+func (m *marshaler) encodeFloat32(ptr unsafe.Pointer) error {
 	f := float64(*(*float32)(ptr))
 	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
@@ -109,7 +109,7 @@ func (m *Marshaler) encodeFloat32(ptr unsafe.Pointer) error {
 	return nil
 }
 
-func (m *Marshaler) encodeFloat64(ptr unsafe.Pointer) error {
+func (m *marshaler) encodeFloat64(ptr unsafe.Pointer) error {
 	f := *(*float64)(ptr)
 	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
@@ -118,12 +118,12 @@ func (m *Marshaler) encodeFloat64(ptr unsafe.Pointer) error {
 	return nil
 }
 
-func (m *Marshaler) encodeString(s string) {
+func (m *marshaler) encodeString(s string) {
 	m.buf = appendEscapedString(m.buf, s, escapeFlags(m.flags))
 }
 
 // encodeQuotedString double-encodes a string: Go "hello" → JSON "\"hello\"".
-func (m *Marshaler) encodeQuotedString(s string) {
+func (m *marshaler) encodeQuotedString(s string) {
 	inner := appendEscapedString(nil, s, escapeFlags(m.flags))
 	m.buf = appendEscapedString(m.buf, unsafeString(inner), escapeFlags(m.flags))
 }
@@ -132,7 +132,7 @@ func (m *Marshaler) encodeQuotedString(s string) {
 // assigned to TypeInfo.EncodeFn by bindEncodeFn during codec construction.
 // encodeValue calls them directly via function pointer (hot path).
 
-func encodeBool(m *Marshaler, ptr unsafe.Pointer) error {
+func encodeBool(m *marshaler, ptr unsafe.Pointer) error {
 	if *(*bool)(ptr) {
 		m.buf = append(m.buf, litTrue...)
 	} else {
@@ -141,37 +141,37 @@ func encodeBool(m *Marshaler, ptr unsafe.Pointer) error {
 	return nil
 }
 
-func encodeInt(m *Marshaler, ptr unsafe.Pointer) error     { return m.appendInt64(int64(*(*int)(ptr))) }
-func encodeInt8(m *Marshaler, ptr unsafe.Pointer) error    { return m.appendInt64(int64(*(*int8)(ptr))) }
-func encodeInt16(m *Marshaler, ptr unsafe.Pointer) error   { return m.appendInt64(int64(*(*int16)(ptr))) }
-func encodeInt32(m *Marshaler, ptr unsafe.Pointer) error   { return m.appendInt64(int64(*(*int32)(ptr))) }
-func encodeInt64Fn(m *Marshaler, ptr unsafe.Pointer) error { return m.appendInt64(*(*int64)(ptr)) }
+func encodeInt(m *marshaler, ptr unsafe.Pointer) error     { return m.appendInt64(int64(*(*int)(ptr))) }
+func encodeInt8(m *marshaler, ptr unsafe.Pointer) error    { return m.appendInt64(int64(*(*int8)(ptr))) }
+func encodeInt16(m *marshaler, ptr unsafe.Pointer) error   { return m.appendInt64(int64(*(*int16)(ptr))) }
+func encodeInt32(m *marshaler, ptr unsafe.Pointer) error   { return m.appendInt64(int64(*(*int32)(ptr))) }
+func encodeInt64Fn(m *marshaler, ptr unsafe.Pointer) error { return m.appendInt64(*(*int64)(ptr)) }
 
-func encodeUint(m *Marshaler, ptr unsafe.Pointer) error {
+func encodeUint(m *marshaler, ptr unsafe.Pointer) error {
 	return m.appendUint64(uint64(*(*uint)(ptr)))
 }
-func encodeUint8(m *Marshaler, ptr unsafe.Pointer) error {
+func encodeUint8(m *marshaler, ptr unsafe.Pointer) error {
 	return m.appendUint64(uint64(*(*uint8)(ptr)))
 }
-func encodeUint16(m *Marshaler, ptr unsafe.Pointer) error {
+func encodeUint16(m *marshaler, ptr unsafe.Pointer) error {
 	return m.appendUint64(uint64(*(*uint16)(ptr)))
 }
-func encodeUint32(m *Marshaler, ptr unsafe.Pointer) error {
+func encodeUint32(m *marshaler, ptr unsafe.Pointer) error {
 	return m.appendUint64(uint64(*(*uint32)(ptr)))
 }
-func encodeUint64Fn(m *Marshaler, ptr unsafe.Pointer) error {
+func encodeUint64Fn(m *marshaler, ptr unsafe.Pointer) error {
 	return m.appendUint64(*(*uint64)(ptr))
 }
 
-func encodeFloat32Value(m *Marshaler, ptr unsafe.Pointer) error { return m.encodeFloat32(ptr) }
-func encodeFloat64Value(m *Marshaler, ptr unsafe.Pointer) error { return m.encodeFloat64(ptr) }
+func encodeFloat32Value(m *marshaler, ptr unsafe.Pointer) error { return m.encodeFloat32(ptr) }
+func encodeFloat64Value(m *marshaler, ptr unsafe.Pointer) error { return m.encodeFloat64(ptr) }
 
-func encodeStringValue(m *Marshaler, ptr unsafe.Pointer) error {
+func encodeStringValue(m *marshaler, ptr unsafe.Pointer) error {
 	m.encodeString(*(*string)(ptr))
 	return nil
 }
 
-func encodeRawMessageFn(m *Marshaler, ptr unsafe.Pointer) error {
+func encodeRawMessageFn(m *marshaler, ptr unsafe.Pointer) error {
 	raw := *(*[]byte)(ptr)
 	if len(raw) == 0 {
 		m.buf = append(m.buf, litNull...)
@@ -181,7 +181,7 @@ func encodeRawMessageFn(m *Marshaler, ptr unsafe.Pointer) error {
 	return nil
 }
 
-func encodeNumberFn(m *Marshaler, ptr unsafe.Pointer) error {
+func encodeNumberFn(m *marshaler, ptr unsafe.Pointer) error {
 	s := *(*string)(ptr)
 	if s == "" {
 		m.buf = append(m.buf, '0')
@@ -191,43 +191,43 @@ func encodeNumberFn(m *Marshaler, ptr unsafe.Pointer) error {
 	return nil
 }
 
-func encodeAnyValue(m *Marshaler, ptr unsafe.Pointer) error { return m.encodeAny(*(*any)(ptr)) }
+func encodeAnyValue(m *marshaler, ptr unsafe.Pointer) error { return m.encodeAny(*(*any)(ptr)) }
 
 // Closure builders for composite types.
 
-func makeEncodeStruct(dec *StructCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
-	return func(m *Marshaler, ptr unsafe.Pointer) error {
+func makeEncodeStruct(dec *StructCodec) func(m *marshaler, ptr unsafe.Pointer) error {
+	return func(m *marshaler, ptr unsafe.Pointer) error {
 		return m.encodeStruct(dec, ptr)
 	}
 }
 
-func makeEncodeSlice(dec *SliceCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
-	return func(m *Marshaler, ptr unsafe.Pointer) error {
+func makeEncodeSlice(dec *SliceCodec) func(m *marshaler, ptr unsafe.Pointer) error {
+	return func(m *marshaler, ptr unsafe.Pointer) error {
 		return m.encodeSlice(dec, ptr)
 	}
 }
 
-func makeEncodeArray(dec *ArrayCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
-	return func(m *Marshaler, ptr unsafe.Pointer) error {
+func makeEncodeArray(dec *ArrayCodec) func(m *marshaler, ptr unsafe.Pointer) error {
+	return func(m *marshaler, ptr unsafe.Pointer) error {
 		return m.encodeArray(dec, ptr)
 	}
 }
 
-func makeEncodePointer(dec *PointerCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
-	return func(m *Marshaler, ptr unsafe.Pointer) error {
+func makeEncodePointer(dec *PointerCodec) func(m *marshaler, ptr unsafe.Pointer) error {
+	return func(m *marshaler, ptr unsafe.Pointer) error {
 		return m.encodePointer(dec, ptr)
 	}
 }
 
-func makeEncodeMap(dec *MapCodec) func(m *Marshaler, ptr unsafe.Pointer) error {
-	return func(m *Marshaler, ptr unsafe.Pointer) error {
+func makeEncodeMap(dec *MapCodec) func(m *marshaler, ptr unsafe.Pointer) error {
+	return func(m *marshaler, ptr unsafe.Pointer) error {
 		return m.encodeMap(dec, ptr)
 	}
 }
 
-func makeEncodeIface(ti *TypeInfo) func(m *Marshaler, ptr unsafe.Pointer) error {
+func makeEncodeIface(ti *TypeInfo) func(m *marshaler, ptr unsafe.Pointer) error {
 	ifaceType := ti.Ext.Type
-	return func(m *Marshaler, ptr unsafe.Pointer) error {
+	return func(m *marshaler, ptr unsafe.Pointer) error {
 		rv := reflect.NewAt(ifaceType, ptr).Elem()
 		if rv.IsNil() {
 			m.buf = append(m.buf, litNull...)
@@ -239,8 +239,8 @@ func makeEncodeIface(ti *TypeInfo) func(m *Marshaler, ptr unsafe.Pointer) error 
 
 // Closure builders for custom marshalers.
 
-func makeEncodeMarshalJSON(marshalFn func(ptr unsafe.Pointer) ([]byte, error)) func(m *Marshaler, ptr unsafe.Pointer) error {
-	return func(m *Marshaler, ptr unsafe.Pointer) error {
+func makeEncodeMarshalJSON(marshalFn func(ptr unsafe.Pointer) ([]byte, error)) func(m *marshaler, ptr unsafe.Pointer) error {
+	return func(m *marshaler, ptr unsafe.Pointer) error {
 		data, err := marshalFn(ptr)
 		if err != nil {
 			return err
@@ -250,8 +250,8 @@ func makeEncodeMarshalJSON(marshalFn func(ptr unsafe.Pointer) ([]byte, error)) f
 	}
 }
 
-func makeEncodeTextMarshal(textMarshalFn func(ptr unsafe.Pointer) ([]byte, error)) func(m *Marshaler, ptr unsafe.Pointer) error {
-	return func(m *Marshaler, ptr unsafe.Pointer) error {
+func makeEncodeTextMarshal(textMarshalFn func(ptr unsafe.Pointer) ([]byte, error)) func(m *marshaler, ptr unsafe.Pointer) error {
+	return func(m *marshaler, ptr unsafe.Pointer) error {
 		text, err := textMarshalFn(ptr)
 		if err != nil {
 			return err
@@ -262,7 +262,7 @@ func makeEncodeTextMarshal(textMarshalFn func(ptr unsafe.Pointer) ([]byte, error
 }
 
 // encodeValueQuoted encodes a value wrapped in a JSON string (for `,string` tag).
-func (m *Marshaler) encodeValueQuoted(ti *TypeInfo, ptr unsafe.Pointer) error {
+func (m *marshaler) encodeValueQuoted(ti *TypeInfo, ptr unsafe.Pointer) error {
 	switch ti.Kind {
 	case KindBool:
 		if *(*bool)(ptr) {
@@ -322,7 +322,7 @@ func (m *Marshaler) encodeValueQuoted(ti *TypeInfo, ptr unsafe.Pointer) error {
 	return nil
 }
 
-func (m *Marshaler) appendNewlineIndent() {
+func (m *marshaler) appendNewlineIndent() {
 	m.buf = append(m.buf, '\n')
 	m.buf = append(m.buf, m.prefix...)
 	for range m.indentDepth {
@@ -335,7 +335,7 @@ func (m *Marshaler) appendNewlineIndent() {
 // encodeStructGo encodes a struct using the pure-Go encoder.
 // This is the fallback path for structs with features
 // not supported by the C engine (omitempty, custom marshalers, etc.).
-func (m *Marshaler) encodeStructGo(dec *StructCodec, base unsafe.Pointer) error {
+func (m *marshaler) encodeStructGo(dec *StructCodec, base unsafe.Pointer) error {
 	m.buf = append(m.buf, '{')
 	first := true
 	for _, step := range dec.EncodeSteps {
@@ -349,7 +349,7 @@ func (m *Marshaler) encodeStructGo(dec *StructCodec, base unsafe.Pointer) error 
 	return nil
 }
 
-func (m *Marshaler) encodeStructIndent(dec *StructCodec, base unsafe.Pointer) error {
+func (m *marshaler) encodeStructIndent(dec *StructCodec, base unsafe.Pointer) error {
 	m.buf = append(m.buf, '{')
 	first := true
 	m.indentDepth++
@@ -391,7 +391,7 @@ func (m *Marshaler) encodeStructIndent(dec *StructCodec, base unsafe.Pointer) er
 // Slice / Array encoding (Go path)
 
 // encodeSliceGo is the pure-Go fallback for slice encoding.
-func (m *Marshaler) encodeSliceGo(dec *SliceCodec, ptr unsafe.Pointer) error {
+func (m *marshaler) encodeSliceGo(dec *SliceCodec, ptr unsafe.Pointer) error {
 	sh := (*SliceHeader)(ptr)
 
 	if sh.Len == 0 {
@@ -429,7 +429,7 @@ func (m *Marshaler) encodeSliceGo(dec *SliceCodec, ptr unsafe.Pointer) error {
 	return nil
 }
 
-func (m *Marshaler) encodeByteSlice(sh *SliceHeader) error {
+func (m *marshaler) encodeByteSlice(sh *SliceHeader) error {
 	data := unsafe.Slice((*byte)(sh.Data), sh.Len)
 	m.buf = append(m.buf, '"')
 	encodedLen := base64.StdEncoding.EncodedLen(len(data))
@@ -441,7 +441,7 @@ func (m *Marshaler) encodeByteSlice(sh *SliceHeader) error {
 }
 
 // encodeArrayGo is the pure-Go fallback for fixed-size array encoding.
-func (m *Marshaler) encodeArrayGo(dec *ArrayCodec, ptr unsafe.Pointer) error {
+func (m *marshaler) encodeArrayGo(dec *ArrayCodec, ptr unsafe.Pointer) error {
 	if dec.ArrayLen == 0 {
 		m.buf = append(m.buf, litArr...)
 		return nil
@@ -478,7 +478,7 @@ func (m *Marshaler) encodeArrayGo(dec *ArrayCodec, ptr unsafe.Pointer) error {
 }
 
 // encodeByteArray encodes [N]byte as a base64 JSON string.
-func (m *Marshaler) encodeByteArray(dec *ArrayCodec, ptr unsafe.Pointer) error {
+func (m *marshaler) encodeByteArray(dec *ArrayCodec, ptr unsafe.Pointer) error {
 	data := unsafe.Slice((*byte)(ptr), dec.ArrayLen)
 	m.buf = append(m.buf, '"')
 	encodedLen := base64.StdEncoding.EncodedLen(len(data))
@@ -491,7 +491,7 @@ func (m *Marshaler) encodeByteArray(dec *ArrayCodec, ptr unsafe.Pointer) error {
 
 // Pointer encoding
 
-func (m *Marshaler) encodePointer(dec *PointerCodec, ptr unsafe.Pointer) error {
+func (m *marshaler) encodePointer(dec *PointerCodec, ptr unsafe.Pointer) error {
 	elemPtr := *(*unsafe.Pointer)(ptr)
 	if elemPtr == nil {
 		m.buf = append(m.buf, litNull...)
@@ -502,7 +502,7 @@ func (m *Marshaler) encodePointer(dec *PointerCodec, ptr unsafe.Pointer) error {
 
 // Map encoding (Go path)
 
-func (m *Marshaler) encodeMapStringString(ptr unsafe.Pointer) error {
+func (m *marshaler) encodeMapStringString(ptr unsafe.Pointer) error {
 	mp := *(*map[string]string)(ptr)
 	if mp == nil {
 		m.buf = append(m.buf, litNull...)
@@ -551,7 +551,7 @@ func (m *Marshaler) encodeMapStringString(ptr unsafe.Pointer) error {
 // encodeMapKey encodes a non-string map key directly into m.buf as a quoted
 // JSON string, avoiding the intermediate string allocation that
 // resolveMapKeyPtr + encodeString would incur for integer keys.
-func (m *Marshaler) encodeMapKey(keyPtr unsafe.Pointer, keyTI *TypeInfo, keyType reflect.Type) error {
+func (m *marshaler) encodeMapKey(keyPtr unsafe.Pointer, keyTI *TypeInfo, keyType reflect.Type) error {
 	if keyTI.Flags&tiFlagHasTextMarshalFn != 0 {
 		text, err := keyTI.Ext.TextMarshalFn(keyPtr)
 		if err != nil {
@@ -599,7 +599,7 @@ func readUintN(ptr unsafe.Pointer, size uintptr) uint64 {
 	}
 }
 
-func (m *Marshaler) encodeMapGeneric(dec *MapCodec, ptr unsafe.Pointer) error {
+func (m *marshaler) encodeMapGeneric(dec *MapCodec, ptr unsafe.Pointer) error {
 	// ptr is a pointer to the map variable, which itself is a pointer to the map header.
 	mp := *(*unsafe.Pointer)(ptr)
 	if mp == nil {
@@ -665,7 +665,7 @@ func (m *Marshaler) encodeMapGeneric(dec *MapCodec, ptr unsafe.Pointer) error {
 // Hot types (string, float64, bool, []any, map[string]any) are handled
 // inline; numeric types, []byte, json.Number follow; everything else
 // falls back to encodeAnyReflect.
-func (m *Marshaler) encodeAny(v any) error {
+func (m *marshaler) encodeAny(v any) error {
 	if v == nil {
 		m.buf = append(m.buf, litNull...)
 		return nil
@@ -741,7 +741,7 @@ func (m *Marshaler) encodeAny(v any) error {
 
 // encodeAnySlice encodes a []any as a JSON array.
 // Hot types are inlined for icache locality; cold types fall through to encodeAny.
-func (m *Marshaler) encodeAnySlice(arr []any) error {
+func (m *marshaler) encodeAnySlice(arr []any) error {
 	if arr == nil {
 		m.buf = append(m.buf, litNull...)
 		return nil
@@ -808,7 +808,7 @@ func (m *Marshaler) encodeAnySlice(arr []any) error {
 
 // encodeAnyMap encodes a map[string]any as a JSON object.
 // Hot types are inlined for icache locality; cold types fall through to encodeAny.
-func (m *Marshaler) encodeAnyMap(mp map[string]any) error {
+func (m *marshaler) encodeAnyMap(mp map[string]any) error {
 	if mp == nil {
 		m.buf = append(m.buf, litNull...)
 		return nil
@@ -884,7 +884,7 @@ func (m *Marshaler) encodeAnyMap(mp map[string]any) error {
 }
 
 // encodeAnyReflect is the reflect fallback for non-standard any values.
-func (m *Marshaler) encodeAnyReflect(v any) error {
+func (m *marshaler) encodeAnyReflect(v any) error {
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() {
 		m.buf = append(m.buf, litNull...)

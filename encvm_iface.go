@@ -19,7 +19,7 @@ var errVMContinue = errors.New("vjson: vm continue")
 // (PC and VMState already updated for resume past the slice).
 // Returns nil when the caller should re-enter C at PC+1.
 // Returns any other error on encoding failure.
-func (m *Marshaler) handleInterfaceYield(ctx *VjExecCtx, activeBP *Blueprint) error {
+func (m *marshaler) handleInterfaceYield(ctx *VjExecCtx, activeBP *Blueprint) error {
 	hdr := opHdrAt(activeBP.Ops, ctx.PC)
 	isFirst := vmstateGetFirst(ctx.VMState)
 	ifacePtr := unsafe.Add(ctx.CurBase, uintptr(hdr.FieldOff))

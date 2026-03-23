@@ -125,7 +125,7 @@ func addIndentGuides(data []byte) []byte {
 
 // flushVMTrace reads pending trace data from the ring buffer and prints
 // it to stderr. Called after each VM exit (buffer full, yield, done, error).
-func (m *Marshaler) flushVMTrace() {
+func (m *marshaler) flushVMTrace() {
 	if m.vmCtx.TraceBuf == nil {
 		return
 	}
@@ -165,9 +165,9 @@ func (m *Marshaler) flushVMTrace() {
 	tb.Total = 0
 }
 
-// setupVMTrace sets up the trace buffer on the Marshaler's VM context.
+// setupVMTrace sets up the trace buffer on the marshaler's VM context.
 // Called from getMarshaler when vjdebug build tag is active.
-func (m *Marshaler) setupVMTrace() {
+func (m *marshaler) setupVMTrace() {
 	if m.vmCtx.TraceBuf == nil {
 		tb := allocTraceBuf()
 		m.vmCtx.TraceBuf = unsafe.Pointer(tb)
@@ -179,14 +179,14 @@ func (m *Marshaler) setupVMTrace() {
 	}
 }
 
-// traceBlueprints associates each Marshaler with the blueprints collected
+// traceBlueprints associates each marshaler with the blueprints collected
 // during a single execVM call. Package-level to avoid adding fields to
-// the Marshaler struct (which is pooled and performance-sensitive).
-var traceBlueprints sync.Map // *Marshaler → *[]*Blueprint
+// the marshaler struct (which is pooled and performance-sensitive).
+var traceBlueprints sync.Map // *marshaler → *[]*Blueprint
 
-// traceRecordBlueprint appends bp to the per-Marshaler blueprint list,
+// traceRecordBlueprint appends bp to the per-marshaler blueprint list,
 // skipping duplicates (same pointer).
-func (m *Marshaler) traceRecordBlueprint(bp *Blueprint) {
+func (m *marshaler) traceRecordBlueprint(bp *Blueprint) {
 	val, _ := traceBlueprints.LoadOrStore(m, &[]*Blueprint{})
 	list := val.(*[]*Blueprint)
 	for _, existing := range *list {
@@ -197,9 +197,9 @@ func (m *Marshaler) traceRecordBlueprint(bp *Blueprint) {
 	*list = append(*list, bp)
 }
 
-// traceFlushBlueprints prints all collected blueprints for this Marshaler
+// traceFlushBlueprints prints all collected blueprints for this marshaler
 // to stderr, then removes the entry from the map.
-func (m *Marshaler) traceFlushBlueprints() {
+func (m *marshaler) traceFlushBlueprints() {
 	val, ok := traceBlueprints.LoadAndDelete(m)
 	if !ok {
 		return

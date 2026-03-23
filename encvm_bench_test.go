@@ -173,7 +173,7 @@ var (
 	}
 )
 
-// Helper: force Go-only encoding path through Marshaler.
+// Helper: force Go-only encoding path through marshaler.
 
 func marshalGoOnly[T any](v *T) ([]byte, error) {
 	m := getMarshaler()

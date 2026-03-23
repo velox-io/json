@@ -154,7 +154,7 @@ type testStringer struct {
 
 func (s testStringer) String() string { return s.Val }
 
-// Plain non-empty interface — not Stringer, not Marshaler.
+// Plain non-empty interface — not Stringer, not marshaler.
 // encoding/json ignores Speak() and serializes struct fields normally.
 type Animal interface {
 	Speak() string
@@ -210,7 +210,7 @@ func TestMarshal_NonEmptyInterface(t *testing.T) {
 // TestMarshal_PlainNonEmptyInterface
 //
 // Struct fields with plain non-empty interface types (not Stringer, not
-// Marshaler). encoding/json serializes the concrete struct fields normally,
+// marshaler). encoding/json serializes the concrete struct fields normally,
 // ignoring the interface methods. This exercises the makeEncodeIface path
 // for interfaces that have no special JSON behavior.
 

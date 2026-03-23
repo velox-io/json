@@ -73,15 +73,17 @@ func WithCopyString() UnmarshalOption {
 	return func(sc *Parser) { sc.copyString = true }
 }
 
-// Unmarshal parses JSON data into v using the single-pass scanner.
+// Unmarshal parses JSON data into v.
 // v must be a non-nil pointer. Strings may reference data (zero-copy);
 // the caller must not modify data after this call.
-func Unmarshal[T any](data []byte, v *T, opts ...UnmarshalOption) error {
-	if v == nil {
-		return &InvalidUnmarshalError{Type: reflect.TypeFor[*T]()}
-	}
+func Unmarshal[T any](data []byte, v T, opts ...UnmarshalOption) error {
 	if len(data) == 0 {
 		return newSyntaxError("vjson: unexpected end of JSON input", 0)
+	}
+
+	ti, ptr, err := unmarshalTarget[T](&v)
+	if err != nil {
+		return err
 	}
 
 	sc := parsers.Get()
@@ -90,25 +92,52 @@ func Unmarshal[T any](data []byte, v *T, opts ...UnmarshalOption) error {
 		o(sc)
 	}
 
-	// Fast path: avoid interface boxing and reflect.ValueOf.
-	ti := codecCacheUnmarshal.getCodec(reflect.TypeFor[T]())
-	ptr := unsafe.Pointer(v)
-
 	idx := skipWS(data, 0)
-	newIdx, err := sc.scanValue(data, idx, ti, ptr)
-	if err != nil {
-		if err == errUnexpectedEOF {
+	newIdx, scanErr := sc.scanValue(data, idx, ti, ptr)
+	if scanErr != nil {
+		if scanErr == errUnexpectedEOF {
 			return newSyntaxError("vjson: unexpected end of input", len(data))
 		}
-		return err
+		return scanErr
 	}
 
-	// Verify no trailing non-whitespace
 	newIdx = skipWS(data, newIdx)
 	if newIdx < len(data) {
 		return newSyntaxError(fmt.Sprintf("vjson: invalid character %q after top-level value", data[newIdx]), newIdx)
 	}
 	return nil
+}
+
+// unmarshalTarget resolves the TypeInfo and data pointer for decoding.
+// When T is a pointer, it unwraps one level. When T is interface{},
+// the concrete value must be a non-nil pointer.
+// Returns InvalidUnmarshalError on invalid targets.
+func unmarshalTarget[T any](vp *T) (*TypeInfo, unsafe.Pointer, error) {
+	rt := reflect.TypeFor[T]()
+
+	if rt.Kind() == reflect.Pointer {
+		elemPtr := *(*unsafe.Pointer)(unsafe.Pointer(vp))
+		if elemPtr == nil {
+			return nil, nil, &InvalidUnmarshalError{Type: rt}
+		}
+		return codecCacheUnmarshal.getCodec(rt.Elem()), elemPtr, nil
+	}
+
+	if rt.Kind() == reflect.Interface {
+		rv := reflect.ValueOf(*vp)
+		if !rv.IsValid() {
+			return nil, nil, &InvalidUnmarshalError{Type: nil}
+		}
+		if rv.Kind() != reflect.Pointer {
+			return nil, nil, &InvalidUnmarshalError{Type: rv.Type()}
+		}
+		if rv.IsNil() {
+			return nil, nil, &InvalidUnmarshalError{Type: rv.Type()}
+		}
+		return codecCacheUnmarshal.getCodec(rv.Elem().Type()), rv.UnsafePointer(), nil
+	}
+
+	return nil, nil, &InvalidUnmarshalError{Type: rt}
 }
 
 // Parser is a reusable single-pass JSON scanner.

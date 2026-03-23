@@ -135,9 +135,6 @@ func (enc *Encoder) Encode(v any) error {
 }
 
 // EncodeValue is a generic, zero-allocation alternative to [Encoder.Encode].
-// The type parameter provides compile-time type information, avoiding
-// interface boxing and reflect overhead. When T is a pointer type, the
-// pointer is unwrapped to encode the element directly.
 func EncodeValue[T any](enc *Encoder, v T) error {
 	if enc.err != nil {
 		return enc.err

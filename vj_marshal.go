@@ -12,7 +12,7 @@ const (
 	// marshalBufInitSize is the default capacity for pool-created buffers.
 	marshalBufInitSize = 32 * 1024
 	// marshalBufPoolLimit is the maximum buffer capacity kept in the pool.
-	// When the Marshaler is returned to the pool, if its buffer has grown
+	// When the marshaler is returned to the pool, if its buffer has grown
 	// beyond this limit, the buffer is released (set to nil) so the GC can
 	// reclaim it, preventing large one-off payloads from inflating
 	// steady-state pool memory.
@@ -21,10 +21,10 @@ const (
 
 func init() {
 	// Pre-warm pool so the first Marshal call avoids allocation.
-	marshalerPool.Put(&Marshaler{buf: make([]byte, 0, marshalBufInitSize)})
+	marshalerPool.Put(&marshaler{buf: make([]byte, 0, marshalBufInitSize)})
 }
 
-type Marshaler struct {
+type marshaler struct {
 	// vmCtx MUST be the first field: VjExecCtx.Stack (at offset 96 within
 	// VjExecCtx) requires 32-byte alignment relative to the struct base.
 	// Placing vmCtx at offset 0 guarantees this (96 % 32 == 0), regardless
@@ -48,14 +48,14 @@ type Marshaler struct {
 	flushFn func([]byte) error
 }
 
-// Compile-time assertion: vmCtx must be at offset 0 in Marshaler so that
+// Compile-time assertion: vmCtx must be at offset 0 in marshaler so that
 // VjExecCtx.Stack (offset 96) is 32-byte aligned relative to the struct base.
-// If this fails, someone reordered the Marshaler fields — fix the layout.
-var _ [0]byte = [unsafe.Offsetof(Marshaler{}.vmCtx)]byte{}
+// If this fails, someone reordered the marshaler fields — fix the layout.
+var _ [0]byte = [unsafe.Offsetof(marshaler{}.vmCtx)]byte{}
 
 var marshalerPool = sync.Pool{
 	New: func() any {
-		return &Marshaler{
+		return &marshaler{
 			buf: make([]byte, 0, marshalBufInitSize),
 		}
 	},
@@ -67,8 +67,8 @@ var indentTplPool = sync.Pool{
 	},
 }
 
-func getMarshaler() *Marshaler {
-	m := marshalerPool.Get().(*Marshaler)
+func getMarshaler() *marshaler {
+	m := marshalerPool.Get().(*marshaler)
 	m.buf = m.buf[:0]
 	m.indent = ""
 	m.prefix = ""
@@ -85,7 +85,7 @@ func getMarshaler() *Marshaler {
 	return m
 }
 
-func putMarshaler(m *Marshaler) {
+func putMarshaler(m *marshaler) {
 	if cap(m.buf) > marshalBufPoolLimit {
 		m.buf = nil // discard oversized buffer, let GC reclaim
 	}
@@ -99,7 +99,7 @@ func putMarshaler(m *Marshaler) {
 
 // flush writes all buffered data through flushFn and resets the buffer.
 // Returns nil if flushFn is not set or the buffer is empty.
-func (m *Marshaler) flush() error {
+func (m *marshaler) flush() error {
 	if m.flushFn == nil || len(m.buf) == 0 {
 		return nil
 	}
@@ -109,41 +109,41 @@ func (m *Marshaler) flush() error {
 }
 
 // MarshalOption configures encoding behavior.
-type MarshalOption func(*Marshaler)
+type MarshalOption func(*marshaler)
 
 // WithEscapeHTML enables escaping of <, >, & in strings.
 func WithEscapeHTML() MarshalOption {
-	return func(m *Marshaler) { m.flags |= uint32(escapeHTML) }
+	return func(m *marshaler) { m.flags |= uint32(escapeHTML) }
 }
 
 // WithoutEscapeHTML disables escaping of <, >, &.
 func WithoutEscapeHTML() MarshalOption {
-	return func(m *Marshaler) { m.flags &^= uint32(escapeHTML) }
+	return func(m *marshaler) { m.flags &^= uint32(escapeHTML) }
 }
 
 // WithEscapeLineTerms enables escaping of U+2028 and U+2029 line terminators in strings.
 func WithEscapeLineTerms() MarshalOption {
-	return func(m *Marshaler) { m.flags |= uint32(escapeLineTerms) }
+	return func(m *marshaler) { m.flags |= uint32(escapeLineTerms) }
 }
 
 // WithoutEscapeLineTerms disables escaping of U+2028 and U+2029.
 func WithoutEscapeLineTerms() MarshalOption {
-	return func(m *Marshaler) { m.flags &^= uint32(escapeLineTerms) }
+	return func(m *marshaler) { m.flags &^= uint32(escapeLineTerms) }
 }
 
 // WithUTF8Correction enables replacing invalid UTF-8 with \ufffd in strings.
 func WithUTF8Correction() MarshalOption {
-	return func(m *Marshaler) { m.flags |= uint32(escapeInvalidUTF8) }
+	return func(m *marshaler) { m.flags |= uint32(escapeInvalidUTF8) }
 }
 
 // WithoutUTF8Correction disables replacing invalid UTF-8 in strings.
 func WithoutUTF8Correction() MarshalOption {
-	return func(m *Marshaler) { m.flags &^= uint32(escapeInvalidUTF8) }
+	return func(m *marshaler) { m.flags &^= uint32(escapeInvalidUTF8) }
 }
 
 // WithStdCompat enables full encoding/json compatibility.
 func WithStdCompat() MarshalOption {
-	return func(m *Marshaler) {
+	return func(m *marshaler) {
 		m.flags = uint32(escapeStdCompat) | vjEncFloatExpAuto
 	}
 }
@@ -152,7 +152,7 @@ func WithStdCompat() MarshalOption {
 // for floats with |f| < 1e-6 or |f| >= 1e21 (e.g. 1e-7, 1e+21).
 // By default, floats are always formatted in fixed-point notation.
 func WithFloatExpAuto() MarshalOption {
-	return func(m *Marshaler) { m.flags |= vjEncFloatExpAuto }
+	return func(m *marshaler) { m.flags |= vjEncFloatExpAuto }
 }
 
 // WithFastEscape disables all string-level escape features
@@ -160,28 +160,21 @@ func WithFloatExpAuto() MarshalOption {
 // Only mandatory JSON escapes (control chars, '"', '\\') are performed.
 // This enables the fastest string encoding path in the native encoder.
 func WithFastEscape() MarshalOption {
-	return func(m *Marshaler) { m.flags &^= uint32(escapeHTML | escapeLineTerms | escapeInvalidUTF8) }
+	return func(m *marshaler) { m.flags &^= uint32(escapeHTML | escapeLineTerms | escapeInvalidUTF8) }
 }
 
 // Marshal returns the compact JSON encoding of v.
-//
-// When T is a pointer type (e.g. Marshal(&s)), the pointer is unwrapped so
-// the codec operates on the element type directly — zero overhead compared
-// to non-pointer values. When T is a non-pointer type (e.g. Marshal(myMap)),
-// the value is encoded directly.
-//
-// Stack-move safety: the C VM stores a raw pointer to the data being encoded
-// in Marshaler.vmCtx.CurBase. This pointer must not be invalidated by a
-// goroutine stack move. Currently safe because encodeValue dispatches through
-// EncodeFn (indirect call), which prevents escape analysis from proving v is
-// stack-only — the compiler heap-allocates v. If EncodeFn is ever devirtualised,
-// add an explicit forceEscape or runtime.Pinner.
 func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
 	m := getMarshaler()
 	for _, o := range opts {
 		o(m)
 	}
 
+	// Stack-move safety: the C VM stores a raw pointer (vmCtx.CurBase) to
+	// the data being encoded. The &v below is safe because encodeValue
+	// dispatches through EncodeFn (indirect call), preventing escape
+	// analysis from keeping v on the stack. If EncodeFn is ever
+	// devirtualised, add forceEscape or runtime.Pinner.
 	ti, ptr := marshalTarget[T](&v)
 
 	if ti.HintBytes > cap(m.buf) {
@@ -237,15 +230,9 @@ func AppendMarshal[T any](dst []byte, v T, opts ...MarshalOption) ([]byte, error
 	return result, nil
 }
 
-// marshalTarget resolves the TypeInfo and data pointer for encoding v.
-//
-// When T is a pointer type, the pointer is unwrapped: the element type's
-// codec is returned and ptr points directly to the element (same code path
-// as if the caller had passed a non-pointer element). Nil pointers fall
-// back to the PointerCodec which emits "null".
-//
-// When T is a non-pointer type, the codec for T is returned and ptr
-// points to v itself.
+// marshalTarget resolves the TypeInfo and data pointer for encoding.
+// When T is a pointer, it unwraps one level; nil pointers fall back
+// to PointerCodec (emits "null").
 func marshalTarget[T any](vp *T) (*TypeInfo, unsafe.Pointer) {
 	rt := reflect.TypeFor[T]()
 	if rt.Kind() == reflect.Pointer {
@@ -259,8 +246,8 @@ func marshalTarget[T any](vp *T) (*TypeInfo, unsafe.Pointer) {
 	return codecCacheMarshal.getCodec(rt), unsafe.Pointer(vp)
 }
 
-// finalize copies the result to a new slice and recycles the Marshaler.
-func (m *Marshaler) finalize() []byte {
+// finalize copies the result to a new slice and recycles the marshaler.
+func (m *marshaler) finalize() []byte {
 	n := len(m.buf)
 	result := makeDirtyBytes(n, n)
 	copy(result, m.buf)
@@ -273,7 +260,7 @@ func (m *Marshaler) finalize() []byte {
 // For types involved in indirect cycles, EncodeFn may still be nil because the
 // codec was value-copied before the cycle was fully resolved; in that case we
 // lazily resolve the codec and bind EncodeFn on first use.
-func (m *Marshaler) encodeValue(ti *TypeInfo, ptr unsafe.Pointer) error {
+func (m *marshaler) encodeValue(ti *TypeInfo, ptr unsafe.Pointer) error {
 	if fn := ti.EncodeFn; fn != nil {
 		return fn(m, ptr)
 	}
@@ -288,7 +275,7 @@ func (m *Marshaler) encodeValue(ti *TypeInfo, ptr unsafe.Pointer) error {
 	return &UnsupportedTypeError{Type: ti.Ext.Type}
 }
 
-func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
+func (m *marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
 	// Indent mode: check if we can use the native VM fast path.
 	// Simple indents (uniform spaces/tabs, no prefix) can be handled
 	// by the C VM; exotic indents fall through to the Go path.
@@ -313,7 +300,7 @@ func (m *Marshaler) encodeStruct(dec *StructCodec, base unsafe.Pointer) error {
 	return m.encodeStructGo(dec, base)
 }
 
-func (m *Marshaler) encodeSlice(dec *SliceCodec, ptr unsafe.Pointer) error {
+func (m *marshaler) encodeSlice(dec *SliceCodec, ptr unsafe.Pointer) error {
 	sh := (*SliceHeader)(ptr)
 
 	if sh.Data == nil {
@@ -337,7 +324,7 @@ func (m *Marshaler) encodeSlice(dec *SliceCodec, ptr unsafe.Pointer) error {
 	return m.encodeSliceGo(dec, ptr)
 }
 
-func (m *Marshaler) encodeArray(dec *ArrayCodec, ptr unsafe.Pointer) error {
+func (m *marshaler) encodeArray(dec *ArrayCodec, ptr unsafe.Pointer) error {
 	// [N]byte → base64
 	if dec.ElemTI.Kind == KindUint8 && dec.ElemSize == 1 {
 		return m.encodeByteArray(dec, ptr)
@@ -352,7 +339,7 @@ func (m *Marshaler) encodeArray(dec *ArrayCodec, ptr unsafe.Pointer) error {
 	return m.encodeArrayGo(dec, ptr)
 }
 
-func (m *Marshaler) encodeMap(dec *MapCodec, ptr unsafe.Pointer) error {
+func (m *marshaler) encodeMap(dec *MapCodec, ptr unsafe.Pointer) error {
 	// Try native VM path for string-keyed maps where MAP_STR_ITER can
 	// iterate in C. Non-string-key maps always use the Go path.
 	if !m.inVM && encvm.Available && dec.isStringKey {
@@ -364,7 +351,7 @@ func (m *Marshaler) encodeMap(dec *MapCodec, ptr unsafe.Pointer) error {
 }
 
 // encodeMapFallback is the pure-Go map encoding path.
-func (m *Marshaler) encodeMapFallback(dec *MapCodec, ptr unsafe.Pointer) error {
+func (m *marshaler) encodeMapFallback(dec *MapCodec, ptr unsafe.Pointer) error {
 	if dec.MapKind == MapVariantStrStr {
 		return m.encodeMapStringString(ptr)
 	}
@@ -472,7 +459,7 @@ func bindStructFieldEncodeFns(ti *TypeInfo) {
 // structEncodeStep encodes one struct field in compact (non-indent) mode.
 // first indicates whether no field has been written yet.
 // Returns the updated first flag and any error.
-type structEncodeStep func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error)
+type structEncodeStep func(m *marshaler, base unsafe.Pointer, first bool) (bool, error)
 
 // buildStructEncodeSteps pre-generates a closure per field that captures
 // offset, keyBytes, encodeFn, and omitempty logic, eliminating per-field
@@ -492,7 +479,7 @@ func buildStructEncodeSteps(dec *StructCodec) {
 		case hasOmitEmpty && isQuoted:
 			isZeroFn := fi.Ext.IsZeroFn
 			tiCopy := *fi // copy for encodeValueQuoted
-			steps[i] = func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error) {
+			steps[i] = func(m *marshaler, base unsafe.Pointer, first bool) (bool, error) {
 				ptr := unsafe.Add(base, offset)
 				if isZeroFn(ptr) {
 					return first, nil
@@ -506,7 +493,7 @@ func buildStructEncodeSteps(dec *StructCodec) {
 		case hasOmitEmpty:
 			isZeroFn := fi.Ext.IsZeroFn
 			if encodeFn != nil {
-				steps[i] = func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error) {
+				steps[i] = func(m *marshaler, base unsafe.Pointer, first bool) (bool, error) {
 					ptr := unsafe.Add(base, offset)
 					if isZeroFn(ptr) {
 						return first, nil
@@ -520,7 +507,7 @@ func buildStructEncodeSteps(dec *StructCodec) {
 			} else {
 				// EncodeFn nil due to cycle — resolve at runtime via encodeValue.
 				fiRef := fi
-				steps[i] = func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error) {
+				steps[i] = func(m *marshaler, base unsafe.Pointer, first bool) (bool, error) {
 					ptr := unsafe.Add(base, offset)
 					if isZeroFn(ptr) {
 						return first, nil
@@ -534,7 +521,7 @@ func buildStructEncodeSteps(dec *StructCodec) {
 			}
 		case isQuoted:
 			tiCopy := *fi
-			steps[i] = func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error) {
+			steps[i] = func(m *marshaler, base unsafe.Pointer, first bool) (bool, error) {
 				if !first {
 					m.buf = append(m.buf, ',')
 				}
@@ -543,7 +530,7 @@ func buildStructEncodeSteps(dec *StructCodec) {
 			}
 		default:
 			if encodeFn != nil {
-				steps[i] = func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error) {
+				steps[i] = func(m *marshaler, base unsafe.Pointer, first bool) (bool, error) {
 					if !first {
 						m.buf = append(m.buf, ',')
 					}
@@ -553,7 +540,7 @@ func buildStructEncodeSteps(dec *StructCodec) {
 			} else {
 				// EncodeFn nil due to cycle — resolve at runtime via encodeValue.
 				fiRef := fi
-				steps[i] = func(m *Marshaler, base unsafe.Pointer, first bool) (bool, error) {
+				steps[i] = func(m *marshaler, base unsafe.Pointer, first bool) (bool, error) {
 					if !first {
 						m.buf = append(m.buf, ',')
 					}
@@ -644,7 +631,7 @@ func isSimpleIndent(prefix, indent string) int {
 
 // buildIndentTpl fills m.indentTpl with "\n" + prefix + indent×MAX_DEPTH.
 // Allocates the template array from indentTplPool on first use.
-func (m *Marshaler) buildIndentTpl(prefix, indent string) {
+func (m *marshaler) buildIndentTpl(prefix, indent string) {
 	if m.indentTpl == nil {
 		m.indentTpl = indentTplPool.Get().(*[1 + 255 + maxIndentDepth*8]byte)
 	}

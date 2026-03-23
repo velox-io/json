@@ -1696,7 +1696,7 @@ func TestMarshal_TimeTime(t *testing.T) {
 }
 
 func TestMarshal_JSONMarshaler_Null(t *testing.T) {
-	// nil pointer to a Marshaler type → "null"
+	// nil pointer to a marshaler type → "null"
 	type S struct {
 		T *time.Time `json:"t"`
 	}

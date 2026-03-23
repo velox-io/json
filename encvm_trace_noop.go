@@ -5,13 +5,13 @@ package vjson
 const vjTraceEnabled = false
 
 // flushVMTrace is a no-op when vjdebug build tag is not set.
-func (m *Marshaler) flushVMTrace() {}
+func (m *marshaler) flushVMTrace() {}
 
 // setupVMTrace is a no-op when vjdebug build tag is not set.
-func (m *Marshaler) setupVMTrace() {}
+func (m *marshaler) setupVMTrace() {}
 
 // traceRecordBlueprint is a no-op when vjdebug build tag is not set.
-func (m *Marshaler) traceRecordBlueprint(_ *Blueprint) {}
+func (m *marshaler) traceRecordBlueprint(_ *Blueprint) {}
 
 // traceFlushBlueprints is a no-op when vjdebug build tag is not set.
-func (m *Marshaler) traceFlushBlueprints() {}
+func (m *marshaler) traceFlushBlueprints() {}

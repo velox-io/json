@@ -89,7 +89,7 @@ type TypeInfo struct {
 	Offset        uintptr
 	JSONName      string
 	JSONNameLower string
-	EncodeFn      func(m *Marshaler, ptr unsafe.Pointer) error // pre-bound encode dispatch
+	EncodeFn      func(m *marshaler, ptr unsafe.Pointer) error // pre-bound encode dispatch
 	HintBytes     int                                          // static size hint for pre-allocating marshal buffer
 	Codec         any
 	Ext           *TypeInfoExt        // cold marshal/unmarshal metadata (nil when not needed)

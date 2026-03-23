@@ -14,7 +14,7 @@ import (
 
 // vmWriteIndent appends newline + indent whitespace for the current VM
 // indent depth. No-op in compact mode (IndentStep == 0).
-func (m *Marshaler) vmWriteIndent(ctx *VjExecCtx) {
+func (m *marshaler) vmWriteIndent(ctx *VjExecCtx) {
 	if ctx.IndentStep == 0 {
 		return
 	}
@@ -24,7 +24,7 @@ func (m *Marshaler) vmWriteIndent(ctx *VjExecCtx) {
 }
 
 // vmWriteKeySpace appends a space after the key colon in indent mode.
-func (m *Marshaler) vmWriteKeySpace(ctx *VjExecCtx) {
+func (m *marshaler) vmWriteKeySpace(ctx *VjExecCtx) {
 	if ctx.IndentStep != 0 {
 		m.buf = append(m.buf, ' ')
 	}
@@ -32,7 +32,7 @@ func (m *Marshaler) vmWriteKeySpace(ctx *VjExecCtx) {
 
 // encodeStructNative is the native VM entry point for struct encoding.
 // It compiles a Blueprint (if not cached), then runs the VM.
-func (m *Marshaler) encodeStructNative(dec *StructCodec, base unsafe.Pointer) error {
+func (m *marshaler) encodeStructNative(dec *StructCodec, base unsafe.Pointer) error {
 	bp := dec.getBlueprint()
 	if bp == nil || len(bp.Ops) == 0 {
 		// No blueprint → pure Go fallback
@@ -42,7 +42,7 @@ func (m *Marshaler) encodeStructNative(dec *StructCodec, base unsafe.Pointer) er
 }
 
 // encodeSliceNative is the native VM entry point for top-level slice encoding.
-func (m *Marshaler) encodeSliceNative(dec *SliceCodec, base unsafe.Pointer) error {
+func (m *marshaler) encodeSliceNative(dec *SliceCodec, base unsafe.Pointer) error {
 	bp := dec.getBlueprint()
 	if bp == nil || len(bp.Ops) == 0 {
 		return m.encodeSliceGo(dec, base)
@@ -51,7 +51,7 @@ func (m *Marshaler) encodeSliceNative(dec *SliceCodec, base unsafe.Pointer) erro
 }
 
 // encodeArrayNative is the native VM entry point for top-level array encoding.
-func (m *Marshaler) encodeArrayNative(dec *ArrayCodec, base unsafe.Pointer) error {
+func (m *marshaler) encodeArrayNative(dec *ArrayCodec, base unsafe.Pointer) error {
 	bp := dec.getBlueprint()
 	if bp == nil || len(bp.Ops) == 0 {
 		return m.encodeArrayGo(dec, base)
@@ -61,7 +61,7 @@ func (m *Marshaler) encodeArrayNative(dec *ArrayCodec, base unsafe.Pointer) erro
 
 // encodeMapNative is the native VM entry point for top-level map encoding.
 // Only used for string-keyed maps where MAP_STR_ITER can iterate in C.
-func (m *Marshaler) encodeMapNative(dec *MapCodec, ptr unsafe.Pointer) error {
+func (m *marshaler) encodeMapNative(dec *MapCodec, ptr unsafe.Pointer) error {
 	bp := dec.getBlueprint()
 	if bp == nil || len(bp.Ops) == 0 {
 		return m.encodeMapFallback(dec, ptr)
@@ -75,7 +75,7 @@ func (m *Marshaler) encodeMapNative(dec *MapCodec, ptr unsafe.Pointer) error {
 //
 // Uses the reusable m.vmCtx to avoid per-call stack zeroing of the
 // 2152-byte VjExecCtx. IfaceCache is already set by getMarshaler.
-func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
+func (m *marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	// WARNING: execVM must NOT be called re-entrantly. m.vmCtx is a single
 	// shared context; a nested execVM call would corrupt its state (PC, stack,
 	// depth, etc.). Callers (e.g. encodeStruct) must check m.inVM and fall
@@ -149,7 +149,7 @@ func (m *Marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 
 // execVMLoop is the inner VM execution loop, factored out of execVM so that
 // the inVM flag can be cleared without defer overhead on the hot path.
-func (m *Marshaler) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(unsafe.Pointer)) error {
+func (m *marshaler) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(unsafe.Pointer)) error {
 	for {
 		// In streaming mode, flush accumulated data from Go-side yield
 		// handlers before re-entering C. This keeps memory bounded and
@@ -278,7 +278,7 @@ func (m *Marshaler) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(unsafe
 
 // handleIfaceCacheMiss compiles a Blueprint for the interface's concrete type
 // and inserts it into the global cache.
-func (m *Marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
+func (m *marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 	typePtr := ctx.YieldTypePtr
 	if typePtr == nil {
 		return fmt.Errorf("vjson: interface cache miss with nil type pointer")
@@ -331,13 +331,13 @@ func (m *Marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 
 // encodeAnyIface encodes an interface{} value from a pointer to the eface.
 // Delegates to encodeAny which covers all concrete JSON value types.
-func (m *Marshaler) encodeAnyIface(ifacePtr unsafe.Pointer) error {
+func (m *marshaler) encodeAnyIface(ifacePtr unsafe.Pointer) error {
 	return m.encodeAny(*(*any)(ifacePtr))
 }
 
 // handleYieldFallback handles a yield due to custom marshaler, ,string, or
 // unsupported type. Go encodes the field, then returns.
-func (m *Marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
+func (m *marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 	// Extract the 'first' flag from vmstate.
 	isFirst := vmstateGetFirst(ctx.VMState)
 
@@ -400,7 +400,7 @@ func (m *Marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 // For map[string]any, we use encodeAnyMap which has inline fast-paths for
 // common JSON value types (string, float64, bool, nil, []any, map[string]any),
 // avoiding the reflect-based encodeMapGeneric path.
-func (m *Marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
+func (m *marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 	hdr := opHdrAt(bp.Ops, ctx.PC)
 	ext := opExtAt(bp.Ops, ctx.PC)
 	opCodeVal := hdr.OpType
