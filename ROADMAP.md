@@ -8,7 +8,6 @@ This file lists current high-impact improvement areas for contributors.
 
    Current status: buffer strategy is usable but not flexible enough for all workloads.
 
-
 2. **Length-adaptive AVX dispatch for string encoding on amd64**
 
    Currently the encvm uses a single ISA variant (SSE4.2 or AVX) uniformly for all string encoding operations. For most fields (short keys, small values), SSE4.2 is already optimal. However, for fields carrying large payloads — e.g. an article body or a base64 blob — AVX2's 256-bit width can provide significantly better throughput for bulk scanning (UTF-8 validation, HTML-escape detection, etc.).
@@ -30,6 +29,6 @@ This file lists current high-impact improvement areas for contributors.
 
    Current status: float parsing is functional but still has room for throughput improvements. Evaluate how to bring in the xjb SIMD float parse algorithm, including ISA coverage, fallback paths, and benchmark impact on realistic decode workloads.
 
-6. **Fuse whitespace skipping with next-byte classification**
+6. ~~**Fuse whitespace skipping with next-byte classification**~~
 
-   Current status: the decoder currently performs `skipWS` and then separately checks the next byte (for example `src[idx] == '{'`). Investigate a tighter scan path that combines whitespace skipping with next-character classification to reduce branch and load overhead in hot decode paths.
+   Rejected: benchmarked a `skipWSByte(src, idx) (byte, int)` fusion across ~15 call sites — no measurable improvement. `skipWS` and `sliceAt` are already inlined by the compiler, and BCE eliminates redundant bounds checks. The extra return value offsets any savings.
