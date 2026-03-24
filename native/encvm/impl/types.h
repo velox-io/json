@@ -73,8 +73,8 @@ enum OpType {
   OP_PTR_END      = 22, /* pop ptr-deref frame, restore base */
   OP_SLICE_BEGIN  = 23, /* slice loop start */
   OP_SLICE_END    = 24, /* slice loop end / back-edge */
-  OP_MAP_BEGIN    = 25, /* map iteration start (yield-driven) */
-  OP_MAP_END      = 26, /* map iteration end */
+  OP_MAP          = 25, /* map yield — Go handles entire map encoding */
+  /* 26: reserved (was OP_MAP_END) */
   OP_OBJ_OPEN     = 27, /* write key + '{', set first=1 (no frame) */
   OP_OBJ_CLOSE    = 28, /* write '}', set first=0 (no frame) */
   OP_ARRAY_BEGIN  = 29, /* array loop start (inline data, fixed length) */

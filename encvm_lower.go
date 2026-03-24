@@ -138,13 +138,6 @@ func resolveOperands(inst *IRInst, selfOff int, labelOffsets map[Label]int, a, b
 			*b = int32(afterArrayOff - bodyStart - 16) // exclude SLICE_END
 		}
 
-	case opMapBegin:
-		// Target = MAP_END position; OperandA = byte distance from self
-		if inst.Target != InvalidLabel {
-			targetOff := mustResolve(labelOffsets, inst.Target, "MAP_BEGIN")
-			*a = int32(targetOff - selfOff)
-		}
-
 	case opMapStrIter:
 		// OperandA = slot_size (already set).
 		// OperandB = body byte length (between MAP_STR_ITER and MAP_STR_ITER_END).
@@ -171,7 +164,7 @@ func isLongOp(op uint16) bool {
 	switch op {
 	case opSkipIfZero, opCall, opPtrDeref,
 		opSliceBegin, opSliceEnd,
-		opMapBegin, opArrayBegin,
+		opArrayBegin,
 		opSeqFloat64, opSeqInt, opSeqInt64, opSeqString,
 		opMapStrIter, opMapStrIterEnd:
 		return true

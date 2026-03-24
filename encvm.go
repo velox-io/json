@@ -41,8 +41,8 @@ const (
 	opPtrEnd     uint16 = 22 // pop ptr-deref frame, restore base
 	opSliceBegin uint16 = 23 // slice loop start
 	opSliceEnd   uint16 = 24 // slice loop end / back-edge
-	opMapBegin   uint16 = 25 // map iteration start (yield-driven)
-	opMapEnd     uint16 = 26 // map iteration end (yield)
+	opMap        uint16 = 25 // map yield — Go handles entire map encoding
+	_opMapEnd    uint16 = 26 // reserved (was opMapEnd)
 	opObjOpen    uint16 = 27 // write key + '{', set first=1 (no frame push)
 	opObjClose   uint16 = 28 // write '}', set first=0 (no frame pop)
 	opArrayBegin uint16 = 29 // array loop start (inline data, fixed length)
@@ -213,7 +213,7 @@ func init() { //nolint:unused
 	for _, op := range []uint16{
 		opSkipIfZero, opCall, opPtrDeref,
 		opSliceBegin, opSliceEnd,
-		opMapBegin, opArrayBegin,
+		opArrayBegin,
 		opSeqFloat64, opSeqInt, opSeqInt64, opSeqString,
 		opMapStrIter, opMapStrIterEnd,
 	} {

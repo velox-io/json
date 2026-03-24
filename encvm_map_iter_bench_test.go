@@ -6,7 +6,7 @@ import (
 )
 
 // Benchmark scenarios for MAP_STR_ITER: C-native Swiss Map key
-// iteration with VM-dispatched value body vs Go-driven MAP_BEGIN.
+// iteration with VM-dispatched value body vs Go-driven opMap.
 //
 // Scenarios cover:
 //  1. map[string]struct — the primary use case for MAP_STR_ITER

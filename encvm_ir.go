@@ -26,7 +26,7 @@ type IRInst struct {
 	OperandB int32
 
 	// Symbolic jump targets (resolved to byte offsets during lowering).
-	Target   Label // forward jump: SKIP_IF_ZERO, PTR_DEREF, CALL, MAP_BEGIN, SLICE_BEGIN, ARRAY_BEGIN
+	Target   Label // forward jump: SKIP_IF_ZERO, PTR_DEREF, CALL, SLICE_BEGIN, ARRAY_BEGIN
 	LoopBack Label // back-edge: SLICE_END → body start
 
 	// Label definition (only when Op == irLabel).
@@ -34,7 +34,7 @@ type IRInst struct {
 
 	// Metadata (not emitted into the Blueprint byte stream).
 	Annotation string       // debug annotation (type name for OBJ_OPEN/CALL)
-	Fallback   *fbInfo      // OP_FALLBACK / OP_MAP_BEGIN fallback info
+	Fallback   *fbInfo      // OP_FALLBACK / OP_MAP fallback info
 	SourceType reflect.Type // associated struct type (used by dedup pass)
 }
 

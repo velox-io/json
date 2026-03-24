@@ -239,8 +239,7 @@ var opcodeName = map[uint16]string{
 	opPtrEnd:     "PTR_END",
 	opSliceBegin: "SLICE_BEGIN",
 	opSliceEnd:   "SLICE_END",
-	opMapBegin:   "MAP_BEGIN",
-	opMapEnd:     "MAP_END",
+	opMap:        "MAP",
 	opObjOpen:    "OBJ_OPEN",
 	opObjClose:   "OBJ_CLOSE",
 	opArrayBegin: "ARRAY_BEGIN",
@@ -297,7 +296,7 @@ func dumpBlueprint(bp *Blueprint) {
 
 		// Closing ops reduce depth before printing.
 		switch code {
-		case opObjClose, opSliceEnd, opMapEnd, opPtrEnd, opMapStrIterEnd:
+		case opObjClose, opSliceEnd, opPtrEnd, opMapStrIterEnd:
 			depth--
 			if depth < 0 {
 				depth = 0
@@ -351,7 +350,7 @@ func dumpBlueprint(bp *Blueprint) {
 
 		// Opening ops increase depth after printing.
 		switch code {
-		case opObjOpen, opSliceBegin, opMapBegin, opArrayBegin, opPtrDeref, opMapStrIter:
+		case opObjOpen, opSliceBegin, opArrayBegin, opPtrDeref, opMapStrIter:
 			depth++
 		}
 

@@ -190,8 +190,8 @@ VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
       [OP_PTR_END] = DT_ENTRY(vj_op_ptr_end),
       [OP_SLICE_BEGIN] = DT_ENTRY(vj_op_slice_begin),
       [OP_SLICE_END] = DT_ENTRY(vj_op_slice_end),
-      [OP_MAP_BEGIN] = DT_ENTRY(vj_op_map_begin),
-      [OP_MAP_END] = DT_ENTRY(vj_op_map_end),
+      [OP_MAP] = DT_ENTRY(vj_op_map),
+      /* 26: reserved (was OP_MAP_END) */
       [OP_OBJ_OPEN] = DT_ENTRY(vj_op_obj_open),
       [OP_OBJ_CLOSE] = DT_ENTRY(vj_op_obj_close),
       [OP_ARRAY_BEGIN] = DT_ENTRY(vj_op_array_begin),
@@ -961,22 +961,10 @@ vj_op_array_begin: {
 
 /* --- COLD: map / interface / yield --- */
 
-vj_op_map_begin: {
-  VM_TRACE_KEY("MAP_BEGIN");
-  /* Map iteration is Go-driven. Yield to Go, which will:
-   * - Initialize map iterator
-   * - For each entry: write key to buffer, set base to value ptr,
-   *   then re-enter C to execute the value body instructions
-   * - Finally advance PC past MAP_END */
-  VM_TRACE("YIELD(map_handoff:begin)");
-  VJ_ST_SET_YIELD(vmstate, VJ_YIELD_MAP_HANDOFF);
-  VM_SAVE_AND_RETURN(VJ_EXIT_YIELD);
-}
-
-vj_op_map_end: {
-  VM_TRACE("MAP_END");
-  /* After value encoding, yield back to Go for next entry */
-  VM_TRACE("YIELD(map_handoff:end)");
+vj_op_map: {
+  VM_TRACE_KEY("MAP");
+  /* Yield to Go for full map encoding. */
+  VM_TRACE("YIELD(map_handoff)");
   VJ_ST_SET_YIELD(vmstate, VJ_YIELD_MAP_HANDOFF);
   VM_SAVE_AND_RETURN(VJ_EXIT_YIELD);
 }

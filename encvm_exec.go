@@ -393,16 +393,13 @@ func (m *marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 	return nil
 }
 
-// handleMapIteration handles the Go-driven map iteration protocol.
-// When C yields at OP_MAP_BEGIN, Go takes over the entire map encoding,
-// then advances PC past OP_MAP_END.
+// handleMapIteration handles OP_MAP yield: Go encodes the entire map,
+// then advances PC past this instruction.
 //
-// For map[string]any, we use encodeAnyMap which has inline fast-paths for
-// common JSON value types (string, float64, bool, nil, []any, map[string]any),
-// avoiding the reflect-based encodeMapGeneric path.
+// map[string]any uses encodeAnyMap with inline fast-paths for common
+// value types; other map types go through encodeMap.
 func (m *marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 	hdr := opHdrAt(bp.Ops, ctx.PC)
-	ext := opExtAt(bp.Ops, ctx.PC)
 	opCodeVal := hdr.OpType
 
 	// Extract the 'first' flag from vmstate (set by VM before yielding).
@@ -448,9 +445,8 @@ func (m *marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 		}
 	}
 
-	// Advance PC past MAP_END: operand_a is byte distance from MAP_BEGIN to MAP_END,
-	// then add MAP_END size (8 bytes) to move past it.
-	ctx.PC += ext.OperandA + 8
+	// Skip past this instruction.
+	ctx.PC += 8
 
 	// A field was written, so clear first flag in vmstate.
 	ctx.VMState &^= vjStFirstBit

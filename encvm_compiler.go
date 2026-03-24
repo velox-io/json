@@ -141,7 +141,7 @@ func compileStandaloneSliceBlueprint(dec *SliceCodec) *Blueprint {
 
 // compileStandaloneMapBlueprint builds a Blueprint for a map discovered
 // at runtime (e.g. inside an interface{}). Uses C-native Swiss Map iteration
-// when available, otherwise MAP_BEGIN/MAP_END (Go-driven iteration).
+// when available, otherwise opMap (yield to Go).
 func compileStandaloneMapBlueprint(mapDec *MapCodec) *Blueprint {
 	b := &irBuilder{
 		visiting: make(map[reflect.Type]Label),
@@ -835,9 +835,8 @@ func emitElementBody(b *irBuilder, elemTI *TypeInfo) {
 	}
 }
 
-// emitMap emits a map field. Tries C-native Swiss Map iteration first,
-// falls back to opMapBegin/opMapEnd (Go-driven iteration with encodeAnyMap
-// fast path for map[string]any).
+// emitMap emits a map field. Tries C-native Swiss Map iteration first;
+// otherwise yields to Go via opMap.
 func emitMap(b *irBuilder, fi *TypeInfo, fieldOff uintptr, mapDec *MapCodec) {
 	if canSwissMapIterInC(mapDec) {
 		emitMapSwissIter(b, fi, fieldOff, mapDec)
@@ -848,24 +847,17 @@ func emitMap(b *irBuilder, fi *TypeInfo, fieldOff uintptr, mapDec *MapCodec) {
 		emitYieldOverflow(b, fi, fieldOff)
 		return
 	}
-	endLabel := b.allocLabel()
 
 	b.emit(IRInst{
-		Op:       opMapBegin,
+		Op:       opMap,
 		KeyLen:   keyLen,
 		KeyOff:   keyOff,
 		FieldOff: uint16(fieldOff),
-		Target:   endLabel,
 		Fallback: &fbInfo{
 			TI:     fi,
 			Offset: fieldOff,
 		},
 	})
-
-	emitElementBody(b, mapDec.ValTI)
-
-	b.defineLabel(endLabel)
-	b.emit(IRInst{Op: opMapEnd})
 }
 
 // emitMapInner is like emitMap but without key bytes (standalone map blueprints).
@@ -874,22 +866,15 @@ func emitMapInner(b *irBuilder, fieldOff uintptr, mapTI *TypeInfo, mapDec *MapCo
 		emitMapSwissIterInner(b, fieldOff, mapDec)
 		return
 	}
-	endLabel := b.allocLabel()
 
 	b.emit(IRInst{
-		Op:       opMapBegin,
+		Op:       opMap,
 		FieldOff: uint16(fieldOff),
-		Target:   endLabel,
 		Fallback: &fbInfo{
 			TI:     mapTI,
 			Offset: fieldOff,
 		},
 	})
-
-	emitElementBody(b, mapDec.ValTI)
-
-	b.defineLabel(endLabel)
-	b.emit(IRInst{Op: opMapEnd})
 }
 
 // seqOpcode returns the sequence iterator opcode for a given element TypeInfo,
