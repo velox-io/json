@@ -534,7 +534,7 @@ typedef struct VjExecCtx {
   int16_t          indent_depth;      /*  72: logical nesting depth */
   uint8_t          indent_step;       /*  74: bytes per indent level (0 = compact) */
   uint8_t          indent_prefix_len; /*  75: bytes of prefix before indent */
-  int32_t          _pad1;             /*  76: alignment padding */
+  int32_t          trace_depth;       /*  76: trace indent depth (debug only, else padding) */
 
   /* Yield metadata (cold: only accessed on yield) */
   const void      *yield_type_ptr;    /*  80: eface.type_ptr on iface miss */

@@ -41,12 +41,13 @@
  * Go reads exit/yield/depth/first directly from vmstate. */
 #define VM_SAVE_AND_RETURN(exit_code)                                           \
   do {                                                                          \
-    VM_TRACE_MSG("SAVE_AND_RETURN");                                            \
+    VM_TRACE_MSG("◀ exit");                                                     \
     ctx->buf_cur = buf;                                                         \
     ctx->ops_ptr = ops;                                                         \
     ctx->pc = (int32_t)((const uint8_t *)op - ops);                             \
     ctx->cur_base = base;                                                       \
     VM_SAVE_INDENT_DEPTH();                                                     \
+    VM_SAVE_TRACE_DEPTH_CTX();                                                  \
     VJ_ST_SET_EXIT(vmstate, exit_code);                                         \
     ctx->vmstate = vmstate;                                                     \
     return;                                                                     \
@@ -99,12 +100,8 @@ VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
  * NOT used for JSON indent — that uses indent_depth separately. */
 #ifdef VJ_ENCVM_DEBUG
   /* trace_obj_depth tracks OBJ_OPEN/CLOSE nesting for trace indentation only.
-   * On resume, derive from indent_depth which is saved across yields. */
-#ifdef VJ_COMPACT_INDENT
-  int trace_obj_depth = 0;
-#else
-  int trace_obj_depth = (int)ctx->indent_depth - VJ_ST_GET_STACK_DEPTH(vmstate);
-#endif
+   * Persisted in ctx->trace_depth across yields (replaces old indent_depth derivation). */
+  int trace_obj_depth = ctx->trace_depth;
   VjTraceBuf *tbuf = ctx->trace_buf;
   #define VM_TRACE_DEPTH() (VJ_ST_GET_STACK_DEPTH(vmstate) + trace_obj_depth)
   /* Save/restore trace depth in state bits [24..31] across push/pop.
@@ -113,11 +110,14 @@ VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
     ((frame)->state = ((frame)->state & 0xFF) | (trace_obj_depth << 24))
   #define VM_RESTORE_TRACE_DEPTH(frame) \
     (trace_obj_depth = (int32_t)((frame)->state >> 24))
-  VM_TRACE_MSG("VM_ENTER");
+  /* Save trace_obj_depth back to ctx on VM exit. */
+  #define VM_SAVE_TRACE_DEPTH_CTX() (ctx->trace_depth = trace_obj_depth)
+  VM_TRACE_MSG("▶ enter");
 #else
   #define VM_TRACE_DEPTH() (VJ_ST_GET_STACK_DEPTH(vmstate))
   #define VM_SAVE_TRACE_DEPTH(frame) ((void)0)
   #define VM_RESTORE_TRACE_DEPTH(frame) ((void)0)
+  #define VM_SAVE_TRACE_DEPTH_CTX() ((void)0)
 #endif
 
   /* Indent state: indent_step == 0 means compact mode (no indentation).
@@ -830,10 +830,10 @@ vj_op_call: {
 vj_op_ret: {
   if (VJ_ST_GET_STACK_DEPTH(vmstate) > 0) {
     /* Subroutine return: pop CALL frame, restore ops/pc/base. */
+    VM_TRACE("RET");
     VJ_ST_DEC_STACK_DEPTH(vmstate);
     VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)];
     VM_RESTORE_TRACE_DEPTH(frame);
-    VM_TRACE("RET");
     ops = frame->call.ret_ops;
     op = (const VjOpHdr *)(ops + frame->call.ret_pc);
     base = frame->ret_base;
@@ -1500,7 +1500,6 @@ vj_op_interface: {
     op = (const VjOpHdr *)ops;
     base = iface_r.data_ptr;
     VJ_ST_SET_FIRST_1(vmstate);
-    VM_TRACE("IFACE_SWITCH_OPS");
     VM_DISPATCH();
   }
   case VJ_IFACE_BUF_FULL:
@@ -1541,6 +1540,7 @@ vj_op_yield: {
 #undef VM_DEPTH
 #undef VM_SAVE_TRACE_DEPTH
 #undef VM_RESTORE_TRACE_DEPTH
+#undef VM_SAVE_TRACE_DEPTH_CTX
 #ifdef VJ_COMPACT_INDENT
 #undef indent_tpl
 #undef indent_depth

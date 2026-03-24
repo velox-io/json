@@ -352,7 +352,7 @@ type VjExecCtx struct {
 	IndentDepth     int16          //  72: logical nesting depth
 	IndentStep      uint8          //  74: bytes per indent level (0 = compact)
 	IndentPrefixLen uint8          //  75: bytes of prefix before indent
-	_pad1           int32          //  76: alignment padding
+	TraceDepth      int32          //  76: trace indent depth (debug only, else padding)
 	YieldTypePtr    unsafe.Pointer //  80: interface cache miss: eface.type_ptr
 	KeyPoolBase     unsafe.Pointer //  88: global key pool base pointer
 

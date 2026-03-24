@@ -157,8 +157,8 @@ func (m *marshaler) flushVMTrace() {
 	out = expandFallbackReasons(out)
 	out = addIndentGuides(out)
 
-	fmt.Fprintf(os.Stderr, "####[vjson:trace] (%d bytes, %d total):\n%s",
-		length, tb.Total, out)
+	fmt.Fprintf(os.Stderr, "── vm trace (%d bytes) ──\n%s",
+		length, out)
 
 	// Reset for next VM invocation.
 	tb.Head = 0
@@ -281,7 +281,7 @@ func dumpBlueprint(bp *Blueprint) {
 	for pc := int32(0); pc < int32(len(bp.Ops)); pc += opSizeOf(opHdrAt(bp.Ops, pc).OpType) {
 		nOps++
 	}
-	fmt.Fprintf(&buf, "####[vjson:blueprint] %s (%d ops, %d bytes):\n", name, nOps, len(bp.Ops))
+	fmt.Fprintf(&buf, "== blueprint: %s (%d ops, %d bytes) ==\n", name, nOps, len(bp.Ops))
 
 	depth := 0
 	for pc := int32(0); pc < int32(len(bp.Ops)); {
