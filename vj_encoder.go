@@ -120,11 +120,17 @@ func (enc *Encoder) Encode(v any) error {
 		ptr = rv.UnsafePointer()
 		elemType = rv.Elem().Type()
 	} else {
-		// reflect forbids taking the address of a non-addressable Value.
-		// Rather than copying via reflect.New+Set, we extract the data
-		// pointer straight from the interface's eface layout {_type, data}.
-		ptr = (*[2]unsafe.Pointer)(unsafe.Pointer(&v))[1]
 		elemType = rv.Type()
+		// eface = {_type, data}. For indirect-interface types, data points
+		// to the value. For direct-interface types (map/chan/func), data IS
+		// the value; encoding expects one more indirection, so use &data.
+		efaceData := &(*[2]unsafe.Pointer)(unsafe.Pointer(&v))[1]
+		switch rv.Kind() {
+		case reflect.Map, reflect.Chan, reflect.Func:
+			ptr = unsafe.Pointer(efaceData)
+		default:
+			ptr = *efaceData
+		}
 	}
 
 	err := enc.encodePtr(getCodec(elemType), ptr)

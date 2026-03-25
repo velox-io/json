@@ -286,6 +286,118 @@ func TestEncoder_NDJSON_Stream(t *testing.T) {
 	}
 }
 
+// TestEncoder_MapNonPointer exercises the Encode path for map values passed
+// directly (not as *map). Maps are "direct interface" types in Go — the eface
+// data word IS the *hmap pointer, not a pointer to it. This previously caused
+// a "traceback did not unwind completely" crash because the encoding path
+// dereferenced one level too deep.
+func TestEncoder_MapNonPointer(t *testing.T) {
+	t.Run("map[string]string", func(t *testing.T) {
+		var buf bytes.Buffer
+		enc := NewEncoder(&buf)
+		m := map[string]string{"code": "INVALID_LIMIT", "message": "limit must be >= 1"}
+		if err := enc.Encode(m); err != nil {
+			t.Fatal(err)
+		}
+		// Verify the output is valid JSON by round-tripping.
+		var got map[string]string
+		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+			t.Fatalf("output is not valid JSON: %v\nraw: %s", err, buf.String())
+		}
+		if got["code"] != "INVALID_LIMIT" || got["message"] != "limit must be >= 1" {
+			t.Errorf("unexpected result: %v", got)
+		}
+	})
+
+	t.Run("map[string]any", func(t *testing.T) {
+		var buf bytes.Buffer
+		enc := NewEncoder(&buf)
+		m := map[string]any{"key": "value", "num": 42.0}
+		if err := enc.Encode(m); err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+			t.Fatalf("output is not valid JSON: %v\nraw: %s", err, buf.String())
+		}
+		if got["key"] != "value" || got["num"] != 42.0 {
+			t.Errorf("unexpected result: %v", got)
+		}
+	})
+
+	t.Run("map[string]int", func(t *testing.T) {
+		var buf bytes.Buffer
+		enc := NewEncoder(&buf)
+		m := map[string]int{"a": 1, "b": 2}
+		if err := enc.Encode(m); err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]int
+		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+			t.Fatalf("output is not valid JSON: %v\nraw: %s", err, buf.String())
+		}
+		if got["a"] != 1 || got["b"] != 2 {
+			t.Errorf("unexpected result: %v", got)
+		}
+	})
+
+	t.Run("nil map", func(t *testing.T) {
+		var buf bytes.Buffer
+		enc := NewEncoder(&buf)
+		var m map[string]string
+		if err := enc.Encode(m); err != nil {
+			t.Fatal(err)
+		}
+		got := strings.TrimSpace(buf.String())
+		if got != "null" {
+			t.Errorf("got %q, want %q", got, "null")
+		}
+	})
+
+	t.Run("empty map", func(t *testing.T) {
+		var buf bytes.Buffer
+		enc := NewEncoder(&buf)
+		m := map[string]string{}
+		if err := enc.Encode(m); err != nil {
+			t.Fatal(err)
+		}
+		got := strings.TrimSpace(buf.String())
+		if got != "{}" {
+			t.Errorf("got %q, want %q", got, "{}")
+		}
+	})
+}
+
+// TestEncoder_SliceNonPointer ensures slices passed by value to Encode work.
+func TestEncoder_SliceNonPointer(t *testing.T) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+	s := []int{1, 2, 3}
+	if err := enc.Encode(s); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.TrimSpace(buf.String())
+	if got != "[1,2,3]" {
+		t.Errorf("got %q, want %q", got, "[1,2,3]")
+	}
+}
+
+// TestEncoder_StructNonPointer ensures structs passed by value to Encode work.
+func TestEncoder_StructNonPointer(t *testing.T) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+	type Msg struct {
+		Name string `json:"name"`
+	}
+	if err := enc.Encode(Msg{Name: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.TrimSpace(buf.String())
+	if got != `{"name":"test"}` {
+		t.Errorf("got %q, want %q", got, `{"name":"test"}`)
+	}
+}
+
 func TestEncodeValue_Generic(t *testing.T) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
