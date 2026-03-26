@@ -77,13 +77,32 @@ func WithCopyString() UnmarshalOption {
 // v must be a non-nil pointer. Strings may reference data (zero-copy);
 // the caller must not modify data after this call.
 func Unmarshal[T any](data []byte, v T, opts ...UnmarshalOption) error {
-	if len(data) == 0 {
-		return newSyntaxError("vjson: unexpected end of JSON input", 0)
-	}
+	rt := reflect.TypeFor[T]()
 
-	ti, ptr, err := unmarshalTarget[T](&v)
-	if err != nil {
-		return err
+	var ptr unsafe.Pointer
+	var ti *TypeInfo
+
+	if rt.Kind() == reflect.Pointer {
+		ptr = *(*unsafe.Pointer)(unsafe.Pointer(&v))
+		if ptr == nil {
+			return &InvalidUnmarshalError{Type: rt}
+		}
+		ti = codecCacheUnmarshal.getCodec(rt.Elem())
+	} else if rt.Kind() == reflect.Interface {
+		rv := reflect.ValueOf(v)
+		if !rv.IsValid() {
+			return &InvalidUnmarshalError{Type: nil}
+		}
+		if rv.Kind() != reflect.Pointer {
+			return &InvalidUnmarshalError{Type: rv.Type()}
+		}
+		if rv.IsNil() {
+			return &InvalidUnmarshalError{Type: rv.Type()}
+		}
+		ptr = rv.UnsafePointer()
+		ti = codecCacheUnmarshal.getCodec(rv.Elem().Type())
+	} else {
+		return &InvalidUnmarshalError{Type: rt}
 	}
 
 	sc := parsers.Get()
@@ -106,38 +125,6 @@ func Unmarshal[T any](data []byte, v T, opts ...UnmarshalOption) error {
 		return newSyntaxError(fmt.Sprintf("vjson: invalid character %q after top-level value", data[newIdx]), newIdx)
 	}
 	return nil
-}
-
-// unmarshalTarget resolves the TypeInfo and data pointer for decoding.
-// When T is a pointer, it unwraps one level. When T is interface{},
-// the concrete value must be a non-nil pointer.
-// Returns InvalidUnmarshalError on invalid targets.
-func unmarshalTarget[T any](vp *T) (*TypeInfo, unsafe.Pointer, error) {
-	rt := reflect.TypeFor[T]()
-
-	if rt.Kind() == reflect.Pointer {
-		elemPtr := *(*unsafe.Pointer)(unsafe.Pointer(vp))
-		if elemPtr == nil {
-			return nil, nil, &InvalidUnmarshalError{Type: rt}
-		}
-		return codecCacheUnmarshal.getCodec(rt.Elem()), elemPtr, nil
-	}
-
-	if rt.Kind() == reflect.Interface {
-		rv := reflect.ValueOf(*vp)
-		if !rv.IsValid() {
-			return nil, nil, &InvalidUnmarshalError{Type: nil}
-		}
-		if rv.Kind() != reflect.Pointer {
-			return nil, nil, &InvalidUnmarshalError{Type: rv.Type()}
-		}
-		if rv.IsNil() {
-			return nil, nil, &InvalidUnmarshalError{Type: rv.Type()}
-		}
-		return codecCacheUnmarshal.getCodec(rv.Elem().Type()), rv.UnsafePointer(), nil
-	}
-
-	return nil, nil, &InvalidUnmarshalError{Type: rt}
 }
 
 // Parser is a reusable single-pass JSON scanner.
