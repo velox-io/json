@@ -233,6 +233,9 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *TypeInfo, ptr unsafe.Pointe
 
 						if fi.UFlags == 0 && fi.Kind != KindPointer {
 							// Hot-path for common scalar field kinds to avoid an extra scanValue dispatch.
+							if idx >= len(src) {
+								return idx, errUnexpectedEOF
+							}
 							b := sliceAt(src, idx)
 
 							switch {
