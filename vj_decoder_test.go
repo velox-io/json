@@ -338,6 +338,13 @@ func TestDecoder_TruncatedInput(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for truncated input")
 	}
+	var se *SyntaxError
+	if !errors.As(err, &se) {
+		t.Fatalf("want *SyntaxError, got %T: %v", err, err)
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("want io.ErrUnexpectedEOF in chain, got: %v", err)
+	}
 }
 
 func TestDecoder_SyntaxError(t *testing.T) {

@@ -194,6 +194,7 @@ func (d *Decoder) Decode(v any) error {
 		return d.retryDecode(sc, idx, ti, ptr, rv)
 	}
 	if err != nil {
+		err = wrapUnexpectedEOF(err, d.bufLen)
 		if d.skipErrors != nil && d.skipErrors(err) {
 			d.scanAt = idx
 			if skipErr := d.skipToNewline(); skipErr != nil {
@@ -250,7 +251,7 @@ func (d *Decoder) retryDecode(sc *Parser, valueStart int, ti *TypeInfo, ptr unsa
 		idx := skipWS(data, d.scanAt)
 		if idx >= d.bufLen {
 			if d.eof {
-				return newSyntaxError("vjson: unexpected end of input", d.bufLen)
+				return newSyntaxErrorWrap("vjson: unexpected end of input", d.bufLen, io.ErrUnexpectedEOF)
 			}
 			continue
 		}
@@ -262,6 +263,7 @@ func (d *Decoder) retryDecode(sc *Parser, valueStart int, ti *TypeInfo, ptr unsa
 			continue
 		}
 		if err != nil {
+			err = wrapUnexpectedEOF(err, d.bufLen)
 			if d.skipErrors != nil && d.skipErrors(err) {
 				d.scanAt = idx
 				if skipErr := d.skipToNewline(); skipErr != nil {
@@ -547,6 +549,16 @@ func isTokenContinuation(b byte) bool {
 		(b >= 'a' && b <= 'z') ||
 		(b >= 'A' && b <= 'Z') ||
 		b == '.' || b == '+' || b == '-'
+}
+
+// wrapUnexpectedEOF converts the internal errUnexpectedEOF sentinel into a
+// *SyntaxError wrapping io.ErrUnexpectedEOF so callers can use errors.Is.
+// Non-EOF errors are returned unchanged.
+func wrapUnexpectedEOF(err error, offset int) error {
+	if err == errUnexpectedEOF {
+		return newSyntaxErrorWrap("vjson: unexpected end of input", offset, io.ErrUnexpectedEOF)
+	}
+	return err
 }
 
 // DecodeValue is a generic convenience wrapper around [Decoder.Decode].

@@ -3,6 +3,7 @@ package vjson
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"strings"
 	"testing"
@@ -35,6 +36,9 @@ func TestSyntaxError_EmptyInput(t *testing.T) {
 	if !errors.As(err, &se) {
 		t.Fatalf("want *SyntaxError, got %T: %v", err, err)
 	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("want io.ErrUnexpectedEOF in chain, got: %v", err)
+	}
 }
 
 func TestSyntaxError_UnexpectedEOF(t *testing.T) {
@@ -46,6 +50,9 @@ func TestSyntaxError_UnexpectedEOF(t *testing.T) {
 	var se *SyntaxError
 	if !errors.As(err, &se) {
 		t.Fatalf("want *SyntaxError, got %T: %v", err, err)
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("want io.ErrUnexpectedEOF in chain, got: %v", err)
 	}
 }
 
@@ -318,5 +325,42 @@ func TestSyntaxError_Unwrap(t *testing.T) {
 	se := &SyntaxError{msg: "test", Err: inner}
 	if !errors.Is(se, inner) {
 		t.Fatal("SyntaxError.Unwrap should return inner error")
+	}
+}
+
+func TestUnmarshalEOF_VariousTypes(t *testing.T) {
+	// Verify that truncated/empty input targeting different Go types
+	// produces a SyntaxError wrapping io.ErrUnexpectedEOF, not an
+	// unsafe out-of-bounds read through the default switch branch.
+	tests := []struct {
+		name  string
+		input string
+		dest  any // pointer to target; determines which scanValue branch is taken
+	}{
+		{"empty/map", ``, new(map[string]any)},
+		{"empty/struct", ``, new(struct{ A int })},
+		{"empty/slice", ``, new([]int)},
+		{"empty/string", ``, new(string)},
+		{"empty/int", ``, new(int)},
+		{"empty/bool", ``, new(bool)},
+		{"whitespace-only/map", `   `, new(map[string]any)},
+		{"whitespace-only/int", " \t\n", new(int)},
+		{"truncated/object-value", `{"a":`, new(map[string]any)},
+		{"truncated/array-element", `[1,`, new([]int)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Unmarshal([]byte(tt.input), tt.dest)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			var se *SyntaxError
+			if !errors.As(err, &se) {
+				t.Fatalf("want *SyntaxError, got %T: %v", err, err)
+			}
+			if !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("want io.ErrUnexpectedEOF in error chain, got: %v", err)
+			}
+		})
 	}
 }

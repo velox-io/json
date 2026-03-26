@@ -114,10 +114,7 @@ func Unmarshal[T any](data []byte, v T, opts ...UnmarshalOption) error {
 	idx := skipWS(data, 0)
 	newIdx, scanErr := sc.scanValue(data, idx, ti, ptr)
 	if scanErr != nil {
-		if scanErr == errUnexpectedEOF {
-			return newSyntaxError("vjson: unexpected end of input", len(data))
-		}
-		return scanErr
+		return wrapUnexpectedEOF(scanErr, len(data))
 	}
 
 	newIdx = skipWS(data, newIdx)
