@@ -850,6 +850,98 @@ func TestDecoder_SkipErrors_SmallBuffer(t *testing.T) {
 	}
 }
 
+// WithExpectedSize
+
+func TestDecoder_WithExpectedSize_Exact(t *testing.T) {
+	input := `{"name":"alice","age":30}`
+	dec := NewDecoder(strings.NewReader(input), WithExpectedSize(len(input)))
+
+	type Msg struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+	}
+	var m Msg
+	if err := dec.Decode(&m); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if m.Name != "alice" || m.Age != 30 {
+		t.Fatalf("got %+v", m)
+	}
+}
+
+func TestDecoder_WithExpectedSize_Overestimate(t *testing.T) {
+	input := `{"x":1}`
+	dec := NewDecoder(strings.NewReader(input), WithExpectedSize(4096))
+
+	var m map[string]int
+	if err := dec.Decode(&m); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if m["x"] != 1 {
+		t.Fatalf("got %v", m)
+	}
+}
+
+func TestDecoder_WithExpectedSize_Underestimate(t *testing.T) {
+	// Expected size smaller than actual — should still work via retry.
+	input := `{"name":"alice","age":30,"city":"wonderland"}`
+	dec := NewDecoder(strings.NewReader(input), WithExpectedSize(10))
+
+	type Msg struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+		City string `json:"city"`
+	}
+	var m Msg
+	if err := dec.Decode(&m); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if m.Name != "alice" || m.Age != 30 || m.City != "wonderland" {
+		t.Fatalf("got %+v", m)
+	}
+}
+
+func TestDecoder_WithExpectedSize_OneByteReader(t *testing.T) {
+	// Simulates slow network: 1 byte per Read call.
+	input := `{"x":42}`
+	dec := NewDecoder(
+		&oneByteReader{r: strings.NewReader(input)},
+		WithExpectedSize(len(input)),
+	)
+
+	var m map[string]int
+	if err := dec.Decode(&m); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if m["x"] != 42 {
+		t.Fatalf("got %v", m)
+	}
+}
+
+func TestDecoder_WithExpectedSize_MultipleValues(t *testing.T) {
+	// Expected size covers all values; second Decode uses normal path.
+	input := `{"a":1} {"a":2}`
+	dec := NewDecoder(strings.NewReader(input), WithExpectedSize(len(input)))
+
+	for i := 1; i <= 2; i++ {
+		var m map[string]int
+		if err := dec.Decode(&m); err != nil {
+			t.Fatalf("Decode #%d: %v", i, err)
+		}
+		if m["a"] != i {
+			t.Fatalf("Decode #%d: got a=%d, want %d", i, m["a"], i)
+		}
+	}
+}
+
+func TestDecoder_WithExpectedSize_Empty(t *testing.T) {
+	dec := NewDecoder(strings.NewReader(""), WithExpectedSize(100))
+	var m map[string]any
+	if err := dec.Decode(&m); err != io.EOF {
+		t.Fatalf("expected io.EOF, got %v", err)
+	}
+}
+
 // Benchmark
 
 func BenchmarkDecoder_SingleObject(b *testing.B) {

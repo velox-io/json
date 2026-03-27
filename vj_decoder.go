@@ -44,6 +44,17 @@ func DecoderCopyString() DecoderOption {
 	}
 }
 
+// WithExpectedSize hints the total input size (e.g. HTTP Content-Length).
+// The decoder pre-reads this many bytes before the first parse, avoiding
+// retry overhead for slow or chunked readers.
+func WithExpectedSize(size int) DecoderOption {
+	return func(d *Decoder) {
+		if size > 0 {
+			d.expectedSize = size
+		}
+	}
+}
+
 // Decoder reads and decodes JSON values from an input stream.
 // Each [Decoder.Decode] call parses the next value via scanValue (single-pass).
 // When a value spans a buffer boundary the decoder grows the buffer and retries.
@@ -59,6 +70,8 @@ type Decoder struct {
 	scanAt int
 
 	bufSize int
+
+	expectedSize int // if > 0, pre-read this many bytes before first parse
 
 	err error
 	eof bool
@@ -332,10 +345,36 @@ func (d *Decoder) ensureData() error {
 	if d.eof {
 		return io.EOF
 	}
+
+	// First read with expected size: allocate exact buffer and fill it.
+	if d.expectedSize > 0 && d.buf == nil {
+		return d.prereadExpected()
+	}
+
 	if err := d.ensureBuffer(); err != nil {
 		return err
 	}
 	return d.readMore()
+}
+
+// prereadExpected allocates a buffer sized for expectedSize and reads
+// until expectedSize bytes are collected or EOF. One-shot: clears
+// expectedSize after use.
+func (d *Decoder) prereadExpected() error {
+	size := d.expectedSize + minReadSize // margin for trailing whitespace
+	d.buf = makeDirtyBytes(size, size)
+	d.bufLen = 0
+	d.scanAt = 0
+
+	target := d.expectedSize
+	d.expectedSize = 0 // one-shot
+
+	for d.bufLen < target && !d.eof {
+		if err := d.readMore(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ensureBuffer makes sure d.buf has at least minReadSize free bytes.
