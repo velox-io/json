@@ -11,9 +11,7 @@ import (
 	"testing"
 )
 
-// go test -run TestJSONTestSuiteCompatibility . -update-compat-results
-
-const compatResultsPath = "testdata/JSONTestSuite/compat_results.json"
+const compatResultsPath = "tests/JSONTestSuite/compat_results.json"
 
 var updateCompatResults = flag.Bool("update-compat-results", false, "update compatibility baseline for JSONTestSuite")
 

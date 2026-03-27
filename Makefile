@@ -11,15 +11,11 @@ fmt:
 	goimports -w .
 
 test:
-	go test -race .
-	go test -race -tags vj_noencvm .
-	cd benchmark && go test -race .
-	cd benchmark && go test -tags vj_noencvm -race .
+	@./scripts/run-test.sh
 
 test-coverage:
 	go test -race -coverprofile=coverage.out .
 	go tool cover -html=coverage.out -o coverage.html
-
 
 clean:
 	go clean
@@ -86,6 +82,13 @@ gen-debug:
 	@EXTRA_CFLAGS="-DVJ_ENCVM_DEBUG" DEBUG_SYMBOLS=1 bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
 		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
+# Decode VM (Rust) native build
+gen-rsdec:
+	@bash scripts/gen-rsdec.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
+
+gen-rsdec-debug:
+	@bash scripts/gen-rsdec.sh --debug "$(TARGET_OS)" "$(TARGET_ARCH)"
+
 BENCH_FILTER ?= .
 BENCH_TITLE ?= Benchmark Results
 BENCH_COUNT ?= 5
@@ -123,4 +126,4 @@ bench-pack: bench-build
 	tar czf $(BENCH_PACK) -C $(CURDIR) Makefile scripts/bench.sh scripts/benchcmp.sh scripts/bench-run.sh $(BENCH_BIN)
 	@echo "Packed: $(BENCH_PACK)"
 
-.PHONY: lint lint-ci fmt test test-coverage bclean fuzz fuzz-parallel fuzz-concurrent gen gen-debug gen-pgo-use bench-build bench-pack benchviz benchcmp
+.PHONY: lint lint-ci fmt test test-coverage bclean fuzz fuzz-parallel fuzz-concurrent gen gen-debug gen-pgo-use gen-rsdec gen-rsdec-debug bench-build bench-pack benchviz benchcmp

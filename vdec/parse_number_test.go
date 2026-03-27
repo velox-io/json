@@ -1,0 +1,600 @@
+package vdec
+
+import (
+	"encoding/json"
+	"math"
+	"strings"
+	"testing"
+)
+
+func TestParseEightDigitsSWAR(t *testing.T) {
+	tests := []struct {
+		input string
+		want  uint32
+	}{
+		{"12345678________", 12345678},
+		{"00000000________", 0},
+		{"99999999________", 99999999},
+		{"00000001________", 1},
+		{"10000000________", 10000000},
+		{"01234567________", 1234567},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input[:8], func(t *testing.T) {
+			got := parseEightDigits([]byte(tt.input), 0)
+			if got != tt.want {
+				t.Errorf("parseEightDigitsSWAR(%q) = %d, want %d", tt.input[:8], got, tt.want)
+			}
+		})
+	}
+}
+
+func TestScanInt64(t *testing.T) {
+	tests := []struct {
+		input string
+		want  int64
+	}{
+		{"0", 0},
+		{"1", 1},
+		{"-1", -1},
+		{"42", 42},
+		{"-42", -42},
+		{"-123", -123},
+		{"2147483647", 2147483647},
+		{"-2147483648", -2147483648},
+		{"9223372036854775807", 9223372036854775807},
+		// 8-digit unsigned portion
+		{"12345678", 12345678},
+		{"-12345678", -12345678},
+		// 16-digit unsigned portion
+		{"-1234567812345678", -1234567812345678},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			b := []byte(tt.input)
+			end, got, isFloat, ok := scanInt64(b, 0)
+			if !ok {
+				t.Fatalf("scanInt64(%q) ok=false", tt.input)
+			}
+			if isFloat {
+				t.Fatalf("scanInt64(%q) isFloat=true", tt.input)
+			}
+			if end != len(b) {
+				t.Errorf("scanInt64(%q) end=%d, want %d", tt.input, end, len(b))
+			}
+			if got != tt.want {
+				t.Errorf("scanInt64(%q) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestScanInt64_Empty(t *testing.T) {
+	_, _, _, ok := scanInt64(nil, 0)
+	if ok {
+		t.Errorf("scanInt64(nil) ok=true, want false")
+	}
+	_, _, _, ok = scanInt64([]byte{}, 0)
+	if ok {
+		t.Errorf("scanInt64([]) ok=true, want false")
+	}
+}
+
+func TestScanUint64(t *testing.T) {
+	tests := []struct {
+		input string
+		want  uint64
+	}{
+		// Short
+		{"0", 0},
+		{"1", 1},
+		{"42", 42},
+		{"255", 255},
+		{"65535", 65535},
+		{"1234567", 1234567},
+		// Exactly 8 digits
+		{"12345678", 12345678},
+		// 9-15 digits
+		{"123456789", 123456789},
+		{"1234567890", 1234567890},
+		{"4294967295", 4294967295},
+		{"999999999999999", 999999999999999},
+		// 16 digits
+		{"1234567812345678", 1234567812345678},
+		// 16+ digits
+		{"12345678123456789", 12345678123456789},
+		{"18446744073709551615", 18446744073709551615},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			b := []byte(tt.input)
+			end, got, isFloat, ok := scanUint64(b, 0)
+			if !ok {
+				t.Fatalf("scanUint64(%q) ok=false", tt.input)
+			}
+			if isFloat {
+				t.Fatalf("scanUint64(%q) isFloat=true", tt.input)
+			}
+			if end != len(b) {
+				t.Errorf("scanUint64(%q) end=%d, want %d", tt.input, end, len(b))
+			}
+			if got != tt.want {
+				t.Errorf("scanUint64(%q) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestScanFloat64(t *testing.T) {
+	tests := []struct {
+		input string
+		want  float64
+	}{
+		{"0", 0},
+		{"-0", 0},
+		{"1", 1},
+		{"-1", -1},
+		{"42", 42},
+		{"123456789", 123456789},
+		{"0.0", 0},
+		{"1.5", 1.5},
+		{"-0.5", -0.5},
+		{"3.14", 3.14},
+		{"1e10", 1e10},
+		{"1E10", 1e10},
+		{"1e+10", 1e10},
+		{"1e-10", 1e-10},
+		{"1.5e2", 150},
+		{"-1.5e-2", -0.015},
+		{"0e0", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			b := []byte(tt.input)
+			end, got, err := scanFloat64(b, 0)
+			if err != nil {
+				t.Fatalf("scanFloat64(%q) error: %v", tt.input, err)
+			}
+			if end != len(b) {
+				t.Errorf("scanFloat64(%q) end=%d, want %d", tt.input, end, len(b))
+			}
+			if got != tt.want {
+				t.Errorf("scanFloat64(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+var sinkUint64 uint64
+
+func BenchmarkScanUint64_4digits(b *testing.B) {
+	src := []byte("1234")
+	for b.Loop() {
+		_, sinkUint64, _, _ = scanUint64(src, 0)
+	}
+}
+
+func BenchmarkScanUint64_8digits(b *testing.B) {
+	src := []byte("12345678")
+	for b.Loop() {
+		_, sinkUint64, _, _ = scanUint64(src, 0)
+	}
+}
+
+func BenchmarkScanUint64_10digits(b *testing.B) {
+	src := []byte("1234567890")
+	for b.Loop() {
+		_, sinkUint64, _, _ = scanUint64(src, 0)
+	}
+}
+
+func BenchmarkScanUint64_16digits(b *testing.B) {
+	src := []byte("1234567812345678")
+	for b.Loop() {
+		_, sinkUint64, _, _ = scanUint64(src, 0)
+	}
+}
+
+func BenchmarkScanUint64_19digits(b *testing.B) {
+	src := []byte("9223372036854775807")
+	for b.Loop() {
+		_, sinkUint64, _, _ = scanUint64(src, 0)
+	}
+}
+
+// TestScanNumber_FloatToInt verifies that float-format numbers are rejected
+// when the target field is an integer type, matching encoding/json behavior.
+func TestScanNumber_FloatToInt(t *testing.T) {
+	tests := []struct {
+		json string
+		desc string
+	}{
+		{`{"a":3.14}`, "fractional"},
+		{`{"a":1e5}`, "exponent"},
+		{`{"a":1.0}`, "dotZero"},
+		{`{"a":1E10}`, "upperExponent"},
+		{`{"a":-3.14}`, "negativeFractional"},
+	}
+	for _, tt := range tests {
+		t.Run("int_"+tt.desc, func(t *testing.T) {
+			var s struct {
+				A int `json:"a"`
+			}
+			err := Unmarshal([]byte(tt.json), &s)
+			if err == nil {
+				t.Errorf("expected error for %s, got nil (value=%d)", tt.json, s.A)
+			} else if !strings.Contains(err.Error(), "cannot unmarshal number") {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+		t.Run("uint_"+tt.desc, func(t *testing.T) {
+			json := strings.Replace(tt.json, "-3.14", "3.14", 1) // avoid negative for uint
+			var s struct {
+				A uint64 `json:"a"`
+			}
+			err := Unmarshal([]byte(json), &s)
+			if err == nil {
+				t.Errorf("expected error for %s, got nil (value=%d)", json, s.A)
+			} else if !strings.Contains(err.Error(), "cannot unmarshal number") {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+
+	// Verify pure integers still work
+	t.Run("int_ok", func(t *testing.T) {
+		var s struct {
+			A int `json:"a"`
+		}
+		if err := Unmarshal([]byte(`{"a":42}`), &s); err != nil {
+			t.Fatal(err)
+		}
+		if s.A != 42 {
+			t.Errorf("got %d, want 42", s.A)
+		}
+	})
+	t.Run("uint_ok", func(t *testing.T) {
+		var s struct {
+			A uint64 `json:"a"`
+		}
+		if err := Unmarshal([]byte(`{"a":12345}`), &s); err != nil {
+			t.Fatal(err)
+		}
+		if s.A != 12345 {
+			t.Errorf("got %d, want 12345", s.A)
+		}
+	})
+}
+
+// scanNumberSpan RFC 8259 validation tests
+
+func TestScanNumberSpan_Valid(t *testing.T) {
+	tests := []struct {
+		input   string
+		isFloat bool
+	}{
+		// Integers
+		{"0", false},
+		{"-0", false},
+		{"1", false},
+		{"-1", false},
+		{"9", false},
+		{"10", false},
+		{"42", false},
+		{"123", false},
+		{"123456789", false},
+		{"-123456789", false},
+
+		// Fractions
+		{"0.0", true},
+		{"0.5", true},
+		{"-0.5", true},
+		{"1.0", true},
+		{"1.5", true},
+		{"123.456", true},
+		{"-123.456", true},
+		{"0.123456789", true},
+
+		// Exponents
+		{"1e10", true},
+		{"1E10", true},
+		{"1e+10", true},
+		{"1e-10", true},
+		{"1E+10", true},
+		{"1E-10", true},
+		{"-1e10", true},
+		{"0e0", true},
+
+		// Fraction + exponent
+		{"1.5e2", true},
+		{"-1.5e-2", true},
+		{"0.1e+10", true},
+		{"123.456e789", true},
+		{"1.0E1", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			src := []byte(tt.input)
+			end, isFloat, err := scanNumberSpan(src, 0)
+			if err != nil {
+				t.Fatalf("scanNumberSpan(%q) unexpected error: %v", tt.input, err)
+			}
+			if end != len(src) {
+				t.Errorf("scanNumberSpan(%q) end=%d, want %d", tt.input, end, len(src))
+			}
+			if isFloat != tt.isFloat {
+				t.Errorf("scanNumberSpan(%q) isFloat=%v, want %v", tt.input, isFloat, tt.isFloat)
+			}
+		})
+	}
+}
+
+func TestScanNumberSpan_Invalid(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		// Leading zeros
+		{"leading zero", "01"},
+		{"leading zeros", "00"},
+		{"negative leading zero", "-01"},
+		{"negative leading zeros", "-00123"},
+
+		// Missing digits
+		{"plus sign", "+1"},
+		{"bare minus", "-"},
+		{"bare dot", "."},
+		{"leading dot", ".5"},
+
+		// Trailing dot (no digits after)
+		{"trailing dot", "1."},
+		{"negative trailing dot", "-1."},
+
+		// Bad exponents
+		{"bare exponent", "1e"},
+		{"bare exponent upper", "1E"},
+		{"exponent plus no digit", "1e+"},
+		{"exponent minus no digit", "1e-"},
+		{"bare frac exponent", "1.0e"},
+		{"bare frac exponent+", "1.0e+"},
+
+		// Double characters — scanNumberSpan stops at second occurrence;
+		// the trailing garbage is caught by the caller.
+		// These are tested at integration level in TestRFC8259_InvalidNumbers.
+		// {"double dot", "1.2.3"},
+		// {"double exponent", "1e2e3"},
+
+		// Non-number literals
+		{"double minus", "--1"},
+		{"NaN", "NaN"},
+		{"Infinity", "Infinity"},
+		// 0x1F: scanNumberSpan sees "0" then stops at 'x' (valid "0" span).
+		// Trailing "x1F" is rejected by the caller.
+		// {"hex", "0x1F"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := []byte(tt.input)
+			_, _, err := scanNumberSpan(src, 0)
+			if err == nil {
+				t.Errorf("scanNumberSpan(%q) should return error, got nil", tt.input)
+			}
+		})
+	}
+}
+
+// TestScanNumberSpan_TrailingChars verifies that the parser stops at the right
+// position when a valid number is followed by non-number characters.
+func TestScanNumberSpan_TrailingChars(t *testing.T) {
+	tests := []struct {
+		input   string
+		wantEnd int
+		isFloat bool
+	}{
+		{"123,", 3, false},
+		{"0}", 1, false},
+		{"-0]", 2, false},
+		{"1.5,", 3, true},
+		{"1e10}", 4, true},
+		{"123 ", 3, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			src := []byte(tt.input)
+			end, isFloat, err := scanNumberSpan(src, 0)
+			if err != nil {
+				t.Fatalf("scanNumberSpan(%q) unexpected error: %v", tt.input, err)
+			}
+			if end != tt.wantEnd {
+				t.Errorf("scanNumberSpan(%q) end=%d, want %d", tt.input, end, tt.wantEnd)
+			}
+			if isFloat != tt.isFloat {
+				t.Errorf("scanNumberSpan(%q) isFloat=%v, want %v", tt.input, isFloat, tt.isFloat)
+			}
+		})
+	}
+}
+
+// TestScanFloat64_Fallback tests the Tier 3 (fpparse.Parse/uscale) fallback paths
+// that handle cases beyond Tier 1 (exact pow10) and Tier 2 (Eisel-Lemire).
+// Each test case is cross-checked against encoding/json for correctness.
+func TestScanFloat64_Fallback(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		// --- >19 significant digits (mantissa truncated to first 19) ---
+		{"20 digits integer", "12345678901234567890"},
+		{"21 digits negative", "-123456789012345678901"},
+		{"20 digits with fraction", "1.2345678901234567890"},
+
+		// --- >19 digits + exponent ---
+		{"many digits + big exp", "12345678901234567890e100"},
+		{"many digits + negative exp", "12345678901234567890e-100"},
+
+		// --- Extreme exponents (goto fallback via exponent > 400) ---
+		{"huge negative exponent underflow", "1e-999"},
+		{"negative huge underflow", "-1e-999"},
+		{"exponent -401", "1e-401"},
+
+		// --- Leading fractional zeros (mantissa==0 path) ---
+		{"19 leading zeros", "0.0000000000000000001"},
+		{"leading zeros negative", "-0.0000000000000000001"},
+
+		// --- Ambiguous Eisel-Lemire (<=19 digits but EL returns false) ---
+		{"near 2^53 boundary", "9007199254740993"},
+		{"subnormal region", "5e-324"},
+		{"negative subnormal", "-5e-324"},
+		{"min positive normal", "2.2250738585072014e-308"},
+		{"max float64", "1.7976931348623157e308"},
+
+		// --- Underflow via uscale ---
+		{"underflow via digits+exp", "1e-350"},
+		{"deep underflow", "1e-400"},
+
+		// --- Mixed: fraction + exponent + many digits ---
+		{"long fraction + exp", "0.12345678901234567890e5"},
+		{"long negative fraction + exp", "-9.999999999999999999e-300"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := []byte(tt.input)
+			end, got, err := scanFloat64(src, 0)
+			if err != nil {
+				t.Fatalf("scanFloat64(%q) error: %v", tt.input, err)
+			}
+			if end != len(src) {
+				t.Errorf("scanFloat64(%q) end=%d, want %d", tt.input, end, len(src))
+			}
+
+			// Cross-check: parse with encoding/json
+			jsonInput := []byte(`{"a":` + tt.input + `}`)
+			var stdM map[string]float64
+			if stdErr := json.Unmarshal(jsonInput, &stdM); stdErr != nil {
+				t.Fatalf("encoding/json rejected %q: %v", tt.input, stdErr)
+			}
+			stdVal := stdM["a"]
+
+			if math.Float64bits(got) != math.Float64bits(stdVal) {
+				t.Errorf("scanFloat64(%q) = %v (bits %016x), encoding/json = %v (bits %016x)",
+					tt.input, got, math.Float64bits(got), stdVal, math.Float64bits(stdVal))
+			}
+		})
+	}
+}
+
+// TestScanFloat64_Overflow tests numbers that overflow to +/-Inf.
+// These must return an error (matching encoding/json behavior).
+func TestScanFloat64_Overflow(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"1e999", "1e999"},
+		{"-1e999", "-1e999"},
+		{"1e401", "1e401"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := []byte(tt.input)
+			_, _, err := scanFloat64(src, 0)
+			if err == nil {
+				t.Fatalf("scanFloat64(%q) expected overflow error, got nil", tt.input)
+			}
+		})
+	}
+}
+
+// TestRFC8259_InvalidNumbers tests that Unmarshal rejects invalid number formats,
+// matching encoding/json behavior.
+func TestRFC8259_InvalidNumbers(t *testing.T) {
+	invalid := []string{
+		`{"a":01}`,
+		`{"a":00}`,
+		`{"a":-01}`,
+		`{"a":+1}`,
+		`{"a":1.}`,
+		`{"a":.5}`,
+		`{"a":1e}`,
+		`{"a":1e+}`,
+		`{"a":1.2.3}`,
+		`{"a":--1}`,
+		`{"a":1ee2}`,
+		`{"a":NaN}`,
+		`{"a":Infinity}`,
+		`{"a":0x1F}`,
+	}
+	for _, input := range invalid {
+		t.Run(input, func(t *testing.T) {
+			var m map[string]any
+			vjErr := Unmarshal([]byte(input), &m)
+			if vjErr == nil {
+				t.Errorf("vjson should reject %s, got value: %v", input, m)
+			}
+
+			// Verify encoding/json also rejects
+			var stdM map[string]any
+			stdErr := json.Unmarshal([]byte(input), &stdM)
+			if stdErr == nil {
+				t.Logf("NOTE: encoding/json accepts %s — divergence acceptable", input)
+			}
+		})
+	}
+}
+
+// TestRFC8259_ValidNumbers tests that Unmarshal accepts valid number formats
+// and produces the same results as encoding/json.
+func TestRFC8259_ValidNumbers(t *testing.T) {
+	valid := []struct {
+		input string
+		want  float64
+	}{
+		{`{"a":0}`, 0},
+		{`{"a":-0}`, 0},
+		{`{"a":1}`, 1},
+		{`{"a":-1}`, -1},
+		{`{"a":42}`, 42},
+		{`{"a":123456789}`, 123456789},
+		{`{"a":1.0}`, 1.0},
+		{`{"a":1.5}`, 1.5},
+		{`{"a":-0.5}`, -0.5},
+		{`{"a":1e10}`, 1e10},
+		{`{"a":1E10}`, 1e10},
+		{`{"a":1e+10}`, 1e10},
+		{`{"a":1e-10}`, 1e-10},
+		{`{"a":1.5e2}`, 150},
+		{`{"a":-1.5e-2}`, -0.015},
+		{`{"a":0.0}`, 0},
+		{`{"a":0e0}`, 0},
+	}
+	for _, tt := range valid {
+		t.Run(tt.input, func(t *testing.T) {
+			var m map[string]any
+			if err := Unmarshal([]byte(tt.input), &m); err != nil {
+				t.Fatalf("vjson should accept %s: %v", tt.input, err)
+			}
+			got, ok := m["a"].(float64)
+			if !ok {
+				t.Fatalf("expected float64, got %T", m["a"])
+			}
+			if got != tt.want {
+				t.Errorf("%s: got %v, want %v", tt.input, got, tt.want)
+			}
+
+			// Cross-check with encoding/json
+			var stdM map[string]any
+			if err := json.Unmarshal([]byte(tt.input), &stdM); err != nil {
+				t.Fatalf("encoding/json should accept %s: %v", tt.input, err)
+			}
+			stdGot := stdM["a"].(float64)
+			if got != stdGot {
+				t.Errorf("%s: vjson=%v, encoding/json=%v", tt.input, got, stdGot)
+			}
+		})
+	}
+}

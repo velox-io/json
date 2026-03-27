@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const jsonTestSuiteDir = "testdata/JSONTestSuite"
+const jsonTestSuiteDir = "tests/JSONTestSuite"
 
 // knownComplianceAcceptDivergences lists y_*.json files where vjson incorrectly
 // rejects valid JSON. These subtests are skipped with t.Skip() and a reason.

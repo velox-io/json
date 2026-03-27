@@ -251,7 +251,7 @@ func TestUnsupportedValueError_AsJSON(t *testing.T) {
 // Error message sanity checks
 
 func TestSyntaxError_Message(t *testing.T) {
-	se := &SyntaxError{msg: "test error", Offset: 42}
+	se := &SyntaxError{Msg: "test error", Offset: 42}
 	if se.Error() != "test error" {
 		t.Fatalf("Error() = %q", se.Error())
 	}
@@ -322,7 +322,7 @@ func TestMarshalerError_Unwrap(t *testing.T) {
 
 func TestSyntaxError_Unwrap(t *testing.T) {
 	inner := errors.New("inner error")
-	se := &SyntaxError{msg: "test", Err: inner}
+	se := &SyntaxError{Msg: "test", Err: inner}
 	if !errors.Is(se, inner) {
 		t.Fatal("SyntaxError.Unwrap should return inner error")
 	}

@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 env:
-  GO_VERSION: '1.24'
+  GO_VERSION: '1.26'
   BENCH_BASELINE_VERSION: 'v2'
 
 jobs:
@@ -20,10 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Setup Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version: ${{ env.GO_VERSION }}
 
@@ -67,14 +67,13 @@ jobs:
           echo "No baseline found. This run will become the baseline."
         fi
 
-    - name: Save baseline (on main branch)
-      if: github.ref == 'refs/heads/main'
+    - name: Update baseline cache (manual trigger only)
+      if: github.event_name == 'workflow_dispatch'
       run: |
         cp benchmark/bench-current.txt benchmark/bench-baseline.txt
-
-    - name: Cache baseline
-      if: github.ref == 'refs/heads/main'
-      uses: actions/cache/save@v4
+      # Save uses the same path as Restore so cache round-trips correctly
+    - uses: actions/cache/save@v4
+      if: github.event_name == 'workflow_dispatch'
       with:
         path: benchmark/bench-baseline.txt
         key: benchmark-baseline-${{ env.BENCH_BASELINE_VERSION }}
