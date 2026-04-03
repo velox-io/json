@@ -494,7 +494,7 @@ func emitDerefBody(b *irBuilder, elemTI *EncTypeInfo) {
 	case typ.KindMap:
 		mi := elemTI.ResolveMap()
 		if canSwissMapInC(mi.MapKind) {
-			emitMapSwissInner(b, 0, mi.MapKind)
+			emitMapSwissInner(b, 0, mi.MapKind, elemTI)
 		} else {
 			emitMapInner(b, 0, elemTI, mi)
 		}
@@ -769,7 +769,7 @@ func emitElementBody(b *irBuilder, elemTI *EncTypeInfo) {
 	case typ.KindMap:
 		mi := elemTI.ResolveMap()
 		if canSwissMapInC(mi.MapKind) {
-			emitMapSwissInner(b, 0, mi.MapKind)
+			emitMapSwissInner(b, 0, mi.MapKind, elemTI)
 		} else {
 			emitMapInner(b, 0, elemTI, mi)
 		}
@@ -904,11 +904,16 @@ func emitMapSwiss(b *irBuilder, fi *EncTypeInfo, fieldOff uintptr, variant typ.M
 	})
 }
 
-// emitMapSwissInner emits the keyless specialized Swiss-map opcode.
-func emitMapSwissInner(b *irBuilder, fieldOff uintptr, variant typ.MapVariant) {
+// emitMapSwissInner emits the keyless specialized Swiss-map opcode with a
+// fallback entry so the Go VM can delegate to Go-native map encoding.
+func emitMapSwissInner(b *irBuilder, fieldOff uintptr, variant typ.MapVariant, ti *EncTypeInfo) {
 	b.emit(IRInst{
 		Op:       swissMapOpcode(variant),
 		FieldOff: uint16(fieldOff),
+		Fallback: &fbInfo{
+			TI:     ti,
+			Offset: fieldOff,
+		},
 	})
 }
 

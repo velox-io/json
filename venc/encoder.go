@@ -149,6 +149,9 @@ func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	m.flags = enc.flags
 	m.prefix = enc.prefix
 	m.indent = enc.indent
+	if enc.indent != "" {
+		m.nativeCompat = isSimpleIndent(enc.prefix, enc.indent) > 0
+	}
 
 	hint := marshalHint(ti, ptr)
 	if hint > cap(m.buf) {

@@ -471,16 +471,30 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 		case opMapStrStr, opMapStrInt, opMapStrInt64:
 			m.goVMWriteKey(hdr, first, indent)
 			first = false
-			// Delegate to the Go map encoder via the field's EncodeFn
-			fb, ok := bp.Fallbacks[int(pc)]
-			if ok {
-				fieldPtr := unsafe.Add(base, fb.Offset)
-				if err := m.encodeTop(fb.TI, fieldPtr); err != nil {
+			mapPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
+			// Try fallback entry first (available when compiled as struct field).
+			if fb, ok := bp.Fallbacks[int(pc)]; ok {
+				if err := m.encodeTop(fb.TI, unsafe.Add(base, fb.Offset)); err != nil {
 					return err
 				}
 			} else {
-				// No fallback? Try encodeMapFallback via the map type info.
-				return fmt.Errorf("venc: goVM: map opcode %d at PC=%d with no fallback", op, pc)
+				// Standalone map op: read map pointer and encode via type-specific fast path.
+				mp := *(*unsafe.Pointer)(mapPtr)
+				if mp == nil {
+					m.buf = append(m.buf, litNull...)
+				} else {
+					switch op {
+					case opMapStrStr:
+						if err := m.encodeMapStringString(mapPtr); err != nil {
+							return err
+						}
+					default:
+						// opMapStrInt, opMapStrInt64: delegate to generic map encoder.
+						// The EncTypeInfo isn't available here, but encodeAnyMap handles
+						// map[string]any. For typed maps, fall back to reflect.
+						return fmt.Errorf("venc: goVM: map opcode %d at PC=%d requires fallback entry", op, pc)
+					}
+				}
 			}
 			pc += 8
 

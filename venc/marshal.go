@@ -22,10 +22,11 @@ type marshaler struct {
 	inVM  bool   // blocks re-entrant VM entry
 	buf   []byte
 
-	indent      string
-	prefix      string
-	indentDepth int
-	indentTpl   *[1 + 255 + maxIndentDepth*8]byte // "\n" + prefix + indent*maxDepth
+	indent         string
+	prefix         string
+	indentDepth    int
+	nativeCompat   bool // true if compact or simple indent pattern (C VM can handle)
+	indentTpl      *[1 + 255 + maxIndentDepth*8]byte // "\n" + prefix + indent*maxDepth
 
 	flushFn func([]byte) error // streaming sink for Encoder
 }
@@ -57,6 +58,7 @@ func getMarshaler() *marshaler {
 	m.indent = ""
 	m.prefix = ""
 	m.indentDepth = 0
+	m.nativeCompat = true // compact mode is always C-VM compatible
 	m.flags = 0
 	m.flushFn = nil
 	// Compact-mode VM entry assumes the indent fields are zeroed.
@@ -211,6 +213,7 @@ func MarshalIndent[T any](v T, prefix, indent string, opts ...MarshalOption) ([]
 
 	m.prefix = prefix
 	m.indent = indent
+	m.nativeCompat = isSimpleIndent(prefix, indent) > 0
 
 	ti, ptr := marshalTarget(v)
 	if err := m.encodeTop(ti, ptr); err != nil {
@@ -293,7 +296,7 @@ func (m *marshaler) finalize() []byte {
 
 // exec runs a compiled Blueprint through the best available VM.
 func (m *marshaler) exec(bp *Blueprint, base unsafe.Pointer) error {
-	if encvm.Available && !m.inVM && (m.indent == "" || isSimpleIndent(m.prefix, m.indent) > 0) {
+	if encvm.Available && !m.inVM && m.nativeCompat {
 		return m.execNative(bp, base)
 	}
 	return m.goVM(bp, base)
