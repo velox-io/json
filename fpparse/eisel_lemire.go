@@ -23,12 +23,13 @@ func EiselLemire(mantissa uint64, power10 int) (uint64, bool) {
 		exponentBias = -1023
 	)
 
-	if power10 < pow10Min || power10 > pow10Max {
+	if power10 < elPow10Min || power10 > elPow10Max {
 		return 0, false
 	}
 
 	// Look up the 128-bit approximation of 10^power10.
-	power := pow10Tab[power10-pow10Min]
+	// elPow10Tab stores standard {hi, lo} pairs (hi<<64 + lo).
+	power := elPow10Tab[power10-elPow10Min]
 
 	// Estimate the binary exponent: 10^e approx 2^(e * log2(10)).
 	// 108853 / 2^15 approx 3.321928... approx log2(10).
@@ -39,7 +40,7 @@ func EiselLemire(mantissa uint64, power10 int) (uint64, bool) {
 	mantissa <<= uint(leadingZeros)
 	resultExp := uint64(binaryExp+63-exponentBias) - uint64(leadingZeros)
 
-	// 128-bit multiply: mantissa * power.hi (high 64 bits of 10^exp10)
+	// 128-bit multiply: mantissa * power.hi (high 64 bits of 10^power10)
 	prodHi, prodLo := bits.Mul64(mantissa, power.hi)
 
 	// If the product falls near a rounding boundary (low 9 bits all set)

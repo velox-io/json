@@ -53,7 +53,7 @@ type scaler struct {
 // prescale returns the scaling constants for e, p.
 // lp must be log2Pow10(p).
 func prescale(e, p, lp int) scaler {
-	return scaler{pm: pow10Tab[p-pow10Min], s: -(e + lp + 3)}
+	return scaler{pm: usPow10Tab[p-usPow10Min], s: -(e + lp + 3)}
 }
 
 // uscale returns unround(x * 2**e * 10**p).
@@ -84,11 +84,11 @@ func Parse(d uint64, p int) float64 {
 	}
 
 	// Check if p is within the precomputed table range.
-	// pow10Tab covers [pow10Min, pow10Max] = [-348, 347].
-	if p < pow10Min {
+	// usPow10Tab covers [usPow10Min, usPow10Max] = [-348, 347].
+	if p < usPow10Min {
 		return 0 // underflow
 	}
-	if p > pow10Max {
+	if p > usPow10Max {
 		return math.Inf(1) // overflow
 	}
 
