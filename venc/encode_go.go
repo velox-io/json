@@ -1002,7 +1002,7 @@ func buildStructEncodeSteps(si *EncStructInfo) {
 		switch {
 		case hasOmitEmpty && isQuoted:
 			isZeroFn := fi.IsZeroFn
-			tiCopy := *fi // copy for encodeValueQuoted
+			fiRef := fi
 			steps[i] = func(ctx unsafe.Pointer, base unsafe.Pointer, first bool) (bool, error) {
 				m := (*marshaler)(ctx)
 				ptr := unsafe.Add(base, offset)
@@ -1013,7 +1013,7 @@ func buildStructEncodeSteps(si *EncStructInfo) {
 					m.buf = append(m.buf, ',')
 				}
 				m.buf = append(m.buf, keyBytes...)
-				return false, m.encodeValueQuoted(&tiCopy, ptr)
+				return false, m.encodeValueQuoted(fiRef, ptr)
 			}
 		case hasOmitEmpty:
 			isZeroFn := fi.IsZeroFn
@@ -1047,14 +1047,14 @@ func buildStructEncodeSteps(si *EncStructInfo) {
 				}
 			}
 		case isQuoted:
-			tiCopy := *fi
+			fiRef := fi
 			steps[i] = func(ctx unsafe.Pointer, base unsafe.Pointer, first bool) (bool, error) {
 				m := (*marshaler)(ctx)
 				if !first {
 					m.buf = append(m.buf, ',')
 				}
 				m.buf = append(m.buf, keyBytes...)
-				return false, m.encodeValueQuoted(&tiCopy, unsafe.Add(base, offset))
+				return false, m.encodeValueQuoted(fiRef, unsafe.Add(base, offset))
 			}
 		default:
 			if encodeFn != nil {

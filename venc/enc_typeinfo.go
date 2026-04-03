@@ -30,9 +30,9 @@ type EncTypeInfo struct {
 	JSONName string
 	Type     reflect.Type // for errors and dynamic paths
 
-	KeyBytes       []byte // compact `"name":`
-	KeyBytesIndent []byte // indented `"name": `
-	HintBytes      int    // static output size hint
+	KeyBytes       []byte       // compact `"name":`
+	KeyBytesIndent []byte       // indented `"name": `
+	HintBytes      int          // static output size hint
 	AdaptiveHint   atomic.Int64 // observed max output size (updated after each marshal)
 	IsZeroFn       func(ptr unsafe.Pointer) bool
 
