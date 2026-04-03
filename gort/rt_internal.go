@@ -50,8 +50,7 @@ func ExtractItab(ifacePtr unsafe.Pointer) unsafe.Pointer {
 
 // TypePtr extracts the *abi.Type from a reflect.Type interface value.
 func TypePtr(t reflect.Type) unsafe.Pointer {
-	iface := *(*[2]unsafe.Pointer)(unsafe.Pointer(&t))
-	return iface[1]
+	return *(*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(&t), unsafe.Sizeof(uintptr(0))))
 }
 
 // SliceHeader matches the internal layout of a Go slice.

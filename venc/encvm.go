@@ -245,7 +245,9 @@ const maxIndentDepth = VJ_MAX_STACK_DEPTH
 // VjExecCtx matches the native 2152-byte exec ABI. Field order and offsets are fixed.
 type VjExecCtx struct {
 	// Hot registers.
-	BufCur          unsafe.Pointer //   0: current write position
+	// BufCur is uintptr (not unsafe.Pointer) because the VM may advance it to
+	// one-past-end (BufCur == BufEnd), which is not a valid GC pointer.
+	BufCur          uintptr        //   0: current write position (NOT GC-traced; may be one-past-end)
 	BufEnd          uintptr        //   8: one past last writable byte (NOT GC-traced)
 	OpsPtr          unsafe.Pointer //  16: &Blueprint.Ops[0] (current active byte stream)
 	PC              int32          //  24: current byte offset into ops

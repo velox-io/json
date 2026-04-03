@@ -3,6 +3,7 @@ package venc
 import (
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/velox-io/json/gort"
@@ -11,8 +12,55 @@ import (
 
 var encTypeCache sync.Map
 
+// Fast cache: direct-mapped, sits in front of encTypeCache (sync.Map).
+const encFastCacheSize = 32 // must be power of two
+
+type encCacheEntry struct {
+	key uintptr // rtype pointer
+	val *EncTypeInfo
+}
+
+type encFastCache [encFastCacheSize]atomic.Pointer[encCacheEntry]
+
+func encFastCacheIndex(rtp uintptr) uintptr {
+	const magic = 0x9e3779b97f4a7c15 // Fibonacci: golden-ratio × 2^64
+	return (rtp * magic) >> (64 - 5) // 5 = log2(32)
+}
+
+var (
+	encCache    encFastCache // rtype → EncTypeInfo for the same type
+	encPtrCache encFastCache // rtype(*T) → EncTypeInfo(T) for pointer-unwrap fast path
+)
+
 // EncTypeInfoOf returns the cached encode descriptor.
 func EncTypeInfoOf(t reflect.Type) *EncTypeInfo {
+	rtp := uintptr(gort.TypePtr(t))
+	idx := encFastCacheIndex(rtp)
+	if p := encCache[idx].Load(); p != nil && p.key == rtp {
+		return p.val
+	}
+	eti := encTypeInfoViaMap(t)
+	encCache[idx].Store(&encCacheEntry{key: rtp, val: eti})
+	return eti
+}
+
+// encElemTypeInfoOf looks up EncTypeInfo for the element type of a pointer,
+// keyed by the pointer's rtype. This avoids reflect.Type.Elem() on the hot path.
+func encElemTypeInfoOf(ptrRtp uintptr, rt reflect.Type) *EncTypeInfo {
+	idx := encFastCacheIndex(ptrRtp)
+	if p := encPtrCache[idx].Load(); p != nil && p.key == ptrRtp {
+		return p.val
+	}
+	return encElemTypeInfoSlow(ptrRtp, idx, rt)
+}
+
+func encElemTypeInfoSlow(ptrRtp uintptr, idx uintptr, rt reflect.Type) *EncTypeInfo {
+	eti := EncTypeInfoOf(rt.Elem())
+	encPtrCache[idx].Store(&encCacheEntry{key: ptrRtp, val: eti})
+	return eti
+}
+
+func encTypeInfoViaMap(t reflect.Type) *EncTypeInfo {
 	if v, ok := encTypeCache.Load(t); ok {
 		return v.(*EncTypeInfo)
 	}

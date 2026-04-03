@@ -52,7 +52,7 @@ func init() {
 
 func getMarshaler() *marshaler {
 	m := marshalerPool.Get().(*marshaler)
-	m.buf = m.buf[:0]
+	m.buf = m.buf[:0] // reset buffer (may contain partial output from a prior error path)
 	m.indent = ""
 	m.prefix = ""
 	m.indentDepth = 0
@@ -147,15 +147,55 @@ func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
 		o(m)
 	}
 
-	ti, ptr := marshalTarget(&v)
+	rt := reflect.TypeFor[T]()
+	if rt.Kind() == reflect.Pointer {
+		rtp := *(*uintptr)(unsafe.Add(unsafe.Pointer(&rt), unsafe.Sizeof(uintptr(0))))
+		elemPtr := *(*unsafe.Pointer)(unsafe.Pointer(&v))
+		if elemPtr != nil {
+			ti := encElemTypeInfoOf(rtp, rt)
 
-	if ti.HintBytes > cap(m.buf) {
-		m.buf = make([]byte, 0, ti.HintBytes)
+			if ti.HintBytes > cap(m.buf) {
+				m.buf = make([]byte, 0, max(marshalBufInitSize, ti.HintBytes))
+			}
+
+			var err error
+			if fn := ti.EncodeFn; fn != nil {
+				err = fn(unsafe.Pointer(m), elemPtr)
+			} else {
+				err = &UnsupportedTypeError{Type: ti.Type}
+			}
+
+			if err != nil {
+				putMarshaler(m)
+				return nil, err
+			}
+
+			return m.finalize(), nil
+		}
 	}
 
-	if err := m.encodeValue(ti, ptr); err != nil {
+	// Slow path: non-pointer T or nil pointer — v escapes here, which is fine.
+	return marshalSlow(m, v)
+}
+
+// marshalSlow handles non-pointer types and nil pointers where &v must escape.
+//
+//go:noinline
+func marshalSlow[T any](m *marshaler, v T) ([]byte, error) {
+	ti, ptr := marshalTarget(v)
+
+	if ti.HintBytes > cap(m.buf) {
+		m.buf = make([]byte, 0, max(marshalBufInitSize, ti.HintBytes))
+	}
+
+	if fn := ti.EncodeFn; fn != nil {
+		if err := fn(unsafe.Pointer(m), ptr); err != nil {
+			putMarshaler(m)
+			return nil, err
+		}
+	} else {
 		putMarshaler(m)
-		return nil, err
+		return nil, &UnsupportedTypeError{Type: ti.Type}
 	}
 
 	return m.finalize(), nil
@@ -170,7 +210,7 @@ func MarshalIndent[T any](v T, prefix, indent string, opts ...MarshalOption) ([]
 	m.prefix = prefix
 	m.indent = indent
 
-	ti, ptr := marshalTarget(&v)
+	ti, ptr := marshalTarget(v)
 	if err := m.encodeValue(ti, ptr); err != nil {
 		putMarshaler(m)
 		return nil, err
@@ -187,7 +227,7 @@ func AppendMarshal[T any](dst []byte, v T, opts ...MarshalOption) ([]byte, error
 
 	m.buf = dst
 
-	ti, ptr := marshalTarget(&v)
+	ti, ptr := marshalTarget(v)
 	if err := m.encodeValue(ti, ptr); err != nil {
 		m.buf = nil // detach caller's buffer before pooling
 		putMarshaler(m)
@@ -201,23 +241,34 @@ func AppendMarshal[T any](dst []byte, v T, opts ...MarshalOption) ([]byte, error
 }
 
 // marshalTarget unwraps one pointer level; nil pointers stay on the pointer codec.
-func marshalTarget[T any](vp *T) (*EncTypeInfo, unsafe.Pointer) {
+func marshalTarget[T any](v T) (*EncTypeInfo, unsafe.Pointer) {
 	rt := reflect.TypeFor[T]()
 	if rt.Kind() == reflect.Pointer {
-		elemPtr := *(*unsafe.Pointer)(unsafe.Pointer(vp))
+		elemPtr := *(*unsafe.Pointer)(unsafe.Pointer(&v))
 		if elemPtr == nil {
-			return EncTypeInfoOf(rt), unsafe.Pointer(vp)
+			return EncTypeInfoOf(rt), unsafe.Pointer(&v)
 		}
 		return EncTypeInfoOf(rt.Elem()), elemPtr
 	}
-	return EncTypeInfoOf(rt), unsafe.Pointer(vp)
+	return EncTypeInfoOf(rt), unsafe.Pointer(&v)
 }
 
 // finalize detaches the output before pooling the marshaler.
 func (m *marshaler) finalize() []byte {
 	n := len(m.buf)
-	result := makeDirtyBytes(n, n)
-	copy(result, m.buf)
+
+	// result := makeDirtyBytes(n, n)
+	// copy(result, m.buf)
+
+	result := m.buf[:n:n]
+	c := cap(m.buf)
+	remain := c - n
+	if remain >= marshalBufInitSize/4 {
+		m.buf = m.buf[n:n:c]
+	} else {
+		m.buf = nil
+	}
+
 	putMarshaler(m)
 	return result
 }

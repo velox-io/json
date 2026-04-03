@@ -46,12 +46,6 @@ func rtypePtr(t reflect.Type) unsafe.Pointer {
 	return gort.TypePtr(t)
 }
 
-// makeDirtyBytes allocates a []byte without zeroing. Caller MUST overwrite
-// every byte before reading. Safe because bytes have no pointers for GC.
-func makeDirtyBytes(len, cap int) []byte {
-	return gort.MakeDirtyBytes(len, cap)
-}
-
 func maplen(m unsafe.Pointer) int {
 	return gort.MapLen(m)
 }

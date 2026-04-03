@@ -126,24 +126,28 @@ func (m *marshaler) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(unsafe
 			}
 		}
 
-		avail := cap(m.buf) - len(m.buf)
-		if avail < 64 {
+		// Ensure workBuf is non-empty. Besides vjExitBufFull, the YieldToGo
+		// handlers also append to m.buf and may fill it to cap exactly,
+		// so we must check on every iteration, not just after BufFull.
+		if len(m.buf) == cap(m.buf) {
 			newCap := max(cap(m.buf)*2, 4096)
 			newBuf := make([]byte, len(m.buf), newCap)
 			copy(newBuf, m.buf)
 			m.buf = newBuf
 		}
 
+		// Hand the spare capacity [len:cap) to the C VM as its write region.
 		workBuf := m.buf[len(m.buf):cap(m.buf)]
-		bufStart := unsafe.Pointer(&workBuf[0])
+		bufStart := uintptr(unsafe.Pointer(&workBuf[0]))
 		ctx.BufCur = bufStart
-		ctx.BufEnd = uintptr(bufStart) + uintptr(len(workBuf))
+		ctx.BufEnd = bufStart + uintptr(len(workBuf))
 
 		vmExec(unsafe.Pointer(ctx))
 
 		m.flushVMTrace()
 
-		written := int(uintptr(ctx.BufCur) - uintptr(bufStart))
+		// Bytes written by the VM this iteration.
+		written := int(ctx.BufCur - bufStart)
 
 		switch vmstateGetExit(ctx.VMState) {
 		case vjExitOK:

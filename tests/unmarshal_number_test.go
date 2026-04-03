@@ -543,6 +543,49 @@ func TestNumber_Float64Overflow(t *testing.T) {
 	}
 }
 
+// Float64 parsing precision: vjson must produce the same float64 as encoding/json.
+
+func TestNumber_Float64Precision(t *testing.T) {
+	// Each input is a JSON number whose nearest float64 has a shorter decimal
+	// representation than the input itself. A correct parser must still pick
+	// the right float64; a naive one may round to the wrong ULP neighbor.
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"17_sig_digits", `1.112345678195234`},
+		{"trailing_5_round_even", `1.0000000000000002`},
+		{"subnormal_boundary", `5e-324`},
+		{"max_float64", `1.7976931348623157e+308`},
+		{"min_positive_normal", `2.2250738585072014e-308`},
+		{"long_fraction", `0.1234567890123456789`},
+		{"negative_precision", `-1.112345678195234`},
+		{"exp_precision", `1.112345678195234e5`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := []byte(tt.input)
+
+			var vjResult any
+			if err := vjson.Unmarshal(data, &vjResult); err != nil {
+				t.Fatalf("vjson error: %v", err)
+			}
+			var stdResult any
+			if err := json.Unmarshal(data, &stdResult); err != nil {
+				t.Fatalf("stdlib error: %v", err)
+			}
+			vjF, ok1 := vjResult.(float64)
+			stdF, ok2 := stdResult.(float64)
+			if !ok1 || !ok2 {
+				t.Fatalf("type mismatch: vjson=%T, stdlib=%T", vjResult, stdResult)
+			}
+			if vjF != stdF {
+				t.Errorf("precision mismatch for %s:\nvjson:  %.17g\nstdlib: %.17g", tt.input, vjF, stdF)
+			}
+		})
+	}
+}
+
 // Large integer mantissa precision: numbers with >19 digits must produce correct float64 values
 
 func TestNumber_LargeIntegerPrecision(t *testing.T) {

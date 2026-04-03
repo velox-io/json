@@ -148,6 +148,10 @@ func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	m.prefix = enc.prefix
 	m.indent = enc.indent
 
+	if ti.HintBytes > cap(m.buf) {
+		m.buf = make([]byte, 0, max(marshalBufInitSize, ti.HintBytes))
+	}
+
 	// Stream out completed chunks to keep memory bounded.
 	m.flushFn = func(p []byte) error {
 		_, err := enc.w.Write(p)
