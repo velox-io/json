@@ -310,14 +310,16 @@ func (m *marshaler) encodeValue(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 
 func (m *marshaler) encodeStruct(si *EncStructInfo, base unsafe.Pointer) error {
 	if m.indent != "" {
-		if m.inVM || !encvm.Available || isSimpleIndent(m.prefix, m.indent) == 0 {
-			return m.encodeStructIndent(si, base)
+		if !m.inVM && encvm.Available && isSimpleIndent(m.prefix, m.indent) > 0 {
+			return m.encodeStructNative(si, base)
 		}
-		return m.encodeStructNative(si, base)
+		if bp := si.getBlueprint(); bp != nil && len(bp.Ops) > 0 {
+			return m.goVM(bp, base)
+		}
+		return m.encodeStructIndent(si, base)
 	}
 
 	if m.inVM {
-		// Re-entrant: use Go VM if blueprint available, else old recursive path.
 		if bp := si.getBlueprint(); bp != nil && len(bp.Ops) > 0 {
 			return m.goVM(bp, base)
 		}
@@ -328,7 +330,6 @@ func (m *marshaler) encodeStruct(si *EncStructInfo, base unsafe.Pointer) error {
 		return m.encodeStructNative(si, base)
 	}
 
-	// No C VM: use Go VM if blueprint available, else old recursive path.
 	if bp := si.getBlueprint(); bp != nil && len(bp.Ops) > 0 {
 		return m.goVM(bp, base)
 	}

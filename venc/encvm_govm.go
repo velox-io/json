@@ -13,9 +13,11 @@ import (
 // goVM executes a compiled Blueprint entirely in Go.
 // It interprets the same bytecode as the C VM but writes directly to m.buf
 // via append — no BufCur/BufEnd, no BUF_FULL yield.
+// Supports both compact and indented output modes.
 func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 	ops := bp.Ops
 	opsLen := int32(len(ops))
+	indent := m.indent != ""
 	var (
 		pc    int32
 		first = true // tracks whether to write comma before next value
@@ -32,16 +34,27 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 
 		case opObjOpen:
 			if hdr.KeyLen > 0 {
-				m.goVMWriteKey(hdr, first)
-				first = true // reset for inner object
+				m.goVMWriteKey(hdr, first, indent)
 			} else if !first {
 				m.buf = append(m.buf, ',')
+				if indent {
+					m.appendNewlineIndent()
+				}
 			}
 			m.buf = append(m.buf, '{')
+			if indent {
+				m.indentDepth++
+			}
 			first = true
 			pc += 8
 
 		case opObjClose:
+			if indent {
+				m.indentDepth--
+				if !first {
+					m.appendNewlineIndent()
+				}
+			}
 			m.buf = append(m.buf, '}')
 			first = false
 			pc += 8
@@ -51,7 +64,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 		case opBool:
 			fieldPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
 			if hdr.KeyLen > 0 {
-				m.goVMWriteKey(hdr, first)
+				m.goVMWriteKey(hdr, first, indent)
 				first = false
 			}
 			if *(*bool)(fieldPtr) {
@@ -62,67 +75,67 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			pc += 8
 
 		case opInt:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			m.appendInt64(int64(*(*int)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opInt8:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			m.appendInt64(int64(*(*int8)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opInt16:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			m.appendInt64(int64(*(*int16)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opInt32:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			m.appendInt64(int64(*(*int32)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opInt64:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			m.appendInt64(*(*int64)(unsafe.Add(base, uintptr(hdr.FieldOff))))
 			pc += 8
 
 		case opUint:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			m.appendUint64(uint64(*(*uint)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opUint8:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			m.appendUint64(uint64(*(*uint8)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opUint16:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			m.appendUint64(uint64(*(*uint16)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opUint32:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			m.appendUint64(uint64(*(*uint32)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opUint64:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			m.appendUint64(*(*uint64)(unsafe.Add(base, uintptr(hdr.FieldOff))))
 			pc += 8
 
 		case opFloat32:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			f := float64(*(*float32)(unsafe.Add(base, uintptr(hdr.FieldOff))))
 			if math.IsNaN(f) || math.IsInf(f, 0) {
@@ -132,7 +145,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			pc += 8
 
 		case opFloat64:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			f := *(*float64)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			if math.IsNaN(f) || math.IsInf(f, 0) {
@@ -142,7 +155,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			pc += 8
 
 		case opString:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			s := *(*string)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			m.encodeString(s)
@@ -151,32 +164,32 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 		// ---- Keyed scalar shortcuts ----
 
 		case opKString:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			s := *(*string)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			m.encodeString(s)
 			pc += 8
 
 		case opKInt:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			m.appendInt64(int64(*(*int)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opKInt64:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			m.appendInt64(*(*int64)(unsafe.Add(base, uintptr(hdr.FieldOff))))
 			pc += 8
 
 		case opKQInt:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			m.appendQuotedInt64(int64(*(*int)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opKQInt64:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			m.appendQuotedInt64(*(*int64)(unsafe.Add(base, uintptr(hdr.FieldOff))))
 			pc += 8
@@ -184,7 +197,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 		// ---- Special value types ----
 
 		case opRawMessage:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			sh := (*gort.SliceHeader)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			if sh.Data == nil || sh.Len == 0 {
@@ -196,7 +209,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			pc += 8
 
 		case opNumber:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			s := *(*string)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			if s == "" {
@@ -207,7 +220,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			pc += 8
 
 		case opByteSlice:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			sh := (*gort.SliceHeader)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			if sh.Data == nil {
@@ -224,7 +237,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			pc += 8
 
 		case opTime:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			// Delegate to fallback — time.Time has custom MarshalJSON
 			fb, ok := bp.Fallbacks[int(pc)]
@@ -288,7 +301,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			p := *(*unsafe.Pointer)(fieldPtr)
 			if p == nil {
 				// Write key + null, skip deref body
-				m.goVMWriteKey(hdr, first)
+				m.goVMWriteKey(hdr, first, indent)
 				first = false
 				m.buf = append(m.buf, litNull...)
 				pc += ext.OperandA // jump past PtrEnd
@@ -320,7 +333,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			sh := (*gort.SliceHeader)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 
 			if hdr.KeyLen > 0 {
-				m.goVMWriteKey(hdr, first)
+				m.goVMWriteKey(hdr, first, indent)
 				first = false
 			}
 
@@ -332,8 +345,14 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			}
 
 			m.buf = append(m.buf, '[')
+			if indent {
+				m.indentDepth++
+			}
 
 			if sh.Len == 0 {
+				if indent {
+					m.indentDepth--
+				}
 				m.buf = append(m.buf, ']')
 				pc += 16 + bodyLen + 16
 				continue
@@ -374,6 +393,10 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			} else {
 				// End iteration
 				base = frame.RetBase
+				if indent {
+					m.indentDepth--
+					m.appendNewlineIndent()
+				}
 				m.buf = append(m.buf, ']')
 				first = false
 				pc += 16
@@ -389,7 +412,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			bodyLen := ext.OperandB
 
 			if hdr.KeyLen > 0 {
-				m.goVMWriteKey(hdr, first)
+				m.goVMWriteKey(hdr, first, indent)
 				first = false
 			}
 
@@ -436,7 +459,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 				return fmt.Errorf("venc: goVM: opMap at PC=%d with no fallback info", pc)
 			}
 			if hdr.KeyLen > 0 {
-				m.goVMWriteKey(hdr, first)
+				m.goVMWriteKey(hdr, first, indent)
 				first = false
 			}
 			mapInfo := fb.TI.ResolveMap()
@@ -447,7 +470,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			pc += 8
 
 		case opMapStrStr, opMapStrInt, opMapStrInt64:
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			// Delegate to the Go map encoder via the field's EncodeFn
 			fb, ok := bp.Fallbacks[int(pc)]
@@ -470,7 +493,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			if !ok {
 				return fmt.Errorf("venc: goVM: opMapStrIter at PC=%d with no fallback", pc)
 			}
-			m.goVMWriteKey(hdr, first)
+			m.goVMWriteKey(hdr, first, indent)
 			first = false
 			mapInfo := fb.TI.ResolveMap()
 			mapPtr := unsafe.Add(base, fb.Offset)
@@ -489,7 +512,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 		case opInterface:
 			fieldPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
 			if hdr.KeyLen > 0 {
-				m.goVMWriteKey(hdr, first)
+				m.goVMWriteKey(hdr, first, indent)
 				first = false
 			} else if !first {
 				m.buf = append(m.buf, ',')
@@ -545,13 +568,19 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 	return nil
 }
 
-// goVMWriteKey writes comma (if not first) + key from the pool.
-func (m *marshaler) goVMWriteKey(hdr *VjOpHdr, first bool) {
+// goVMWriteKey writes comma (if not first) + indent + key from the pool + key-space.
+func (m *marshaler) goVMWriteKey(hdr *VjOpHdr, first bool, indent bool) {
 	if !first {
 		m.buf = append(m.buf, ',')
 	}
+	if indent {
+		m.appendNewlineIndent()
+	}
 	if hdr.KeyLen > 0 {
 		m.buf = append(m.buf, keyPoolBytes(hdr.KeyOff, hdr.KeyLen)...)
+		if indent {
+			m.buf = append(m.buf, ' ')
+		}
 	}
 }
 
@@ -606,9 +635,10 @@ func goVMIsZero(ptr unsafe.Pointer, tag int32, hdr *VjOpHdr) bool {
 func (m *marshaler) goVMSeq(hdr *VjOpHdr, ops []byte, pc int32, base unsafe.Pointer, first bool, op uint16) error {
 	ext := opExtAt(ops, pc)
 	fieldPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
+	doIndent := m.indent != ""
 
 	if hdr.KeyLen > 0 {
-		m.goVMWriteKey(hdr, first)
+		m.goVMWriteKey(hdr, first, doIndent)
 	}
 
 	packed := uint32(ext.OperandA)
@@ -631,9 +661,15 @@ func (m *marshaler) goVMSeq(hdr *VjOpHdr, ops []byte, pc int32, base unsafe.Poin
 	}
 
 	m.buf = append(m.buf, '[')
+	if doIndent && count > 0 {
+		m.indentDepth++
+	}
 	for i := 0; i < count; i++ {
 		if i > 0 {
 			m.buf = append(m.buf, ',')
+		}
+		if doIndent {
+			m.appendNewlineIndent()
 		}
 		switch op {
 		case opSeqFloat64:
@@ -650,6 +686,10 @@ func (m *marshaler) goVMSeq(hdr *VjOpHdr, ops []byte, pc int32, base unsafe.Poin
 			s := *(*string)(unsafe.Add(data, uintptr(i)*unsafe.Sizeof("")))
 			m.encodeString(s)
 		}
+	}
+	if doIndent && count > 0 {
+		m.indentDepth--
+		m.appendNewlineIndent()
 	}
 	m.buf = append(m.buf, ']')
 	return nil
