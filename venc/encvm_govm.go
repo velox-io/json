@@ -245,7 +245,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 				return fmt.Errorf("venc: goVM: opTime at PC=%d with no fallback info", pc)
 			}
 			fieldPtr := unsafe.Add(base, fb.Offset)
-			if err := m.encodeValue(fb.TI, fieldPtr); err != nil {
+			if err := m.encodeTop(fb.TI, fieldPtr); err != nil {
 				return err
 			}
 			pc += 8
@@ -462,9 +462,8 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 				m.goVMWriteKey(hdr, first, indent)
 				first = false
 			}
-			mapInfo := fb.TI.ResolveMap()
 			mapPtr := unsafe.Add(base, fb.Offset)
-			if err := m.encodeMap(mapInfo, mapPtr); err != nil {
+			if err := m.encodeTop(fb.TI, mapPtr); err != nil {
 				return err
 			}
 			pc += 8
@@ -476,7 +475,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			fb, ok := bp.Fallbacks[int(pc)]
 			if ok {
 				fieldPtr := unsafe.Add(base, fb.Offset)
-				if err := m.encodeValue(fb.TI, fieldPtr); err != nil {
+				if err := m.encodeTop(fb.TI, fieldPtr); err != nil {
 					return err
 				}
 			} else {
@@ -495,9 +494,8 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			}
 			m.goVMWriteKey(hdr, first, indent)
 			first = false
-			mapInfo := fb.TI.ResolveMap()
 			mapPtr := unsafe.Add(base, fb.Offset)
-			if err := m.encodeMap(mapInfo, mapPtr); err != nil {
+			if err := m.encodeTop(fb.TI, mapPtr); err != nil {
 				return err
 			}
 			// Skip past body + MapStrIterEnd
@@ -553,7 +551,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 					return err
 				}
 			} else {
-				if err := m.encodeValue(fb.TI, fieldPtr); err != nil {
+				if err := m.encodeTop(fb.TI, fieldPtr); err != nil {
 					return err
 				}
 			}

@@ -27,42 +27,6 @@ func (m *marshaler) vmWriteKeySpace(ctx *VjExecCtx) {
 	}
 }
 
-// encodeStructNative runs the cached native program for a struct.
-func (m *marshaler) encodeStructNative(si *EncStructInfo, base unsafe.Pointer) error {
-	bp := si.getBlueprint()
-	if bp == nil || len(bp.Ops) == 0 {
-		return m.encodeStructGo(si, base)
-	}
-	return m.execVM(bp, base)
-}
-
-// encodeSliceNative runs the native slice program when available.
-func (m *marshaler) encodeSliceNative(si *EncSliceInfo, base unsafe.Pointer) error {
-	bp := si.getBlueprint()
-	if bp == nil || len(bp.Ops) == 0 {
-		return m.encodeSliceGo(si, base)
-	}
-	return m.execVM(bp, base)
-}
-
-// encodeArrayNative runs the native array program when available.
-func (m *marshaler) encodeArrayNative(ai *EncArrayInfo, base unsafe.Pointer) error {
-	bp := ai.getBlueprint()
-	if bp == nil || len(bp.Ops) == 0 {
-		return m.encodeArrayGo(ai, base)
-	}
-	return m.execVM(bp, base)
-}
-
-// encodeMapNative runs the native map program for supported string-keyed maps.
-func (m *marshaler) encodeMapNative(mi *EncMapInfo, ptr unsafe.Pointer) error {
-	bp := mi.getBlueprint()
-	if bp == nil || len(bp.Ops) == 0 {
-		return m.encodeMapFallback(mi, ptr)
-	}
-	return m.execVM(bp, ptr)
-}
-
 // execVM drives the Go<->C VM loop around one Blueprint.
 func (m *marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	// m.vmCtx is shared state, so native VM entry cannot be re-entrant.
@@ -327,7 +291,7 @@ func (m *marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 			return err
 		}
 	} else {
-		if err := m.encodeValue(fb.TI, fieldPtr); err != nil {
+		if err := m.encodeTop(fb.TI, fieldPtr); err != nil {
 			return err
 		}
 	}
@@ -372,7 +336,7 @@ func (m *marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 			return err
 		}
 	} else {
-		if err := m.encodeMap(mapInfo, mapPtr); err != nil {
+		if err := m.encodeTop(fb.TI, mapPtr); err != nil {
 			return err
 		}
 	}

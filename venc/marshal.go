@@ -161,11 +161,7 @@ func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
 			}
 
 			var err error
-			if fn := ti.EncodeFn; fn != nil {
-				err = fn(unsafe.Pointer(m), elemPtr)
-			} else {
-				err = &UnsupportedTypeError{Type: ti.Type}
-			}
+			err = m.encodeTop(ti, elemPtr)
 
 			if err != nil {
 				putMarshaler(m)
@@ -195,14 +191,9 @@ func marshalSlow[T any](m *marshaler, v T) ([]byte, error) {
 		m.buf = gort.MakeDirtyBytes(0, max(marshalBufInitSize, hint))
 	}
 
-	if fn := ti.EncodeFn; fn != nil {
-		if err := fn(unsafe.Pointer(m), ptr); err != nil {
-			putMarshaler(m)
-			return nil, err
-		}
-	} else {
+	if err := m.encodeTop(ti, ptr); err != nil {
 		putMarshaler(m)
-		return nil, &UnsupportedTypeError{Type: ti.Type}
+		return nil, err
 	}
 
 	if n := int64(len(m.buf)); n > ti.AdaptiveHint.Load() {
@@ -222,7 +213,7 @@ func MarshalIndent[T any](v T, prefix, indent string, opts ...MarshalOption) ([]
 	m.indent = indent
 
 	ti, ptr := marshalTarget(v)
-	if err := m.encodeValue(ti, ptr); err != nil {
+	if err := m.encodeTop(ti, ptr); err != nil {
 		putMarshaler(m)
 		return nil, err
 	}
@@ -239,7 +230,7 @@ func AppendMarshal[T any](dst []byte, v T, opts ...MarshalOption) ([]byte, error
 	m.buf = dst
 
 	ti, ptr := marshalTarget(v)
-	if err := m.encodeValue(ti, ptr); err != nil {
+	if err := m.encodeTop(ti, ptr); err != nil {
 		m.buf = nil // detach caller's buffer before pooling
 		putMarshaler(m)
 		return dst, err
@@ -300,97 +291,142 @@ func (m *marshaler) finalize() []byte {
 	return result
 }
 
-// encodeValue dispatches through the pre-bound EncodeFn.
-func (m *marshaler) encodeValue(ti *EncTypeInfo, ptr unsafe.Pointer) error {
-	if fn := ti.EncodeFn; fn != nil {
-		return fn(unsafe.Pointer(m), ptr)
+// exec runs a compiled Blueprint through the best available VM.
+func (m *marshaler) exec(bp *Blueprint, base unsafe.Pointer) error {
+	if encvm.Available && !m.inVM && (m.indent == "" || isSimpleIndent(m.prefix, m.indent) > 0) {
+		return m.execNative(bp, base)
 	}
-	return &UnsupportedTypeError{Type: ti.Type}
+	return m.goVM(bp, base)
 }
 
-func (m *marshaler) encodeStruct(si *EncStructInfo, base unsafe.Pointer) error {
-	if m.indent != "" {
-		if !m.inVM && encvm.Available && isSimpleIndent(m.prefix, m.indent) > 0 {
-			return m.encodeStructNative(si, base)
-		}
-		if bp := si.getBlueprint(); bp != nil && len(bp.Ops) > 0 {
-			return m.goVM(bp, base)
-		}
-		return m.encodeStructIndent(si, base)
-	}
-
-	if m.inVM {
-		if bp := si.getBlueprint(); bp != nil && len(bp.Ops) > 0 {
-			return m.goVM(bp, base)
-		}
-		return m.encodeStructGo(si, base)
-	}
-
-	if encvm.Available {
-		return m.encodeStructNative(si, base)
-	}
-
-	if bp := si.getBlueprint(); bp != nil && len(bp.Ops) > 0 {
-		return m.goVM(bp, base)
-	}
-	return m.encodeStructGo(si, base)
+// execNative drives the C VM. Moved from encvm_exec.go for colocation.
+func (m *marshaler) execNative(bp *Blueprint, base unsafe.Pointer) error {
+	return m.execVM(bp, base)
 }
 
-func (m *marshaler) encodeSlice(si *EncSliceInfo, ptr unsafe.Pointer) error {
-	sh := (*SliceHeader)(ptr)
-
-	if sh.Data == nil {
-		m.buf = append(m.buf, litNull...)
+// encodeTop is the universal encode dispatch. It replaces the old EncodeFn
+// function-pointer approach with a direct Kind switch.
+func (m *marshaler) encodeTop(ti *EncTypeInfo, ptr unsafe.Pointer) error {
+	// Custom marshal hooks — must call user code, cannot be compiled to bytecode.
+	if ti.TypeFlags&EncTypeFlagHasMarshalFn != 0 && ti.MarshalFn != nil {
+		data, err := ti.MarshalFn(ptr)
+		if err != nil {
+			return err
+		}
+		if len(data) == 0 {
+			m.buf = append(m.buf, litNull...)
+		} else {
+			m.buf = append(m.buf, data...)
+		}
+		return nil
+	}
+	if ti.TypeFlags&EncTypeFlagHasTextMarshalFn != 0 && ti.TextMarshalFn != nil {
+		data, err := ti.TextMarshalFn(ptr)
+		if err != nil {
+			return err
+		}
+		m.encodeString(unsafeString(data))
 		return nil
 	}
 
-	if si.ElemTI.Kind == typ.KindUint8 && si.ElemSize == 1 {
-		return m.encodeByteSlice(sh)
-	}
-
-	if !m.inVM && encvm.Available {
-		if m.indent == "" || isSimpleIndent(m.prefix, m.indent) > 0 {
-			return m.encodeSliceNative(si, ptr)
+	switch ti.Kind {
+	case typ.KindBool:
+		if *(*bool)(ptr) {
+			m.buf = append(m.buf, litTrue...)
+		} else {
+			m.buf = append(m.buf, litFalse...)
 		}
-	}
-
-	if bp := si.getBlueprint(); bp != nil && len(bp.Ops) > 0 {
-		return m.goVM(bp, ptr)
-	}
-	return m.encodeSliceGo(si, ptr)
-}
-
-func (m *marshaler) encodeArray(ai *EncArrayInfo, ptr unsafe.Pointer) error {
-	if ai.ElemTI.Kind == typ.KindUint8 && ai.ElemSize == 1 {
-		return m.encodeByteArray(ai, ptr)
-	}
-
-	if !m.inVM && encvm.Available {
-		if m.indent == "" || isSimpleIndent(m.prefix, m.indent) > 0 {
-			return m.encodeArrayNative(ai, ptr)
+	case typ.KindInt:
+		m.appendInt64(int64(*(*int)(ptr)))
+	case typ.KindInt8:
+		m.appendInt64(int64(*(*int8)(ptr)))
+	case typ.KindInt16:
+		m.appendInt64(int64(*(*int16)(ptr)))
+	case typ.KindInt32:
+		m.appendInt64(int64(*(*int32)(ptr)))
+	case typ.KindInt64:
+		m.appendInt64(*(*int64)(ptr))
+	case typ.KindUint:
+		m.appendUint64(uint64(*(*uint)(ptr)))
+	case typ.KindUint8:
+		m.appendUint64(uint64(*(*uint8)(ptr)))
+	case typ.KindUint16:
+		m.appendUint64(uint64(*(*uint16)(ptr)))
+	case typ.KindUint32:
+		m.appendUint64(uint64(*(*uint32)(ptr)))
+	case typ.KindUint64:
+		m.appendUint64(*(*uint64)(ptr))
+	case typ.KindFloat32:
+		return m.encodeFloat32(ptr)
+	case typ.KindFloat64:
+		return m.encodeFloat64(ptr)
+	case typ.KindString:
+		m.encodeString(*(*string)(ptr))
+	case typ.KindRawMessage:
+		raw := *(*[]byte)(ptr)
+		if len(raw) == 0 {
+			m.buf = append(m.buf, litNull...)
+		} else {
+			m.buf = append(m.buf, raw...)
 		}
-	}
-
-	if bp := ai.getBlueprint(); bp != nil && len(bp.Ops) > 0 {
-		return m.goVM(bp, ptr)
-	}
-	return m.encodeArrayGo(ai, ptr)
-}
-
-func (m *marshaler) encodeMap(mi *EncMapInfo, ptr unsafe.Pointer) error {
-	if !m.inVM && encvm.Available && mi.IsStringKey {
-		if m.indent == "" || isSimpleIndent(m.prefix, m.indent) > 0 {
-			return m.encodeMapNative(mi, ptr)
+	case typ.KindNumber:
+		s := *(*string)(ptr)
+		if s == "" {
+			m.buf = append(m.buf, '0')
+		} else {
+			m.buf = append(m.buf, s...)
 		}
+	case typ.KindStruct:
+		si := ti.ResolveStruct()
+		return m.exec(si.getBlueprint(), ptr)
+	case typ.KindSlice:
+		si := ti.ResolveSlice()
+		sh := (*SliceHeader)(ptr)
+		if sh.Data == nil {
+			m.buf = append(m.buf, litNull...)
+			return nil
+		}
+		if si.ElemTI.Kind == typ.KindUint8 && si.ElemSize == 1 {
+			return m.encodeByteSlice(sh)
+		}
+		return m.exec(si.getBlueprint(), ptr)
+	case typ.KindArray:
+		ai := ti.ResolveArray()
+		if ai.ElemTI.Kind == typ.KindUint8 && ai.ElemSize == 1 {
+			return m.encodeByteArray(ai, ptr)
+		}
+		return m.exec(ai.getBlueprint(), ptr)
+	case typ.KindMap:
+		mi := ti.ResolveMap()
+		if mi.IsStringKey && encvm.Available && !m.inVM && (m.indent == "" || isSimpleIndent(m.prefix, m.indent) > 0) {
+			return m.exec(mi.getBlueprint(), ptr)
+		}
+		if mi.MapKind == typ.MapVariantStrStr {
+			return m.encodeMapStringString(ptr)
+		}
+		return m.encodeMapGeneric(mi, ptr)
+	case typ.KindPointer:
+		pi := ti.ResolvePointer()
+		elemPtr := *(*unsafe.Pointer)(ptr)
+		if elemPtr == nil {
+			m.buf = append(m.buf, litNull...)
+			return nil
+		}
+		return m.encodeTop(pi.ElemTI, elemPtr)
+	case typ.KindAny:
+		return m.encodeAny(*(*any)(ptr))
+	case typ.KindIface:
+		// Non-empty interface: need reflect to extract concrete value.
+		rv := reflect.NewAt(ti.Type, ptr).Elem()
+		if rv.IsNil() {
+			m.buf = append(m.buf, litNull...)
+			return nil
+		}
+		return m.encodeAnyReflect(rv.Elem().Interface())
+	default:
+		return &UnsupportedTypeError{Type: ti.Type}
 	}
-	return m.encodeMapFallback(mi, ptr)
-}
-
-func (m *marshaler) encodeMapFallback(mi *EncMapInfo, ptr unsafe.Pointer) error {
-	if mi.MapKind == typ.MapVariantStrStr {
-		return m.encodeMapStringString(ptr)
-	}
-	return m.encodeMapGeneric(mi, ptr)
+	return nil
 }
 
 // isSimpleIndent reports whether the native VM can synthesize this indent pattern.

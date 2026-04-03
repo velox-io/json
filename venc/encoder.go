@@ -164,7 +164,7 @@ func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 		return err
 	}
 
-	if err := m.encodeValue(ti, ptr); err != nil {
+	if err := m.encodeTop(ti, ptr); err != nil {
 		putMarshaler(m)
 		return enc.stickyErr(err)
 	}

@@ -95,7 +95,6 @@ func buildEncRec(t reflect.Type, building map[reflect.Type]*EncTypeInfo) *EncTyp
 	eti := newEncTypeInfoFromUT(ut)
 	building[t] = eti
 	fillContainerExt(eti, ut, building)
-	bindEncodeFn(eti)
 	bindSizeFn(eti)
 	eti.HintBytes = computeHintBytes(eti, 0)
 	return eti
@@ -151,11 +150,7 @@ func fixupStructFields(si *EncStructInfo, building map[reflect.Type]*EncTypeInfo
 				fi.Ext = v.(*EncTypeInfo).Ext
 			}
 		}
-		if fi.EncodeFn == nil {
-			bindEncodeFn(fi)
-		}
 	}
-	buildStructEncodeSteps(si)
 }
 
 func isContainerKind(k typ.ElemTypeKind) bool {

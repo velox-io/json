@@ -211,7 +211,7 @@ func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 			typ.KindUint, typ.KindUint8, typ.KindUint16, typ.KindUint32, typ.KindUint64,
 			typ.KindFloat32, typ.KindFloat64,
 			typ.KindString,
-			typ.KindRawMessage, typ.KindNumber:
+			typ.KindNumber:
 			if needsOmitempty {
 				emitSkipIfZero(b, fi, fieldOff, 16+8, fi.Kind)
 			}
@@ -457,7 +457,7 @@ func emitDerefBody(b *irBuilder, elemTI *EncTypeInfo) {
 		typ.KindUint, typ.KindUint8, typ.KindUint16, typ.KindUint32, typ.KindUint64,
 		typ.KindFloat32, typ.KindFloat64,
 		typ.KindString,
-		typ.KindRawMessage, typ.KindNumber:
+		typ.KindNumber:
 		b.emit(IRInst{
 			Op:       kindToOpcode(elemTI.Kind),
 			FieldOff: 0,
@@ -721,7 +721,7 @@ func emitElementBody(b *irBuilder, elemTI *EncTypeInfo) {
 		typ.KindUint, typ.KindUint8, typ.KindUint16, typ.KindUint32, typ.KindUint64,
 		typ.KindFloat32, typ.KindFloat64,
 		typ.KindString,
-		typ.KindRawMessage, typ.KindNumber:
+		typ.KindNumber:
 		b.emit(IRInst{
 			Op:       kindToOpcode(elemTI.Kind),
 			FieldOff: 0,

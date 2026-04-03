@@ -222,78 +222,6 @@ func encodeAnyValue(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
 	return m.encodeAny(*(*any)(ptr))
 }
 
-func makeEncodeStruct(si *EncStructInfo) func(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	return func(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-		m := (*marshaler)(ctx)
-		return m.encodeStruct(si, ptr)
-	}
-}
-
-func makeEncodeSlice(si *EncSliceInfo) func(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	return func(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-		m := (*marshaler)(ctx)
-		return m.encodeSlice(si, ptr)
-	}
-}
-
-func makeEncodeArray(ai *EncArrayInfo) func(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	return func(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-		m := (*marshaler)(ctx)
-		return m.encodeArray(ai, ptr)
-	}
-}
-
-func makeEncodePointer(pi *EncPointerInfo) func(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	return func(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-		m := (*marshaler)(ctx)
-		return m.encodePointer(pi, ptr)
-	}
-}
-
-func makeEncodeMap(mi *EncMapInfo) func(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	return func(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-		m := (*marshaler)(ctx)
-		return m.encodeMap(mi, ptr)
-	}
-}
-
-func makeEncodeIface(ti *EncTypeInfo) func(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	ifaceType := ti.Type
-	return func(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-		m := (*marshaler)(ctx)
-		rv := reflect.NewAt(ifaceType, ptr).Elem()
-		if rv.IsNil() {
-			m.buf = append(m.buf, litNull...)
-			return nil
-		}
-		return m.encodeAnyReflect(rv.Elem().Interface())
-	}
-}
-
-func makeEncodeMarshalJSON(marshalFn func(ptr unsafe.Pointer) ([]byte, error)) func(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	return func(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-		m := (*marshaler)(ctx)
-		data, err := marshalFn(ptr)
-		if err != nil {
-			return err
-		}
-		m.buf = append(m.buf, data...)
-		return nil
-	}
-}
-
-func makeEncodeTextMarshal(textMarshalFn func(ptr unsafe.Pointer) ([]byte, error)) func(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	return func(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-		m := (*marshaler)(ctx)
-		text, err := textMarshalFn(ptr)
-		if err != nil {
-			return err
-		}
-		m.encodeString(string(text))
-		return nil
-	}
-}
-
 // encodeValueQuoted implements the `,string` field option.
 func (m *marshaler) encodeValueQuoted(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	switch ti.Kind {
@@ -350,7 +278,7 @@ func (m *marshaler) encodeValueQuoted(ti *EncTypeInfo, ptr unsafe.Pointer) error
 		}
 		return m.encodeValueQuoted(pi.ElemTI, elemPtr)
 	default:
-		return m.encodeValue(ti, ptr)
+		return m.encodeTop(ti, ptr)
 	}
 	return nil
 }
@@ -402,7 +330,7 @@ func (m *marshaler) encodeStructIndent(si *EncStructInfo, base unsafe.Pointer) e
 			if err := m.encodeValueQuoted(fi, fieldPtr); err != nil {
 				return err
 			}
-		} else if err := m.encodeValue(fi, fieldPtr); err != nil {
+		} else if err := m.encodeTop(fi, fieldPtr); err != nil {
 			return err
 		}
 	}
@@ -440,7 +368,7 @@ func (m *marshaler) encodeSliceGo(si *EncSliceInfo, ptr unsafe.Pointer) error {
 		}
 
 		elemPtr := unsafe.Add(sh.Data, uintptr(i)*elemSize)
-		if err := m.encodeValue(si.ElemTI, elemPtr); err != nil {
+		if err := m.encodeTop(si.ElemTI, elemPtr); err != nil {
 			return err
 		}
 	}
@@ -487,7 +415,7 @@ func (m *marshaler) encodeArrayGo(ai *EncArrayInfo, ptr unsafe.Pointer) error {
 		}
 
 		elemPtr := unsafe.Add(ptr, uintptr(i)*elemSize)
-		if err := m.encodeValue(ai.ElemTI, elemPtr); err != nil {
+		if err := m.encodeTop(ai.ElemTI, elemPtr); err != nil {
 			return err
 		}
 	}
@@ -519,7 +447,7 @@ func (m *marshaler) encodePointer(pi *EncPointerInfo, ptr unsafe.Pointer) error 
 		m.buf = append(m.buf, litNull...)
 		return nil
 	}
-	return m.encodeValue(pi.ElemTI, elemPtr)
+	return m.encodeTop(pi.ElemTI, elemPtr)
 }
 
 func (m *marshaler) encodeMapStringString(ptr unsafe.Pointer) error {
@@ -660,7 +588,7 @@ func (m *marshaler) encodeMapGeneric(mi *EncMapInfo, ptr unsafe.Pointer) error {
 		}
 
 		elemPtr := mapsIterElem(&it)
-		if err := m.encodeValue(mi.ValTI, elemPtr); err != nil {
+		if err := m.encodeTop(mi.ValTI, elemPtr); err != nil {
 			return err
 		}
 		mapsIterNext(&it)
@@ -909,179 +837,9 @@ func (m *marshaler) encodeAnyReflect(v any) error {
 
 	tmp := reflect.New(rv.Type())
 	tmp.Elem().Set(rv)
-	return m.encodeValue(ti, tmp.UnsafePointer())
+	return m.encodeTop(ti, tmp.UnsafePointer())
 }
 
-// bindEncodeFn installs the highest-priority encode path on ti.
-func bindEncodeFn(ti *EncTypeInfo) {
-	// RawMessage and Number need custom empty-value handling before interface hooks.
-	switch ti.Kind {
-	case typ.KindRawMessage:
-		ti.EncodeFn = encodeRawMessageFn
-		return
-	case typ.KindNumber:
-		ti.EncodeFn = encodeNumberFn
-		return
-	}
-	if ti.TypeFlags&EncTypeFlagHasMarshalFn != 0 && ti.MarshalFn != nil {
-		ti.EncodeFn = makeEncodeMarshalJSON(ti.MarshalFn)
-		return
-	}
-	if ti.TypeFlags&EncTypeFlagHasTextMarshalFn != 0 && ti.TextMarshalFn != nil {
-		ti.EncodeFn = makeEncodeTextMarshal(ti.TextMarshalFn)
-		return
-	}
-	switch ti.Kind {
-	case typ.KindBool:
-		ti.EncodeFn = encodeBool
-	case typ.KindInt:
-		ti.EncodeFn = encodeInt
-	case typ.KindInt8:
-		ti.EncodeFn = encodeInt8
-	case typ.KindInt16:
-		ti.EncodeFn = encodeInt16
-	case typ.KindInt32:
-		ti.EncodeFn = encodeInt32
-	case typ.KindInt64:
-		ti.EncodeFn = encodeInt64Fn
-	case typ.KindUint:
-		ti.EncodeFn = encodeUint
-	case typ.KindUint8:
-		ti.EncodeFn = encodeUint8
-	case typ.KindUint16:
-		ti.EncodeFn = encodeUint16
-	case typ.KindUint32:
-		ti.EncodeFn = encodeUint32
-	case typ.KindUint64:
-		ti.EncodeFn = encodeUint64Fn
-	case typ.KindFloat32:
-		ti.EncodeFn = encodeFloat32Value
-	case typ.KindFloat64:
-		ti.EncodeFn = encodeFloat64Value
-	case typ.KindString:
-		ti.EncodeFn = encodeStringValue
-	case typ.KindAny:
-		ti.EncodeFn = encodeAnyValue
-	case typ.KindStruct:
-		if si := ti.ResolveStruct(); si != nil {
-			ti.EncodeFn = makeEncodeStruct(si)
-		}
-	case typ.KindSlice:
-		if si := ti.ResolveSlice(); si != nil {
-			ti.EncodeFn = makeEncodeSlice(si)
-		}
-	case typ.KindArray:
-		if ai := ti.ResolveArray(); ai != nil {
-			ti.EncodeFn = makeEncodeArray(ai)
-		}
-	case typ.KindPointer:
-		if pi := ti.ResolvePointer(); pi != nil {
-			ti.EncodeFn = makeEncodePointer(pi)
-		}
-	case typ.KindMap:
-		if mi := ti.ResolveMap(); mi != nil {
-			ti.EncodeFn = makeEncodeMap(mi)
-		}
-	case typ.KindIface:
-		ti.EncodeFn = makeEncodeIface(ti)
-	}
-}
-
-// buildStructEncodeSteps bakes field offsets, keys, and omitempty checks into closures.
-func buildStructEncodeSteps(si *EncStructInfo) {
-	steps := make([]StructEncodeStep, len(si.Fields))
-	for i := range si.Fields {
-		fi := &si.Fields[i]
-		offset := fi.Offset
-		keyBytes := fi.KeyBytes
-		encodeFn := fi.EncodeFn
-
-		hasOmitEmpty := fi.TagFlags&EncTagFlagOmitEmpty != 0 && fi.IsZeroFn != nil
-		isQuoted := fi.TagFlags&EncTagFlagQuoted != 0
-
-		switch {
-		case hasOmitEmpty && isQuoted:
-			isZeroFn := fi.IsZeroFn
-			fiRef := fi
-			steps[i] = func(ctx unsafe.Pointer, base unsafe.Pointer, first bool) (bool, error) {
-				m := (*marshaler)(ctx)
-				ptr := unsafe.Add(base, offset)
-				if isZeroFn(ptr) {
-					return first, nil
-				}
-				if !first {
-					m.buf = append(m.buf, ',')
-				}
-				m.buf = append(m.buf, keyBytes...)
-				return false, m.encodeValueQuoted(fiRef, ptr)
-			}
-		case hasOmitEmpty:
-			isZeroFn := fi.IsZeroFn
-			if encodeFn != nil {
-				steps[i] = func(ctx unsafe.Pointer, base unsafe.Pointer, first bool) (bool, error) {
-					m := (*marshaler)(ctx)
-					ptr := unsafe.Add(base, offset)
-					if isZeroFn(ptr) {
-						return first, nil
-					}
-					if !first {
-						m.buf = append(m.buf, ',')
-					}
-					m.buf = append(m.buf, keyBytes...)
-					return false, encodeFn(unsafe.Pointer(m), ptr)
-				}
-			} else {
-				// Recursive types resolve through encodeValue at runtime.
-				fiRef := fi
-				steps[i] = func(ctx unsafe.Pointer, base unsafe.Pointer, first bool) (bool, error) {
-					m := (*marshaler)(ctx)
-					ptr := unsafe.Add(base, offset)
-					if isZeroFn(ptr) {
-						return first, nil
-					}
-					if !first {
-						m.buf = append(m.buf, ',')
-					}
-					m.buf = append(m.buf, keyBytes...)
-					return false, m.encodeValue(fiRef, ptr)
-				}
-			}
-		case isQuoted:
-			fiRef := fi
-			steps[i] = func(ctx unsafe.Pointer, base unsafe.Pointer, first bool) (bool, error) {
-				m := (*marshaler)(ctx)
-				if !first {
-					m.buf = append(m.buf, ',')
-				}
-				m.buf = append(m.buf, keyBytes...)
-				return false, m.encodeValueQuoted(fiRef, unsafe.Add(base, offset))
-			}
-		default:
-			if encodeFn != nil {
-				steps[i] = func(ctx unsafe.Pointer, base unsafe.Pointer, first bool) (bool, error) {
-					m := (*marshaler)(ctx)
-					if !first {
-						m.buf = append(m.buf, ',')
-					}
-					m.buf = append(m.buf, keyBytes...)
-					return false, encodeFn(unsafe.Pointer(m), unsafe.Add(base, offset))
-				}
-			} else {
-				// Recursive types resolve through encodeValue at runtime.
-				fiRef := fi
-				steps[i] = func(ctx unsafe.Pointer, base unsafe.Pointer, first bool) (bool, error) {
-					m := (*marshaler)(ctx)
-					if !first {
-						m.buf = append(m.buf, ',')
-					}
-					m.buf = append(m.buf, keyBytes...)
-					return false, m.encodeValue(fiRef, unsafe.Add(base, offset))
-				}
-			}
-		}
-	}
-	si.EncodeSteps = steps
-}
 
 // computeHintBytes returns a one-time static output-size estimate.
 func computeHintBytes(ti *EncTypeInfo, depth int) int {
