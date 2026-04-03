@@ -58,7 +58,7 @@ func getMarshaler() *marshaler {
 	m.indent = ""
 	m.prefix = ""
 	m.indentDepth = 0
-	m.nativeCompat = true // compact mode is always C-VM compatible
+	m.nativeCompat = encvm.Available // compact mode: native OK if C VM linked
 	m.flags = 0
 	m.flushFn = nil
 	// Compact-mode VM entry assumes the indent fields are zeroed.
@@ -213,7 +213,7 @@ func MarshalIndent[T any](v T, prefix, indent string, opts ...MarshalOption) ([]
 
 	m.prefix = prefix
 	m.indent = indent
-	m.nativeCompat = isSimpleIndent(prefix, indent) > 0
+	m.nativeCompat = encvm.Available && isSimpleIndent(prefix, indent) > 0
 
 	ti, ptr := marshalTarget(v)
 	if err := m.encodeTop(ti, ptr); err != nil {
@@ -296,7 +296,7 @@ func (m *marshaler) finalize() []byte {
 
 // exec runs a compiled Blueprint through the best available VM.
 func (m *marshaler) exec(bp *Blueprint, base unsafe.Pointer) error {
-	if encvm.Available && !m.inVM && m.nativeCompat {
+	if !m.inVM && m.nativeCompat {
 		return m.execNative(bp, base)
 	}
 	return m.goVM(bp, base)
@@ -401,7 +401,7 @@ func (m *marshaler) encodeTop(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 		return m.exec(ai.getBlueprint(), ptr)
 	case typ.KindMap:
 		mi := ti.ResolveMap()
-		if mi.IsStringKey && encvm.Available && !m.inVM && (m.indent == "" || isSimpleIndent(m.prefix, m.indent) > 0) {
+		if mi.IsStringKey && !m.inVM && m.nativeCompat {
 			return m.exec(mi.getBlueprint(), ptr)
 		}
 		if mi.MapKind == typ.MapVariantStrStr {

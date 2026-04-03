@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"github.com/velox-io/json/gort"
+	"github.com/velox-io/json/native/encvm"
 )
 
 // EncoderOption configures an [Encoder].
@@ -150,7 +151,7 @@ func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	m.prefix = enc.prefix
 	m.indent = enc.indent
 	if enc.indent != "" {
-		m.nativeCompat = isSimpleIndent(enc.prefix, enc.indent) > 0
+		m.nativeCompat = encvm.Available && isSimpleIndent(enc.prefix, enc.indent) > 0
 	}
 
 	hint := marshalHint(ti, ptr)
