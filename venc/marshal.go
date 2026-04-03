@@ -317,6 +317,10 @@ func (m *marshaler) encodeStruct(si *EncStructInfo, base unsafe.Pointer) error {
 	}
 
 	if m.inVM {
+		// Re-entrant: use Go VM if blueprint available, else old recursive path.
+		if bp := si.getBlueprint(); bp != nil && len(bp.Ops) > 0 {
+			return m.goVM(bp, base)
+		}
 		return m.encodeStructGo(si, base)
 	}
 
@@ -324,6 +328,10 @@ func (m *marshaler) encodeStruct(si *EncStructInfo, base unsafe.Pointer) error {
 		return m.encodeStructNative(si, base)
 	}
 
+	// No C VM: use Go VM if blueprint available, else old recursive path.
+	if bp := si.getBlueprint(); bp != nil && len(bp.Ops) > 0 {
+		return m.goVM(bp, base)
+	}
 	return m.encodeStructGo(si, base)
 }
 
@@ -345,6 +353,9 @@ func (m *marshaler) encodeSlice(si *EncSliceInfo, ptr unsafe.Pointer) error {
 		}
 	}
 
+	if bp := si.getBlueprint(); bp != nil && len(bp.Ops) > 0 {
+		return m.goVM(bp, ptr)
+	}
 	return m.encodeSliceGo(si, ptr)
 }
 
@@ -359,6 +370,9 @@ func (m *marshaler) encodeArray(ai *EncArrayInfo, ptr unsafe.Pointer) error {
 		}
 	}
 
+	if bp := ai.getBlueprint(); bp != nil && len(bp.Ops) > 0 {
+		return m.goVM(bp, ptr)
+	}
 	return m.encodeArrayGo(ai, ptr)
 }
 
