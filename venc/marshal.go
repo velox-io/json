@@ -5,6 +5,7 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/native/encvm"
 	"github.com/velox-io/json/typ"
 )
@@ -35,7 +36,7 @@ var _ [0]byte = [unsafe.Offsetof(marshaler{}.vmCtx)]byte{}
 var marshalerPool = sync.Pool{
 	New: func() any {
 		return &marshaler{
-			buf: make([]byte, 0, marshalBufInitSize),
+			buf: gort.MakeDirtyBytes(0, marshalBufInitSize),
 		}
 	},
 }
@@ -47,7 +48,7 @@ var indentTplPool = sync.Pool{
 }
 
 func init() {
-	marshalerPool.Put(&marshaler{buf: make([]byte, 0, marshalBufInitSize)})
+	marshalerPool.Put(&marshaler{buf: gort.MakeDirtyBytes(0, marshalBufInitSize)})
 }
 
 func getMarshaler() *marshaler {
@@ -154,8 +155,9 @@ func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
 		if elemPtr != nil {
 			ti := encElemTypeInfoOf(rtp, rt)
 
-			if ti.HintBytes > cap(m.buf) {
-				m.buf = make([]byte, 0, max(marshalBufInitSize, ti.HintBytes))
+			hint := max(ti.HintBytes, int(ti.AdaptiveHint.Load()))
+			if hint > cap(m.buf) {
+				m.buf = gort.MakeDirtyBytes(0, max(marshalBufInitSize, hint))
 			}
 
 			var err error
@@ -168,6 +170,10 @@ func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
 			if err != nil {
 				putMarshaler(m)
 				return nil, err
+			}
+
+			if n := int64(len(m.buf)); n > ti.AdaptiveHint.Load() {
+				ti.AdaptiveHint.Store(n + n/5) // +20% headroom to avoid BufFull on next call
 			}
 
 			return m.finalize(), nil
@@ -184,8 +190,9 @@ func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
 func marshalSlow[T any](m *marshaler, v T) ([]byte, error) {
 	ti, ptr := marshalTarget(v)
 
-	if ti.HintBytes > cap(m.buf) {
-		m.buf = make([]byte, 0, max(marshalBufInitSize, ti.HintBytes))
+	hint := max(ti.HintBytes, int(ti.AdaptiveHint.Load()))
+	if hint > cap(m.buf) {
+		m.buf = gort.MakeDirtyBytes(0, max(marshalBufInitSize, hint))
 	}
 
 	if fn := ti.EncodeFn; fn != nil {
@@ -196,6 +203,10 @@ func marshalSlow[T any](m *marshaler, v T) ([]byte, error) {
 	} else {
 		putMarshaler(m)
 		return nil, &UnsupportedTypeError{Type: ti.Type}
+	}
+
+	if n := int64(len(m.buf)); n > ti.AdaptiveHint.Load() {
+		ti.AdaptiveHint.Store(n + n/5) // +20% headroom to avoid BufFull on next call
 	}
 
 	return m.finalize(), nil

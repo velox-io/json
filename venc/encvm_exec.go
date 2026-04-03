@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"unsafe"
 
+	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/native/encvm"
 	"github.com/velox-io/json/typ"
 )
@@ -131,7 +132,7 @@ func (m *marshaler) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(unsafe
 		// so we must check on every iteration, not just after BufFull.
 		if len(m.buf) == cap(m.buf) {
 			newCap := max(cap(m.buf)*2, 4096)
-			newBuf := make([]byte, len(m.buf), newCap)
+			newBuf := gort.MakeDirtyBytes(len(m.buf), newCap)
 			copy(newBuf, m.buf)
 			m.buf = newBuf
 		}
@@ -163,7 +164,7 @@ func (m *marshaler) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(unsafe
 				}
 			} else {
 				newCap := max(cap(m.buf)*2, len(m.buf)+4096)
-				newBuf := make([]byte, len(m.buf), newCap)
+				newBuf := gort.MakeDirtyBytes(len(m.buf), newCap)
 				copy(newBuf, m.buf)
 				m.buf = newBuf
 			}

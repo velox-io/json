@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"runtime"
 	"unsafe"
+
+	"github.com/velox-io/json/gort"
 )
 
 // EncoderOption configures an [Encoder].
@@ -148,8 +150,9 @@ func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	m.prefix = enc.prefix
 	m.indent = enc.indent
 
-	if ti.HintBytes > cap(m.buf) {
-		m.buf = make([]byte, 0, max(marshalBufInitSize, ti.HintBytes))
+	hint := max(ti.HintBytes, int(ti.AdaptiveHint.Load()))
+	if hint > cap(m.buf) {
+		m.buf = gort.MakeDirtyBytes(0, max(marshalBufInitSize, hint))
 	}
 
 	// Stream out completed chunks to keep memory bounded.
