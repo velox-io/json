@@ -150,7 +150,7 @@ func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	m.prefix = enc.prefix
 	m.indent = enc.indent
 
-	hint := max(ti.HintBytes, int(ti.AdaptiveHint.Load()))
+	hint := marshalHint(ti, ptr)
 	if hint > cap(m.buf) {
 		m.buf = gort.MakeDirtyBytes(0, max(marshalBufInitSize, hint))
 	}

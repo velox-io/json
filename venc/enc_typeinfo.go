@@ -38,6 +38,11 @@ type EncTypeInfo struct {
 
 	EncodeFn func(ctx unsafe.Pointer, ptr unsafe.Pointer) error
 
+	// SizeFn predicts JSON output size by scanning runtime data (lengths, nil-ness).
+	// Returns 0 if prediction is unavailable (interface{}, custom marshal, etc.).
+	// Compiled once per type at registration time.
+	SizeFn func(ptr unsafe.Pointer) int
+
 	// Custom hooks; nil for most types.
 	MarshalFn     func(ptr unsafe.Pointer) ([]byte, error)
 	TextMarshalFn func(ptr unsafe.Pointer) ([]byte, error)

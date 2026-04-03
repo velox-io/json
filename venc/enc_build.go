@@ -96,6 +96,7 @@ func buildEncRec(t reflect.Type, building map[reflect.Type]*EncTypeInfo) *EncTyp
 	building[t] = eti
 	fillContainerExt(eti, ut, building)
 	bindEncodeFn(eti)
+	bindSizeFn(eti)
 	eti.HintBytes = computeHintBytes(eti, 0)
 	return eti
 }
@@ -185,6 +186,8 @@ func compileStructInfo(t reflect.Type, info *typ.StructTypeInfo, building map[re
 		fi.KeyBytesIndent = sf.KeyBytesIndent
 		fi.IsZeroFn = sf.IsZeroFn
 		fi.TagFlags = sf.TagFlags
+		fi.SizeFn = elemETI.SizeFn
+		fi.HintBytes = elemETI.HintBytes
 	}
 
 	return si

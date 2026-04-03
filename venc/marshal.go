@@ -155,7 +155,7 @@ func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
 		if elemPtr != nil {
 			ti := encElemTypeInfoOf(rtp, rt)
 
-			hint := max(ti.HintBytes, int(ti.AdaptiveHint.Load()))
+			hint := marshalHint(ti, elemPtr)
 			if hint > cap(m.buf) {
 				m.buf = gort.MakeDirtyBytes(0, max(marshalBufInitSize, hint))
 			}
@@ -173,7 +173,7 @@ func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
 			}
 
 			if n := int64(len(m.buf)); n > ti.AdaptiveHint.Load() {
-				ti.AdaptiveHint.Store(n + n/5) // +20% headroom to avoid BufFull on next call
+				ti.AdaptiveHint.Store(n + n/20) // +5% headroom to avoid BufFull on next call
 			}
 
 			return m.finalize(), nil
@@ -190,7 +190,7 @@ func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
 func marshalSlow[T any](m *marshaler, v T) ([]byte, error) {
 	ti, ptr := marshalTarget(v)
 
-	hint := max(ti.HintBytes, int(ti.AdaptiveHint.Load()))
+	hint := marshalHint(ti, ptr)
 	if hint > cap(m.buf) {
 		m.buf = gort.MakeDirtyBytes(0, max(marshalBufInitSize, hint))
 	}
@@ -206,7 +206,7 @@ func marshalSlow[T any](m *marshaler, v T) ([]byte, error) {
 	}
 
 	if n := int64(len(m.buf)); n > ti.AdaptiveHint.Load() {
-		ti.AdaptiveHint.Store(n + n/5) // +20% headroom to avoid BufFull on next call
+		ti.AdaptiveHint.Store(n + n/20) // +5% headroom to avoid BufFull on next call
 	}
 
 	return m.finalize(), nil
@@ -262,6 +262,22 @@ func marshalTarget[T any](v T) (*EncTypeInfo, unsafe.Pointer) {
 		return EncTypeInfoOf(rt.Elem()), elemPtr
 	}
 	return EncTypeInfoOf(rt), unsafe.Pointer(&v)
+}
+
+// marshalHint returns the best buffer size estimate for the given type and data.
+// Priority: AdaptiveHint (historical, most accurate) > SizeFn (data-driven) > HintBytes (static).
+func marshalHint(ti *EncTypeInfo, ptr unsafe.Pointer) int {
+	// AdaptiveHint is the most accurate — it's based on real output size + headroom.
+	if ah := int(ti.AdaptiveHint.Load()); ah > 0 {
+		return ah
+	}
+	// First call: use SizeFn if available for data-driven prediction.
+	if fn := ti.SizeFn; fn != nil {
+		if predicted := fn(ptr); predicted > 0 {
+			return predicted + predicted/20 // +5% headroom
+		}
+	}
+	return ti.HintBytes
 }
 
 // finalize detaches the output before pooling the marshaler.
