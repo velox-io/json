@@ -103,13 +103,10 @@ func buildEncRec(t reflect.Type, building map[reflect.Type]*EncTypeInfo) *EncTyp
 // newEncTypeInfoFromUT copies the shared type descriptor into encode form.
 func newEncTypeInfoFromUT(ut *typ.UniType) *EncTypeInfo {
 	eti := &EncTypeInfo{
+		UT:   ut,
 		Kind: ut.Kind,
-		Size: ut.Size,
-		Type: ut.Type,
 	}
 	if h := ut.Hooks; h != nil {
-		eti.MarshalFn = h.MarshalFn
-		eti.TextMarshalFn = h.TextMarshalFn
 		if h.MarshalFn != nil {
 			eti.TypeFlags |= typ.TypeFlagHasMarshalFn
 		}
@@ -144,9 +141,9 @@ func fixupStructFields(si *EncStructInfo, building map[reflect.Type]*EncTypeInfo
 	for i := range si.Fields {
 		fi := &si.Fields[i]
 		if fi.Ext == nil && isContainerKind(fi.Kind) {
-			if eti, ok := building[fi.Type]; ok {
+			if eti, ok := building[fi.UT.Type]; ok {
 				fi.Ext = eti.Ext
-			} else if v, ok := encTypeCache.Load(fi.Type); ok {
+			} else if v, ok := encTypeCache.Load(fi.UT.Type); ok {
 				fi.Ext = v.(*EncTypeInfo).Ext
 			}
 		}
@@ -168,15 +165,12 @@ func compileStructInfo(t reflect.Type, info *typ.StructTypeInfo, building map[re
 	for i, sf := range info.Fields {
 		elemETI := buildEncRec(sf.FieldType.Type, building)
 		fi := &si.Fields[i]
+		fi.UT = elemETI.UT
 		fi.Kind = elemETI.Kind
 		fi.TypeFlags = elemETI.TypeFlags
-		fi.Size = elemETI.Size
 		fi.Offset = sf.Offset
 		fi.JSONName = sf.JSONName
-		fi.Type = sf.FieldType.Type
 		fi.Ext = elemETI.Ext
-		fi.MarshalFn = elemETI.MarshalFn
-		fi.TextMarshalFn = elemETI.TextMarshalFn
 		fi.KeyBytes = sf.KeyBytes
 		fi.KeyBytesIndent = sf.KeyBytesIndent
 		fi.IsZeroFn = sf.IsZeroFn

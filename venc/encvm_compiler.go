@@ -1091,10 +1091,10 @@ func isTimeType(fi *EncTypeInfo) bool {
 	if fi.Kind != typ.KindStruct {
 		return false
 	}
-	if fi.Type == nil {
+	if fi.UT == nil {
 		return false
 	}
-	return fi.Type == timeType
+	return fi.UT.Type == timeType
 }
 
 // emitTime emits the native time.Time opcode with Go fallback metadata for complex zones.

@@ -311,8 +311,8 @@ func (m *marshaler) execNative(bp *Blueprint, base unsafe.Pointer) error {
 // function-pointer approach with a direct Kind switch.
 func (m *marshaler) encodeTop(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	// Custom marshal hooks — must call user code, cannot be compiled to bytecode.
-	if ti.TypeFlags&EncTypeFlagHasMarshalFn != 0 && ti.MarshalFn != nil {
-		data, err := ti.MarshalFn(ptr)
+	if ti.TypeFlags&EncTypeFlagHasMarshalFn != 0 {
+		data, err := ti.UT.Hooks.MarshalFn(ptr)
 		if err != nil {
 			return err
 		}
@@ -323,8 +323,8 @@ func (m *marshaler) encodeTop(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 		}
 		return nil
 	}
-	if ti.TypeFlags&EncTypeFlagHasTextMarshalFn != 0 && ti.TextMarshalFn != nil {
-		data, err := ti.TextMarshalFn(ptr)
+	if ti.TypeFlags&EncTypeFlagHasTextMarshalFn != 0 {
+		data, err := ti.UT.Hooks.TextMarshalFn(ptr)
 		if err != nil {
 			return err
 		}
@@ -420,14 +420,14 @@ func (m *marshaler) encodeTop(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 		return m.encodeAny(*(*any)(ptr))
 	case typ.KindIface:
 		// Non-empty interface: need reflect to extract concrete value.
-		rv := reflect.NewAt(ti.Type, ptr).Elem()
+		rv := reflect.NewAt(ti.UT.Type, ptr).Elem()
 		if rv.IsNil() {
 			m.buf = append(m.buf, litNull...)
 			return nil
 		}
 		return m.encodeAnyReflect(rv.Elem().Interface())
 	default:
-		return &UnsupportedTypeError{Type: ti.Type}
+		return &UnsupportedTypeError{Type: ti.UT.Type}
 	}
 	return nil
 }

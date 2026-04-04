@@ -269,7 +269,7 @@ func (m *marshaler) encodeMapStringString(ptr unsafe.Pointer) error {
 // encodeMapKey writes non-string map keys without building an intermediate string.
 func (m *marshaler) encodeMapKey(keyPtr unsafe.Pointer, keyTI *EncTypeInfo, keyType reflect.Type) error {
 	if keyTI.TypeFlags&EncTypeFlagHasTextMarshalFn != 0 {
-		text, err := keyTI.TextMarshalFn(keyPtr)
+		text, err := keyTI.UT.Hooks.TextMarshalFn(keyPtr)
 		if err != nil {
 			return err
 		}

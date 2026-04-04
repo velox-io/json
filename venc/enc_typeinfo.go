@@ -18,17 +18,17 @@ const (
 
 // EncTypeInfo is the cached encode descriptor for a Go type.
 type EncTypeInfo struct {
+	UT *typ.UniType // shared type descriptor (nil for struct field copies)
+
 	Kind      typ.ElemTypeKind
 	TypeFlags typ.TypeFlag
 	TagFlags  typ.TagFlag // only set on struct fields
 	_         [1]byte
 	Offset    uintptr
-	Size      uintptr
 
 	Ext unsafe.Pointer // *EncStructInfo / *EncSliceInfo / ... for container kinds
 
 	JSONName string
-	Type     reflect.Type // for errors and dynamic paths
 
 	KeyBytes       []byte       // compact `"name":`
 	KeyBytesIndent []byte       // indented `"name": `
@@ -40,10 +40,6 @@ type EncTypeInfo struct {
 	// Returns 0 if prediction is unavailable (interface{}, custom marshal, etc.).
 	// Compiled once per type at registration time.
 	SizeFn func(ptr unsafe.Pointer) int
-
-	// Custom hooks; nil for most types.
-	MarshalFn     func(ptr unsafe.Pointer) ([]byte, error)
-	TextMarshalFn func(ptr unsafe.Pointer) ([]byte, error)
 }
 
 func (d *EncTypeInfo) ResolveStruct() *EncStructInfo {
