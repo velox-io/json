@@ -71,6 +71,10 @@ func buildEncTypeInfo(t reflect.Type) *EncTypeInfo {
 	// Recursive shells stay local until every container edge is wired.
 	building := make(map[reflect.Type]*EncTypeInfo)
 	eti := buildEncRec(t, building)
+	// All types are now fully constructed (Ext wired). Bind encode functions.
+	for _, beti := range building {
+		bindEncodeFn(beti)
+	}
 	for bt, beti := range building {
 		encTypeCache.LoadOrStore(bt, beti)
 	}

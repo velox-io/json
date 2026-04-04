@@ -7,7 +7,6 @@ import (
 
 	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/native/encvm"
-	"github.com/velox-io/json/typ"
 )
 
 const (
@@ -296,138 +295,14 @@ func (m *marshaler) finalize() []byte {
 // exec runs a compiled Blueprint through the best available VM.
 func (m *marshaler) exec(bp *Blueprint, base unsafe.Pointer) error {
 	if !m.inVM && m.nativeCompat {
-		return m.execNative(bp, base)
+		return m.execVM(bp, base)
 	}
 	return m.goVM(bp, base)
 }
 
-// execNative drives the C VM. Moved from encvm_exec.go for colocation.
-func (m *marshaler) execNative(bp *Blueprint, base unsafe.Pointer) error {
-	return m.execVM(bp, base)
-}
-
-// encodeTop is the universal encode dispatch. It replaces the old EncodeFn
-// function-pointer approach with a direct Kind switch.
+// encodeTop dispatches to the compile-time bound encode function.
 func (m *marshaler) encodeTop(ti *EncTypeInfo, ptr unsafe.Pointer) error {
-	// Custom marshal hooks — must call user code, cannot be compiled to bytecode.
-	if ti.TypeFlags&EncTypeFlagHasMarshalFn != 0 {
-		data, err := ti.Hooks.MarshalFn(ptr)
-		if err != nil {
-			return err
-		}
-		if len(data) == 0 {
-			m.buf = append(m.buf, litNull...)
-		} else {
-			m.buf = append(m.buf, data...)
-		}
-		return nil
-	}
-	if ti.TypeFlags&EncTypeFlagHasTextMarshalFn != 0 {
-		data, err := ti.Hooks.TextMarshalFn(ptr)
-		if err != nil {
-			return err
-		}
-		m.encodeString(unsafeString(data))
-		return nil
-	}
-
-	switch ti.Kind {
-	case typ.KindBool:
-		if *(*bool)(ptr) {
-			m.buf = append(m.buf, litTrue...)
-		} else {
-			m.buf = append(m.buf, litFalse...)
-		}
-	case typ.KindInt:
-		m.appendInt64(int64(*(*int)(ptr)))
-	case typ.KindInt8:
-		m.appendInt64(int64(*(*int8)(ptr)))
-	case typ.KindInt16:
-		m.appendInt64(int64(*(*int16)(ptr)))
-	case typ.KindInt32:
-		m.appendInt64(int64(*(*int32)(ptr)))
-	case typ.KindInt64:
-		m.appendInt64(*(*int64)(ptr))
-	case typ.KindUint:
-		m.appendUint64(uint64(*(*uint)(ptr)))
-	case typ.KindUint8:
-		m.appendUint64(uint64(*(*uint8)(ptr)))
-	case typ.KindUint16:
-		m.appendUint64(uint64(*(*uint16)(ptr)))
-	case typ.KindUint32:
-		m.appendUint64(uint64(*(*uint32)(ptr)))
-	case typ.KindUint64:
-		m.appendUint64(*(*uint64)(ptr))
-	case typ.KindFloat32:
-		return m.encodeFloat32(ptr)
-	case typ.KindFloat64:
-		return m.encodeFloat64(ptr)
-	case typ.KindString:
-		m.encodeString(*(*string)(ptr))
-	case typ.KindRawMessage:
-		raw := *(*[]byte)(ptr)
-		if len(raw) == 0 {
-			m.buf = append(m.buf, litNull...)
-		} else {
-			m.buf = append(m.buf, raw...)
-		}
-	case typ.KindNumber:
-		s := *(*string)(ptr)
-		if s == "" {
-			m.buf = append(m.buf, '0')
-		} else {
-			m.buf = append(m.buf, s...)
-		}
-	case typ.KindStruct:
-		return m.exec(ti.getBlueprint(), ptr)
-	case typ.KindSlice:
-		si := ti.ResolveSlice()
-		sh := (*SliceHeader)(ptr)
-		if sh.Data == nil {
-			m.buf = append(m.buf, litNull...)
-			return nil
-		}
-		if si.ElemType.Kind == typ.KindUint8 && si.ElemSize == 1 {
-			return m.encodeByteSlice(sh)
-		}
-		return m.exec(ti.getBlueprint(), ptr)
-	case typ.KindArray:
-		ai := ti.ResolveArray()
-		if ai.ElemType.Kind == typ.KindUint8 && ai.ElemSize == 1 {
-			return m.encodeByteArray(ai, ptr)
-		}
-		return m.exec(ti.getBlueprint(), ptr)
-	case typ.KindMap:
-		mi := ti.ResolveMap()
-		if mi.IsStringKey && !m.inVM && m.nativeCompat {
-			return m.exec(ti.getBlueprint(), ptr)
-		}
-		if mi.MapKind == typ.MapVariantStrStr {
-			return m.encodeMapStringString(ptr)
-		}
-		return m.encodeMapGeneric(mi, ptr)
-	case typ.KindPointer:
-		pi := ti.ResolvePointer()
-		elemPtr := *(*unsafe.Pointer)(ptr)
-		if elemPtr == nil {
-			m.buf = append(m.buf, litNull...)
-			return nil
-		}
-		return m.encodeTop(pi.ElemType, elemPtr)
-	case typ.KindAny:
-		return m.encodeAny(*(*any)(ptr))
-	case typ.KindIface:
-		// Non-empty interface: need reflect to extract concrete value.
-		rv := reflect.NewAt(ti.UniType.Type, ptr).Elem()
-		if rv.IsNil() {
-			m.buf = append(m.buf, litNull...)
-			return nil
-		}
-		return m.encodeAnyReflect(rv.Elem().Interface())
-	default:
-		return &UnsupportedTypeError{Type: ti.Type}
-	}
-	return nil
+	return ti.Encode(m, ptr)
 }
 
 // isSimpleIndent reports whether the native VM can synthesize this indent pattern.

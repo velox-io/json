@@ -15,6 +15,10 @@ const (
 	EncTagFlagOmitEmpty         = typ.TagFlagOmitEmpty
 )
 
+// encodeFn is the per-type encode function, bound at type-registration time.
+// Replaces the runtime Kind switch in encodeTop with O(1) dispatch.
+type encodeFn func(m *marshaler, ptr unsafe.Pointer) error
+
 // EncTypeInfo is the per-type encode descriptor (singleton per Go type).
 // It holds type-level encoding metadata and a reference to the shared UniType.
 type EncTypeInfo struct {
@@ -23,6 +27,10 @@ type EncTypeInfo struct {
 	TypeFlags typ.TypeFlag // cached from Hooks for fast bit-test
 
 	Ext unsafe.Pointer // *EncStructInfo / *EncSliceInfo / ... for container kinds
+
+	// Encode is the compile-time bound encode function for this type.
+	// Set by bindEncodeFn after all container edges are wired.
+	Encode encodeFn
 
 	HintBytes    int          // static output size estimate
 	AdaptiveHint atomic.Int64 // observed max output size (updated after each marshal)
