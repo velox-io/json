@@ -36,8 +36,6 @@ type EncTypeInfo struct {
 	AdaptiveHint   atomic.Int64 // observed max output size (updated after each marshal)
 	IsZeroFn       func(ptr unsafe.Pointer) bool
 
-	EncodeFn func(ctx unsafe.Pointer, ptr unsafe.Pointer) error
-
 	// SizeFn predicts JSON output size by scanning runtime data (lengths, nil-ness).
 	// Returns 0 if prediction is unavailable (interface{}, custom marshal, etc.).
 	// Compiled once per type at registration time.
@@ -73,8 +71,6 @@ type EncStructInfo struct {
 	Type   reflect.Type
 	Fields []EncTypeInfo
 
-	EncodeSteps []StructEncodeStep
-
 	vm atomic.Pointer[encvmCache]
 }
 
@@ -89,9 +85,6 @@ func (si *EncStructInfo) vmCache() *encvmCache {
 	}
 	return si.vm.Load()
 }
-
-// StructEncodeStep encodes one field in compact mode.
-type StructEncodeStep func(ctx unsafe.Pointer, base unsafe.Pointer, first bool) (bool, error)
 
 // encvmCache holds lazily compiled VM state.
 type encvmCache struct {

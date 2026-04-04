@@ -184,9 +184,10 @@ func marshalGoOnly[T any](v *T) ([]byte, error) {
 		m.buf = make([]byte, 0, hint)
 	}
 
-	// Force Go path by calling encodeStructGo directly.
+	// Force Go VM path.
 	si := ti.ResolveStruct()
-	if err := m.encodeStructGo(si, unsafe.Pointer(v)); err != nil {
+	bp := si.getBlueprint()
+	if err := m.goVM(bp, unsafe.Pointer(v)); err != nil {
 		putMarshaler(m)
 		return nil, err
 	}
@@ -481,6 +482,7 @@ func marshalSliceGoOnly[T any](sl *[]T) ([]byte, error) {
 	m := getMarshaler()
 	ti := EncTypeInfoOf(reflect.TypeFor[T]())
 	si := ti.ResolveStruct()
+	bp := si.getBlueprint()
 
 	hint := ti.HintBytes * len(*sl)
 	if hint > cap(m.buf) {
@@ -492,7 +494,7 @@ func marshalSliceGoOnly[T any](sl *[]T) ([]byte, error) {
 		if i > 0 {
 			m.buf = append(m.buf, ',')
 		}
-		if err := m.encodeStructGo(si, unsafe.Pointer(&(*sl)[i])); err != nil {
+		if err := m.goVM(bp, unsafe.Pointer(&(*sl)[i])); err != nil {
 			putMarshaler(m)
 			return nil, err
 		}

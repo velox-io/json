@@ -128,100 +128,6 @@ func (m *marshaler) encodeQuotedString(s string) {
 	m.buf = appendEscapedString(m.buf, unsafeString(inner), escapeFlags(m.flags))
 }
 
-func encodeBool(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	if *(*bool)(ptr) {
-		m.buf = append(m.buf, litTrue...)
-	} else {
-		m.buf = append(m.buf, litFalse...)
-	}
-	return nil
-}
-
-func encodeInt(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	return m.appendInt64(int64(*(*int)(ptr)))
-}
-func encodeInt8(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	return m.appendInt64(int64(*(*int8)(ptr)))
-}
-func encodeInt16(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	return m.appendInt64(int64(*(*int16)(ptr)))
-}
-func encodeInt32(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	return m.appendInt64(int64(*(*int32)(ptr)))
-}
-func encodeInt64Fn(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	return m.appendInt64(*(*int64)(ptr))
-}
-
-func encodeUint(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	return m.appendUint64(uint64(*(*uint)(ptr)))
-}
-func encodeUint8(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	return m.appendUint64(uint64(*(*uint8)(ptr)))
-}
-func encodeUint16(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	return m.appendUint64(uint64(*(*uint16)(ptr)))
-}
-func encodeUint32(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	return m.appendUint64(uint64(*(*uint32)(ptr)))
-}
-func encodeUint64Fn(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	return m.appendUint64(*(*uint64)(ptr))
-}
-
-func encodeFloat32Value(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	return m.encodeFloat32(ptr)
-}
-func encodeFloat64Value(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	return m.encodeFloat64(ptr)
-}
-
-func encodeStringValue(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	m.encodeString(*(*string)(ptr))
-	return nil
-}
-
-func encodeRawMessageFn(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	raw := *(*[]byte)(ptr)
-	if len(raw) == 0 {
-		m.buf = append(m.buf, litNull...)
-	} else {
-		m.buf = append(m.buf, raw...)
-	}
-	return nil
-}
-
-func encodeNumberFn(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	s := *(*string)(ptr)
-	if s == "" {
-		m.buf = append(m.buf, '0')
-	} else {
-		m.buf = append(m.buf, s...)
-	}
-	return nil
-}
-
-func encodeAnyValue(ctx unsafe.Pointer, ptr unsafe.Pointer) error {
-	m := (*marshaler)(ctx)
-	return m.encodeAny(*(*any)(ptr))
-}
-
 // encodeValueQuoted implements the `,string` field option.
 func (m *marshaler) encodeValueQuoted(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	switch ti.Kind {
@@ -291,97 +197,6 @@ func (m *marshaler) appendNewlineIndent() {
 	}
 }
 
-func (m *marshaler) encodeStructGo(si *EncStructInfo, base unsafe.Pointer) error {
-	m.buf = append(m.buf, '{')
-	first := true
-	for _, step := range si.EncodeSteps {
-		var err error
-		first, err = step(unsafe.Pointer(m), base, first)
-		if err != nil {
-			return err
-		}
-	}
-	m.buf = append(m.buf, '}')
-	return nil
-}
-
-func (m *marshaler) encodeStructIndent(si *EncStructInfo, base unsafe.Pointer) error {
-	m.buf = append(m.buf, '{')
-	first := true
-	m.indentDepth++
-
-	for i := range si.Fields {
-		fi := &si.Fields[i]
-		fieldPtr := unsafe.Add(base, fi.Offset)
-
-		if fi.TagFlags&EncTagFlagOmitEmpty != 0 && fi.IsZeroFn != nil && fi.IsZeroFn(fieldPtr) {
-			continue
-		}
-
-		if !first {
-			m.buf = append(m.buf, ',')
-		}
-		first = false
-
-		m.appendNewlineIndent()
-		m.buf = append(m.buf, fi.KeyBytesIndent...)
-
-		if fi.TagFlags&EncTagFlagQuoted != 0 {
-			if err := m.encodeValueQuoted(fi, fieldPtr); err != nil {
-				return err
-			}
-		} else if err := m.encodeTop(fi, fieldPtr); err != nil {
-			return err
-		}
-	}
-
-	m.indentDepth--
-	if !first {
-		m.appendNewlineIndent()
-	}
-
-	m.buf = append(m.buf, '}')
-	return nil
-}
-
-func (m *marshaler) encodeSliceGo(si *EncSliceInfo, ptr unsafe.Pointer) error {
-	sh := (*SliceHeader)(ptr)
-
-	if sh.Len == 0 {
-		m.buf = append(m.buf, litArr...)
-		return nil
-	}
-
-	m.buf = append(m.buf, '[')
-	elemSize := si.ElemSize
-
-	if m.indent != "" {
-		m.indentDepth++
-	}
-
-	for i := range sh.Len {
-		if i > 0 {
-			m.buf = append(m.buf, ',')
-		}
-		if m.indent != "" {
-			m.appendNewlineIndent()
-		}
-
-		elemPtr := unsafe.Add(sh.Data, uintptr(i)*elemSize)
-		if err := m.encodeTop(si.ElemTI, elemPtr); err != nil {
-			return err
-		}
-	}
-
-	if m.indent != "" {
-		m.indentDepth--
-		m.appendNewlineIndent()
-	}
-
-	m.buf = append(m.buf, ']')
-	return nil
-}
-
 func (m *marshaler) encodeByteSlice(sh *SliceHeader) error {
 	data := unsafe.Slice((*byte)(sh.Data), sh.Len)
 	m.buf = append(m.buf, '"')
@@ -390,42 +205,6 @@ func (m *marshaler) encodeByteSlice(sh *SliceHeader) error {
 	m.buf = append(m.buf, make([]byte, encodedLen)...)
 	base64.StdEncoding.Encode(m.buf[start:], data)
 	m.buf = append(m.buf, '"')
-	return nil
-}
-
-func (m *marshaler) encodeArrayGo(ai *EncArrayInfo, ptr unsafe.Pointer) error {
-	if ai.ArrayLen == 0 {
-		m.buf = append(m.buf, litArr...)
-		return nil
-	}
-
-	m.buf = append(m.buf, '[')
-	elemSize := ai.ElemSize
-
-	if m.indent != "" {
-		m.indentDepth++
-	}
-
-	for i := range ai.ArrayLen {
-		if i > 0 {
-			m.buf = append(m.buf, ',')
-		}
-		if m.indent != "" {
-			m.appendNewlineIndent()
-		}
-
-		elemPtr := unsafe.Add(ptr, uintptr(i)*elemSize)
-		if err := m.encodeTop(ai.ElemTI, elemPtr); err != nil {
-			return err
-		}
-	}
-
-	if m.indent != "" {
-		m.indentDepth--
-		m.appendNewlineIndent()
-	}
-
-	m.buf = append(m.buf, ']')
 	return nil
 }
 
@@ -439,15 +218,6 @@ func (m *marshaler) encodeByteArray(ai *EncArrayInfo, ptr unsafe.Pointer) error 
 	base64.StdEncoding.Encode(m.buf[start:], data)
 	m.buf = append(m.buf, '"')
 	return nil
-}
-
-func (m *marshaler) encodePointer(pi *EncPointerInfo, ptr unsafe.Pointer) error {
-	elemPtr := *(*unsafe.Pointer)(ptr)
-	if elemPtr == nil {
-		m.buf = append(m.buf, litNull...)
-		return nil
-	}
-	return m.encodeTop(pi.ElemTI, elemPtr)
 }
 
 func (m *marshaler) encodeMapStringString(ptr unsafe.Pointer) error {
