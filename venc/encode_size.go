@@ -9,7 +9,7 @@ import (
 
 // bindSizeFn compiles a per-type size prediction function that scans runtime
 // data (slice/map/string lengths, pointer nil-ness) without touching values.
-// Returns 0 for types that can't be predicted (interface{}, custom marshal).
+// Sets SizeFn to nil for types that can't be predicted (interface{}, custom marshal).
 func bindSizeFn(ti *EncTypeInfo) {
 	ti.SizeFn = buildSizeFn(ti, 0)
 }
@@ -56,20 +56,21 @@ func buildSizeFn(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 	}
 }
 
-// --- Scalar size functions (constant or near-constant) ---
+// --- Constant size functions ---
 
 func sizeBool(_ unsafe.Pointer) int  { return 5 } // "false"
 func sizeInt(_ unsafe.Pointer) int   { return 12 }
 func sizeFloat(_ unsafe.Pointer) int { return 24 }
+
+// --- Runtime-dependent size functions ---
 
 // sizeAny returns a conservative estimate for interface{} fields.
 // Most interface{} values in real-world JSON are null (4 bytes) or short
 // strings/numbers. 16 is a reasonable middle ground.
 func sizeAny(_ unsafe.Pointer) int { return 16 }
 
-// sizeString reads the string length and estimates JSON output size.
-// Estimate: 2 (quotes) + len. Most strings have minimal escape overhead;
-// the +20% headroom in marshalHint covers the rare escape cases.
+// sizeString reads the string length and estimates JSON output as 2 + len.
+// Escape overhead is not accounted for; callers add their own headroom if needed.
 func sizeString(ptr unsafe.Pointer) int {
 	slen := *(*int)(unsafe.Add(ptr, unsafe.Sizeof(uintptr(0)))) // string.len
 	return 2 + slen
@@ -119,6 +120,8 @@ func buildSizeStruct(si *EncStructInfo, depth int) func(ptr unsafe.Pointer) int 
 			return nil
 		}
 
+		// Struct fields use tighter estimates than top-level scalars because
+		// the per-field overhead (key+comma) already provides buffer headroom.
 		var fixedFieldSize int
 		switch fi.Type.Kind {
 		case typ.KindBool:

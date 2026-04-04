@@ -165,7 +165,7 @@ func (m *marshaler) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(unsafe
 						return err
 					}
 				} else {
-					if err := m.handleYieldFallback(ctx, activeBP); err != nil {
+					if err := m.handleFallbackYield(ctx, activeBP); err != nil {
 						return err
 					}
 				}
@@ -251,8 +251,8 @@ func (m *marshaler) encodeAnyIface(ifacePtr unsafe.Pointer) error {
 	return m.encodeAny(*(*any)(ifacePtr))
 }
 
-// handleYieldFallback runs the Go-side fallback for one yielded field.
-func (m *marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
+// handleFallbackYield runs the Go-side fallback for one yielded field.
+func (m *marshaler) handleFallbackYield(ctx *VjExecCtx, bp *Blueprint) error {
 	isFirst := vmstateGetFirst(ctx.VMState)
 
 	fb, ok := bp.Fallbacks[int(ctx.PC)]
