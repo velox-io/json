@@ -41,7 +41,7 @@ const (
 	opSliceBegin uint16 = 23 // slice loop start
 	opSliceEnd   uint16 = 24 // slice loop back-edge
 	opMap        uint16 = 25 // yield whole map to Go
-	_opMapEnd    uint16 = 26 // reserved
+	// _opMapEnd    uint16 = 26 // reserved
 	opObjOpen    uint16 = 27 // write key + '{'
 	opObjClose   uint16 = 28 // write '}'
 	opArrayBegin uint16 = 29 // fixed array loop start
@@ -102,16 +102,16 @@ const (
 	yieldMapHandoff uint32 = 3 // map encoding handoff — Go takes over full map field encoding
 )
 
-// fbInfo.Reason values; keep them in sync with native/encvm/impl/types.h.
+// fbInfo.Reason values — Go-side only diagnostic codes for trace output.
+// Describes why the compiler yielded a field to Go-side encoding.
 const (
-	fbReasonUnknown       int32 = 0 // unspecified / unknown kind
-	fbReasonMarshaler     int32 = 1 // implements json.Marshaler
-	fbReasonTextMarshaler int32 = 2 // implements encoding.TextMarshaler
-	fbReasonQuoted        int32 = 3 // field has `,string` struct tag
-	fbReasonByteSlice     int32 = 4 // []byte — base64 encoding
-	fbReasonByteArray     int32 = 5 // [N]byte — base64 encoding
-	fbReasonMapOmitempty  int32 = 6 // map with omitempty (needs Go len check)
-	fbReasonKeyPoolFull   int32 = 7 // global key pool exhausted (>64KB); key read from fbInfo.TI.Ext.KeyBytes
+	fbReasonUnknown       int32 = iota // catch-all for unrecognized kinds
+	fbReasonMarshaler                  // implements json.Marshaler
+	fbReasonTextMarshaler              // implements encoding.TextMarshaler
+	fbReasonQuoted                     // field has `,string` struct tag
+	fbReasonByteArray                  // [N]byte — base64 encoding
+	fbReasonIface                      // non-empty interface
+	fbReasonOverflow                   // field offset or key exceeds native encoding limits
 )
 
 // VMState mirrors the native packed state: depth in [0..7], first in bit 16, flags in [17..31], exit in [32..39], yield in [40..47].
@@ -122,6 +122,9 @@ const (
 	vjStExitShift      = 32
 	vjStYieldShift     = 40
 )
+
+// Must match native VJ_IFACE_FLAG_INDIRECT.
+const ifaceFlagIndirect uint8 = 0x01
 
 func vmstateGetExit(st uint64) int32 {
 	return int32((st >> vjStExitShift) & 0xFF)
@@ -173,32 +176,12 @@ type Blueprint struct {
 
 // fbInfo records the Go fallback attached to one OP_FALLBACK pc.
 type fbInfo struct {
-	TI     *EncTypeInfo // field's EncTypeInfo (for EncodeFn dispatch)
-	Offset uintptr      // field offset within struct
-	Reason int32        // fallback reason code for diagnostics/debug metadata
-}
-
-// opIsLong marks the 16-byte instruction forms for trace/debug helpers.
-var opIsLong [256]bool //nolint:unused
-
-func init() { //nolint:unused
-	for _, op := range []uint16{
-		opSkipIfZero, opCall, opPtrDeref,
-		opSliceBegin, opSliceEnd,
-		opArrayBegin,
-		opSeqFloat64, opSeqInt, opSeqInt64, opSeqString,
-		opMapStrIter, opMapStrIterEnd,
-	} {
-		opIsLong[op] = true
-	}
-}
-
-// opSizeOf reports the encoded size for trace/debug helpers.
-func opSizeOf(opType uint16) int32 { //nolint:unused
-	if opIsLong[opType] {
-		return 16
-	}
-	return 8
+	TI       *EncTypeInfo                  // type descriptor (for encodeTop dispatch)
+	Offset   uintptr                       // field offset within struct
+	Reason   int32                         // fallback reason code for diagnostics/debug metadata
+	TagFlags typ.TagFlag                   // field-level tag flags (omitempty, quoted)
+	KeyBytes []byte                        // precomputed `"name":` bytes
+	IsZeroFn func(ptr unsafe.Pointer) bool // omitempty zero check
 }
 
 func opHdrAt(ops []byte, pc int32) *VjOpHdr {
@@ -209,32 +192,26 @@ func opExtAt(ops []byte, pc int32) *VjOpExt {
 	return (*VjOpExt)(unsafe.Pointer(&ops[pc+8]))
 }
 
-// opSizeAt reports the size of the instruction at pc.
-func opSizeAt(ops []byte, pc int32) int32 { //nolint:unused
-	hdr := opHdrAt(ops, pc)
-	return opSizeOf(hdr.OpType)
-}
-
 // VjStackFrame matches the native 32-byte frame ABI. `first` stays in VMState.
-// _union stores CALL {ret_ops, ret_pc} or ITER/MAP {data, count, idx}.
+// Payload stores CALL {ret_ops, ret_pc} or ITER/MAP {data, count, idx}.
 type VjStackFrame struct {
 	RetBase unsafe.Pointer // 0: parent base
-	_union  [20]byte       // 8: native union payload
+	Payload [20]byte       // 8: native union payload
 	State   int32          // 28: iter-active bit + trace depth
 }
 
 var _ [32]byte = [unsafe.Sizeof(VjStackFrame{})]byte{}
 
 func (f *VjStackFrame) iterData() unsafe.Pointer {
-	return *(*unsafe.Pointer)(unsafe.Pointer(&f._union[0]))
+	return *(*unsafe.Pointer)(unsafe.Pointer(&f.Payload[0]))
 }
 
 func (f *VjStackFrame) iterCount() int64 {
-	return *(*int64)(unsafe.Pointer(&f._union[8]))
+	return *(*int64)(unsafe.Pointer(&f.Payload[8]))
 }
 
 func (f *VjStackFrame) iterIdx() int64 {
-	return int64(*(*int32)(unsafe.Pointer(&f._union[16])))
+	return int64(*(*int32)(unsafe.Pointer(&f.Payload[16])))
 }
 
 // Must match native VJ_MAX_STACK_DEPTH.
@@ -319,6 +296,7 @@ func loadIfaceCacheSnapshot() *ifaceCacheSnapshot {
 
 // blueprintRegistry resolves ctx.OpsPtr back to the active Blueprint after SWITCH_OPS.
 var blueprintRegistry atomic.Pointer[map[unsafe.Pointer]*Blueprint]
+var initPrimitiveIfaceCacheOnce sync.Once
 
 func init() {
 	globalIfaceCache.current.Store(&ifaceCacheSnapshot{})
@@ -327,6 +305,7 @@ func init() {
 	globalKeyPool.current.Store(&keyPoolSnapshot{
 		idx: make(map[string]keyPoolEntry),
 	})
+	initPrimitiveIfaceCacheOnce.Do(initPrimitiveIfaceCache)
 }
 
 // globalKeyPool stores all pre-encoded JSON keys in one append-only COW pool.
@@ -353,7 +332,8 @@ func globalKeyPoolInsert(keyBytes []byte) (off uint16, klen uint8, ok bool) {
 		return 0, 0, true
 	}
 	if len(keyBytes) > 255 {
-		panic("venc: key too long for uint8 key_len (>255 bytes)") // internal bug: compiler falls back before reaching here
+		// internal bug: compiler falls back before reaching here
+		panic("venc: key too long for uint8 key_len (>255 bytes)")
 	}
 
 	key := string(keyBytes)
@@ -383,9 +363,7 @@ func globalKeyPoolInsert(keyBytes []byte) (off uint16, klen uint8, ok bool) {
 	copy(newData[newOff:], keyBytes)
 
 	newIdx := make(map[string]keyPoolEntry, len(snap.idx)+1)
-	for k, v := range snap.idx {
-		newIdx[k] = v
-	}
+	maps.Copy(newIdx, snap.idx)
 	entry := keyPoolEntry{off: uint16(newOff), len: uint8(len(keyBytes))}
 	newIdx[key] = entry
 
@@ -418,9 +396,6 @@ func registerBlueprintOps(bp *Blueprint) {
 	newMap[key] = bp
 	blueprintRegistry.Store(&newMap)
 }
-
-// Must match native VJ_IFACE_FLAG_INDIRECT.
-const ifaceFlagIndirect uint8 = 0x01
 
 // insertIfaceCache publishes one more interface cache entry via COW.
 func insertIfaceCache(typePtr unsafe.Pointer, bp *Blueprint, tag uint8, flags uint8) {
@@ -494,8 +469,7 @@ func initPrimitiveIfaceCache() {
 	}
 	for _, t := range compositeSlices {
 		ti := EncTypeInfoOf(t)
-		sliceInfo := ti.ResolveSlice()
-		bp := compileStandaloneSliceBlueprint(sliceInfo)
+		bp := ti.getBlueprint()
 		entry := VjIfaceCacheEntry{TypePtr: rtypePtr(t)}
 		if bp != nil && len(bp.Ops) > 0 {
 			entry.OpsPtr = unsafe.Pointer(&bp.Ops[0])
@@ -510,8 +484,7 @@ func initPrimitiveIfaceCache() {
 	}
 	for _, t := range compositeMaps {
 		ti := EncTypeInfoOf(t)
-		mapInfo := ti.ResolveMap()
-		bp := compileStandaloneMapBlueprint(mapInfo)
+		bp := ti.getBlueprint()
 		entry := VjIfaceCacheEntry{
 			TypePtr: rtypePtr(t),
 			Flags:   ifaceFlagIndirect, // map is reference type
@@ -529,8 +502,6 @@ func initPrimitiveIfaceCache() {
 	globalIfaceCache.current.Store(&ifaceCacheSnapshot{entries: table})
 }
 
-var initPrimitiveIfaceCacheOnce sync.Once
-
 // activeBlueprint resolves the Blueprint currently backing ctx.OpsPtr.
 func activeBlueprint(ctx *VjExecCtx, rootBP *Blueprint) *Blueprint {
 	if ctx.OpsPtr == unsafe.Pointer(&rootBP.Ops[0]) {
@@ -543,36 +514,4 @@ func activeBlueprint(ctx *VjExecCtx, rootBP *Blueprint) *Blueprint {
 		return bp
 	}
 	panic("venc: activeBlueprint: unknown ops pointer (SWITCH_OPS without registry entry)")
-}
-
-func (si *EncStructInfo) getBlueprint() *Blueprint {
-	cache := si.vmCache()
-	cache.once.Do(func() {
-		cache.blueprint = compileBlueprint(si)
-	})
-	return cache.blueprint
-}
-
-func (si *EncSliceInfo) getBlueprint() *Blueprint {
-	cache := si.vmCache()
-	cache.once.Do(func() {
-		cache.blueprint = compileStandaloneSliceBlueprint(si)
-	})
-	return cache.blueprint
-}
-
-func (ai *EncArrayInfo) getBlueprint() *Blueprint {
-	cache := ai.vmCache()
-	cache.once.Do(func() {
-		cache.blueprint = compileStandaloneArrayBlueprint(ai)
-	})
-	return cache.blueprint
-}
-
-func (mi *EncMapInfo) getBlueprint() *Blueprint {
-	cache := mi.vmCache()
-	cache.once.Do(func() {
-		cache.blueprint = compileStandaloneMapBlueprint(mi)
-	})
-	return cache.blueprint
 }

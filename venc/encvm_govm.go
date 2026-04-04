@@ -273,8 +273,8 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			frame := &m.vmCtx.Stack[depth]
 			frame.RetBase = base
 			// Store return PC and first flag in the union area
-			*(*int32)(unsafe.Pointer(&frame._union[0])) = pc + 16 // return address
-			*(*int32)(unsafe.Pointer(&frame._union[4])) = boolToInt32(first) // save first
+			*(*int32)(unsafe.Pointer(&frame.Payload[0])) = pc + 16            // return address
+			*(*int32)(unsafe.Pointer(&frame.Payload[4])) = boolToInt32(first) // save first
 			depth++
 
 			// Switch base to the field pointed to by FieldOff
@@ -289,9 +289,8 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			depth--
 			frame := &m.vmCtx.Stack[depth]
 			base = frame.RetBase
-			pc = *(*int32)(unsafe.Pointer(&frame._union[0]))       // restore return PC
-			first = *(*int32)(unsafe.Pointer(&frame._union[4])) != 0 // restore first flag
-			first = false // after a call, we've written something
+			pc = *(*int32)(unsafe.Pointer(&frame.Payload[0])) // restore return PC
+			first = false                                     // after a call, we've written something
 
 		// ---- Control flow: pointer deref ----
 
@@ -364,10 +363,10 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			}
 			frame := &m.vmCtx.Stack[depth]
 			frame.RetBase = base
-			*(*unsafe.Pointer)(unsafe.Pointer(&frame._union[0])) = sh.Data
-			*(*int64)(unsafe.Pointer(&frame._union[8])) = int64(sh.Len)
-			*(*int32)(unsafe.Pointer(&frame._union[16])) = 0 // idx = 0
-			frame.State = int32(elemSize) // stash elemSize in State for SliceEnd
+			*(*unsafe.Pointer)(unsafe.Pointer(&frame.Payload[0])) = sh.Data
+			*(*int64)(unsafe.Pointer(&frame.Payload[8])) = int64(sh.Len)
+			*(*int32)(unsafe.Pointer(&frame.Payload[16])) = 0 // idx = 0
+			frame.State = int32(elemSize)                     // stash elemSize in State for SliceEnd
 			depth++
 
 			base = sh.Data // point to first element
@@ -378,17 +377,17 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			ext := opExtAt(ops, pc)
 			depth--
 			frame := &m.vmCtx.Stack[depth]
-			idx := *(*int32)(unsafe.Pointer(&frame._union[16])) + 1
-			count := *(*int64)(unsafe.Pointer(&frame._union[8]))
+			idx := *(*int32)(unsafe.Pointer(&frame.Payload[16])) + 1
+			count := *(*int64)(unsafe.Pointer(&frame.Payload[8]))
 			elemSize := uintptr(frame.State)
 
 			if int64(idx) < count {
 				// Continue iteration
-				*(*int32)(unsafe.Pointer(&frame._union[16])) = idx
+				*(*int32)(unsafe.Pointer(&frame.Payload[16])) = idx
 				depth++
-				data := *(*unsafe.Pointer)(unsafe.Pointer(&frame._union[0]))
+				data := *(*unsafe.Pointer)(unsafe.Pointer(&frame.Payload[0]))
 				base = unsafe.Add(data, uintptr(idx)*elemSize)
-				first = false // subsequent elements get comma
+				first = false      // subsequent elements get comma
 				pc += ext.OperandA // jump back to body start
 			} else {
 				// End iteration
@@ -431,9 +430,9 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			}
 			frame := &m.vmCtx.Stack[depth]
 			frame.RetBase = base
-			*(*unsafe.Pointer)(unsafe.Pointer(&frame._union[0])) = fieldPtr
-			*(*int64)(unsafe.Pointer(&frame._union[8])) = int64(arrayLen)
-			*(*int32)(unsafe.Pointer(&frame._union[16])) = 0
+			*(*unsafe.Pointer)(unsafe.Pointer(&frame.Payload[0])) = fieldPtr
+			*(*int64)(unsafe.Pointer(&frame.Payload[8])) = int64(arrayLen)
+			*(*int32)(unsafe.Pointer(&frame.Payload[16])) = 0
 			frame.State = int32(elemSize)
 			depth++
 
@@ -525,7 +524,6 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			fieldPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
 			if hdr.KeyLen > 0 {
 				m.goVMWriteKey(hdr, first, indent)
-				first = false
 			} else if !first {
 				m.buf = append(m.buf, ',')
 			}
@@ -544,8 +542,8 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			}
 			fieldPtr := unsafe.Add(base, fb.Offset)
 
-			if fb.TI.TagFlags&EncTagFlagOmitEmpty != 0 && fb.TI.IsZeroFn != nil {
-				if fb.TI.IsZeroFn(fieldPtr) {
+			if fb.TagFlags&EncTagFlagOmitEmpty != 0 && fb.IsZeroFn != nil {
+				if fb.IsZeroFn(fieldPtr) {
 					pc += 8
 					continue
 				}
@@ -556,11 +554,11 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			}
 			if hdr.KeyLen > 0 {
 				m.buf = append(m.buf, keyPoolBytes(hdr.KeyOff, hdr.KeyLen)...)
-			} else if len(fb.TI.KeyBytes) > 0 {
-				m.buf = append(m.buf, fb.TI.KeyBytes...)
+			} else if len(fb.KeyBytes) > 0 {
+				m.buf = append(m.buf, fb.KeyBytes...)
 			}
 
-			if fb.TI.TagFlags&EncTagFlagQuoted != 0 {
+			if fb.TagFlags&EncTagFlagQuoted != 0 {
 				if err := m.encodeValueQuoted(fb.TI, fieldPtr); err != nil {
 					return err
 				}

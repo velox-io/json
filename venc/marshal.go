@@ -22,11 +22,11 @@ type marshaler struct {
 	inVM  bool   // blocks re-entrant VM entry
 	buf   []byte
 
-	indent         string
-	prefix         string
-	indentDepth    int
-	nativeCompat   bool // true if compact or simple indent pattern (C VM can handle)
-	indentTpl      *[1 + 255 + maxIndentDepth*8]byte // "\n" + prefix + indent*maxDepth
+	indent       string
+	prefix       string
+	indentDepth  int
+	nativeCompat bool                              // true if compact or simple indent pattern (C VM can handle)
+	indentTpl    *[1 + 255 + maxIndentDepth*8]byte // "\n" + prefix + indent*maxDepth
 
 	flushFn func([]byte) error // streaming sink for Encoder
 }
@@ -162,8 +162,7 @@ func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
 				m.buf = gort.MakeDirtyBytes(0, max(marshalBufInitSize, hint))
 			}
 
-			var err error
-			err = m.encodeTop(ti, elemPtr)
+			err := m.encodeTop(ti, elemPtr)
 
 			if err != nil {
 				putMarshaler(m)
@@ -312,7 +311,7 @@ func (m *marshaler) execNative(bp *Blueprint, base unsafe.Pointer) error {
 func (m *marshaler) encodeTop(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	// Custom marshal hooks — must call user code, cannot be compiled to bytecode.
 	if ti.TypeFlags&EncTypeFlagHasMarshalFn != 0 {
-		data, err := ti.UT.Hooks.MarshalFn(ptr)
+		data, err := ti.Hooks.MarshalFn(ptr)
 		if err != nil {
 			return err
 		}
@@ -324,7 +323,7 @@ func (m *marshaler) encodeTop(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 		return nil
 	}
 	if ti.TypeFlags&EncTypeFlagHasTextMarshalFn != 0 {
-		data, err := ti.UT.Hooks.TextMarshalFn(ptr)
+		data, err := ti.Hooks.TextMarshalFn(ptr)
 		if err != nil {
 			return err
 		}
@@ -380,8 +379,7 @@ func (m *marshaler) encodeTop(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 			m.buf = append(m.buf, s...)
 		}
 	case typ.KindStruct:
-		si := ti.ResolveStruct()
-		return m.exec(si.getBlueprint(), ptr)
+		return m.exec(ti.getBlueprint(), ptr)
 	case typ.KindSlice:
 		si := ti.ResolveSlice()
 		sh := (*SliceHeader)(ptr)
@@ -389,20 +387,20 @@ func (m *marshaler) encodeTop(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 			m.buf = append(m.buf, litNull...)
 			return nil
 		}
-		if si.ElemTI.Kind == typ.KindUint8 && si.ElemSize == 1 {
+		if si.ElemType.Kind == typ.KindUint8 && si.ElemSize == 1 {
 			return m.encodeByteSlice(sh)
 		}
-		return m.exec(si.getBlueprint(), ptr)
+		return m.exec(ti.getBlueprint(), ptr)
 	case typ.KindArray:
 		ai := ti.ResolveArray()
-		if ai.ElemTI.Kind == typ.KindUint8 && ai.ElemSize == 1 {
+		if ai.ElemType.Kind == typ.KindUint8 && ai.ElemSize == 1 {
 			return m.encodeByteArray(ai, ptr)
 		}
-		return m.exec(ai.getBlueprint(), ptr)
+		return m.exec(ti.getBlueprint(), ptr)
 	case typ.KindMap:
 		mi := ti.ResolveMap()
 		if mi.IsStringKey && !m.inVM && m.nativeCompat {
-			return m.exec(mi.getBlueprint(), ptr)
+			return m.exec(ti.getBlueprint(), ptr)
 		}
 		if mi.MapKind == typ.MapVariantStrStr {
 			return m.encodeMapStringString(ptr)
@@ -415,19 +413,19 @@ func (m *marshaler) encodeTop(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 			m.buf = append(m.buf, litNull...)
 			return nil
 		}
-		return m.encodeTop(pi.ElemTI, elemPtr)
+		return m.encodeTop(pi.ElemType, elemPtr)
 	case typ.KindAny:
 		return m.encodeAny(*(*any)(ptr))
 	case typ.KindIface:
 		// Non-empty interface: need reflect to extract concrete value.
-		rv := reflect.NewAt(ti.UT.Type, ptr).Elem()
+		rv := reflect.NewAt(ti.UniType.Type, ptr).Elem()
 		if rv.IsNil() {
 			m.buf = append(m.buf, litNull...)
 			return nil
 		}
 		return m.encodeAnyReflect(rv.Elem().Interface())
 	default:
-		return &UnsupportedTypeError{Type: ti.UT.Type}
+		return &UnsupportedTypeError{Type: ti.Type}
 	}
 	return nil
 }

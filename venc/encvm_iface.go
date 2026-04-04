@@ -16,11 +16,11 @@ func (m *marshaler) handleInterfaceYield(ctx *VjExecCtx, activeBP *Blueprint) er
 
 	if !isFirst {
 		m.buf = append(m.buf, ',')
-		m.vmWriteIndent(ctx)
+		m.writeIndent(ctx)
 	}
 	if hdr.KeyLen > 0 {
 		m.buf = append(m.buf, keyPoolBytes(hdr.KeyOff, hdr.KeyLen)...)
-		m.vmWriteKeySpace(ctx)
+		m.writeKeySpace(ctx)
 	}
 
 	if err := m.encodeAnyIface(ifacePtr); err != nil {
@@ -39,14 +39,14 @@ func (m *marshaler) handleInterfaceYield(ctx *VjExecCtx, activeBP *Blueprint) er
 			count := frame.iterCount()
 			for idx := frame.iterIdx() + 1; idx < count; idx++ {
 				m.buf = append(m.buf, ',')
-				m.vmWriteIndent(ctx)
+				m.writeIndent(ctx)
 				elemPtr := unsafe.Add(frame.iterData(), uintptr(idx)*elemSize)
 				if err := m.encodeAnyIface(elemPtr); err != nil {
 					return err
 				}
 			}
 			ctx.IndentDepth--
-			m.vmWriteIndent(ctx)
+			m.writeIndent(ctx)
 			m.buf = append(m.buf, ']')
 			ctx.VMState--
 			ctx.VMState &^= vjStFirstBit

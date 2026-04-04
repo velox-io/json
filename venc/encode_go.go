@@ -36,22 +36,20 @@ var (
 	litArr   = []byte("[]")
 )
 
-func (m *marshaler) appendInt64(v int64) error {
+func (m *marshaler) appendInt64(v int64) {
 	if v >= 0 && v < 1000 {
 		m.buf = append(m.buf, smallInts[v]...)
-		return nil
+		return
 	}
 	m.buf = strconv.AppendInt(m.buf, v, 10)
-	return nil
 }
 
-func (m *marshaler) appendUint64(v uint64) error {
+func (m *marshaler) appendUint64(v uint64) {
 	if v < 1000 {
 		m.buf = append(m.buf, smallInts[v]...)
-		return nil
+		return
 	}
 	m.buf = strconv.AppendUint(m.buf, v, 10)
-	return nil
 }
 
 func (m *marshaler) appendQuotedInt64(v int64) {
@@ -182,7 +180,7 @@ func (m *marshaler) encodeValueQuoted(ti *EncTypeInfo, ptr unsafe.Pointer) error
 			m.buf = append(m.buf, litNull...)
 			return nil
 		}
-		return m.encodeValueQuoted(pi.ElemTI, elemPtr)
+		return m.encodeValueQuoted(pi.ElemType, elemPtr)
 	default:
 		return m.encodeTop(ti, ptr)
 	}
@@ -269,7 +267,7 @@ func (m *marshaler) encodeMapStringString(ptr unsafe.Pointer) error {
 // encodeMapKey writes non-string map keys without building an intermediate string.
 func (m *marshaler) encodeMapKey(keyPtr unsafe.Pointer, keyTI *EncTypeInfo, keyType reflect.Type) error {
 	if keyTI.TypeFlags&EncTypeFlagHasTextMarshalFn != 0 {
-		text, err := keyTI.UT.Hooks.TextMarshalFn(keyPtr)
+		text, err := keyTI.Hooks.TextMarshalFn(keyPtr)
 		if err != nil {
 			return err
 		}
@@ -348,7 +346,7 @@ func (m *marshaler) encodeMapGeneric(mi *EncMapInfo, ptr unsafe.Pointer) error {
 		keyPtr := mapsIterKey(&it)
 		if mi.IsStringKey {
 			m.encodeString(*(*string)(keyPtr))
-		} else if err := m.encodeMapKey(keyPtr, mi.KeyTI, mi.KeyType); err != nil {
+		} else if err := m.encodeMapKey(keyPtr, mi.KeyType, mi.KeyType.Type); err != nil {
 			return err
 		}
 		if m.indent != "" {
@@ -358,7 +356,7 @@ func (m *marshaler) encodeMapGeneric(mi *EncMapInfo, ptr unsafe.Pointer) error {
 		}
 
 		elemPtr := mapsIterElem(&it)
-		if err := m.encodeTop(mi.ValTI, elemPtr); err != nil {
+		if err := m.encodeTop(mi.ValType, elemPtr); err != nil {
 			return err
 		}
 		mapsIterNext(&it)
@@ -399,25 +397,25 @@ func (m *marshaler) encodeAny(v any) error {
 	case map[string]any:
 		return m.encodeAnyMap(val)
 	case int:
-		_ = m.appendInt64(int64(val))
+		m.appendInt64(int64(val))
 	case int8:
-		_ = m.appendInt64(int64(val))
+		m.appendInt64(int64(val))
 	case int16:
-		_ = m.appendInt64(int64(val))
+		m.appendInt64(int64(val))
 	case int32:
-		_ = m.appendInt64(int64(val))
+		m.appendInt64(int64(val))
 	case int64:
-		_ = m.appendInt64(val)
+		m.appendInt64(val)
 	case uint:
-		_ = m.appendUint64(uint64(val))
+		m.appendUint64(uint64(val))
 	case uint8:
-		_ = m.appendUint64(uint64(val))
+		m.appendUint64(uint64(val))
 	case uint16:
-		_ = m.appendUint64(uint64(val))
+		m.appendUint64(uint64(val))
 	case uint32:
-		_ = m.appendUint64(uint64(val))
+		m.appendUint64(uint64(val))
 	case uint64:
-		_ = m.appendUint64(val)
+		m.appendUint64(val)
 	case float32:
 		f := float64(val)
 		if math.IsNaN(f) || math.IsInf(f, 0) {
@@ -610,7 +608,6 @@ func (m *marshaler) encodeAnyReflect(v any) error {
 	return m.encodeTop(ti, tmp.UnsafePointer())
 }
 
-
 // computeHintBytes returns a one-time static output-size estimate.
 func computeHintBytes(ti *EncTypeInfo, depth int) int {
 	if depth > 8 {
@@ -639,7 +636,7 @@ func computeHintBytes(ti *EncTypeInfo, depth int) int {
 		for i := range si.Fields {
 			fi := &si.Fields[i]
 			n += len(fi.KeyBytes) + 1
-			n += computeHintBytes(fi, depth+1)
+			n += computeHintBytes(fi.Type, depth+1)
 		}
 		return n
 	case typ.KindSlice:
@@ -647,14 +644,14 @@ func computeHintBytes(ti *EncTypeInfo, depth int) int {
 		if si == nil {
 			return 64
 		}
-		elemHint := computeHintBytes(si.ElemTI, depth+1)
+		elemHint := computeHintBytes(si.ElemType, depth+1)
 		return 2 + 4*(elemHint+1)
 	case typ.KindPointer:
 		pi := ti.ResolvePointer()
 		if pi == nil {
 			return 64
 		}
-		return computeHintBytes(pi.ElemTI, depth+1)
+		return computeHintBytes(pi.ElemType, depth+1)
 	case typ.KindMap:
 		return 128
 	case typ.KindRawMessage:

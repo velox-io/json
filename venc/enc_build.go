@@ -71,12 +71,6 @@ func buildEncTypeInfo(t reflect.Type) *EncTypeInfo {
 	// Recursive shells stay local until every container edge is wired.
 	building := make(map[reflect.Type]*EncTypeInfo)
 	eti := buildEncRec(t, building)
-	// Recursive struct fields may need a second pass after all shells are filled.
-	for _, beti := range building {
-		if beti.Kind == typ.KindStruct {
-			fixupStructFields((*EncStructInfo)(beti.Ext), building)
-		}
-	}
 	for bt, beti := range building {
 		encTypeCache.LoadOrStore(bt, beti)
 	}
@@ -88,118 +82,83 @@ func buildEncRec(t reflect.Type, building map[reflect.Type]*EncTypeInfo) *EncTyp
 	if v, ok := encTypeCache.Load(t); ok {
 		return v.(*EncTypeInfo)
 	}
-	if eti, ok := building[t]; ok {
-		return eti
+	if et, ok := building[t]; ok {
+		return et
 	}
 	ut := typ.UniTypeOf(t)
-	eti := newEncTypeInfoFromUT(ut)
-	building[t] = eti
-	fillContainerExt(eti, ut, building)
-	bindSizeFn(eti)
-	eti.HintBytes = computeHintBytes(eti, 0)
-	return eti
+	et := newEncTypeFromUT(ut)
+	building[t] = et
+	fillContainerExt(et, ut, building)
+	bindSizeFn(et)
+	et.HintBytes = computeHintBytes(et, 0)
+	return et
 }
 
-// newEncTypeInfoFromUT copies the shared type descriptor into encode form.
-func newEncTypeInfoFromUT(ut *typ.UniType) *EncTypeInfo {
-	eti := &EncTypeInfo{
-		UT:   ut,
-		Kind: ut.Kind,
+// newEncTypeFromUT creates a new EncType from a shared UniType.
+func newEncTypeFromUT(ut *typ.UniType) *EncTypeInfo {
+	et := &EncTypeInfo{
+		UniType: ut,
 	}
 	if h := ut.Hooks; h != nil {
 		if h.MarshalFn != nil {
-			eti.TypeFlags |= typ.TypeFlagHasMarshalFn
+			et.TypeFlags |= typ.TypeFlagHasMarshalFn
 		}
 		if h.TextMarshalFn != nil {
-			eti.TypeFlags |= typ.TypeFlagHasTextMarshalFn
+			et.TypeFlags |= typ.TypeFlagHasTextMarshalFn
 		}
 	}
-	return eti
+	return et
 }
 
 // fillContainerExt populates container-specific encode metadata.
-func fillContainerExt(eti *EncTypeInfo, ut *typ.UniType, building map[reflect.Type]*EncTypeInfo) {
+func fillContainerExt(et *EncTypeInfo, ut *typ.UniType, building map[reflect.Type]*EncTypeInfo) {
 	switch info := ut.Ext.(type) {
 	case *typ.StructTypeInfo:
-		eti.Ext = unsafe.Pointer(compileStructInfo(ut.Type, info, building))
+		et.Ext = unsafe.Pointer(buildStructInfo(info, building))
 	case *typ.SliceTypeInfo:
-		eti.Ext = unsafe.Pointer(compileSliceInfo(ut.Type, info, building))
+		et.Ext = unsafe.Pointer(buildSliceInfo(info, building))
 	case *typ.ArrayTypeInfo:
-		eti.Ext = unsafe.Pointer(compileArrayInfo(ut.Type, info, building))
+		et.Ext = unsafe.Pointer(buildArrayInfo(info, building))
 	case *typ.MapTypeInfo:
-		eti.Ext = unsafe.Pointer(compileMapInfo(ut.Type, info, building))
+		et.Ext = unsafe.Pointer(buildMapInfo(ut.Type, info, building))
 	case *typ.PointerTypeInfo:
-		eti.Ext = unsafe.Pointer(compilePointerInfo(info, building))
+		et.Ext = unsafe.Pointer(buildPointerInfo(info, building))
 	}
 }
 
-// fixupStructFields patches recursive field metadata after the build pass.
-func fixupStructFields(si *EncStructInfo, building map[reflect.Type]*EncTypeInfo) {
-	if si == nil {
-		return
-	}
-	for i := range si.Fields {
-		fi := &si.Fields[i]
-		if fi.Ext == nil && isContainerKind(fi.Kind) {
-			if eti, ok := building[fi.UT.Type]; ok {
-				fi.Ext = eti.Ext
-			} else if v, ok := encTypeCache.Load(fi.UT.Type); ok {
-				fi.Ext = v.(*EncTypeInfo).Ext
-			}
-		}
-	}
-}
-
-func isContainerKind(k typ.ElemTypeKind) bool {
-	switch k {
-	case typ.KindStruct, typ.KindSlice, typ.KindArray, typ.KindMap, typ.KindPointer:
-		return true
-	}
-	return false
-}
-
-func compileStructInfo(t reflect.Type, info *typ.StructTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncStructInfo {
-	si := &EncStructInfo{Type: t}
-	si.Fields = make([]EncTypeInfo, len(info.Fields))
+func buildStructInfo(info *typ.StructTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncStructInfo {
+	si := &EncStructInfo{}
+	si.Fields = make([]EncFieldInfo, len(info.Fields))
 
 	for i, sf := range info.Fields {
-		elemETI := buildEncRec(sf.FieldType.Type, building)
+		elemET := buildEncRec(sf.FieldType.Type, building)
 		fi := &si.Fields[i]
-		fi.UT = elemETI.UT
-		fi.Kind = elemETI.Kind
-		fi.TypeFlags = elemETI.TypeFlags
+		fi.Type = elemET
 		fi.Offset = sf.Offset
 		fi.JSONName = sf.JSONName
-		fi.Ext = elemETI.Ext
 		fi.KeyBytes = sf.KeyBytes
 		fi.KeyBytesIndent = sf.KeyBytesIndent
 		fi.IsZeroFn = sf.IsZeroFn
 		fi.TagFlags = sf.TagFlags
-		fi.SizeFn = elemETI.SizeFn
-		fi.HintBytes = elemETI.HintBytes
 	}
 
 	return si
 }
 
-func compileSliceInfo(t reflect.Type, info *typ.SliceTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncSliceInfo {
-	elemETI := buildEncRec(info.ElemType.Type, building)
+func buildSliceInfo(info *typ.SliceTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncSliceInfo {
+	elemET := buildEncRec(info.ElemType.Type, building)
 	return &EncSliceInfo{
-		ElemTI:     elemETI,
-		SliceType:  t,
-		ElemType:   info.ElemType.Type,
+		ElemType:   elemET,
 		ElemSize:   info.ElemType.Size,
 		ElemHasPtr: info.ElemHasPtr,
 		ElemRType:  gort.TypePtr(info.ElemType.Type),
 	}
 }
 
-func compileArrayInfo(t reflect.Type, info *typ.ArrayTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncArrayInfo {
-	elemETI := buildEncRec(info.ElemType.Type, building)
+func buildArrayInfo(info *typ.ArrayTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncArrayInfo {
+	elemET := buildEncRec(info.ElemType.Type, building)
 	return &EncArrayInfo{
-		ElemTI:     elemETI,
-		ArrayType:  t,
-		ElemType:   info.ElemType.Type,
+		ElemType:   elemET,
 		ElemSize:   info.ElemType.Size,
 		ArrayLen:   info.ArrayLen,
 		ElemHasPtr: info.ElemHasPtr,
@@ -207,37 +166,31 @@ func compileArrayInfo(t reflect.Type, info *typ.ArrayTypeInfo, building map[refl
 	}
 }
 
-func compileMapInfo(t reflect.Type, info *typ.MapTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncMapInfo {
-	valETI := buildEncRec(info.ValType.Type, building)
-	keyETI := buildEncRec(info.KeyType.Type, building)
+func buildMapInfo(t reflect.Type, info *typ.MapTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncMapInfo {
+	valET := buildEncRec(info.ValType.Type, building)
+	keyET := buildEncRec(info.KeyType.Type, building)
 	mi := &EncMapInfo{
-		ValTI:       valETI,
-		KeyTI:       keyETI,
-		MapType:     t,
-		KeyType:     info.KeyType.Type,
-		ValType:     info.ValType.Type,
-		ValSize:     info.ValType.Size,
-		KeySize:     info.KeyType.Size,
+		ValType:     valET,
+		KeyType:     keyET,
 		MapKind:     info.MapKind,
 		MapRType:    gort.TypePtr(t),
 		KeyRType:    gort.TypePtr(info.KeyType.Type),
 		ValRType:    gort.TypePtr(info.ValType.Type),
 		IsStringKey: info.IsStringKey,
 		ValHasPtr:   info.ValHasPtr,
+		ValSize:     info.ValType.Size,
+		KeySize:     info.KeyType.Size,
 	}
-	// Generic string-key iteration needs the probed Swiss Map slot size.
 	if slotSize, ok := probeSwissMapSlotSize(t, info.ValType.Size); ok {
 		mi.SlotSize = slotSize
 	}
 	return mi
 }
 
-func compilePointerInfo(info *typ.PointerTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncPointerInfo {
-	elemETI := buildEncRec(info.ElemType.Type, building)
+func buildPointerInfo(info *typ.PointerTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncPointerInfo {
+	elemET := buildEncRec(info.ElemType.Type, building)
 	return &EncPointerInfo{
-		ElemTI:     elemETI,
-		ElemType:   info.ElemType.Type,
-		ElemSize:   info.ElemType.Size,
+		ElemType:   elemET,
 		ElemHasPtr: info.ElemHasPtr,
 		ElemRType:  gort.TypePtr(info.ElemType.Type),
 	}

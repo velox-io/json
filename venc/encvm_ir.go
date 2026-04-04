@@ -44,14 +44,14 @@ type irBuilder struct {
 	nextLabel Label // starts at 1; 0 is InvalidLabel
 
 	// Cycle detection and subroutine scheduling.
-	// visiting[t]: InvalidLabel => compiling now; other label => entry already allocated.
-	visiting    map[reflect.Type]Label
-	pendingSubs []pendingSub
+	// visiting[ti]: InvalidLabel => compiling now; other label => entry already allocated.
+	visiting  map[*EncTypeInfo]Label
+	cycleSubs []cycleSub
 }
 
-// pendingSub stores a struct type waiting for subroutine emission and its entry label.
-type pendingSub struct {
-	si    *EncStructInfo
+// cycleSub is a deferred subroutine for a cycle-participating struct type.
+type cycleSub struct {
+	ti    *EncTypeInfo
 	label Label
 }
 

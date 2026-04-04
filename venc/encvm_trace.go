@@ -34,10 +34,9 @@ var fbReasonLabels = [...]string{
 	fbReasonMarshaler:     "marshaler",
 	fbReasonTextMarshaler: "text_marshaler",
 	fbReasonQuoted:        "quoted",
-	fbReasonByteSlice:     "byte_slice",
 	fbReasonByteArray:     "byte_array",
-	fbReasonMapOmitempty:  "map_omitempty",
-	fbReasonKeyPoolFull:   "keypool_full",
+	fbReasonIface:         "iface",
+	fbReasonOverflow:      "overflow",
 }
 
 // expandFallbackReasons replaces any "YIELD(fb:N)" tokens in trace output

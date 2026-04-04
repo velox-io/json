@@ -468,15 +468,6 @@ enum VjYieldReason {
   VJ_YIELD_MAP_HANDOFF = 3,  /* map encoding handoff to Go */
 };
 
-/* FallbackReason — Go-side diagnostic codes kept in sync with fbReason*
- * constants in vj_encvm.go.
- * Describes why a field was delegated to Go-side encoding.
- * Values: 0=unknown, 1=json.Marshaler, 2=encoding.TextMarshaler,
- *         3=`,string` tag, 4=[]byte, 5=[N]byte, 6=map+omitempty,
- *         7=key pool full.
- * Used by Go-side debug/diagnostic tooling when fallback metadata carries
- * an associated reason code. */
-
 /* ================================================================
  *  Interface Cache Entry — 24 bytes
  * ================================================================ */

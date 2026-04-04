@@ -1,7 +1,6 @@
 package venc
 
 import (
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -16,134 +15,112 @@ const (
 	EncTagFlagOmitEmpty         = typ.TagFlagOmitEmpty
 )
 
-// EncTypeInfo is the cached encode descriptor for a Go type.
+// EncTypeInfo is the per-type encode descriptor (singleton per Go type).
+// It holds type-level encoding metadata and a reference to the shared UniType.
 type EncTypeInfo struct {
-	UT *typ.UniType // shared type descriptor (nil for struct field copies)
+	*typ.UniType // embedded shared descriptor
 
-	Kind      typ.ElemTypeKind
-	TypeFlags typ.TypeFlag
-	TagFlags  typ.TagFlag // only set on struct fields
-	_         [1]byte
-	Offset    uintptr
+	TypeFlags typ.TypeFlag // cached from Hooks for fast bit-test
 
 	Ext unsafe.Pointer // *EncStructInfo / *EncSliceInfo / ... for container kinds
 
-	JSONName string
-
-	KeyBytes       []byte       // compact `"name":`
-	KeyBytesIndent []byte       // indented `"name": `
-	HintBytes      int          // static output size hint
-	AdaptiveHint   atomic.Int64 // observed max output size (updated after each marshal)
-	IsZeroFn       func(ptr unsafe.Pointer) bool
+	HintBytes    int          // static output size estimate
+	AdaptiveHint atomic.Int64 // observed max output size (updated after each marshal)
 
 	// SizeFn predicts JSON output size by scanning runtime data (lengths, nil-ness).
-	// Returns 0 if prediction is unavailable (interface{}, custom marshal, etc.).
-	// Compiled once per type at registration time.
 	SizeFn func(ptr unsafe.Pointer) int
+
+	bp atomic.Pointer[blueprintCache] // lazily compiled blueprint
 }
 
-func (d *EncTypeInfo) ResolveStruct() *EncStructInfo {
-	return (*EncStructInfo)(d.Ext)
+func (t *EncTypeInfo) ResolveStruct() *EncStructInfo {
+	return (*EncStructInfo)(t.Ext)
 }
 
-func (d *EncTypeInfo) ResolveSlice() *EncSliceInfo {
-	return (*EncSliceInfo)(d.Ext)
+func (t *EncTypeInfo) ResolveSlice() *EncSliceInfo {
+	return (*EncSliceInfo)(t.Ext)
 }
 
-func (d *EncTypeInfo) ResolveArray() *EncArrayInfo {
-	return (*EncArrayInfo)(d.Ext)
+func (t *EncTypeInfo) ResolveArray() *EncArrayInfo {
+	return (*EncArrayInfo)(t.Ext)
 }
 
-func (d *EncTypeInfo) ResolveMap() *EncMapInfo {
-	return (*EncMapInfo)(d.Ext)
+func (t *EncTypeInfo) ResolveMap() *EncMapInfo {
+	return (*EncMapInfo)(t.Ext)
 }
 
-func (d *EncTypeInfo) ResolvePointer() *EncPointerInfo {
-	return (*EncPointerInfo)(d.Ext)
+func (t *EncTypeInfo) ResolvePointer() *EncPointerInfo {
+	return (*EncPointerInfo)(t.Ext)
 }
 
-// EncStructInfo describes a struct.
-type EncStructInfo struct {
-	Type   reflect.Type
-	Fields []EncTypeInfo
-
-	vm atomic.Pointer[encvmCache]
+// getBlueprint returns the lazily compiled blueprint for this type.
+func (t *EncTypeInfo) getBlueprint() *Blueprint {
+	cache := t.bpCache()
+	if cache == nil {
+		return nil
+	}
+	cache.once.Do(func() {
+		cache.blueprint = compileBlueprint(t)
+	})
+	return cache.blueprint
 }
 
-// vmCache lazily allocates the per-type VM cache.
-func (si *EncStructInfo) vmCache() *encvmCache {
-	if p := si.vm.Load(); p != nil {
+func (t *EncTypeInfo) bpCache() *blueprintCache {
+	if p := t.bp.Load(); p != nil {
 		return p
 	}
-	p := &encvmCache{}
-	if si.vm.CompareAndSwap(nil, p) {
+	p := &blueprintCache{}
+	if t.bp.CompareAndSwap(nil, p) {
 		return p
 	}
-	return si.vm.Load()
+	return t.bp.Load()
 }
 
-// encvmCache holds lazily compiled VM state.
-type encvmCache struct {
+// blueprintCache holds the lazily compiled Blueprint for a type.
+type blueprintCache struct {
 	once      sync.Once
 	blueprint *Blueprint
 }
 
+// EncFieldInfo describes one struct field for encoding.
+type EncFieldInfo struct {
+	Type *EncTypeInfo // field's type descriptor
+
+	TagFlags typ.TagFlag // omitempty, quoted, etc.
+	Offset   uintptr     // field offset in struct
+	JSONName string
+
+	KeyBytes       []byte // compact `"name":`
+	KeyBytesIndent []byte // indented `"name": `
+	IsZeroFn       func(ptr unsafe.Pointer) bool
+}
+
+// EncStructInfo describes a struct's encoding layout.
+type EncStructInfo struct {
+	Fields []EncFieldInfo
+}
+
 // EncSliceInfo describes a slice.
 type EncSliceInfo struct {
-	ElemTI     *EncTypeInfo
-	SliceType  reflect.Type
-	ElemType   reflect.Type
+	ElemType   *EncTypeInfo
 	ElemSize   uintptr
 	ElemHasPtr bool
 	ElemRType  unsafe.Pointer
-
-	vm atomic.Pointer[encvmCache]
-}
-
-func (si *EncSliceInfo) vmCache() *encvmCache {
-	if p := si.vm.Load(); p != nil {
-		return p
-	}
-	p := &encvmCache{}
-	if si.vm.CompareAndSwap(nil, p) {
-		return p
-	}
-	return si.vm.Load()
 }
 
 // EncArrayInfo describes a fixed-size array.
 type EncArrayInfo struct {
-	ElemTI     *EncTypeInfo
-	ArrayType  reflect.Type
-	ElemType   reflect.Type
+	ElemType   *EncTypeInfo
 	ElemSize   uintptr
 	ArrayLen   int
 	ElemHasPtr bool
 	ElemRType  unsafe.Pointer
-
-	vm atomic.Pointer[encvmCache]
-}
-
-func (ai *EncArrayInfo) vmCache() *encvmCache {
-	if p := ai.vm.Load(); p != nil {
-		return p
-	}
-	p := &encvmCache{}
-	if ai.vm.CompareAndSwap(nil, p) {
-		return p
-	}
-	return ai.vm.Load()
 }
 
 // EncMapInfo describes a map.
 type EncMapInfo struct {
-	ValTI   *EncTypeInfo
-	KeyTI   *EncTypeInfo
-	MapType reflect.Type
-	KeyType reflect.Type
-	ValType reflect.Type
-	ValSize uintptr
-	KeySize uintptr
+	ValType *EncTypeInfo
+	KeyType *EncTypeInfo
 
 	MapKind     typ.MapVariant
 	MapRType    unsafe.Pointer
@@ -151,27 +128,14 @@ type EncMapInfo struct {
 	ValRType    unsafe.Pointer
 	IsStringKey bool
 	ValHasPtr   bool
+	ValSize     uintptr
+	KeySize     uintptr
 	SlotSize    uintptr // Swiss Map slot size; 0 if unknown
-
-	vm atomic.Pointer[encvmCache]
-}
-
-func (mi *EncMapInfo) vmCache() *encvmCache {
-	if p := mi.vm.Load(); p != nil {
-		return p
-	}
-	p := &encvmCache{}
-	if mi.vm.CompareAndSwap(nil, p) {
-		return p
-	}
-	return mi.vm.Load()
 }
 
 // EncPointerInfo describes a pointer.
 type EncPointerInfo struct {
-	ElemTI     *EncTypeInfo
-	ElemType   reflect.Type
-	ElemSize   uintptr
+	ElemType   *EncTypeInfo
 	ElemHasPtr bool
 	ElemRType  unsafe.Pointer
 }

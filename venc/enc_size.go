@@ -114,15 +114,13 @@ func buildSizeStruct(si *EncStructInfo, depth int) func(ptr unsafe.Pointer) int 
 		overhead := len(fi.KeyBytes) + 1 // key + comma
 		omit := fi.TagFlags&EncTagFlagOmitEmpty != 0
 
-		fn := buildSizeFn(fi, depth+1)
+		fn := buildSizeFn(fi.Type, depth+1)
 		if fn == nil {
-			// Unpredictable field → entire struct is unpredictable.
 			return nil
 		}
 
-		// Fixed-size scalars: accumulate into constant total.
 		var fixedFieldSize int
-		switch fi.Kind {
+		switch fi.Type.Kind {
 		case typ.KindBool:
 			fixedFieldSize = 5
 		case typ.KindInt, typ.KindInt8, typ.KindInt16, typ.KindInt32, typ.KindInt64,
@@ -188,7 +186,7 @@ func buildSizeSlice(si *EncSliceInfo, depth int) func(ptr unsafe.Pointer) int {
 	}
 
 	// For []byte, estimate base64 output size.
-	if si.ElemTI.Kind == typ.KindUint8 && si.ElemSize == 1 {
+	if si.ElemType.Kind == typ.KindUint8 && si.ElemSize == 1 {
 		return func(ptr unsafe.Pointer) int {
 			sh := (*gort.SliceHeader)(ptr)
 			if sh.Data == nil {
@@ -199,7 +197,7 @@ func buildSizeSlice(si *EncSliceInfo, depth int) func(ptr unsafe.Pointer) int {
 		}
 	}
 
-	elemSizeFn := buildSizeFn(si.ElemTI, depth+1)
+	elemSizeFn := buildSizeFn(si.ElemType, depth+1)
 
 	if elemSizeFn != nil {
 		return func(ptr unsafe.Pointer) int {
@@ -218,7 +216,7 @@ func buildSizeSlice(si *EncSliceInfo, depth int) func(ptr unsafe.Pointer) int {
 	}
 
 	// Fallback: static per-element hint.
-	elemHint := computeHintBytes(si.ElemTI, depth+1)
+	elemHint := computeHintBytes(si.ElemType, depth+1)
 
 	return func(ptr unsafe.Pointer) int {
 		sh := (*gort.SliceHeader)(ptr)
@@ -233,12 +231,12 @@ func buildSizeSlice(si *EncSliceInfo, depth int) func(ptr unsafe.Pointer) int {
 	}
 }
 
-func buildSizeArray(ai *EncArrayInfo, depth int) func(ptr unsafe.Pointer) int {
+func buildSizeArray(ai *EncArrayInfo, _ int) func(ptr unsafe.Pointer) int {
 	if ai == nil {
 		return nil
 	}
 
-	elemHint := computeHintBytes(ai.ElemTI, 0)
+	elemHint := computeHintBytes(ai.ElemType, 0)
 	arrayLen := ai.ArrayLen
 
 	// Array size is data-independent (fixed element count).
@@ -255,8 +253,8 @@ func buildSizeMap(mi *EncMapInfo, depth int) func(ptr unsafe.Pointer) int {
 	}
 
 	// Per-entry estimate: "key": value, = keyHint + 1(:) + valHint
-	keyHint := computeHintBytes(mi.KeyTI, depth+1)
-	valHint := computeHintBytes(mi.ValTI, depth+1)
+	keyHint := computeHintBytes(mi.KeyType, depth+1)
+	valHint := computeHintBytes(mi.ValType, depth+1)
 	entryHint := keyHint + 1 + valHint
 
 	return func(ptr unsafe.Pointer) int {
@@ -278,7 +276,7 @@ func buildSizePointer(pi *EncPointerInfo, depth int) func(ptr unsafe.Pointer) in
 		return nil
 	}
 
-	elemFn := buildSizeFn(pi.ElemTI, depth+1)
+	elemFn := buildSizeFn(pi.ElemType, depth+1)
 	if elemFn == nil {
 		return nil
 	}

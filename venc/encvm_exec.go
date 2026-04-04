@@ -10,8 +10,7 @@ import (
 	"github.com/velox-io/json/typ"
 )
 
-// vmWriteIndent appends the current VM newline+indent prefix.
-func (m *marshaler) vmWriteIndent(ctx *VjExecCtx) {
+func (m *marshaler) writeIndent(ctx *VjExecCtx) {
 	if ctx.IndentStep == 0 {
 		return
 	}
@@ -20,8 +19,7 @@ func (m *marshaler) vmWriteIndent(ctx *VjExecCtx) {
 	m.buf = append(m.buf, tpl[:n]...)
 }
 
-// vmWriteKeySpace mirrors the indented `": ` layout.
-func (m *marshaler) vmWriteKeySpace(ctx *VjExecCtx) {
+func (m *marshaler) writeKeySpace(ctx *VjExecCtx) {
 	if ctx.IndentStep != 0 {
 		m.buf = append(m.buf, ' ')
 	}
@@ -45,7 +43,6 @@ func (m *marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 
 	ctx.VMState = vmstateBuildInitial(m.flags)
 
-	initPrimitiveIfaceCacheOnce.Do(initPrimitiveIfaceCache)
 	snap := loadIfaceCacheSnapshot()
 	if len(snap.entries) > 0 {
 		ctx.IfaceCachePtr = unsafe.Pointer(&snap.entries[0])
@@ -230,17 +227,13 @@ func (m *marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 	default:
 		switch ti.Kind {
 		case typ.KindStruct:
-			si := ti.ResolveStruct()
-			bp = si.getBlueprint()
+			bp = ti.getBlueprint()
 		case typ.KindSlice:
-			sliceInfo := ti.ResolveSlice()
-			bp = compileStandaloneSliceBlueprint(sliceInfo)
+			bp = ti.getBlueprint()
 		case typ.KindArray:
-			arrayInfo := ti.ResolveArray()
-			bp = compileStandaloneArrayBlueprint(arrayInfo)
+			bp = ti.getBlueprint()
 		case typ.KindMap:
-			mapInfo := ti.ResolveMap()
-			bp = compileStandaloneMapBlueprint(mapInfo)
+			bp = ti.getBlueprint()
 			// Map interface payloads are direct, so the VM needs the INDIRECT flag.
 			flags = ifaceFlagIndirect
 		default:
@@ -269,8 +262,8 @@ func (m *marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 
 	fieldPtr := unsafe.Add(ctx.CurBase, fb.Offset)
 
-	if fb.TI.TagFlags&EncTagFlagOmitEmpty != 0 && fb.TI.IsZeroFn != nil {
-		if fb.TI.IsZeroFn(fieldPtr) {
+	if fb.TagFlags&EncTagFlagOmitEmpty != 0 && fb.IsZeroFn != nil {
+		if fb.IsZeroFn(fieldPtr) {
 			ctx.PC += 8
 			return nil
 		}
@@ -278,15 +271,15 @@ func (m *marshaler) handleYieldFallback(ctx *VjExecCtx, bp *Blueprint) error {
 
 	if !isFirst {
 		m.buf = append(m.buf, ',')
-		m.vmWriteIndent(ctx)
+		m.writeIndent(ctx)
 	}
 
-	if len(fb.TI.KeyBytes) > 0 {
-		m.buf = append(m.buf, fb.TI.KeyBytes...)
-		m.vmWriteKeySpace(ctx)
+	if len(fb.KeyBytes) > 0 {
+		m.buf = append(m.buf, fb.KeyBytes...)
+		m.writeKeySpace(ctx)
 	}
 
-	if fb.TI.TagFlags&EncTagFlagQuoted != 0 {
+	if fb.TagFlags&EncTagFlagQuoted != 0 {
 		if err := m.encodeValueQuoted(fb.TI, fieldPtr); err != nil {
 			return err
 		}
@@ -321,16 +314,16 @@ func (m *marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 
 	if !isFirst {
 		m.buf = append(m.buf, ',')
-		m.vmWriteIndent(ctx)
+		m.writeIndent(ctx)
 	}
 
 	if hdr.KeyLen > 0 {
 		m.buf = append(m.buf, keyPoolBytes(hdr.KeyOff, hdr.KeyLen)...)
-		m.vmWriteKeySpace(ctx)
+		m.writeKeySpace(ctx)
 	}
 
 	// map[string]any keeps the value fast path inline.
-	if mapInfo.ValTI.Kind == typ.KindAny && mapInfo.KeyType.Kind() == reflect.String {
+	if mapInfo.ValType.Kind == typ.KindAny && mapInfo.IsStringKey {
 		mp := *(*map[string]any)(mapPtr)
 		if err := m.encodeAnyMap(mp); err != nil {
 			return err

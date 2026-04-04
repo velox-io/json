@@ -185,8 +185,7 @@ func marshalGoOnly[T any](v *T) ([]byte, error) {
 	}
 
 	// Force Go VM path.
-	si := ti.ResolveStruct()
-	bp := si.getBlueprint()
+	bp := ti.getBlueprint()
 	if err := m.goVM(bp, unsafe.Pointer(v)); err != nil {
 		putMarshaler(m)
 		return nil, err
@@ -481,8 +480,7 @@ func BenchmarkMarshal_Slice100_StdJSON(b *testing.B) {
 func marshalSliceGoOnly[T any](sl *[]T) ([]byte, error) {
 	m := getMarshaler()
 	ti := EncTypeInfoOf(reflect.TypeFor[T]())
-	si := ti.ResolveStruct()
-	bp := si.getBlueprint()
+	bp := ti.getBlueprint()
 
 	hint := ti.HintBytes * len(*sl)
 	if hint > cap(m.buf) {
