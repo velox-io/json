@@ -534,9 +534,7 @@ func emitMapSwiss(b *irBuilder, ti *EncTypeInfo, fc fieldContext) {
 		KeyOff:   fc.KeyOff,
 		FieldOff: uint16(fc.FieldOff),
 	}
-	if fc == (fieldContext{}) {
-		inst.Fallback = &fbInfo{TI: ti, Offset: fc.FieldOff}
-	}
+	inst.Fallback = &fbInfo{TI: ti, Offset: fc.FieldOff}
 	b.emit(inst)
 }
 
@@ -555,6 +553,7 @@ func emitMapSwissIter(b *irBuilder, ti *EncTypeInfo, fc fieldContext) {
 		FieldOff: uint16(fc.FieldOff),
 		OperandA: slotSize,
 		Target:   afterLabel,
+		Fallback: &fbInfo{TI: ti, Offset: fc.FieldOff},
 	})
 
 	b.defineLabel(bodyLabel)
