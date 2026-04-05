@@ -2,81 +2,96 @@ name: Performance Regression Test
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: 'Baseline git ref (commit/tag/branch) to compare against'
+        required: false
+        default: 'main'
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   GO_VERSION: '1.26'
-  BENCH_BASELINE_VERSION: 'v2'
+  BENCH_COUNT: 5
+  # Fixed baseline ref for comparison. Update this when establishing a new
+  # performance baseline (e.g. after a release or intentional perf change).
+  BENCH_BASELINE_REF: 'v0.1.2'
 
 jobs:
   benchmark:
     name: Run Benchmarks
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
+    - name: Checkout current code
       uses: actions/checkout@v5
+      with:
+        fetch-depth: 0  # full history for checkout of baseline
 
     - name: Setup Go
       uses: actions/setup-go@v6
       with:
         go-version: ${{ env.GO_VERSION }}
 
-    - name: Run benchmarks
+    - name: Install benchstat
+      run: go install golang.org/x/perf/cmd/benchstat@latest
+
+    - name: Determine baseline ref
+      id: baseline
       run: |
-        cd benchmark && go test -bench="Velox" -benchmem -count=5 . | tee bench-current.txt
-
-    - name: Restore baseline
-      uses: actions/cache/restore@v4
-      with:
-        path: benchmark/bench-baseline.txt
-        key: benchmark-baseline-${{ env.BENCH_BASELINE_VERSION }}
-
-    - name: Compare with baseline
-      id: compare
-      run: |
-        if [ -f "benchmark/bench-baseline.txt" ]; then
-          echo "Comparing with baseline..."
-          go install golang.org/x/perf/cmd/benchstat@latest
-          benchstat benchmark/bench-baseline.txt benchmark/bench-current.txt > benchmark/comparison.txt || true
-
-          echo "=== Performance Comparison ===" >> $GITHUB_STEP_SUMMARY
-          cat benchmark/comparison.txt >> $GITHUB_STEP_SUMMARY
-
-          # Detect significant regressions (>10% slower)
-          REGRESSION_DETECTED=0
-          while IFS= read -r line; do
-            if echo "$line" | grep -qE '\+[0-9]+\.[0-9]+%'; then
-              percent=$(echo "$line" | grep -oE '\+[0-9]+\.[0-9]+%' | tr -d '+%')
-              if [ -n "$percent" ] && [ $(echo "$percent > 10" | bc -l) -eq 1 ]; then
-                echo "::warning::Significant regression detected: $line"
-                REGRESSION_DETECTED=1
-              fi
-            fi
-          done < benchmark/comparison.txt
-
-          if [ $REGRESSION_DETECTED -eq 1 ]; then
-            echo "regression_detected=true" >> $GITHUB_OUTPUT
-          fi
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.baseline_ref }}" ]; then
+          echo "ref=${{ github.event.inputs.baseline_ref }}" >> $GITHUB_OUTPUT
         else
-          echo "No baseline found. This run will become the baseline."
+          echo "ref=${{ env.BENCH_BASELINE_REF }}" >> $GITHUB_OUTPUT
         fi
 
-    - name: Update baseline cache (manual trigger only)
-      if: github.event_name == 'workflow_dispatch'
+    - name: Run baseline benchmarks
       run: |
-        cp benchmark/bench-current.txt benchmark/bench-baseline.txt
-      # Save uses the same path as Restore so cache round-trips correctly
-    - uses: actions/cache/save@v4
-      if: github.event_name == 'workflow_dispatch'
-      with:
-        path: benchmark/bench-baseline.txt
-        key: benchmark-baseline-${{ env.BENCH_BASELINE_VERSION }}
+        BASELINE_REF="${{ steps.baseline.outputs.ref }}"
+        echo "Baseline ref: $BASELINE_REF"
+
+        # Save current HEAD
+        CURRENT_SHA=$(git rev-parse HEAD)
+
+        # Checkout baseline
+        git checkout "$BASELINE_REF" --quiet
+
+        # Run baseline benchmarks
+        cd benchmark && go test -bench="Velox" -benchmem -count=${{ env.BENCH_COUNT }} . | tee bench-baseline.txt
+        cd ..
+
+        # Return to current commit
+        git checkout "$CURRENT_SHA" --quiet
+
+    - name: Run current benchmarks
+      run: |
+        cd benchmark && go test -bench="Velox" -benchmem -count=${{ env.BENCH_COUNT }} . | tee bench-current.txt
+
+    - name: Compare results
+      id: compare
+      run: |
+        echo "=== Performance Comparison ===" >> $GITHUB_STEP_SUMMARY
+        benchstat benchmark/bench-baseline.txt benchmark/bench-current.txt | tee benchmark/comparison.txt >> $GITHUB_STEP_SUMMARY || true
+
+        # Detect significant regressions (>10% slower)
+        REGRESSION_DETECTED=0
+        while IFS= read -r line; do
+          if echo "$line" | grep -qE '\+[0-9]+\.[0-9]+%'; then
+            percent=$(echo "$line" | grep -oE '\+[0-9]+\.[0-9]+%' | tr -d '+%')
+            if [ -n "$percent" ] && [ $(echo "$percent > 10" | bc -l) -eq 1 ]; then
+              echo "::warning::Significant regression detected: $line"
+              REGRESSION_DETECTED=1
+            fi
+          fi
+        done < benchmark/comparison.txt
+
+        if [ $REGRESSION_DETECTED -eq 1 ]; then
+          echo "regression_detected=true" >> $GITHUB_OUTPUT
+        fi
 
     - name: Fail on significant regression
       if: steps.compare.outputs.regression_detected == 'true'
