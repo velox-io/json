@@ -152,21 +152,17 @@ func buildStructInfo(info *typ.StructTypeInfo, building map[reflect.Type]*EncTyp
 func buildSliceInfo(info *typ.SliceTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncSliceInfo {
 	elemET := buildEncRec(info.ElemType.Type, building)
 	return &EncSliceInfo{
-		ElemType:   elemET,
-		ElemSize:   info.ElemType.Size,
-		ElemHasPtr: info.ElemHasPtr,
-		ElemRType:  gort.TypePtr(info.ElemType.Type),
+		ElemType: elemET,
+		ElemSize: info.ElemType.Size,
 	}
 }
 
 func buildArrayInfo(info *typ.ArrayTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncArrayInfo {
 	elemET := buildEncRec(info.ElemType.Type, building)
 	return &EncArrayInfo{
-		ElemType:   elemET,
-		ElemSize:   info.ElemType.Size,
-		ArrayLen:   info.ArrayLen,
-		ElemHasPtr: info.ElemHasPtr,
-		ElemRType:  gort.TypePtr(info.ElemType.Type),
+		ElemType: elemET,
+		ElemSize: info.ElemType.Size,
+		ArrayLen: info.ArrayLen,
 	}
 }
 
@@ -178,12 +174,7 @@ func buildMapInfo(t reflect.Type, info *typ.MapTypeInfo, building map[reflect.Ty
 		KeyType:     keyET,
 		MapKind:     info.MapKind,
 		MapRType:    gort.TypePtr(t),
-		KeyRType:    gort.TypePtr(info.KeyType.Type),
-		ValRType:    gort.TypePtr(info.ValType.Type),
 		IsStringKey: info.IsStringKey,
-		ValHasPtr:   info.ValHasPtr,
-		ValSize:     info.ValType.Size,
-		KeySize:     info.KeyType.Size,
 	}
 	if slotSize, ok := probeSwissMapSlotSize(t, info.ValType.Size); ok {
 		mi.SlotSize = slotSize
@@ -194,9 +185,7 @@ func buildMapInfo(t reflect.Type, info *typ.MapTypeInfo, building map[reflect.Ty
 func buildPointerInfo(info *typ.PointerTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncPointerInfo {
 	elemET := buildEncRec(info.ElemType.Type, building)
 	return &EncPointerInfo{
-		ElemType:   elemET,
-		ElemHasPtr: info.ElemHasPtr,
-		ElemRType:  gort.TypePtr(info.ElemType.Type),
+		ElemType: elemET,
 	}
 }
 

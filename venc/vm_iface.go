@@ -9,21 +9,21 @@ import (
 var errVMContinue = errors.New("venc: vm continue")
 
 // handleInterfaceYield encodes the yielded interface{} value and may take over the rest of a []interface{} loop in Go.
-func (m *marshaler) handleInterfaceYield(ctx *VjExecCtx, activeBP *Blueprint) error {
+func (es *encodeState) handleInterfaceYield(ctx *VjExecCtx, activeBP *Blueprint) error {
 	hdr := opHdrAt(activeBP.Ops, ctx.PC)
 	isFirst := vmstateGetFirst(ctx.VMState)
 	ifacePtr := unsafe.Add(ctx.CurBase, uintptr(hdr.FieldOff))
 
 	if !isFirst {
-		m.buf = append(m.buf, ',')
-		m.writeIndent(ctx)
+		es.buf = append(es.buf, ',')
+		es.writeIndent(ctx)
 	}
 	if hdr.KeyLen > 0 {
-		m.buf = append(m.buf, keyPoolBytes(hdr.KeyOff, hdr.KeyLen)...)
-		m.writeKeySpace(ctx)
+		es.buf = append(es.buf, keyPoolBytes(hdr.KeyOff, hdr.KeyLen)...)
+		es.writeKeySpace(ctx)
 	}
 
-	if err := m.encodeAnyIface(ifacePtr); err != nil {
+	if err := es.encodeAnyIface(ifacePtr); err != nil {
 		return err
 	}
 
@@ -38,16 +38,16 @@ func (m *marshaler) handleInterfaceYield(ctx *VjExecCtx, activeBP *Blueprint) er
 			elemSize := uintptr(prevExt.OperandA)
 			count := frame.iterCount()
 			for idx := frame.iterIdx() + 1; idx < count; idx++ {
-				m.buf = append(m.buf, ',')
-				m.writeIndent(ctx)
+				es.buf = append(es.buf, ',')
+				es.writeIndent(ctx)
 				elemPtr := unsafe.Add(frame.iterData(), uintptr(idx)*elemSize)
-				if err := m.encodeAnyIface(elemPtr); err != nil {
+				if err := es.encodeAnyIface(elemPtr); err != nil {
 					return err
 				}
 			}
 			ctx.IndentDepth--
-			m.writeIndent(ctx)
-			m.buf = append(m.buf, ']')
+			es.writeIndent(ctx)
+			es.buf = append(es.buf, ']')
 			ctx.VMState--
 			ctx.VMState &^= vjStFirstBit
 			ctx.CurBase = frame.RetBase

@@ -42,15 +42,15 @@ func buildSizeFn(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 	case typ.KindAny, typ.KindIface:
 		return sizeAny // conservative constant for interface{} fields
 	case typ.KindStruct:
-		return buildSizeStruct(ti.ResolveStruct(), depth)
+		return buildSizeStruct(ti, depth)
 	case typ.KindSlice:
-		return buildSizeSlice(ti.ResolveSlice(), depth)
+		return buildSizeSlice(ti, depth)
 	case typ.KindArray:
-		return buildSizeArray(ti.ResolveArray(), depth)
+		return buildSizeArray(ti, depth)
 	case typ.KindMap:
-		return buildSizeMap(ti.ResolveMap(), depth)
+		return buildSizeMap(ti, depth)
 	case typ.KindPointer:
-		return buildSizePointer(ti.ResolvePointer(), depth)
+		return buildSizePointer(ti, depth)
 	default:
 		return nil
 	}
@@ -94,7 +94,8 @@ func sizeRawMessage(ptr unsafe.Pointer) int {
 
 // --- Container size functions (compiled closures) ---
 
-func buildSizeStruct(si *EncStructInfo, depth int) func(ptr unsafe.Pointer) int {
+func buildSizeStruct(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
+	si := ti.ResolveStruct()
 	if si == nil {
 		return nil
 	}
@@ -183,7 +184,8 @@ func buildSizeStruct(si *EncStructInfo, depth int) func(ptr unsafe.Pointer) int 
 	}
 }
 
-func buildSizeSlice(si *EncSliceInfo, depth int) func(ptr unsafe.Pointer) int {
+func buildSizeSlice(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
+	si := ti.ResolveSlice()
 	if si == nil {
 		return nil
 	}
@@ -234,7 +236,8 @@ func buildSizeSlice(si *EncSliceInfo, depth int) func(ptr unsafe.Pointer) int {
 	}
 }
 
-func buildSizeArray(ai *EncArrayInfo, _ int) func(ptr unsafe.Pointer) int {
+func buildSizeArray(ti *EncTypeInfo, _ int) func(ptr unsafe.Pointer) int {
+	ai := ti.ResolveArray()
 	if ai == nil {
 		return nil
 	}
@@ -250,7 +253,8 @@ func buildSizeArray(ai *EncArrayInfo, _ int) func(ptr unsafe.Pointer) int {
 	return func(_ unsafe.Pointer) int { return total }
 }
 
-func buildSizeMap(mi *EncMapInfo, depth int) func(ptr unsafe.Pointer) int {
+func buildSizeMap(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
+	mi := ti.ResolveMap()
 	if mi == nil {
 		return nil
 	}
@@ -274,11 +278,11 @@ func buildSizeMap(mi *EncMapInfo, depth int) func(ptr unsafe.Pointer) int {
 	}
 }
 
-func buildSizePointer(pi *EncPointerInfo, depth int) func(ptr unsafe.Pointer) int {
+func buildSizePointer(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
+	pi := ti.ResolvePointer()
 	if pi == nil {
 		return nil
 	}
-
 	elemFn := buildSizeFn(pi.ElemType, depth+1)
 	if elemFn == nil {
 		return nil
@@ -290,5 +294,61 @@ func buildSizePointer(pi *EncPointerInfo, depth int) func(ptr unsafe.Pointer) in
 			return 4 // "null"
 		}
 		return elemFn(p)
+	}
+}
+
+// computeHintBytes returns a one-time static output-size estimate.
+func computeHintBytes(ti *EncTypeInfo, depth int) int {
+	if depth > 8 {
+		return 32 // cap recursive hint growth
+	}
+	if ti.TypeFlags&EncTypeFlagHasMarshalFn != 0 || ti.TypeFlags&EncTypeFlagHasTextMarshalFn != 0 {
+		return 64
+	}
+	switch ti.Kind {
+	case typ.KindBool:
+		return 5
+	case typ.KindInt, typ.KindInt8, typ.KindInt16, typ.KindInt32, typ.KindInt64:
+		return 12
+	case typ.KindUint, typ.KindUint8, typ.KindUint16, typ.KindUint32, typ.KindUint64:
+		return 12
+	case typ.KindFloat32, typ.KindFloat64:
+		return 20
+	case typ.KindString:
+		return 32
+	case typ.KindStruct:
+		si := ti.ResolveStruct()
+		if si == nil {
+			return 64
+		}
+		n := 2
+		for i := range si.Fields {
+			fi := &si.Fields[i]
+			n += len(fi.KeyBytes) + 1
+			n += computeHintBytes(fi.Type, depth+1)
+		}
+		return n
+	case typ.KindSlice:
+		si := ti.ResolveSlice()
+		if si == nil {
+			return 64
+		}
+		return 2 + 4*(computeHintBytes(si.ElemType, depth+1)+1)
+	case typ.KindPointer:
+		pi := ti.ResolvePointer()
+		if pi == nil {
+			return 64
+		}
+		return computeHintBytes(pi.ElemType, depth+1)
+	case typ.KindMap:
+		return 128
+	case typ.KindRawMessage:
+		return 64
+	case typ.KindNumber:
+		return 12
+	case typ.KindAny:
+		return 64
+	default:
+		return 32
 	}
 }

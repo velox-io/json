@@ -47,9 +47,9 @@ func EncoderSetEscapeLineTerms(on bool) EncoderOption {
 func EncoderSetFloatExpAuto(on bool) EncoderOption {
 	return func(enc *Encoder) {
 		if on {
-			enc.flags |= vjEncFloatExpAuto
+			enc.flags |= EncFloatExpAuto
 		} else {
-			enc.flags &^= vjEncFloatExpAuto
+			enc.flags &^= EncFloatExpAuto
 		}
 	}
 }
@@ -140,27 +140,27 @@ func EncodeValue[T any](enc *Encoder, v T) error {
 	if enc.err != nil {
 		return enc.err
 	}
-	ti, ptr := marshalTarget(&v)
+	ti, ptr := encodingTarget(&v)
 	return enc.encodePtr(ti, ptr)
 }
 
 // encodePtr shares the streaming encode path used by Encode and EncodeValue.
 func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
-	m := getMarshaler()
-	m.flags = enc.flags
-	m.prefix = enc.prefix
-	m.indent = enc.indent
+	es := acquireEncodeState()
+	es.flags = enc.flags
+	es.prefix = enc.prefix
+	es.indent = enc.indent
 	if enc.indent != "" {
-		m.nativeCompat = encvm.Available && isSimpleIndent(enc.prefix, enc.indent) > 0
+		es.nativeCompat = encvm.Available && isSimpleIndent(enc.prefix, enc.indent) > 0
 	}
 
-	hint := marshalHint(ti, ptr)
-	if hint > cap(m.buf) {
-		m.buf = gort.MakeDirtyBytes(0, max(marshalBufInitSize, hint))
+	hint := encodingSizeHint(ti, ptr)
+	if hint > cap(es.buf) {
+		es.buf = gort.MakeDirtyBytes(0, max(encBufInitSize, hint))
 	}
 
 	// Stream out completed chunks to keep memory bounded.
-	m.flushFn = func(p []byte) error {
+	es.flushFn = func(p []byte) error {
 		_, err := enc.w.Write(p)
 		if err != nil {
 			enc.err = err
@@ -168,21 +168,21 @@ func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 		return err
 	}
 
-	if err := m.encodeTop(ti, ptr); err != nil {
-		putMarshaler(m)
+	if err := es.encodeTop(ti, ptr); err != nil {
+		releaseEncodeState(es)
 		return enc.stickyErr(err)
 	}
 
-	m.buf = append(m.buf, '\n')
+	es.buf = append(es.buf, '\n')
 
-	if len(m.buf) > 0 {
-		if _, err := enc.w.Write(m.buf); err != nil {
-			putMarshaler(m)
+	if len(es.buf) > 0 {
+		if _, err := enc.w.Write(es.buf); err != nil {
+			releaseEncodeState(es)
 			return enc.stickyErr(err)
 		}
 	}
 
-	putMarshaler(m)
+	releaseEncodeState(es)
 	return nil
 }
 

@@ -10,14 +10,15 @@ import (
 	"github.com/velox-io/json/typ"
 )
 
-// goVM executes a compiled Blueprint entirely in Go.
-// It interprets the same bytecode as the C VM but writes directly to m.buf
-// via append — no BufCur/BufEnd, no BUF_FULL yield.
-// Supports both compact and indented output modes.
-func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
+// interp interprets a compiled Blueprint entirely in Go.
+// It executes the same bytecode as the C VM but writes directly to es.buf
+// via append — no BufCur/BufEnd, no BUF_FULL yield, no mid-encode flush.
+// The entire output is buffered; the caller (Encoder.encodePtr / Marshal)
+// handles flushing or detaching the result after interp returns.
+func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 	ops := bp.Ops
 	opsLen := int32(len(ops))
-	indent := m.indent != ""
+	indent := es.indent != ""
 	var (
 		pc    int32
 		first = true // tracks whether to write comma before next value
@@ -34,28 +35,28 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 
 		case opObjOpen:
 			if hdr.KeyLen > 0 {
-				m.goVMWriteKey(hdr, first, indent)
+				es.interpWriteKey(hdr, first, indent)
 			} else if !first {
-				m.buf = append(m.buf, ',')
+				es.buf = append(es.buf, ',')
 				if indent {
-					m.appendNewlineIndent()
+					es.appendNewlineIndent()
 				}
 			}
-			m.buf = append(m.buf, '{')
+			es.buf = append(es.buf, '{')
 			if indent {
-				m.indentDepth++
+				es.indentDepth++
 			}
 			first = true
 			pc += 8
 
 		case opObjClose:
 			if indent {
-				m.indentDepth--
+				es.indentDepth--
 				if !first {
-					m.appendNewlineIndent()
+					es.appendNewlineIndent()
 				}
 			}
-			m.buf = append(m.buf, '}')
+			es.buf = append(es.buf, '}')
 			first = false
 			pc += 8
 
@@ -64,188 +65,188 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 		case opBool:
 			fieldPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
 			if hdr.KeyLen > 0 {
-				m.goVMWriteKey(hdr, first, indent)
+				es.interpWriteKey(hdr, first, indent)
 				first = false
 			}
 			if *(*bool)(fieldPtr) {
-				m.buf = append(m.buf, litTrue...)
+				es.buf = append(es.buf, litTrue...)
 			} else {
-				m.buf = append(m.buf, litFalse...)
+				es.buf = append(es.buf, litFalse...)
 			}
 			pc += 8
 
 		case opInt:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
-			m.appendInt64(int64(*(*int)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
+			es.appendInt64(int64(*(*int)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opInt8:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
-			m.appendInt64(int64(*(*int8)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
+			es.appendInt64(int64(*(*int8)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opInt16:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
-			m.appendInt64(int64(*(*int16)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
+			es.appendInt64(int64(*(*int16)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opInt32:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
-			m.appendInt64(int64(*(*int32)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
+			es.appendInt64(int64(*(*int32)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opInt64:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
-			m.appendInt64(*(*int64)(unsafe.Add(base, uintptr(hdr.FieldOff))))
+			es.appendInt64(*(*int64)(unsafe.Add(base, uintptr(hdr.FieldOff))))
 			pc += 8
 
 		case opUint:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
-			m.appendUint64(uint64(*(*uint)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
+			es.appendUint64(uint64(*(*uint)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opUint8:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
-			m.appendUint64(uint64(*(*uint8)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
+			es.appendUint64(uint64(*(*uint8)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opUint16:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
-			m.appendUint64(uint64(*(*uint16)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
+			es.appendUint64(uint64(*(*uint16)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opUint32:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
-			m.appendUint64(uint64(*(*uint32)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
+			es.appendUint64(uint64(*(*uint32)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opUint64:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
-			m.appendUint64(*(*uint64)(unsafe.Add(base, uintptr(hdr.FieldOff))))
+			es.appendUint64(*(*uint64)(unsafe.Add(base, uintptr(hdr.FieldOff))))
 			pc += 8
 
 		case opFloat32:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
 			f := float64(*(*float32)(unsafe.Add(base, uintptr(hdr.FieldOff))))
 			if math.IsNaN(f) || math.IsInf(f, 0) {
 				return &UnsupportedValueError{Str: "NaN or Inf float value"}
 			}
-			m.appendJSONFloat32(f)
+			es.appendJSONFloat32(f)
 			pc += 8
 
 		case opFloat64:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
 			f := *(*float64)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			if math.IsNaN(f) || math.IsInf(f, 0) {
 				return &UnsupportedValueError{Str: "NaN or Inf float value"}
 			}
-			m.appendJSONFloat64(f)
+			es.appendJSONFloat64(f)
 			pc += 8
 
 		case opString:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
 			s := *(*string)(unsafe.Add(base, uintptr(hdr.FieldOff)))
-			m.encodeString(s)
+			es.encodeString(s)
 			pc += 8
 
 		// ---- Keyed scalar shortcuts ----
 
 		case opKString:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
 			s := *(*string)(unsafe.Add(base, uintptr(hdr.FieldOff)))
-			m.encodeString(s)
+			es.encodeString(s)
 			pc += 8
 
 		case opKInt:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
-			m.appendInt64(int64(*(*int)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
+			es.appendInt64(int64(*(*int)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opKInt64:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
-			m.appendInt64(*(*int64)(unsafe.Add(base, uintptr(hdr.FieldOff))))
+			es.appendInt64(*(*int64)(unsafe.Add(base, uintptr(hdr.FieldOff))))
 			pc += 8
 
 		case opKQInt:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
-			m.appendQuotedInt64(int64(*(*int)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
+			es.appendQuotedInt64(int64(*(*int)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opKQInt64:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
-			m.appendQuotedInt64(*(*int64)(unsafe.Add(base, uintptr(hdr.FieldOff))))
+			es.appendQuotedInt64(*(*int64)(unsafe.Add(base, uintptr(hdr.FieldOff))))
 			pc += 8
 
 		// ---- Special value types ----
 
 		case opRawMessage:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
 			sh := (*gort.SliceHeader)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			if sh.Data == nil || sh.Len == 0 {
-				m.buf = append(m.buf, litNull...)
+				es.buf = append(es.buf, litNull...)
 			} else {
 				raw := unsafe.Slice((*byte)(sh.Data), sh.Len)
-				m.buf = append(m.buf, raw...)
+				es.buf = append(es.buf, raw...)
 			}
 			pc += 8
 
 		case opNumber:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
 			s := *(*string)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			if s == "" {
-				m.buf = append(m.buf, '0')
+				es.buf = append(es.buf, '0')
 			} else {
-				m.buf = append(m.buf, s...)
+				es.buf = append(es.buf, s...)
 			}
 			pc += 8
 
 		case opByteSlice:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
 			sh := (*gort.SliceHeader)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			if sh.Data == nil {
-				m.buf = append(m.buf, litNull...)
+				es.buf = append(es.buf, litNull...)
 			} else {
 				data := unsafe.Slice((*byte)(sh.Data), sh.Len)
-				m.buf = append(m.buf, '"')
+				es.buf = append(es.buf, '"')
 				encodedLen := base64.StdEncoding.EncodedLen(sh.Len)
-				start := len(m.buf)
-				m.buf = append(m.buf, make([]byte, encodedLen)...)
-				base64.StdEncoding.Encode(m.buf[start:], data)
-				m.buf = append(m.buf, '"')
+				start := len(es.buf)
+				es.buf = append(es.buf, make([]byte, encodedLen)...)
+				base64.StdEncoding.Encode(es.buf[start:], data)
+				es.buf = append(es.buf, '"')
 			}
 			pc += 8
 
 		case opTime:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
 			// Delegate to fallback — time.Time has custom MarshalJSON
 			fb, ok := bp.Fallbacks[int(pc)]
 			if !ok {
-				return fmt.Errorf("venc: goVM: opTime at PC=%d with no fallback info", pc)
+				return fmt.Errorf("venc: interp: opTime at PC=%d with no fallback info", pc)
 			}
 			fieldPtr := unsafe.Add(base, fb.Offset)
-			if err := m.encodeTop(fb.TI, fieldPtr); err != nil {
+			if err := es.encodeTop(fb.TI, fieldPtr); err != nil {
 				return err
 			}
 			pc += 8
@@ -255,7 +256,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 		case opSkipIfZero:
 			ext := opExtAt(ops, pc)
 			fieldPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
-			skip := goVMIsZero(fieldPtr, ext.OperandB, hdr)
+			skip := interpIsZero(fieldPtr, ext.OperandB)
 			if skip {
 				pc += ext.OperandA // jump forward
 			} else {
@@ -270,7 +271,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 				return fmt.Errorf("venc: nesting depth exceeds limit (%d)", depth)
 			}
 			// Push stack frame: save current base, PC, first flag
-			frame := &m.vmCtx.Stack[depth]
+			frame := &es.vmCtx.Stack[depth]
 			frame.RetBase = base
 			// Store return PC and first flag in the union area
 			*(*int32)(unsafe.Pointer(&frame.Payload[0])) = pc + 16            // return address
@@ -279,7 +280,11 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 
 			// Switch base to the field pointed to by FieldOff
 			base = unsafe.Add(base, uintptr(hdr.FieldOff))
-			first = true
+			// Only reset first=true for struct fields (KeyLen > 0 means it's a field with a key).
+			// For direct array/slice elements (KeyLen == 0), preserve the current first flag.
+			if hdr.KeyLen > 0 {
+				first = true
+			}
 			pc = ext.OperandA // jump to subroutine entry (absolute offset)
 
 		case opRet:
@@ -287,7 +292,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 				return nil // program termination
 			}
 			depth--
-			frame := &m.vmCtx.Stack[depth]
+			frame := &es.vmCtx.Stack[depth]
 			base = frame.RetBase
 			pc = *(*int32)(unsafe.Pointer(&frame.Payload[0])) // restore return PC
 			first = false                                     // after a call, we've written something
@@ -300,17 +305,26 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			p := *(*unsafe.Pointer)(fieldPtr)
 			if p == nil {
 				// Write key + null, skip deref body
-				m.goVMWriteKey(hdr, first, indent)
+				es.interpWriteKey(hdr, first, indent)
 				first = false
-				m.buf = append(m.buf, litNull...)
+				es.buf = append(es.buf, litNull...)
 				pc += ext.OperandA // jump past PtrEnd
 			} else {
+				// Write key before entering deref body (for nested fields)
+				// The body will write the value starting with opObjOpen, opSliceBegin, etc.
+				if hdr.KeyLen > 0 {
+					es.interpWriteKey(hdr, first, indent)
+					// After writing key, set first=true so the value starts without comma
+					first = true
+				}
 				// Push frame to save old base
 				if depth >= VJ_MAX_STACK_DEPTH {
 					return fmt.Errorf("venc: nesting depth exceeds limit (%d)", depth)
 				}
-				frame := &m.vmCtx.Stack[depth]
+				frame := &es.vmCtx.Stack[depth]
 				frame.RetBase = base
+				// Store original first flag (will be restored after return)
+				*(*int32)(unsafe.Pointer(&frame.Payload[4])) = boolToInt32(first)
 				depth++
 				base = p
 				pc += 16 // enter deref body
@@ -319,7 +333,9 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 		case opPtrEnd:
 			if depth > 0 {
 				depth--
-				base = m.vmCtx.Stack[depth].RetBase
+				base = es.vmCtx.Stack[depth].RetBase
+				// After exiting pointer deref body, mark that we've written content
+				first = false
 			}
 			pc += 8
 
@@ -332,27 +348,27 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			sh := (*gort.SliceHeader)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 
 			if hdr.KeyLen > 0 {
-				m.goVMWriteKey(hdr, first, indent)
+				es.interpWriteKey(hdr, first, indent)
 				first = false
 			}
 
 			if sh.Data == nil {
-				m.buf = append(m.buf, litNull...)
+				es.buf = append(es.buf, litNull...)
 				// Jump past the loop body + SliceEnd
 				pc += 16 + bodyLen + 16
 				continue
 			}
 
-			m.buf = append(m.buf, '[')
+			es.buf = append(es.buf, '[')
 			if indent {
-				m.indentDepth++
+				es.indentDepth++
 			}
 
 			if sh.Len == 0 {
 				if indent {
-					m.indentDepth--
+					es.indentDepth--
 				}
-				m.buf = append(m.buf, ']')
+				es.buf = append(es.buf, ']')
 				pc += 16 + bodyLen + 16
 				continue
 			}
@@ -361,7 +377,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			if depth >= VJ_MAX_STACK_DEPTH {
 				return fmt.Errorf("venc: nesting depth exceeds limit (%d)", depth)
 			}
-			frame := &m.vmCtx.Stack[depth]
+			frame := &es.vmCtx.Stack[depth]
 			frame.RetBase = base
 			*(*unsafe.Pointer)(unsafe.Pointer(&frame.Payload[0])) = sh.Data
 			*(*int64)(unsafe.Pointer(&frame.Payload[8])) = int64(sh.Len)
@@ -376,7 +392,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 		case opSliceEnd:
 			ext := opExtAt(ops, pc)
 			depth--
-			frame := &m.vmCtx.Stack[depth]
+			frame := &es.vmCtx.Stack[depth]
 			idx := *(*int32)(unsafe.Pointer(&frame.Payload[16])) + 1
 			count := *(*int64)(unsafe.Pointer(&frame.Payload[8]))
 			elemSize := uintptr(frame.State)
@@ -393,10 +409,10 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 				// End iteration
 				base = frame.RetBase
 				if indent {
-					m.indentDepth--
-					m.appendNewlineIndent()
+					es.indentDepth--
+					es.appendNewlineIndent()
 				}
-				m.buf = append(m.buf, ']')
+				es.buf = append(es.buf, ']')
 				first = false
 				pc += 16
 			}
@@ -411,14 +427,14 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			bodyLen := ext.OperandB
 
 			if hdr.KeyLen > 0 {
-				m.goVMWriteKey(hdr, first, indent)
+				es.interpWriteKey(hdr, first, indent)
 				first = false
 			}
 
-			m.buf = append(m.buf, '[')
+			es.buf = append(es.buf, '[')
 
 			if arrayLen == 0 {
-				m.buf = append(m.buf, ']')
+				es.buf = append(es.buf, ']')
 				pc += 16 + bodyLen + 16
 				continue
 			}
@@ -428,7 +444,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			if depth >= VJ_MAX_STACK_DEPTH {
 				return fmt.Errorf("venc: nesting depth exceeds limit (%d)", depth)
 			}
-			frame := &m.vmCtx.Stack[depth]
+			frame := &es.vmCtx.Stack[depth]
 			frame.RetBase = base
 			*(*unsafe.Pointer)(unsafe.Pointer(&frame.Payload[0])) = fieldPtr
 			*(*int64)(unsafe.Pointer(&frame.Payload[8])) = int64(arrayLen)
@@ -443,7 +459,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 		// ---- Sequence (single-instruction loops) ----
 
 		case opSeqFloat64, opSeqInt, opSeqInt64, opSeqString:
-			if err := m.goVMSeq(hdr, ops, pc, base, first, op); err != nil {
+			if err := es.interpSeq(hdr, ops, pc, base, first, op); err != nil {
 				return err
 			}
 			first = false
@@ -455,43 +471,43 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			// Delegate entire map to Go
 			fb, ok := bp.Fallbacks[int(pc)]
 			if !ok {
-				return fmt.Errorf("venc: goVM: opMap at PC=%d with no fallback info", pc)
+				return fmt.Errorf("venc: interp: opMap at PC=%d with no fallback info", pc)
 			}
 			if hdr.KeyLen > 0 {
-				m.goVMWriteKey(hdr, first, indent)
+				es.interpWriteKey(hdr, first, indent)
 				first = false
 			}
 			mapPtr := unsafe.Add(base, fb.Offset)
-			if err := m.encodeTop(fb.TI, mapPtr); err != nil {
+			if err := es.encodeTop(fb.TI, mapPtr); err != nil {
 				return err
 			}
 			pc += 8
 
 		case opMapStrStr, opMapStrInt, opMapStrInt64:
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
 			mapPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
 			// Try fallback entry first (available when compiled as struct field).
 			if fb, ok := bp.Fallbacks[int(pc)]; ok {
-				if err := m.encodeTop(fb.TI, unsafe.Add(base, fb.Offset)); err != nil {
+				if err := es.encodeTop(fb.TI, unsafe.Add(base, fb.Offset)); err != nil {
 					return err
 				}
 			} else {
 				// Standalone map op: read map pointer and encode via type-specific fast path.
 				mp := *(*unsafe.Pointer)(mapPtr)
 				if mp == nil {
-					m.buf = append(m.buf, litNull...)
+					es.buf = append(es.buf, litNull...)
 				} else {
 					switch op {
 					case opMapStrStr:
-						if err := m.encodeMapStringString(mapPtr); err != nil {
+						if err := es.encodeMapStringString(mapPtr); err != nil {
 							return err
 						}
 					default:
 						// opMapStrInt, opMapStrInt64: delegate to generic map encoder.
 						// The EncTypeInfo isn't available here, but encodeAnyMap handles
 						// map[string]any. For typed maps, fall back to reflect.
-						return fmt.Errorf("venc: goVM: map opcode %d at PC=%d requires fallback entry", op, pc)
+						return fmt.Errorf("venc: interp: map opcode %d at PC=%d requires fallback entry", op, pc)
 					}
 				}
 			}
@@ -503,12 +519,12 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			// For Go VM, we don't do Swiss map iteration — delegate the whole map
 			fb, ok := bp.Fallbacks[int(pc)]
 			if !ok {
-				return fmt.Errorf("venc: goVM: opMapStrIter at PC=%d with no fallback", pc)
+				return fmt.Errorf("venc: interp: opMapStrIter at PC=%d with no fallback", pc)
 			}
-			m.goVMWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, indent)
 			first = false
 			mapPtr := unsafe.Add(base, fb.Offset)
-			if err := m.encodeTop(fb.TI, mapPtr); err != nil {
+			if err := es.encodeTop(fb.TI, mapPtr); err != nil {
 				return err
 			}
 			// Skip past body + MapStrIterEnd
@@ -516,18 +532,18 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 
 		case opMapStrIterEnd:
 			// Should not reach here if opMapStrIter skipped properly
-			return fmt.Errorf("venc: goVM: unexpected opMapStrIterEnd at PC=%d", pc)
+			return fmt.Errorf("venc: interp: unexpected opMapStrIterEnd at PC=%d", pc)
 
 		// ---- Interface ----
 
 		case opInterface:
 			fieldPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
 			if hdr.KeyLen > 0 {
-				m.goVMWriteKey(hdr, first, indent)
+				es.interpWriteKey(hdr, first, indent)
 			} else if !first {
-				m.buf = append(m.buf, ',')
+				es.buf = append(es.buf, ',')
 			}
-			if err := m.encodeAnyIface(fieldPtr); err != nil {
+			if err := es.encodeAnyIface(fieldPtr); err != nil {
 				return err
 			}
 			first = false
@@ -538,7 +554,7 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 		case opFallback:
 			fb, ok := bp.Fallbacks[int(pc)]
 			if !ok {
-				return fmt.Errorf("venc: goVM: opFallback at PC=%d with no fallback info", pc)
+				return fmt.Errorf("venc: interp: opFallback at PC=%d with no fallback info", pc)
 			}
 			fieldPtr := unsafe.Add(base, fb.Offset)
 
@@ -550,20 +566,20 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			}
 
 			if !first {
-				m.buf = append(m.buf, ',')
+				es.buf = append(es.buf, ',')
 			}
 			if hdr.KeyLen > 0 {
-				m.buf = append(m.buf, keyPoolBytes(hdr.KeyOff, hdr.KeyLen)...)
+				es.buf = append(es.buf, keyPoolBytes(hdr.KeyOff, hdr.KeyLen)...)
 			} else if len(fb.KeyBytes) > 0 {
-				m.buf = append(m.buf, fb.KeyBytes...)
+				es.buf = append(es.buf, fb.KeyBytes...)
 			}
 
 			if fb.TagFlags&EncTagFlagQuoted != 0 {
-				if err := m.encodeValueQuoted(fb.TI, fieldPtr); err != nil {
+				if err := es.encodeValueQuoted(fb.TI, fieldPtr); err != nil {
 					return err
 				}
 			} else {
-				if err := m.encodeTop(fb.TI, fieldPtr); err != nil {
+				if err := es.encodeTop(fb.TI, fieldPtr); err != nil {
 					return err
 				}
 			}
@@ -571,32 +587,32 @@ func (m *marshaler) goVM(bp *Blueprint, base unsafe.Pointer) error {
 			pc += 8
 
 		default:
-			return fmt.Errorf("venc: goVM: unknown opcode %d at PC=%d", op, pc)
+			return fmt.Errorf("venc: interp: unknown opcode %d at PC=%d", op, pc)
 		}
 	}
 
 	return nil
 }
 
-// goVMWriteKey writes comma (if not first) + indent + key from the pool + key-space.
-func (m *marshaler) goVMWriteKey(hdr *VjOpHdr, first bool, indent bool) {
+// interpWriteKey writes comma (if not first) + indent + key from the pool + key-space.
+func (es *encodeState) interpWriteKey(hdr *VjOpHdr, first bool, indent bool) {
 	if !first {
-		m.buf = append(m.buf, ',')
+		es.buf = append(es.buf, ',')
 	}
 	if indent {
-		m.appendNewlineIndent()
+		es.appendNewlineIndent()
 	}
 	if hdr.KeyLen > 0 {
-		m.buf = append(m.buf, keyPoolBytes(hdr.KeyOff, hdr.KeyLen)...)
+		es.buf = append(es.buf, keyPoolBytes(hdr.KeyOff, hdr.KeyLen)...)
 		if indent {
-			m.buf = append(m.buf, ' ')
+			es.buf = append(es.buf, ' ')
 		}
 	}
 }
 
-// goVMIsZero implements the zero-check for opSkipIfZero.
+// interpIsZero implements the zero-check for opSkipIfZero.
 // tag is the ZeroCheckTag from OperandB.
-func goVMIsZero(ptr unsafe.Pointer, tag int32, hdr *VjOpHdr) bool {
+func interpIsZero(ptr unsafe.Pointer, tag int32) bool {
 	switch uint16(tag) {
 	case opBool:
 		return !*(*bool)(ptr)
@@ -627,28 +643,42 @@ func goVMIsZero(ptr unsafe.Pointer, tag int32, hdr *VjOpHdr) bool {
 	case opString:
 		return *(*string)(ptr) == ""
 	default:
-		// For complex types (slice, map, pointer), check if nil/empty
-		// Using the tag as KindSlice etc.
+		// For complex types, use the tag as ElemTypeKind.
+		// Matches C VM's vj_is_zero semantics.
 		switch typ.ElemTypeKind(tag) {
 		case typ.KindSlice:
-			return (*gort.SliceHeader)(ptr).Data == nil
+			// Empty for omitempty when len == 0 (not just nil).
+			return (*gort.SliceHeader)(ptr).Len == 0
 		case typ.KindMap:
-			return *(*unsafe.Pointer)(ptr) == nil
+			mp := *(*unsafe.Pointer)(ptr)
+			if mp == nil {
+				return true
+			}
+			return gort.MapLen(mp) == 0
 		case typ.KindPointer:
 			return *(*unsafe.Pointer)(ptr) == nil
+		case typ.KindAny, typ.KindIface:
+			// nil interface = zero value (eface/iface type ptr == NULL).
+			return *(*unsafe.Pointer)(ptr) == nil
+		case typ.KindNumber:
+			// json.Number is a string — zero means empty string.
+			return *(*string)(ptr) == ""
+		case typ.KindRawMessage:
+			// json.RawMessage is []byte — zero means nil or len==0.
+			return (*gort.SliceHeader)(ptr).Len == 0
 		}
 		return false
 	}
 }
 
-// goVMSeq handles single-instruction sequence ops (opSeqFloat64, opSeqInt, opSeqInt64, opSeqString).
-func (m *marshaler) goVMSeq(hdr *VjOpHdr, ops []byte, pc int32, base unsafe.Pointer, first bool, op uint16) error {
+// interpSeq handles single-instruction sequence ops (opSeqFloat64, opSeqInt, opSeqInt64, opSeqString).
+func (es *encodeState) interpSeq(hdr *VjOpHdr, ops []byte, pc int32, base unsafe.Pointer, first bool, op uint16) error {
 	ext := opExtAt(ops, pc)
 	fieldPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
-	doIndent := m.indent != ""
+	doIndent := es.indent != ""
 
 	if hdr.KeyLen > 0 {
-		m.goVMWriteKey(hdr, first, doIndent)
+		es.interpWriteKey(hdr, first, doIndent)
 	}
 
 	packed := uint32(ext.OperandA)
@@ -659,7 +689,7 @@ func (m *marshaler) goVMSeq(hdr *VjOpHdr, ops []byte, pc int32, base unsafe.Poin
 		// Slice
 		sh := (*gort.SliceHeader)(fieldPtr)
 		if sh.Data == nil {
-			m.buf = append(m.buf, litNull...)
+			es.buf = append(es.buf, litNull...)
 			return nil
 		}
 		data = sh.Data
@@ -670,16 +700,16 @@ func (m *marshaler) goVMSeq(hdr *VjOpHdr, ops []byte, pc int32, base unsafe.Poin
 		data = fieldPtr
 	}
 
-	m.buf = append(m.buf, '[')
+	es.buf = append(es.buf, '[')
 	if doIndent && count > 0 {
-		m.indentDepth++
+		es.indentDepth++
 	}
 	for i := 0; i < count; i++ {
 		if i > 0 {
-			m.buf = append(m.buf, ',')
+			es.buf = append(es.buf, ',')
 		}
 		if doIndent {
-			m.appendNewlineIndent()
+			es.appendNewlineIndent()
 		}
 		switch op {
 		case opSeqFloat64:
@@ -687,27 +717,24 @@ func (m *marshaler) goVMSeq(hdr *VjOpHdr, ops []byte, pc int32, base unsafe.Poin
 			if math.IsNaN(f) || math.IsInf(f, 0) {
 				return &UnsupportedValueError{Str: "NaN or Inf float value"}
 			}
-			m.appendJSONFloat64(f)
+			es.appendJSONFloat64(f)
 		case opSeqInt:
-			m.appendInt64(int64(*(*int)(unsafe.Add(data, uintptr(i)*unsafe.Sizeof(int(0))))))
+			es.appendInt64(int64(*(*int)(unsafe.Add(data, uintptr(i)*unsafe.Sizeof(int(0))))))
 		case opSeqInt64:
-			m.appendInt64(*(*int64)(unsafe.Add(data, uintptr(i)*8)))
+			es.appendInt64(*(*int64)(unsafe.Add(data, uintptr(i)*8)))
 		case opSeqString:
 			s := *(*string)(unsafe.Add(data, uintptr(i)*unsafe.Sizeof("")))
-			m.encodeString(s)
+			es.encodeString(s)
 		}
 	}
 	if doIndent && count > 0 {
-		m.indentDepth--
-		m.appendNewlineIndent()
+		es.indentDepth--
+		es.appendNewlineIndent()
 	}
-	m.buf = append(m.buf, ']')
+	es.buf = append(es.buf, ']')
 	return nil
 }
 
 func boolToInt32(b bool) int32 {
-	if b {
-		return 1
-	}
-	return 0
+	return int32(*(*uint8)(unsafe.Pointer(&b)))
 }

@@ -18,15 +18,15 @@ func bindEncodeFn(ti *EncTypeInfo) {
 	// Custom marshal hooks take priority.
 	if ti.TypeFlags&EncTypeFlagHasMarshalFn != 0 {
 		hooks := ti.Hooks
-		ti.Encode = func(m *marshaler, ptr unsafe.Pointer) error {
+		ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
 			data, err := hooks.MarshalFn(ptr)
 			if err != nil {
 				return err
 			}
 			if len(data) == 0 {
-				m.buf = append(m.buf, litNull...)
+				es.buf = append(es.buf, litNull...)
 			} else {
-				m.buf = append(m.buf, data...)
+				es.buf = append(es.buf, data...)
 			}
 			return nil
 		}
@@ -34,12 +34,12 @@ func bindEncodeFn(ti *EncTypeInfo) {
 	}
 	if ti.TypeFlags&EncTypeFlagHasTextMarshalFn != 0 {
 		hooks := ti.Hooks
-		ti.Encode = func(m *marshaler, ptr unsafe.Pointer) error {
+		ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
 			data, err := hooks.TextMarshalFn(ptr)
 			if err != nil {
 				return err
 			}
-			m.encodeString(unsafeString(data))
+			es.encodeString(unsafeString(data))
 			return nil
 		}
 		return
@@ -80,14 +80,14 @@ func bindEncodeFn(ti *EncTypeInfo) {
 		ti.Encode = fnEncodeNumber
 
 	case typ.KindStruct:
-		ti.Encode = func(m *marshaler, ptr unsafe.Pointer) error {
+		ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
 			return m.exec(ti.getBlueprint(), ptr)
 		}
 
 	case typ.KindSlice:
 		si := ti.ResolveSlice()
 		if si.ElemType.Kind == typ.KindUint8 && si.ElemSize == 1 {
-			ti.Encode = func(m *marshaler, ptr unsafe.Pointer) error {
+			ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
 				sh := (*SliceHeader)(ptr)
 				if sh.Data == nil {
 					m.buf = append(m.buf, litNull...)
@@ -96,7 +96,7 @@ func bindEncodeFn(ti *EncTypeInfo) {
 				return m.encodeByteSlice(sh)
 			}
 		} else {
-			ti.Encode = func(m *marshaler, ptr unsafe.Pointer) error {
+			ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
 				sh := (*SliceHeader)(ptr)
 				if sh.Data == nil {
 					m.buf = append(m.buf, litNull...)
@@ -109,18 +109,18 @@ func bindEncodeFn(ti *EncTypeInfo) {
 	case typ.KindArray:
 		ai := ti.ResolveArray()
 		if ai.ElemType.Kind == typ.KindUint8 && ai.ElemSize == 1 {
-			ti.Encode = func(m *marshaler, ptr unsafe.Pointer) error {
+			ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
 				return m.encodeByteArray(ai, ptr)
 			}
 		} else {
-			ti.Encode = func(m *marshaler, ptr unsafe.Pointer) error {
+			ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
 				return m.exec(ti.getBlueprint(), ptr)
 			}
 		}
 
 	case typ.KindMap:
 		mi := ti.ResolveMap()
-		ti.Encode = func(m *marshaler, ptr unsafe.Pointer) error {
+		ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
 			if mi.IsStringKey && !m.inVM && m.nativeCompat {
 				return m.exec(ti.getBlueprint(), ptr)
 			}
@@ -133,7 +133,7 @@ func bindEncodeFn(ti *EncTypeInfo) {
 	case typ.KindPointer:
 		// Read ElemType.Encode at call time (not bind time) to handle cycles.
 		pi := ti.ResolvePointer()
-		ti.Encode = func(m *marshaler, ptr unsafe.Pointer) error {
+		ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
 			elemPtr := *(*unsafe.Pointer)(ptr)
 			if elemPtr == nil {
 				m.buf = append(m.buf, litNull...)
@@ -143,13 +143,13 @@ func bindEncodeFn(ti *EncTypeInfo) {
 		}
 
 	case typ.KindAny:
-		ti.Encode = func(m *marshaler, ptr unsafe.Pointer) error {
+		ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
 			return m.encodeAny(*(*any)(ptr))
 		}
 
 	case typ.KindIface:
 		rtype := ti.Type
-		ti.Encode = func(m *marshaler, ptr unsafe.Pointer) error {
+		ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
 			rv := reflect.NewAt(rtype, ptr).Elem()
 			if rv.IsNil() {
 				m.buf = append(m.buf, litNull...)
@@ -160,7 +160,7 @@ func bindEncodeFn(ti *EncTypeInfo) {
 
 	default:
 		rtype := ti.Type
-		ti.Encode = func(_ *marshaler, _ unsafe.Pointer) error {
+		ti.Encode = func(_ *encodeState, _ unsafe.Pointer) error {
 			return &UnsupportedTypeError{Type: rtype}
 		}
 	}
@@ -168,94 +168,94 @@ func bindEncodeFn(ti *EncTypeInfo) {
 
 // ── Primitive encode functions (stateless, no closure needed) ───────
 
-func fnEncodeBool(m *marshaler, ptr unsafe.Pointer) error {
+func fnEncodeBool(es *encodeState, ptr unsafe.Pointer) error {
 	if *(*bool)(ptr) {
-		m.buf = append(m.buf, litTrue...)
+		es.buf = append(es.buf, litTrue...)
 	} else {
-		m.buf = append(m.buf, litFalse...)
+		es.buf = append(es.buf, litFalse...)
 	}
 	return nil
 }
 
-func fnEncodeInt(m *marshaler, ptr unsafe.Pointer) error {
-	m.appendInt64(int64(*(*int)(ptr)))
+func fnEncodeInt(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendInt64(int64(*(*int)(ptr)))
 	return nil
 }
 
-func fnEncodeInt8(m *marshaler, ptr unsafe.Pointer) error {
-	m.appendInt64(int64(*(*int8)(ptr)))
+func fnEncodeInt8(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendInt64(int64(*(*int8)(ptr)))
 	return nil
 }
 
-func fnEncodeInt16(m *marshaler, ptr unsafe.Pointer) error {
-	m.appendInt64(int64(*(*int16)(ptr)))
+func fnEncodeInt16(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendInt64(int64(*(*int16)(ptr)))
 	return nil
 }
 
-func fnEncodeInt32(m *marshaler, ptr unsafe.Pointer) error {
-	m.appendInt64(int64(*(*int32)(ptr)))
+func fnEncodeInt32(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendInt64(int64(*(*int32)(ptr)))
 	return nil
 }
 
-func fnEncodeInt64(m *marshaler, ptr unsafe.Pointer) error {
-	m.appendInt64(*(*int64)(ptr))
+func fnEncodeInt64(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendInt64(*(*int64)(ptr))
 	return nil
 }
 
-func fnEncodeUint(m *marshaler, ptr unsafe.Pointer) error {
-	m.appendUint64(uint64(*(*uint)(ptr)))
+func fnEncodeUint(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendUint64(uint64(*(*uint)(ptr)))
 	return nil
 }
 
-func fnEncodeUint8(m *marshaler, ptr unsafe.Pointer) error {
-	m.appendUint64(uint64(*(*uint8)(ptr)))
+func fnEncodeUint8(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendUint64(uint64(*(*uint8)(ptr)))
 	return nil
 }
 
-func fnEncodeUint16(m *marshaler, ptr unsafe.Pointer) error {
-	m.appendUint64(uint64(*(*uint16)(ptr)))
+func fnEncodeUint16(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendUint64(uint64(*(*uint16)(ptr)))
 	return nil
 }
 
-func fnEncodeUint32(m *marshaler, ptr unsafe.Pointer) error {
-	m.appendUint64(uint64(*(*uint32)(ptr)))
+func fnEncodeUint32(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendUint64(uint64(*(*uint32)(ptr)))
 	return nil
 }
 
-func fnEncodeUint64(m *marshaler, ptr unsafe.Pointer) error {
-	m.appendUint64(*(*uint64)(ptr))
+func fnEncodeUint64(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendUint64(*(*uint64)(ptr))
 	return nil
 }
 
-func fnEncodeFloat32(m *marshaler, ptr unsafe.Pointer) error {
-	return m.encodeFloat32(ptr)
+func fnEncodeFloat32(es *encodeState, ptr unsafe.Pointer) error {
+	return es.encodeFloat32(ptr)
 }
 
-func fnEncodeFloat64(m *marshaler, ptr unsafe.Pointer) error {
-	return m.encodeFloat64(ptr)
+func fnEncodeFloat64(es *encodeState, ptr unsafe.Pointer) error {
+	return es.encodeFloat64(ptr)
 }
 
-func fnEncodeString(m *marshaler, ptr unsafe.Pointer) error {
-	m.encodeString(*(*string)(ptr))
+func fnEncodeString(es *encodeState, ptr unsafe.Pointer) error {
+	es.encodeString(*(*string)(ptr))
 	return nil
 }
 
-func fnEncodeRawMessage(m *marshaler, ptr unsafe.Pointer) error {
+func fnEncodeRawMessage(es *encodeState, ptr unsafe.Pointer) error {
 	raw := *(*[]byte)(ptr)
 	if len(raw) == 0 {
-		m.buf = append(m.buf, litNull...)
+		es.buf = append(es.buf, litNull...)
 	} else {
-		m.buf = append(m.buf, raw...)
+		es.buf = append(es.buf, raw...)
 	}
 	return nil
 }
 
-func fnEncodeNumber(m *marshaler, ptr unsafe.Pointer) error {
+func fnEncodeNumber(es *encodeState, ptr unsafe.Pointer) error {
 	s := *(*string)(ptr)
 	if s == "" {
-		m.buf = append(m.buf, '0')
+		es.buf = append(es.buf, '0')
 	} else {
-		m.buf = append(m.buf, s...)
+		es.buf = append(es.buf, s...)
 	}
 	return nil
 }

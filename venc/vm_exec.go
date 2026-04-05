@@ -10,38 +10,38 @@ import (
 	"github.com/velox-io/json/typ"
 )
 
-func (m *marshaler) writeIndent(ctx *VjExecCtx) {
+func (es *encodeState) writeIndent(ctx *VjExecCtx) {
 	if ctx.IndentStep == 0 {
 		return
 	}
 	n := 1 + int(ctx.IndentPrefixLen) + int(ctx.IndentDepth)*int(ctx.IndentStep)
-	tpl := m.indentTpl
-	m.buf = append(m.buf, tpl[:n]...)
+	tpl := es.indentTpl
+	es.buf = append(es.buf, tpl[:n]...)
 }
 
-func (m *marshaler) writeKeySpace(ctx *VjExecCtx) {
+func (es *encodeState) writeKeySpace(ctx *VjExecCtx) {
 	if ctx.IndentStep != 0 {
-		m.buf = append(m.buf, ' ')
+		es.buf = append(es.buf, ' ')
 	}
 }
 
 // execVM drives the Go<->C VM loop around one Blueprint.
-func (m *marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
+func (es *encodeState) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	// m.vmCtx is shared state, so native VM entry cannot be re-entrant.
-	m.inVM = true
+	es.inVM = true
 
 	if vjTraceEnabled {
-		m.traceRecordBlueprint(bp)
-		defer m.traceFlushBlueprints()
+		es.traceRecordBlueprint(bp)
+		defer es.traceFlushBlueprints()
 	}
 
-	ctx := &m.vmCtx
+	ctx := &es.vmCtx
 	ctx.OpsPtr = unsafe.Pointer(&bp.Ops[0])
 	ctx.PC = 0
 	// CurBase lives in heap state, so it must never point at stack memory.
 	ctx.CurBase = base
 
-	ctx.VMState = vmstateBuildInitial(m.flags)
+	ctx.VMState = vmstateBuildInitial(es.flags)
 
 	snap := loadIfaceCacheSnapshot()
 	if len(snap.entries) > 0 {
@@ -58,32 +58,32 @@ func (m *marshaler) execVM(bp *Blueprint, base unsafe.Pointer) error {
 
 	// Indent uses the full VM; compact mode selects compact vs fast escaping.
 	var vmExec func(unsafe.Pointer)
-	if step := isSimpleIndent(m.prefix, m.indent); step > 0 {
-		m.buildIndentTpl(m.prefix, m.indent)
-		ctx.IndentTpl = unsafe.Pointer(&m.indentTpl[0])
+	if step := isSimpleIndent(es.prefix, es.indent); step > 0 {
+		es.buildIndentTpl(es.prefix, es.indent)
+		ctx.IndentTpl = unsafe.Pointer(&es.indentTpl[0])
 		ctx.IndentStep = uint8(step)
-		ctx.IndentPrefixLen = uint8(len(m.prefix))
+		ctx.IndentPrefixLen = uint8(len(es.prefix))
 		ctx.IndentDepth = 0
 		vmExec = encvm.VMExec
 	} else {
-		if m.flags&uint32(escapeStringFlags) != 0 {
+		if es.flags&uint32(escapeStringFlags) != 0 {
 			vmExec = encvm.VMExecCompact
 		} else {
 			vmExec = encvm.VMExecFast
 		}
 	}
 
-	err := m.execVMLoop(ctx, bp, vmExec)
-	m.inVM = false
+	err := es.execVMLoop(ctx, bp, vmExec)
+	es.inVM = false
 	return err
 }
 
 // execVMLoop keeps the hot VM loop free of defer overhead.
-func (m *marshaler) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(unsafe.Pointer)) error {
+func (es *encodeState) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(unsafe.Pointer)) error {
 	for {
 		// Flush before re-entry so yield-written bytes reach the writer promptly.
-		if m.flushFn != nil && len(m.buf) > 0 {
-			if err := m.flush(); err != nil {
+		if es.flushFn != nil && len(es.buf) > 0 {
+			if err := es.flush(); err != nil {
 				return err
 			}
 		}
@@ -91,56 +91,56 @@ func (m *marshaler) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(unsafe
 		// Ensure workBuf is non-empty. Besides vjExitBufFull, the YieldToGo
 		// handlers also append to m.buf and may fill it to cap exactly,
 		// so we must check on every iteration, not just after BufFull.
-		if len(m.buf) == cap(m.buf) {
-			newCap := max(cap(m.buf)*2, 4096)
-			newBuf := gort.MakeDirtyBytes(len(m.buf), newCap)
-			copy(newBuf, m.buf)
-			m.buf = newBuf
+		if len(es.buf) == cap(es.buf) {
+			newCap := max(cap(es.buf)*2, 4096)
+			newBuf := gort.MakeDirtyBytes(len(es.buf), newCap)
+			copy(newBuf, es.buf)
+			es.buf = newBuf
 		}
 
 		// Hand the spare capacity [len:cap) to the C VM as its write region.
-		workBuf := m.buf[len(m.buf):cap(m.buf)]
+		workBuf := es.buf[len(es.buf):cap(es.buf)]
 		bufStart := uintptr(unsafe.Pointer(&workBuf[0]))
 		ctx.BufCur = bufStart
 		ctx.BufEnd = bufStart + uintptr(len(workBuf))
 
 		vmExec(unsafe.Pointer(ctx))
 
-		m.flushVMTrace()
+		es.flushVMTrace()
 
 		// Bytes written by the VM this iteration.
 		written := int(ctx.BufCur - bufStart)
 
 		switch vmstateGetExit(ctx.VMState) {
 		case vjExitOK:
-			m.buf = m.buf[:len(m.buf)+written]
+			es.buf = es.buf[:len(es.buf)+written]
 			return nil
 
 		case vjExitBufFull:
-			m.buf = m.buf[:len(m.buf)+written]
+			es.buf = es.buf[:len(es.buf)+written]
 
-			if m.flushFn != nil {
-				if err := m.flush(); err != nil {
+			if es.flushFn != nil {
+				if err := es.flush(); err != nil {
 					return err
 				}
 			} else {
-				newCap := max(cap(m.buf)*2, len(m.buf)+4096)
-				newBuf := gort.MakeDirtyBytes(len(m.buf), newCap)
-				copy(newBuf, m.buf)
-				m.buf = newBuf
+				newCap := max(cap(es.buf)*2, len(es.buf)+4096)
+				newBuf := gort.MakeDirtyBytes(len(es.buf), newCap)
+				copy(newBuf, es.buf)
+				es.buf = newBuf
 			}
 
 		case vjExitYieldToGo:
-			m.buf = m.buf[:len(m.buf)+written]
+			es.buf = es.buf[:len(es.buf)+written]
 
 			// Go-side fallback paths must see the VM's current indent depth.
 			if ctx.IndentStep > 0 {
-				m.indentDepth = int(ctx.IndentDepth)
+				es.indentDepth = int(ctx.IndentDepth)
 			}
 
 			switch vmstateGetYield(ctx.VMState) {
 			case yieldIfaceMiss:
-				if err := m.handleIfaceCacheMiss(ctx); err != nil {
+				if err := es.handleIfaceCacheMiss(ctx); err != nil {
 					return err
 				}
 				snap := loadIfaceCacheSnapshot()
@@ -156,24 +156,24 @@ func (m *marshaler) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(unsafe
 			case yieldFallback:
 				// SWITCH_OPS may have moved execution into a child Blueprint.
 				activeBP := activeBlueprint(ctx, bp)
-				m.traceRecordBlueprint(activeBP)
+				es.traceRecordBlueprint(activeBP)
 
 				if opHdrAt(activeBP.Ops, ctx.PC).OpType == opInterface {
-					if err := m.handleInterfaceYield(ctx, activeBP); err == errVMContinue {
+					if err := es.handleInterfaceYield(ctx, activeBP); err == errVMContinue {
 						continue
 					} else if err != nil {
 						return err
 					}
 				} else {
-					if err := m.handleFallbackYield(ctx, activeBP); err != nil {
+					if err := es.handleFallbackYield(ctx, activeBP); err != nil {
 						return err
 					}
 				}
 
 			case yieldMapHandoff:
 				activeBP := activeBlueprint(ctx, bp)
-				m.traceRecordBlueprint(activeBP)
-				if err := m.handleMapIteration(ctx, activeBP); err != nil {
+				es.traceRecordBlueprint(activeBP)
+				if err := es.handleMapIteration(ctx, activeBP); err != nil {
 					return err
 				}
 
@@ -206,7 +206,7 @@ func typeFromRTypePtr(p unsafe.Pointer) reflect.Type {
 }
 
 // handleIfaceCacheMiss compiles or tags the concrete interface type and publishes it into the shared cache.
-func (m *marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
+func (es *encodeState) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 	typePtr := ctx.YieldTypePtr
 	if typePtr == nil {
 		return fmt.Errorf("venc: interface cache miss with nil type pointer")
@@ -242,17 +242,17 @@ func (m *marshaler) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 
 	insertIfaceCache(typePtr, bp, tag, flags)
 	if bp != nil {
-		m.traceRecordBlueprint(bp)
+		es.traceRecordBlueprint(bp)
 	}
 	return nil
 }
 
-func (m *marshaler) encodeAnyIface(ifacePtr unsafe.Pointer) error {
-	return m.encodeAny(*(*any)(ifacePtr))
+func (es *encodeState) encodeAnyIface(ifacePtr unsafe.Pointer) error {
+	return es.encodeAny(*(*any)(ifacePtr))
 }
 
 // handleFallbackYield runs the Go-side fallback for one yielded field.
-func (m *marshaler) handleFallbackYield(ctx *VjExecCtx, bp *Blueprint) error {
+func (es *encodeState) handleFallbackYield(ctx *VjExecCtx, bp *Blueprint) error {
 	isFirst := vmstateGetFirst(ctx.VMState)
 
 	fb, ok := bp.Fallbacks[int(ctx.PC)]
@@ -270,21 +270,21 @@ func (m *marshaler) handleFallbackYield(ctx *VjExecCtx, bp *Blueprint) error {
 	}
 
 	if !isFirst {
-		m.buf = append(m.buf, ',')
-		m.writeIndent(ctx)
+		es.buf = append(es.buf, ',')
+		es.writeIndent(ctx)
 	}
 
 	if len(fb.KeyBytes) > 0 {
-		m.buf = append(m.buf, fb.KeyBytes...)
-		m.writeKeySpace(ctx)
+		es.buf = append(es.buf, fb.KeyBytes...)
+		es.writeKeySpace(ctx)
 	}
 
 	if fb.TagFlags&EncTagFlagQuoted != 0 {
-		if err := m.encodeValueQuoted(fb.TI, fieldPtr); err != nil {
+		if err := es.encodeValueQuoted(fb.TI, fieldPtr); err != nil {
 			return err
 		}
 	} else {
-		if err := m.encodeTop(fb.TI, fieldPtr); err != nil {
+		if err := es.encodeTop(fb.TI, fieldPtr); err != nil {
 			return err
 		}
 	}
@@ -297,7 +297,7 @@ func (m *marshaler) handleFallbackYield(ctx *VjExecCtx, bp *Blueprint) error {
 }
 
 // handleMapIteration runs the Go-side map encoder for OP_MAP yields.
-func (m *marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
+func (es *encodeState) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 	hdr := opHdrAt(bp.Ops, ctx.PC)
 	opCodeVal := hdr.OpType
 
@@ -313,23 +313,23 @@ func (m *marshaler) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 	mapInfo := fb.TI.ResolveMap()
 
 	if !isFirst {
-		m.buf = append(m.buf, ',')
-		m.writeIndent(ctx)
+		es.buf = append(es.buf, ',')
+		es.writeIndent(ctx)
 	}
 
 	if hdr.KeyLen > 0 {
-		m.buf = append(m.buf, keyPoolBytes(hdr.KeyOff, hdr.KeyLen)...)
-		m.writeKeySpace(ctx)
+		es.buf = append(es.buf, keyPoolBytes(hdr.KeyOff, hdr.KeyLen)...)
+		es.writeKeySpace(ctx)
 	}
 
 	// map[string]any keeps the value fast path inline.
 	if mapInfo.ValType.Kind == typ.KindAny && mapInfo.IsStringKey {
 		mp := *(*map[string]any)(mapPtr)
-		if err := m.encodeAnyMap(mp); err != nil {
+		if err := es.encodeAnyMap(mp); err != nil {
 			return err
 		}
 	} else {
-		if err := m.encodeTop(fb.TI, mapPtr); err != nil {
+		if err := es.encodeTop(fb.TI, mapPtr); err != nil {
 			return err
 		}
 	}

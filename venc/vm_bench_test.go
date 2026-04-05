@@ -176,22 +176,22 @@ var (
 // Helper: force Go-only encoding path through marshaler.
 
 func marshalGoOnly[T any](v *T) ([]byte, error) {
-	m := getMarshaler()
+	es := acquireEncodeState()
 	ti := EncTypeInfoOf(reflect.TypeFor[T]())
 
 	hint := ti.HintBytes
-	if hint > cap(m.buf) {
-		m.buf = make([]byte, 0, hint)
+	if hint > cap(es.buf) {
+		es.buf = make([]byte, 0, hint)
 	}
 
-	// Force Go VM path.
+	// Force interpreter path.
 	bp := ti.getBlueprint()
-	if err := m.goVM(bp, unsafe.Pointer(v)); err != nil {
-		putMarshaler(m)
+	if err := es.interp(bp, unsafe.Pointer(v)); err != nil {
+		releaseEncodeState(es)
 		return nil, err
 	}
 
-	return m.finalize(), nil
+	return es.finalize(), nil
 }
 
 // Flat5 benchmarks
@@ -478,27 +478,27 @@ func BenchmarkMarshal_Slice100_StdJSON(b *testing.B) {
 // bypassing the C batch array optimisation.  Each element is still encoded
 // via encodeStructGo (velox Go struct encoder).
 func marshalSliceGoOnly[T any](sl *[]T) ([]byte, error) {
-	m := getMarshaler()
+	es := acquireEncodeState()
 	ti := EncTypeInfoOf(reflect.TypeFor[T]())
 	bp := ti.getBlueprint()
 
 	hint := ti.HintBytes * len(*sl)
-	if hint > cap(m.buf) {
-		m.buf = make([]byte, 0, hint)
+	if hint > cap(es.buf) {
+		es.buf = make([]byte, 0, hint)
 	}
 
-	m.buf = append(m.buf, '[')
+	es.buf = append(es.buf, '[')
 	for i := range *sl {
 		if i > 0 {
-			m.buf = append(m.buf, ',')
+			es.buf = append(es.buf, ',')
 		}
-		if err := m.goVM(bp, unsafe.Pointer(&(*sl)[i])); err != nil {
-			putMarshaler(m)
+		if err := es.interp(bp, unsafe.Pointer(&(*sl)[i])); err != nil {
+			releaseEncodeState(es)
 			return nil, err
 		}
 	}
-	m.buf = append(m.buf, ']')
-	return m.finalize(), nil
+	es.buf = append(es.buf, ']')
+	return es.finalize(), nil
 }
 
 func BenchmarkMarshal_Slice100_GoOnly(b *testing.B) {

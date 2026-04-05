@@ -15,9 +15,9 @@ const (
 	EncTagFlagOmitEmpty         = typ.TagFlagOmitEmpty
 )
 
-// encodeFn is the per-type encode function, bound at type-registration time.
+// EncodeFn is the per-type encode function, bound at type-registration time.
 // Replaces the runtime Kind switch in encodeTop with O(1) dispatch.
-type encodeFn func(m *marshaler, ptr unsafe.Pointer) error
+type EncodeFn func(es *encodeState, ptr unsafe.Pointer) error
 
 // EncTypeInfo is the per-type encode descriptor (singleton per Go type).
 // It holds type-level encoding metadata and a reference to the shared UniType.
@@ -30,10 +30,10 @@ type EncTypeInfo struct {
 
 	// Encode is the compile-time bound encode function for this type.
 	// Set by bindEncodeFn after all container edges are wired.
-	Encode encodeFn
+	Encode EncodeFn
 
 	HintBytes    int          // static output size estimate
-	AdaptiveHint atomic.Int64 // observed max output size (updated after each marshal)
+	AdaptiveHint atomic.Int64 // observed max output size (updated after each encode)
 
 	// SizeFn predicts JSON output size by scanning runtime data (lengths, nil-ness).
 	SizeFn func(ptr unsafe.Pointer) int
@@ -110,19 +110,20 @@ type EncStructInfo struct {
 
 // EncSliceInfo describes a slice.
 type EncSliceInfo struct {
-	ElemType   *EncTypeInfo
-	ElemSize   uintptr
-	ElemHasPtr bool
-	ElemRType  unsafe.Pointer
+	ElemType *EncTypeInfo
+	ElemSize uintptr
 }
 
 // EncArrayInfo describes a fixed-size array.
 type EncArrayInfo struct {
-	ElemType   *EncTypeInfo
-	ElemSize   uintptr
-	ArrayLen   int
-	ElemHasPtr bool
-	ElemRType  unsafe.Pointer
+	ElemType *EncTypeInfo
+	ElemSize uintptr
+	ArrayLen int
+}
+
+// EncPointerInfo describes a pointer's element type.
+type EncPointerInfo struct {
+	ElemType *EncTypeInfo
 }
 
 // EncMapInfo describes a map.
@@ -132,18 +133,6 @@ type EncMapInfo struct {
 
 	MapKind     typ.MapVariant
 	MapRType    unsafe.Pointer
-	KeyRType    unsafe.Pointer
-	ValRType    unsafe.Pointer
 	IsStringKey bool
-	ValHasPtr   bool
-	ValSize     uintptr
-	KeySize     uintptr
 	SlotSize    uintptr // Swiss Map slot size; 0 if unknown
-}
-
-// EncPointerInfo describes a pointer.
-type EncPointerInfo struct {
-	ElemType   *EncTypeInfo
-	ElemHasPtr bool
-	ElemRType  unsafe.Pointer
 }

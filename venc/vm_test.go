@@ -67,7 +67,6 @@ func TestKindToOpcodePanicsForStructural(t *testing.T) {
 	// kindToOpcode must panic for kinds that have no single instruction opcode.
 	panicKinds := []typ.ElemTypeKind{typ.KindStruct, typ.KindSlice, typ.KindPointer, typ.KindMap}
 	for _, k := range panicKinds {
-		k := k
 		t.Run("", func(t *testing.T) {
 			defer func() {
 				if r := recover(); r == nil {
@@ -83,9 +82,9 @@ func TestKindToOpcodePanicsForStructural(t *testing.T) {
 
 func TestEncFlagsBitPositions(t *testing.T) {
 	// escapeFlags bits 0-2 must not overlap with vjEncFloatExpAuto (bit 3).
-	if uint32(escapeStringFlags)&vjEncFloatExpAuto != 0 {
+	if uint32(escapeStringFlags)&EncFloatExpAuto != 0 {
 		t.Errorf("escapeStringFlags (0x%x) overlaps with vjEncFloatExpAuto (0x%x)",
-			escapeStringFlags, vjEncFloatExpAuto)
+			escapeStringFlags, EncFloatExpAuto)
 	}
 }
 

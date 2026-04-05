@@ -124,7 +124,7 @@ func addIndentGuides(data []byte) []byte {
 
 // flushVMTrace reads pending trace data from the ring buffer and prints
 // it to stderr. Called after each VM exit (buffer full, yield, done, error).
-func (m *marshaler) flushVMTrace() {
+func (m *encodeState) flushVMTrace() {
 	if m.vmCtx.TraceBuf == nil {
 		return
 	}
@@ -164,9 +164,9 @@ func (m *marshaler) flushVMTrace() {
 	tb.Total = 0
 }
 
-// setupVMTrace sets up the trace buffer on the marshaler's VM context.
-// Called from getMarshaler when vjdebug build tag is active.
-func (m *marshaler) setupVMTrace() {
+// setupVMTrace sets up the trace buffer on the encodeState's VM context.
+// Called from acquireEncodeState when vjdebug build tag is active.
+func (m *encodeState) setupVMTrace() {
 	if m.vmCtx.TraceBuf == nil {
 		tb := allocTraceBuf()
 		m.vmCtx.TraceBuf = unsafe.Pointer(tb)
@@ -178,14 +178,14 @@ func (m *marshaler) setupVMTrace() {
 	}
 }
 
-// traceBlueprints associates each marshaler with the blueprints collected
+// traceBlueprints associates each encodeState with the blueprints collected
 // during a single execVM call. Package-level to avoid adding fields to
-// the marshaler struct (which is pooled and performance-sensitive).
-var traceBlueprints sync.Map // *marshaler → *[]*Blueprint
+// the encodeState struct (which is pooled and performance-sensitive).
+var traceBlueprints sync.Map // *encodeState → *[]*Blueprint
 
-// traceRecordBlueprint appends bp to the per-marshaler blueprint list,
+// traceRecordBlueprint appends bp to the per-encodeState blueprint list,
 // skipping duplicates (same pointer).
-func (m *marshaler) traceRecordBlueprint(bp *Blueprint) {
+func (m *encodeState) traceRecordBlueprint(bp *Blueprint) {
 	val, _ := traceBlueprints.LoadOrStore(m, &[]*Blueprint{})
 	list := val.(*[]*Blueprint)
 	for _, existing := range *list {
@@ -196,9 +196,9 @@ func (m *marshaler) traceRecordBlueprint(bp *Blueprint) {
 	*list = append(*list, bp)
 }
 
-// traceFlushBlueprints prints all collected blueprints for this marshaler
+// traceFlushBlueprints prints all collected blueprints for this encodeState
 // to stderr, then removes the entry from the map.
-func (m *marshaler) traceFlushBlueprints() {
+func (m *encodeState) traceFlushBlueprints() {
 	val, ok := traceBlueprints.LoadAndDelete(m)
 	if !ok {
 		return

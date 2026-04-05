@@ -18,6 +18,8 @@ go test -race -tags vj_noencvm ./venc
 
 go test ./tests/
 go test -race ./tests/
+go test -tags vj_noencvm ./tests
+go test -tags vj_noencvm -race ./tests
 
 go test ./ndec/...
 go test -race ./ndec/...
