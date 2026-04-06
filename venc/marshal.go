@@ -1,13 +1,5 @@
 package venc
 
-import (
-	"reflect"
-	"unsafe"
-
-	"github.com/velox-io/json/gort"
-	"github.com/velox-io/json/native/encvm"
-)
-
 // MarshalOption configures encoding behavior.
 type MarshalOption func(*encodeState)
 
@@ -58,99 +50,78 @@ func WithFastEscape() MarshalOption {
 	return func(es *encodeState) { es.flags &^= uint32(escapeHTML | escapeLineTerms | escapeInvalidUTF8) }
 }
 
+// Marshal serializes v to JSON.
+//
+// Pointer T: fast cache path via encElemTypeInfoOf, zero-copy.
+// Value T:   takes pointer to v directly.
 func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
 	es := acquireEncodeState()
+	defer releaseEncodeState(es)
+
 	for _, o := range opts {
 		o(es)
 	}
 
-	rt := reflect.TypeFor[T]()
-	if rt.Kind() == reflect.Pointer {
-		rtp := *(*uintptr)(unsafe.Add(unsafe.Pointer(&rt), unsafe.Sizeof(uintptr(0))))
-		elemPtr := *(*unsafe.Pointer)(unsafe.Pointer(&v))
-		if elemPtr != nil {
-			ti := encElemTypeInfoOf(rtp, rt)
-
-			hint := encodingSizeHint(ti, elemPtr)
-			if hint > cap(es.buf) {
-				es.buf = gort.MakeDirtyBytes(0, max(encBufInitSize, hint))
-			}
-
-			err := es.encodeTop(ti, elemPtr)
-
-			if err != nil {
-				releaseEncodeState(es)
-				return nil, err
-			}
-
-			if n := int64(len(es.buf)); n > ti.AdaptiveHint.Load() {
-				ti.AdaptiveHint.Store(n + n/20) // +5% headroom to avoid BufFull on next call
-			}
-
-			return es.finalize(), nil
-		}
+	ti, ptr := resolveType(&v)
+	if ti == nil {
+		return []byte("null"), nil
 	}
 
-	// Slow path: non-pointer T or nil pointer — v escapes here, which is fine.
-	return marshalSlow(es, v)
-}
-
-func marshalSlow[T any](m *encodeState, v T) ([]byte, error) {
-	ti, ptr := encodingTarget(v)
-
-	hint := encodingSizeHint(ti, ptr)
-	if hint > cap(m.buf) {
-		m.buf = gort.MakeDirtyBytes(0, max(encBufInitSize, hint))
+	hint := int(ti.AdaptiveHint.Load())
+	if hint == 0 {
+		hint = encodingSizeHint(ti, ptr)
+		ti.AdaptiveHint.Store(int64(hint))
 	}
+	es.growBuf(hint)
 
-	if err := m.encodeTop(ti, ptr); err != nil {
-		releaseEncodeState(m)
+	if err := es.encodeTop(ti, ptr); err != nil {
 		return nil, err
 	}
 
-	if n := int64(len(m.buf)); n > ti.AdaptiveHint.Load() {
-		ti.AdaptiveHint.Store(n + n/20) // +5% headroom to avoid BufFull on next call
+	n := len(es.buf)
+	adapted := n + n/16 // +6% headroom for VM pessimistic checks
+	if int64(adapted) > ti.AdaptiveHint.Load() {
+		ti.AdaptiveHint.Store(int64(adapted))
 	}
 
-	return m.finalize(), nil
+	result := es.buf[:n]
+	es.buf = es.buf[n:]
+	return result, nil
 }
 
 func MarshalIndent[T any](v T, prefix, indent string, opts ...MarshalOption) ([]byte, error) {
-	es := acquireEncodeState()
-	for _, o := range opts {
-		o(es)
+	return Marshal(v, append(opts, withIndent(prefix, indent))...)
+}
+
+// withIndent returns an internal MarshalOption that configures indentation.
+func withIndent(prefix, indent string) MarshalOption {
+	return func(es *encodeState) {
+		es.indentPrefix = prefix
+		es.indentString = indent
+		es.nativeIndent = es.nativeIndent && isSimpleIndent(prefix, indent) > 0
 	}
-
-	es.indentPrefix = prefix
-	es.indentString = indent
-	es.nativeIndent = encvm.Available && isSimpleIndent(prefix, indent) > 0
-
-	ti, ptr := encodingTarget(v)
-	if err := es.encodeTop(ti, ptr); err != nil {
-		releaseEncodeState(es)
-		return nil, err
-	}
-
-	return es.finalize(), nil
 }
 
 func AppendMarshal[T any](dst []byte, v T, opts ...MarshalOption) ([]byte, error) {
 	es := acquireEncodeState()
+	defer releaseEncodeState(es)
 	for _, o := range opts {
 		o(es)
 	}
 
 	es.buf = dst
 
-	ti, ptr := encodingTarget(v)
+	ti, ptr := resolveType(&v)
+	if ti == nil {
+		return append(dst, "null"...), nil
+	}
+
 	if err := es.encodeTop(ti, ptr); err != nil {
 		es.buf = nil // detach caller's buffer before pooling
-		releaseEncodeState(es)
 		return dst, err
 	}
 
 	result := es.buf
 	es.buf = nil // detach caller's buffer before pooling
-	releaseEncodeState(es)
 	return result, nil
 }

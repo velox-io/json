@@ -75,32 +75,9 @@ func releaseEncodeState(es *encodeState) {
 
 // flush writes buffered data through flushFn.
 func (es *encodeState) flush() error {
-	if es.flushFn == nil || len(es.buf) == 0 {
-		return nil
-	}
 	err := es.flushFn(es.buf)
 	es.buf = es.buf[:0]
 	return err
-}
-
-// finalize detaches the output before pooling the encodeState.
-func (es *encodeState) finalize() []byte {
-	n := len(es.buf)
-
-	// result := makeDirtyBytes(n, n)
-	// copy(result, m.buf)
-
-	result := es.buf[:n:n]
-	c := cap(es.buf)
-	remain := c - n
-	if remain >= encBufInitSize/4 {
-		es.buf = es.buf[n:n:c]
-	} else {
-		es.buf = nil
-	}
-
-	releaseEncodeState(es)
-	return result
 }
 
 // exec runs a compiled Blueprint through the best available VM.
@@ -114,6 +91,23 @@ func (es *encodeState) exec(bp *Blueprint, base unsafe.Pointer) error {
 // encodeTop dispatches to the compile-time bound encode function.
 func (es *encodeState) encodeTop(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	return ti.Encode(es, ptr)
+}
+
+// resolveType extracts EncTypeInfo and data pointer from a generic value.
+// For pointer T: dereferences one level via encElemTypeInfoOf fast cache.
+// For value T: takes pointer to v directly.
+// Returns (nil, nil) when T is a nil pointer.
+func resolveType[T any](v *T) (*EncTypeInfo, unsafe.Pointer) {
+	rt := reflect.TypeFor[T]()
+	if rt.Kind() == reflect.Pointer {
+		ptr := *(*unsafe.Pointer)(unsafe.Pointer(v))
+		if ptr == nil {
+			return nil, nil
+		}
+		rtp := uintptr(gort.TypePtr(rt))
+		return encElemTypeInfoOf(rtp, rt), ptr
+	}
+	return EncTypeInfoOf(rt), unsafe.Pointer(v)
 }
 
 // isSimpleIndent reports whether the native VM can synthesize this indent pattern.
@@ -175,14 +169,16 @@ func encodingTarget[T any](v T) (*EncTypeInfo, unsafe.Pointer) {
 
 // encodingSizeHint returns the best buffer size estimate for the given type and data.
 func encodingSizeHint(ti *EncTypeInfo, ptr unsafe.Pointer) int {
-	if ah := int(ti.AdaptiveHint.Load()); ah > 0 {
-		return ah
-	}
-	// First call: use SizeFn if available for data-driven prediction.
 	if fn := ti.SizeFn; fn != nil {
 		if predicted := fn(ptr); predicted > 0 {
 			return predicted + predicted/20 // +5% headroom
 		}
 	}
 	return ti.HintBytes
+}
+
+func (es *encodeState) growBuf(hint int) {
+	if hint > cap(es.buf) {
+		es.buf = gort.MakeDirtyBytes(0, max(encBufInitSize, hint*4))
+	}
 }
