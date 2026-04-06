@@ -354,6 +354,29 @@ func TestMarshalIndent_Basic(t *testing.T) {
 	}
 }
 
+func TestMarshalIndent_NilPointerWithPrefix(t *testing.T) {
+	type Foo struct {
+		A int    `json:"a"`
+		B string `json:"b"`
+	}
+
+	var p *Foo
+
+	got, err := vjson.MarshalIndent(p, ">>", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want, err2 := json.MarshalIndent(p, ">>", "  ")
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+
+	if string(got) != string(want) {
+		t.Errorf("MarshalIndent nil pointer with prefix mismatch\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
 // AppendMarshal
 
 func TestAppendMarshal(t *testing.T) {

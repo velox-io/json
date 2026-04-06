@@ -299,3 +299,122 @@ func TestMarshal_MultipleInterfaceTypes(t *testing.T) {
 		})
 	}
 }
+
+// TestMarshal_CustomInterfaceWithMarshalJSON verifies that a value stored in a
+// non-empty interface (MyIface) that also implements json.Marshaler uses the
+// custom MarshalJSON method, matching encoding/json behavior.
+
+type MyIface interface {
+	MyString()
+}
+
+type barWithCustomMarshal struct {
+	Name  string
+	Score int
+}
+
+func (b barWithCustomMarshal) MyString() {}
+
+func (b barWithCustomMarshal) MarshalJSON() ([]byte, error) {
+	return []byte(`{"custom_name":"` + b.Name + `"}`), nil
+}
+
+var _ MyIface = barWithCustomMarshal{}
+
+func TestMarshal_CustomInterfaceWithMarshalJSON(t *testing.T) {
+	var foo MyIface = barWithCustomMarshal{Name: "hello", Score: 100}
+
+	got, err := vjson.Marshal(foo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want, err := json.Marshal(foo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(got) != string(want) {
+		t.Errorf("mismatch:\n  vjson: %s\n  std:   %s", got, want)
+	}
+
+	// Also test pointer-to-interface value.
+	bar := barWithCustomMarshal{Name: "world", Score: 200}
+	var foo2 MyIface = &bar
+
+	got2, err := vjson.Marshal(foo2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want2, err := json.Marshal(foo2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(got2) != string(want2) {
+		t.Errorf("pointer mismatch:\n  vjson: %s\n  std:   %s", got2, want2)
+	}
+}
+
+// TestMarshal_CustomInterfaceWithoutMarshalJSON verifies that a value stored in
+// a non-empty interface without json.Marshaler falls back to standard struct
+// serialization, matching encoding/json behavior.
+
+type barPlain struct {
+	Name  string `json:"name"`
+	Score int    `json:"score"`
+}
+
+func (b barPlain) MyString() {}
+
+var _ MyIface = barPlain{}
+
+func TestMarshal_CustomInterfaceWithoutMarshalJSON(t *testing.T) {
+	var foo MyIface = barPlain{Name: "hello", Score: 100}
+
+	got, err := vjson.Marshal(foo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want, err := json.Marshal(foo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(got) != string(want) {
+		t.Errorf("mismatch:\n  vjson: %s\n  std:   %s", got, want)
+	}
+}
+
+// TestMarshal_CustomInterfaceInStructField verifies marshaling when a non-empty
+// interface field is embedded in a struct.
+
+func TestMarshal_CustomInterfaceInStructField(t *testing.T) {
+	type Wrapper struct {
+		Value MyIface `json:"value"`
+	}
+
+	cases := []struct {
+		name string
+		val  Wrapper
+	}{
+		{"with_marshal_json", Wrapper{Value: barWithCustomMarshal{Name: "a", Score: 1}}},
+		{"without_marshal_json", Wrapper{Value: barPlain{Name: "b", Score: 2}}},
+		{"nil_interface", Wrapper{Value: nil}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := vjson.Marshal(&tc.val)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, _ := json.Marshal(&tc.val)
+			if string(got) != string(want) {
+				t.Errorf("mismatch:\n  vjson: %s\n  std:   %s", got, want)
+			}
+		})
+	}
+}

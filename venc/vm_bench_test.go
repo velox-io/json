@@ -190,8 +190,11 @@ func marshalGoOnly[T any](v *T) ([]byte, error) {
 		releaseEncodeState(es)
 		return nil, err
 	}
-
-	return es.finalize(), nil
+	n := len(es.buf)
+	result := es.buf[:n:n]
+	c := cap(es.buf)
+	es.buf = es.buf[n:n:c]
+	return result, nil
 }
 
 // Flat5 benchmarks
@@ -498,7 +501,11 @@ func marshalSliceGoOnly[T any](sl *[]T) ([]byte, error) {
 		}
 	}
 	es.buf = append(es.buf, ']')
-	return es.finalize(), nil
+	n := len(es.buf)
+	result := es.buf[:n:n]
+	c := cap(es.buf)
+	es.buf = es.buf[n:n:c]
+	return result, nil
 }
 
 func BenchmarkMarshal_Slice100_GoOnly(b *testing.B) {

@@ -69,6 +69,11 @@ linters:
       - unused
       text: 'field _'
       path: ndec/ndec\.go
+    - linters:
+      - govet
+      - staticcheck
+      path: gort/noescape\.go
+      text: 'possible misuse of unsafe.Pointer|SA4016'
     paths:
     - third_party$
     - builtin$
