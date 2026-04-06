@@ -121,9 +121,9 @@ func MarshalIndent[T any](v T, prefix, indent string, opts ...MarshalOption) ([]
 		o(es)
 	}
 
-	es.prefix = prefix
-	es.indent = indent
-	es.nativeCompat = encvm.Available && isSimpleIndent(prefix, indent) > 0
+	es.indentPrefix = prefix
+	es.indentString = indent
+	es.nativeIndent = encvm.Available && isSimpleIndent(prefix, indent) > 0
 
 	ti, ptr := encodingTarget(v)
 	if err := es.encodeTop(ti, ptr); err != nil {

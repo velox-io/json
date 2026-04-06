@@ -16,8 +16,8 @@ type EncoderOption func(*Encoder)
 // EncoderSetIndent configures pretty-print indentation.
 func EncoderSetIndent(prefix, indent string) EncoderOption {
 	return func(enc *Encoder) {
-		enc.prefix = prefix
-		enc.indent = indent
+		enc.indentPrefix = prefix
+		enc.indentString = indent
 	}
 }
 
@@ -56,11 +56,11 @@ func EncoderSetFloatExpAuto(on bool) EncoderOption {
 
 // Encoder writes one JSON value plus a trailing newline per call.
 type Encoder struct {
-	w      io.Writer
-	err    error // sticky write error
-	prefix string
-	indent string
-	flags  uint32 // escapeFlags (bits 0-2) | vjEncFloatExpAuto (bit 3)
+	w            io.Writer
+	err          error // sticky write error
+	indentPrefix string
+	indentString string
+	flags        uint32 // escapeFlags (bits 0-2) | vjEncFloatExpAuto (bit 3)
 }
 
 // NewEncoder builds a streaming encoder for w.
@@ -76,8 +76,8 @@ func NewEncoder(w io.Writer, opts ...EncoderOption) *Encoder {
 
 // SetIndent updates pretty-print indentation.
 func (enc *Encoder) SetIndent(prefix, indent string) {
-	enc.prefix = prefix
-	enc.indent = indent
+	enc.indentPrefix = prefix
+	enc.indentString = indent
 }
 
 // SetEscapeHTML toggles HTML escaping.
@@ -148,10 +148,10 @@ func EncodeValue[T any](enc *Encoder, v T) error {
 func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	es := acquireEncodeState()
 	es.flags = enc.flags
-	es.prefix = enc.prefix
-	es.indent = enc.indent
-	if enc.indent != "" {
-		es.nativeCompat = encvm.Available && isSimpleIndent(enc.prefix, enc.indent) > 0
+	es.indentPrefix = enc.indentPrefix
+	es.indentString = enc.indentString
+	if enc.indentString != "" {
+		es.nativeIndent = encvm.Available && isSimpleIndent(enc.indentPrefix, enc.indentString) > 0
 	}
 
 	hint := encodingSizeHint(ti, ptr)

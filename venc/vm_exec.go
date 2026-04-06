@@ -58,11 +58,11 @@ func (es *encodeState) execVM(bp *Blueprint, base unsafe.Pointer) error {
 
 	// Indent uses the full VM; compact mode selects compact vs fast escaping.
 	var vmExec func(unsafe.Pointer)
-	if step := isSimpleIndent(es.prefix, es.indent); step > 0 {
-		es.buildIndentTpl(es.prefix, es.indent)
+	if step := isSimpleIndent(es.indentPrefix, es.indentString); step > 0 {
+		es.buildIndentTpl(es.indentPrefix, es.indentString)
 		ctx.IndentTpl = unsafe.Pointer(&es.indentTpl[0])
 		ctx.IndentStep = uint8(step)
-		ctx.IndentPrefixLen = uint8(len(es.prefix))
+		ctx.IndentPrefixLen = uint8(len(es.indentPrefix))
 		ctx.IndentDepth = 0
 		vmExec = encvm.VMExec
 	} else {

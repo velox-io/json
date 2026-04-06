@@ -185,9 +185,9 @@ func (es *encodeState) encodeValueQuoted(ti *EncTypeInfo, ptr unsafe.Pointer) er
 
 func (es *encodeState) appendNewlineIndent() {
 	es.buf = append(es.buf, '\n')
-	es.buf = append(es.buf, es.prefix...)
+	es.buf = append(es.buf, es.indentPrefix...)
 	for range es.indentDepth {
-		es.buf = append(es.buf, es.indent...)
+		es.buf = append(es.buf, es.indentString...)
 	}
 }
 
@@ -228,7 +228,7 @@ func (es *encodeState) encodeMapStringString(ptr unsafe.Pointer) error {
 	es.buf = append(es.buf, '{')
 	first := true
 
-	if es.indent != "" {
+	if es.indentString != "" {
 		es.indentDepth++
 	}
 
@@ -238,12 +238,12 @@ func (es *encodeState) encodeMapStringString(ptr unsafe.Pointer) error {
 		}
 		first = false
 
-		if es.indent != "" {
+		if es.indentString != "" {
 			es.appendNewlineIndent()
 		}
 
 		es.encodeString(k)
-		if es.indent != "" {
+		if es.indentString != "" {
 			es.buf = append(es.buf, ':', ' ')
 		} else {
 			es.buf = append(es.buf, ':')
@@ -251,7 +251,7 @@ func (es *encodeState) encodeMapStringString(ptr unsafe.Pointer) error {
 		es.encodeString(v)
 	}
 
-	if es.indent != "" {
+	if es.indentString != "" {
 		es.indentDepth--
 		es.appendNewlineIndent()
 	}
@@ -323,7 +323,7 @@ func (es *encodeState) encodeMapGeneric(mi *EncMapInfo, ptr unsafe.Pointer) erro
 	es.buf = append(es.buf, '{')
 	first := true
 
-	if es.indent != "" {
+	if es.indentString != "" {
 		es.indentDepth++
 	}
 
@@ -335,7 +335,7 @@ func (es *encodeState) encodeMapGeneric(mi *EncMapInfo, ptr unsafe.Pointer) erro
 		}
 		first = false
 
-		if es.indent != "" {
+		if es.indentString != "" {
 			es.appendNewlineIndent()
 		}
 
@@ -345,7 +345,7 @@ func (es *encodeState) encodeMapGeneric(mi *EncMapInfo, ptr unsafe.Pointer) erro
 		} else if err := es.encodeMapKey(keyPtr, mi.KeyType, mi.KeyType.Type); err != nil {
 			return err
 		}
-		if es.indent != "" {
+		if es.indentString != "" {
 			es.buf = append(es.buf, ':', ' ')
 		} else {
 			es.buf = append(es.buf, ':')
@@ -358,7 +358,7 @@ func (es *encodeState) encodeMapGeneric(mi *EncMapInfo, ptr unsafe.Pointer) erro
 		mapsIterNext(&it)
 	}
 
-	if es.indent != "" {
+	if es.indentString != "" {
 		es.indentDepth--
 		es.appendNewlineIndent()
 	}
@@ -455,7 +455,7 @@ func (es *encodeState) encodeAnySlice(arr []any) error {
 
 	es.buf = append(es.buf, '[')
 
-	if es.indent != "" {
+	if es.indentString != "" {
 		es.indentDepth++
 	}
 
@@ -463,7 +463,7 @@ func (es *encodeState) encodeAnySlice(arr []any) error {
 		if i > 0 {
 			es.buf = append(es.buf, ',')
 		}
-		if es.indent != "" {
+		if es.indentString != "" {
 			es.appendNewlineIndent()
 		}
 
@@ -498,7 +498,7 @@ func (es *encodeState) encodeAnySlice(arr []any) error {
 		}
 	}
 
-	if es.indent != "" {
+	if es.indentString != "" {
 		es.indentDepth--
 		es.appendNewlineIndent()
 	}
@@ -521,7 +521,7 @@ func (es *encodeState) encodeAnyMap(mp map[string]any) error {
 	es.buf = append(es.buf, '{')
 	first := true
 
-	if es.indent != "" {
+	if es.indentString != "" {
 		es.indentDepth++
 	}
 
@@ -531,12 +531,12 @@ func (es *encodeState) encodeAnyMap(mp map[string]any) error {
 		}
 		first = false
 
-		if es.indent != "" {
+		if es.indentString != "" {
 			es.appendNewlineIndent()
 		}
 
 		es.encodeString(k)
-		if es.indent != "" {
+		if es.indentString != "" {
 			es.buf = append(es.buf, ':', ' ')
 		} else {
 			es.buf = append(es.buf, ':')
@@ -573,7 +573,7 @@ func (es *encodeState) encodeAnyMap(mp map[string]any) error {
 		}
 	}
 
-	if es.indent != "" {
+	if es.indentString != "" {
 		es.indentDepth--
 		es.appendNewlineIndent()
 	}

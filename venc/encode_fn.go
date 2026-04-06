@@ -80,82 +80,82 @@ func bindEncodeFn(ti *EncTypeInfo) {
 		ti.Encode = fnEncodeNumber
 
 	case typ.KindStruct:
-		ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
-			return m.exec(ti.getBlueprint(), ptr)
+		ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
+			return es.exec(ti.getBlueprint(), ptr)
 		}
 
 	case typ.KindSlice:
 		si := ti.ResolveSlice()
 		if si.ElemType.Kind == typ.KindUint8 && si.ElemSize == 1 {
-			ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
+			ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
 				sh := (*SliceHeader)(ptr)
 				if sh.Data == nil {
-					m.buf = append(m.buf, litNull...)
+					es.buf = append(es.buf, litNull...)
 					return nil
 				}
-				return m.encodeByteSlice(sh)
+				return es.encodeByteSlice(sh)
 			}
 		} else {
-			ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
+			ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
 				sh := (*SliceHeader)(ptr)
 				if sh.Data == nil {
-					m.buf = append(m.buf, litNull...)
+					es.buf = append(es.buf, litNull...)
 					return nil
 				}
-				return m.exec(ti.getBlueprint(), ptr)
+				return es.exec(ti.getBlueprint(), ptr)
 			}
 		}
 
 	case typ.KindArray:
 		ai := ti.ResolveArray()
 		if ai.ElemType.Kind == typ.KindUint8 && ai.ElemSize == 1 {
-			ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
-				return m.encodeByteArray(ai, ptr)
+			ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
+				return es.encodeByteArray(ai, ptr)
 			}
 		} else {
-			ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
-				return m.exec(ti.getBlueprint(), ptr)
+			ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
+				return es.exec(ti.getBlueprint(), ptr)
 			}
 		}
 
 	case typ.KindMap:
 		mi := ti.ResolveMap()
-		ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
-			if mi.IsStringKey && !m.inVM && m.nativeCompat {
-				return m.exec(ti.getBlueprint(), ptr)
+		ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
+			if mi.IsStringKey && !es.inVM && es.nativeIndent {
+				return es.exec(ti.getBlueprint(), ptr)
 			}
 			if mi.MapKind == typ.MapVariantStrStr {
-				return m.encodeMapStringString(ptr)
+				return es.encodeMapStringString(ptr)
 			}
-			return m.encodeMapGeneric(mi, ptr)
+			return es.encodeMapGeneric(mi, ptr)
 		}
 
 	case typ.KindPointer:
 		// Read ElemType.Encode at call time (not bind time) to handle cycles.
 		pi := ti.ResolvePointer()
-		ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
+		ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
 			elemPtr := *(*unsafe.Pointer)(ptr)
 			if elemPtr == nil {
-				m.buf = append(m.buf, litNull...)
+				es.buf = append(es.buf, litNull...)
 				return nil
 			}
-			return pi.ElemType.Encode(m, elemPtr)
+			return pi.ElemType.Encode(es, elemPtr)
 		}
 
 	case typ.KindAny:
-		ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
-			return m.encodeAny(*(*any)(ptr))
+		ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
+			return es.encodeAny(*(*any)(ptr))
 		}
 
 	case typ.KindIface:
 		rtype := ti.Type
-		ti.Encode = func(m *encodeState, ptr unsafe.Pointer) error {
+		ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
 			rv := reflect.NewAt(rtype, ptr).Elem()
 			if rv.IsNil() {
-				m.buf = append(m.buf, litNull...)
+				es.buf = append(es.buf, litNull...)
 				return nil
 			}
-			return m.encodeAnyReflect(rv.Elem().Interface())
+			return es.encodeAnyReflect(rv.Elem().Interface())
 		}
 
 	default:

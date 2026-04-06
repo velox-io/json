@@ -20,10 +20,10 @@ type encodeState struct {
 	inVM  bool   // blocks re-entrant VM entry
 	buf   []byte
 
-	indent       string
-	prefix       string
+	indentString string
+	indentPrefix string
 	indentDepth  int
-	nativeCompat bool                              // true if compact or simple indent pattern (C VM can handle)
+	nativeIndent bool                              // true if compact or simple indent pattern (C VM can handle)
 	indentTpl    *[1 + 255 + maxIndentDepth*8]byte // "\n" + prefix + indent*maxDepth
 
 	flushFn func([]byte) error // streaming sink for Encoder
@@ -53,10 +53,10 @@ func init() {
 func acquireEncodeState() *encodeState {
 	es := encodeStatePool.Get().(*encodeState)
 	es.buf = es.buf[:0] // reset buffer (may contain partial output from a prior error path)
-	es.indent = ""
-	es.prefix = ""
+	es.indentString = ""
+	es.indentPrefix = ""
 	es.indentDepth = 0
-	es.nativeCompat = encvm.Available // compact mode: native OK if C VM linked
+	es.nativeIndent = encvm.Available // compact mode: native OK if C VM linked
 	es.flags = 0
 	es.flushFn = nil
 	// Compact-mode VM entry assumes the indent fields are zeroed.
@@ -115,7 +115,7 @@ func (es *encodeState) finalize() []byte {
 
 // exec runs a compiled Blueprint through the best available VM.
 func (es *encodeState) exec(bp *Blueprint, base unsafe.Pointer) error {
-	if !es.inVM && es.nativeCompat {
+	if !es.inVM && es.nativeIndent {
 		return es.execVM(bp, base)
 	}
 	return es.interp(bp, base)

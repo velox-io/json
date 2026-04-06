@@ -18,7 +18,7 @@ import (
 func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 	ops := bp.Ops
 	opsLen := int32(len(ops))
-	indent := es.indent != ""
+	indent := es.indentString != ""
 	var (
 		pc    int32
 		first = true // tracks whether to write comma before next value
@@ -675,7 +675,7 @@ func interpIsZero(ptr unsafe.Pointer, tag int32) bool {
 func (es *encodeState) interpSeq(hdr *VjOpHdr, ops []byte, pc int32, base unsafe.Pointer, first bool, op uint16) error {
 	ext := opExtAt(ops, pc)
 	fieldPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
-	doIndent := es.indent != ""
+	doIndent := es.indentString != ""
 
 	if hdr.KeyLen > 0 {
 		es.interpWriteKey(hdr, first, doIndent)
