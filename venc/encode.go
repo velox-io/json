@@ -154,19 +154,6 @@ func (es *encodeState) buildIndentTpl(prefix, indent string) {
 	es.tplKey = key
 }
 
-// encodingTarget unwraps one pointer level; nil pointers stay on the pointer codec.
-func encodingTarget[T any](v T) (*EncTypeInfo, unsafe.Pointer) {
-	rt := reflect.TypeFor[T]()
-	if rt.Kind() == reflect.Pointer {
-		elemPtr := *(*unsafe.Pointer)(unsafe.Pointer(&v))
-		if elemPtr == nil {
-			return EncTypeInfoOf(rt), unsafe.Pointer(&v)
-		}
-		return EncTypeInfoOf(rt.Elem()), elemPtr
-	}
-	return EncTypeInfoOf(rt), unsafe.Pointer(&v)
-}
-
 // encodingSizeHint returns the best buffer size estimate for the given type and data.
 func encodingSizeHint(ti *EncTypeInfo, ptr unsafe.Pointer) int {
 	if fn := ti.SizeFn; fn != nil {

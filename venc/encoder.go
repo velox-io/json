@@ -104,33 +104,39 @@ func (enc *Encoder) Encode(v any) error {
 		return enc.err
 	}
 
-	rv := reflect.ValueOf(v)
-	if !rv.IsValid() {
+	// v is an eface{*_type, data}. Extract type and data pointer directly.
+	rt := reflect.TypeOf(v)
+	if rt == nil {
 		return enc.write([]byte("null\n"))
 	}
 
 	var ptr unsafe.Pointer
-	var elemType reflect.Type
-	if rv.Kind() == reflect.Pointer {
-		if rv.IsNil() {
+	var ti *EncTypeInfo
+	eface := (*[2]unsafe.Pointer)(unsafe.Pointer(&v))
+	data := eface[1]
+
+	if rt.Kind() == reflect.Pointer {
+		// data is the pointer value itself. Nil pointer → null.
+		if data == nil {
 			return enc.write([]byte("null\n"))
 		}
-		ptr = rv.UnsafePointer()
-		elemType = rv.Elem().Type()
+		ptr = data
+		rtp := uintptr(gort.TypePtr(rt))
+		ti = encElemTypeInfoOf(rtp, rt)
 	} else {
-		elemType = rv.Type()
-		// Direct-interface map/chan/func values need one extra indirection.
-		efaceData := &(*[2]unsafe.Pointer)(unsafe.Pointer(&v))[1]
-		switch rv.Kind() {
+		ti = EncTypeInfoOf(rt)
+		switch rt.Kind() {
 		case reflect.Map, reflect.Chan, reflect.Func:
-			ptr = unsafe.Pointer(efaceData)
+			// Direct-interface types: data IS the value (a pointer-width
+			// descriptor). Encoder expects a pointer TO the value, so take &eface[1].
+			ptr = unsafe.Pointer(&eface[1])
 		default:
-			ptr = *efaceData
+			// Indirect types: data is already a pointer to the value.
+			ptr = data
 		}
 	}
 
-	err := enc.encodePtr(EncTypeInfoOf(elemType), ptr)
-	// Keep the interface payload alive while encodePtr uses its raw data pointer.
+	err := enc.encodePtr(ti, ptr)
 	runtime.KeepAlive(v)
 	return err
 }
@@ -140,13 +146,18 @@ func EncodeValue[T any](enc *Encoder, v T) error {
 	if enc.err != nil {
 		return enc.err
 	}
-	ti, ptr := encodingTarget(&v)
+	ti, ptr := resolveType(&v)
+	if ti == nil {
+		return enc.write([]byte("null\n"))
+	}
 	return enc.encodePtr(ti, ptr)
 }
 
 // encodePtr shares the streaming encode path used by Encode and EncodeValue.
 func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	es := acquireEncodeState()
+	defer releaseEncodeState(es)
+
 	es.flags = enc.flags
 	es.indentPrefix = enc.indentPrefix
 	es.indentString = enc.indentString
@@ -155,9 +166,7 @@ func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	}
 
 	hint := encodingSizeHint(ti, ptr)
-	if hint > cap(es.buf) {
-		es.buf = gort.MakeDirtyBytes(0, max(encBufInitSize, hint))
-	}
+	es.growBuf(hint)
 
 	// Stream out completed chunks to keep memory bounded.
 	es.flushFn = func(p []byte) error {
@@ -169,20 +178,15 @@ func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	}
 
 	if err := es.encodeTop(ti, ptr); err != nil {
-		releaseEncodeState(es)
 		return enc.stickyErr(err)
 	}
 
 	es.buf = append(es.buf, '\n')
 
-	if len(es.buf) > 0 {
-		if _, err := enc.w.Write(es.buf); err != nil {
-			releaseEncodeState(es)
-			return enc.stickyErr(err)
-		}
+	if _, err := enc.w.Write(es.buf); err != nil {
+		return enc.stickyErr(err)
 	}
 
-	releaseEncodeState(es)
 	return nil
 }
 
