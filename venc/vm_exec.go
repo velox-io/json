@@ -75,7 +75,11 @@ func (es *encodeState) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	}
 
 	err := es.execVMLoop(ctx, bp, vmExec)
+
+	//release
 	es.inVM = false
+	ctx.OpsPtr = nil
+	ctx.CurBase = nil
 	if es.nativeIndent && es.indentString != "" {
 		ctx.IndentTpl = nil
 		ctx.IndentStep = 0

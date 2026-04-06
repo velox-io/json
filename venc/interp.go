@@ -294,6 +294,7 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			depth--
 			frame := &es.vmCtx.Stack[depth]
 			base = frame.RetBase
+			frame.RetBase = nil                               // clear so pooled encodeState has no dangling ptr
 			pc = *(*int32)(unsafe.Pointer(&frame.Payload[0])) // restore return PC
 			first = false                                     // after a call, we've written something
 
@@ -334,6 +335,7 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			if depth > 0 {
 				depth--
 				base = es.vmCtx.Stack[depth].RetBase
+				es.vmCtx.Stack[depth].RetBase = nil
 				// After exiting pointer deref body, mark that we've written content
 				first = false
 			}
@@ -408,6 +410,7 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			} else {
 				// End iteration
 				base = frame.RetBase
+				frame.RetBase = nil
 				if indent {
 					es.indentDepth--
 					es.appendNewlineIndent()
