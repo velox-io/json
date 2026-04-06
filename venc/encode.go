@@ -23,8 +23,9 @@ type encodeState struct {
 	indentString string
 	indentPrefix string
 	indentDepth  int
-	nativeIndent bool                              // true if compact or simple indent pattern (C VM can handle)
-	indentTpl    *[1 + 255 + maxIndentDepth*8]byte // "\n" + prefix + indent*maxDepth
+	indentTpl    *[1 + 255 + maxIndentDepth*8]byte // points into global cache; read-only
+	nativeIndent bool                              // simple indent pattern (C VM can handle)
+	tplKey       string                            // L1 cache key for indentTpl (survives pool recycle)
 
 	flushFn func([]byte) error // streaming sink for Encoder
 }
@@ -34,17 +35,17 @@ var _ [0]byte = [unsafe.Offsetof(encodeState{}.vmCtx)]byte{}
 
 var encodeStatePool = sync.Pool{
 	New: func() any {
-		return &encodeState{
-			buf: gort.MakeDirtyBytes(0, encBufInitSize),
+		es := &encodeState{
+			buf:          gort.MakeDirtyBytes(0, encBufInitSize),
+			nativeIndent: encvm.Available,
 		}
+		return es
 	},
 }
 
-var indentTplPool = sync.Pool{
-	New: func() any {
-		return new([1 + 255 + maxIndentDepth*8]byte)
-	},
-}
+// indentTplCache caches pre-built indent templates keyed by "prefix\x00indent".
+// Entries are immutable after insertion — safe for concurrent read without copying.
+var indentTplCache sync.Map
 
 func init() {
 	encodeStatePool.Put(&encodeState{buf: gort.MakeDirtyBytes(0, encBufInitSize)})
@@ -52,34 +53,23 @@ func init() {
 
 func acquireEncodeState() *encodeState {
 	es := encodeStatePool.Get().(*encodeState)
-	es.buf = es.buf[:0] // reset buffer (may contain partial output from a prior error path)
-	es.indentString = ""
-	es.indentPrefix = ""
-	es.indentDepth = 0
-	es.nativeIndent = encvm.Available // compact mode: native OK if C VM linked
-	es.flags = 0
-	es.flushFn = nil
-	// Compact-mode VM entry assumes the indent fields are zeroed.
-	es.vmCtx.IndentTpl = nil
-	es.vmCtx.IndentStep = 0
-	es.vmCtx.IndentPrefixLen = 0
-	es.vmCtx.IndentDepth = 0
-
+	es.buf = es.buf[:0]
 	es.setupVMTrace()
 
 	return es
 }
 
 func releaseEncodeState(es *encodeState) {
-	const encBufPoolLimit = 1024 * 1024
-	if cap(es.buf) > encBufPoolLimit {
-		es.buf = nil // discard oversized buffer, let GC reclaim
-	}
-	if es.indentTpl != nil {
-		indentTplPool.Put(es.indentTpl)
-		es.indentTpl = nil
-	}
-	es.flushFn = nil        // clear closure reference before pooling
+	es.flushFn = nil // clear closure reference before pooling
+
+	es.flags = 0
+
+	es.indentString = ""
+	es.indentPrefix = ""
+	es.indentDepth = 0
+	// indentTpl and tplKey are intentionally kept: they point into the
+	// global immutable cache and serve as an L1 fast-path on reuse.
+
 	encodeStatePool.Put(es) // always recycle the struct (vmCtx is 2152 bytes)
 }
 
@@ -143,17 +133,31 @@ func isSimpleIndent(prefix, indent string) int {
 	return len(indent)
 }
 
-// buildIndentTpl materializes the VM indent template on first use.
+// buildIndentTpl looks up (or creates) a cached indent template for the
+// given prefix/indent pair. L1: compare the key kept on the encodeState
+// (survives pool recycle). L2: global sync.Map for all known patterns.
 func (es *encodeState) buildIndentTpl(prefix, indent string) {
-	if es.indentTpl == nil {
-		es.indentTpl = indentTplPool.Get().(*[1 + 255 + maxIndentDepth*8]byte)
+	key := prefix + "\x00" + indent
+	// L1: encodeState-local cache — just a string compare, no map lookup.
+	if key == es.tplKey {
+		return
 	}
-	es.indentTpl[0] = '\n'
+	// L2: global cache.
+	if v, ok := indentTplCache.Load(key); ok {
+		es.indentTpl = v.(*[1 + 255 + maxIndentDepth*8]byte)
+		es.tplKey = key
+		return
+	}
+	tpl := new([1 + 255 + maxIndentDepth*8]byte)
+	tpl[0] = '\n'
 	off := 1
-	off += copy(es.indentTpl[off:], prefix)
+	off += copy(tpl[off:], prefix)
 	for range maxIndentDepth {
-		off += copy(es.indentTpl[off:], indent)
+		off += copy(tpl[off:], indent)
 	}
+	actual, _ := indentTplCache.LoadOrStore(key, tpl)
+	es.indentTpl = actual.(*[1 + 255 + maxIndentDepth*8]byte)
+	es.tplKey = key
 }
 
 // encodingTarget unwraps one pointer level; nil pointers stay on the pointer codec.
