@@ -118,7 +118,20 @@ func buildSizeStruct(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 
 		fn := buildSizeFn(fi.Type, depth+1)
 		if fn == nil {
-			return nil
+			// Can't dynamically predict this field (depth exceeded, custom marshal, etc.)
+			// Use static estimate instead of giving up the whole struct.
+			staticHint := computeHintBytes(fi.Type, depth+1)
+			if !omit {
+				fixedTotal += overhead + staticHint
+			} else {
+				sizers = append(sizers, fieldSizer{
+					offset:    fi.Offset,
+					overhead:  overhead + staticHint,
+					omitEmpty: true,
+					isZeroFn:  fi.IsZeroFn,
+				})
+			}
+			continue
 		}
 
 		// Struct fields use tighter estimates than top-level scalars because
@@ -175,7 +188,8 @@ func buildSizeStruct(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 				continue // omitempty zero field → omitted entirely
 			}
 			if s.sizeFn != nil {
-				n += s.overhead + s.sizeFn(fieldPtr)
+				v := s.sizeFn(fieldPtr)
+				n += s.overhead + v
 			} else {
 				n += s.overhead // fixed-size omitempty scalar (not zero)
 			}
@@ -232,7 +246,8 @@ func buildSizeSlice(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 			return 2 // "[]"
 		}
 		// "[" + len * elemHint + (len-1) commas + "]"
-		return 2 + sh.Len*elemHint + sh.Len - 1
+		result := 2 + sh.Len*elemHint + sh.Len - 1
+		return result
 	}
 }
 

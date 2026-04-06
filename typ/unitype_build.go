@@ -109,49 +109,50 @@ func buildUniType(t reflect.Type, wait bool) *UniType {
 	return ut
 }
 
+var marshalerType = reflect.TypeFor[json.Marshaler]()
+var unmarshalerType = reflect.TypeFor[json.Unmarshaler]()
+var textMarshalerType = reflect.TypeFor[encoding.TextMarshaler]()
+var textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
+
 func detectInterfaceHooks(t reflect.Type) *InterfaceHooks {
-	marshalerType := reflect.TypeFor[json.Marshaler]()
-	unmarshalerType := reflect.TypeFor[json.Unmarshaler]()
-	textMarshalerType := reflect.TypeFor[encoding.TextMarshaler]()
-	textUnmarshalerType := reflect.TypeFor[encoding.TextUnmarshaler]()
 	ptrType := reflect.PointerTo(t)
 
 	var hooks InterfaceHooks
-	any := false
+	present := false
 
 	if t.Implements(marshalerType) {
 		hooks.MarshalFn = bindMarshalerValue(t)
-		any = true
+		present = true
 	} else if ptrType.Implements(marshalerType) {
 		hooks.MarshalFn = bindMarshalerPtr(t)
-		any = true
+		present = true
 	}
 
 	if t.Implements(unmarshalerType) {
 		hooks.UnmarshalFn = bindUnmarshalerValue(t)
-		any = true
+		present = true
 	} else if ptrType.Implements(unmarshalerType) {
 		hooks.UnmarshalFn = bindUnmarshalerPtr(t)
-		any = true
+		present = true
 	}
 
 	if t.Implements(textMarshalerType) {
 		hooks.TextMarshalFn = bindTextMarshalerValue(t)
-		any = true
+		present = true
 	} else if ptrType.Implements(textMarshalerType) {
 		hooks.TextMarshalFn = bindTextMarshalerPtr(t)
-		any = true
+		present = true
 	}
 
 	if t.Implements(textUnmarshalerType) {
 		hooks.TextUnmarshalFn = bindTextUnmarshalerValue(t)
-		any = true
+		present = true
 	} else if ptrType.Implements(textUnmarshalerType) {
 		hooks.TextUnmarshalFn = bindTextUnmarshalerPtr(t)
-		any = true
+		present = true
 	}
 
-	if !any {
+	if !present {
 		return nil
 	}
 	return &hooks
