@@ -115,7 +115,8 @@ func (es *encodeState) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(uns
 		ctx.BufCur = bufStart
 		ctx.BufEnd = bufStart + uintptr(len(workBuf))
 
-		vmExec(unsafe.Pointer(ctx))
+		// vmExec(unsafe.Pointer(ctx))
+		es.callvm(vmExec, ctx)
 
 		es.flushVMTrace()
 
@@ -295,7 +296,7 @@ func (es *encodeState) handleFallbackYield(ctx *VjExecCtx, bp *Blueprint) error 
 			return err
 		}
 	} else {
-		if err := es.encodeTop(fb.TI, fieldPtr); err != nil {
+		if err := fb.TI.Encode(es, fieldPtr); err != nil {
 			return err
 		}
 	}
@@ -340,7 +341,7 @@ func (es *encodeState) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 			return err
 		}
 	} else {
-		if err := es.encodeTop(fb.TI, mapPtr); err != nil {
+		if err := fb.TI.Encode(es, mapPtr); err != nil {
 			return err
 		}
 	}

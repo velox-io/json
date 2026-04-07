@@ -1,7 +1,6 @@
 package venc
 
 import (
-	"reflect"
 	"sync"
 	"unsafe"
 
@@ -91,23 +90,6 @@ func (es *encodeState) exec(bp *Blueprint, base unsafe.Pointer) error {
 // encodeTop dispatches to the compile-time bound encode function.
 func (es *encodeState) encodeTop(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	return ti.Encode(es, ptr)
-}
-
-// resolveType extracts EncTypeInfo and data pointer from a generic value.
-// For pointer T: dereferences one level via encElemTypeInfoOf fast cache.
-// For value T: takes pointer to v directly.
-// Returns (nil, nil) when T is a nil pointer.
-func resolveType[T any](v *T) (*EncTypeInfo, unsafe.Pointer) {
-	rt := reflect.TypeFor[T]()
-	if rt.Kind() == reflect.Pointer {
-		ptr := *(*unsafe.Pointer)(unsafe.Pointer(v))
-		if ptr == nil {
-			return nil, nil
-		}
-		rtp := uintptr(gort.TypePtr(rt))
-		return encElemTypeInfoOf(rtp, rt), ptr
-	}
-	return EncTypeInfoOf(rt), unsafe.Pointer(v)
 }
 
 // isSimpleIndent reports whether the native VM can synthesize this indent pattern.

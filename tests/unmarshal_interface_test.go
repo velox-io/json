@@ -282,9 +282,9 @@ func TestUnmarshal_SliceOfAny(t *testing.T) {
 
 func TestUnmarshal_NonEmptyInterface(t *testing.T) {
 	type S struct {
-		Label string       `json:"label"`
-		Name  Animal       `json:"name"`
-		Extra Animal       `json:"extra,omitempty"`
+		Label string `json:"label"`
+		Name  Animal `json:"name"`
+		Extra Animal `json:"extra,omitempty"`
 	}
 
 	// Non-empty interface fields that are nil stay nil after unmarshal

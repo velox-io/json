@@ -178,7 +178,7 @@ func (es *encodeState) encodeValueQuoted(ti *EncTypeInfo, ptr unsafe.Pointer) er
 		}
 		return es.encodeValueQuoted(pi.ElemType, elemPtr)
 	default:
-		return es.encodeTop(ti, ptr)
+		return ti.Encode(es, ptr)
 	}
 	return nil
 }
@@ -352,7 +352,7 @@ func (es *encodeState) encodeMapGeneric(mi *EncMapInfo, ptr unsafe.Pointer) erro
 		}
 
 		elemPtr := mapsIterElem(&it)
-		if err := es.encodeTop(mi.ValType, elemPtr); err != nil {
+		if err := mi.ValType.Encode(es, elemPtr); err != nil {
 			return err
 		}
 		mapsIterNext(&it)
@@ -601,5 +601,5 @@ func (es *encodeState) encodeAnyReflect(v any) error {
 
 	tmp := reflect.New(rv.Type())
 	tmp.Elem().Set(rv)
-	return es.encodeTop(ti, tmp.UnsafePointer())
+	return ti.Encode(es, tmp.UnsafePointer())
 }

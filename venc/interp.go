@@ -246,7 +246,7 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 				return fmt.Errorf("venc: interp: opTime at PC=%d with no fallback info", pc)
 			}
 			fieldPtr := unsafe.Add(base, fb.Offset)
-			if err := es.encodeTop(fb.TI, fieldPtr); err != nil {
+			if err := fb.TI.Encode(es, fieldPtr); err != nil {
 				return err
 			}
 			pc += 8
@@ -481,7 +481,7 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 				first = false
 			}
 			mapPtr := unsafe.Add(base, fb.Offset)
-			if err := es.encodeTop(fb.TI, mapPtr); err != nil {
+			if err := fb.TI.Encode(es, mapPtr); err != nil {
 				return err
 			}
 			pc += 8
@@ -492,7 +492,7 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			mapPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
 			// Try fallback entry first (available when compiled as struct field).
 			if fb, ok := bp.Fallbacks[int(pc)]; ok {
-				if err := es.encodeTop(fb.TI, unsafe.Add(base, fb.Offset)); err != nil {
+				if err := fb.TI.Encode(es, unsafe.Add(base, fb.Offset)); err != nil {
 					return err
 				}
 			} else {
@@ -527,7 +527,7 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			es.interpWriteKey(hdr, first, indent)
 			first = false
 			mapPtr := unsafe.Add(base, fb.Offset)
-			if err := es.encodeTop(fb.TI, mapPtr); err != nil {
+			if err := fb.TI.Encode(es, mapPtr); err != nil {
 				return err
 			}
 			// Skip past body + MapStrIterEnd
@@ -582,7 +582,7 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 					return err
 				}
 			} else {
-				if err := es.encodeTop(fb.TI, fieldPtr); err != nil {
+				if err := fb.TI.Encode(es, fieldPtr); err != nil {
 					return err
 				}
 			}

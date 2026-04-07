@@ -142,15 +142,37 @@ func (enc *Encoder) Encode(v any) error {
 }
 
 // EncodeValue avoids interface boxing for generic callers.
+//
+// Pointer T: inline fast path — dereference without &v, zero escape.
+// Value T:   thin shim → encodeValueSlowPtr to isolate &v escape.
 func EncodeValue[T any](enc *Encoder, v T) error {
 	if enc.err != nil {
 		return enc.err
 	}
-	ti, ptr := resolveType(&v)
-	if ti == nil {
+	rt := reflect.TypeFor[T]()
+	if rt.Kind() != reflect.Pointer {
+		return encodeValueSlow(enc, v, rt)
+	}
+
+	// Pointer fast path.
+	elemPtr := *(*unsafe.Pointer)(unsafe.Pointer(&v))
+	if elemPtr == nil {
 		return enc.write([]byte("null\n"))
 	}
-	return enc.encodePtr(ti, ptr)
+	rtp := uintptr(gort.TypePtr(rt))
+	ti := encElemTypeInfoOf(rtp, rt)
+	return enc.encodePtr(ti, elemPtr)
+}
+
+// encodeValueSlow is a thin inlineable shim that takes &v and forwards to
+// encodeValueSlowPtr, avoiding a second copy of the (potentially large) value.
+func encodeValueSlow[T any](enc *Encoder, v T, rt reflect.Type) error {
+	return encodeValueSlowPtr(enc, &v, rt)
+}
+
+func encodeValueSlowPtr[T any](enc *Encoder, v *T, rt reflect.Type) error {
+	ti := EncTypeInfoOf(rt)
+	return enc.encodePtr(ti, unsafe.Pointer(v))
 }
 
 // encodePtr shares the streaming encode path used by Encode and EncodeValue.

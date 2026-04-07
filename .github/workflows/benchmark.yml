@@ -77,13 +77,39 @@ jobs:
         echo "=== Performance Comparison ===" >> $GITHUB_STEP_SUMMARY
         benchstat benchmark/bench-baseline.txt benchmark/bench-current.txt | tee benchmark/comparison.txt >> $GITHUB_STEP_SUMMARY || true
 
-        # Detect significant regressions (>10% slower)
+        # Detect significant regressions (>10% slower).
+        #
+        # benchstat groups output by metric with header lines like:
+        #   │ sec/op │   — latency:    + means SLOWER  (regression)
+        #   │ B/op   │   — memory:     + means MORE    (regression)
+        #   │ allocs │   — allocs:     + means MORE    (regression)
+        #   │ B/s    │   — throughput: + means FASTER  (improvement, NOT regression)
+        #
+        # We track the current section and only flag +XX% as regression in
+        # sec/op, B/op, and allocs/op sections.
         REGRESSION_DETECTED=0
+        SECTION="unknown"
         while IFS= read -r line; do
+          # Detect section headers (benchstat v2 format: │ sec/op │, │ B/op │, etc.)
+          if echo "$line" | grep -qE '│\s*sec/op\s*│'; then
+            SECTION="latency"
+          elif echo "$line" | grep -qE '│\s*B/op\s*│'; then
+            SECTION="memory"
+          elif echo "$line" | grep -qE '│\s*allocs/op\s*│'; then
+            SECTION="allocs"
+          elif echo "$line" | grep -qE '│\s*[KMGTkmgt]?i?B/s\s*│'; then
+            SECTION="throughput"
+          fi
+
+          # Only flag +XX% as regression in non-throughput sections
+          if [ "$SECTION" = "throughput" ] || [ "$SECTION" = "unknown" ]; then
+            continue
+          fi
+
           if echo "$line" | grep -qE '\+[0-9]+\.[0-9]+%'; then
             percent=$(echo "$line" | grep -oE '\+[0-9]+\.[0-9]+%' | tr -d '+%')
             if [ -n "$percent" ] && [ $(echo "$percent > 10" | bc -l) -eq 1 ]; then
-              echo "::warning::Significant regression detected: $line"
+              echo "::warning::Significant regression detected ($SECTION): $line"
               REGRESSION_DETECTED=1
             fi
           fi

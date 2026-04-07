@@ -306,6 +306,33 @@ func TestNativeEncoder_GoroutineStackStress_Indent(t *testing.T) {
 	})
 }
 
+// TestNativeEncoder_GoroutineStackStress_Fast mirrors the Indent test but
+// uses plain Marshal (fast VM, no options) instead of MarshalIndent (full VM).
+func TestNativeEncoder_GoroutineStackStress_Fast(t *testing.T) {
+	v := stackTestNested{
+		Name:  "fast-test",
+		Inner: stackTestSimple{A: 1, B: "inner", C: true},
+		Value: 1.23,
+	}
+
+	runStackStressTest(t, 500, func(t *testing.T, id int) {
+		got, err := Marshal(v)
+		label := fmt.Sprintf("g=%d", id)
+		if err != nil {
+			t.Errorf("[%s] Marshal error: %v", label, err)
+			return
+		}
+		want, err2 := json.Marshal(&v)
+		if err2 != nil {
+			t.Errorf("[%s] std json.Marshal error: %v", label, err2)
+			return
+		}
+		if string(got) != string(want) {
+			t.Errorf("[%s] mismatch:\n  got:  %s\n  want: %s", label, got, want)
+		}
+	})
+}
+
 // TestNativeEncoder_GoroutineStackStress_ManyOptions tests all VM entry points
 // (default, compact, fast) on fresh stacks.
 func TestNativeEncoder_GoroutineStackStress_ManyOptions(t *testing.T) {

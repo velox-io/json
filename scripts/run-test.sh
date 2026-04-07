@@ -15,11 +15,15 @@ go test ./venc
 go test -race ./venc
 go test -tags vj_noencvm ./venc
 go test -race -tags vj_noencvm ./venc
+go test -tags vjgcstress ./venc
+go test -race -tags vjgcstress ./venc
 
 go test ./tests/
 go test -race ./tests/
 go test -tags vj_noencvm ./tests
 go test -tags vj_noencvm -race ./tests
+go test -tags vjgcstress ./tests
+go test -race -tags vjgcstress ./tests
 
 go test ./ndec/...
 go test -race ./ndec/...
