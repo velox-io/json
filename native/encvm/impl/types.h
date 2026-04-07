@@ -441,7 +441,8 @@ typedef struct __attribute__((aligned(8))) VjStackFrame {
       int32_t     remaining;   /* 20: entries left to encode */
       uint8_t     group_idx;   /* 24: group index within current table (max 127) */
       uint8_t     slot_idx;    /* 25: slot index within current group (0-7) */
-      uint16_t    _pad;        /* 26: alignment padding */
+      uint8_t     entry_first; /* 26: 1 = no entry written yet (comma suppression) */
+      uint8_t     _pad;        /* 27: alignment padding */
     } map;  /* 20 bytes */
   };
 #pragma pack(pop)

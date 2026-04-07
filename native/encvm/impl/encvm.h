@@ -1009,7 +1009,7 @@ vj_op_map_str_str: {
     di = f->map.dir_idx;
     gi = f->map.group_idx;
     si = f->map.slot_idx;
-    entry_first = 0;
+    entry_first = f->map.entry_first;
   } else {
     /* ---- First entry: read map, handle nil/empty ---- */
     m = *(const GoSwissMap **)(base + op->field_off);
@@ -1114,7 +1114,7 @@ OP_LABEL: {                                                                     
     di = f->map.dir_idx;                                                        \
     gi = f->map.group_idx;                                                      \
     si = f->map.slot_idx;                                                       \
-    entry_first = 0;                                                            \
+    entry_first = f->map.entry_first;                                           \
   } else {                                                                      \
     m = *(const GoSwissMap **)(base + op->field_off);                           \
     if (m == NULL || m->used == 0) {                                            \

@@ -228,11 +228,12 @@ vj_swiss_iterate_impl(uint8_t *buf, const uint8_t *bend,
 
       int64_t need = calc_need(k, vp, ipad, key_space);
       if (__builtin_expect(buf + need > bend, 0)) {
-        frame->map.map_ptr   = m;
-        frame->map.remaining = remaining;
-        frame->map.slot_idx  = (uint8_t)si;
-        frame->map.dir_idx   = 0;
-        frame->map.group_idx = 0;
+        frame->map.map_ptr     = m;
+        frame->map.remaining   = remaining;
+        frame->map.slot_idx    = (uint8_t)si;
+        frame->map.dir_idx     = 0;
+        frame->map.group_idx   = 0;
+        frame->map.entry_first = (uint8_t)entry_first;
         return (VjSwissMapResult){buf, VJ_SWISS_BUF_FULL};
       }
 
@@ -261,11 +262,12 @@ vj_swiss_iterate_impl(uint8_t *buf, const uint8_t *bend,
 
           int64_t need = calc_need(k, vp, ipad, key_space);
           if (__builtin_expect(buf + need > bend, 0)) {
-            frame->map.map_ptr   = m;
-            frame->map.remaining = remaining;
-            frame->map.dir_idx   = di;
-            frame->map.group_idx = (uint8_t)gi;
-            frame->map.slot_idx  = (uint8_t)si;
+            frame->map.map_ptr     = m;
+            frame->map.remaining   = remaining;
+            frame->map.dir_idx     = di;
+            frame->map.group_idx   = (uint8_t)gi;
+            frame->map.slot_idx    = (uint8_t)si;
+            frame->map.entry_first = (uint8_t)entry_first;
             return (VjSwissMapResult){buf, VJ_SWISS_BUF_FULL};
           }
 
