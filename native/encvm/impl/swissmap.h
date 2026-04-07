@@ -129,15 +129,15 @@ vj_swiss_encode_one_str_str(uint8_t *buf, const GoString *k, const uint8_t *val_
   *entry_first = 0;
   const GoString *v = (const GoString *)val_ptr;
 #ifdef VJ_FAST_STRING_ESCAPE
-  buf += vj_escape_string_fast(buf, (const uint8_t *)k->ptr, k->len);
+  buf += VJ_ESCAPE_STRING_FAST_DISPATCH(buf, k->ptr, k->len);
   *buf++ = ':';
   if (ind->indent_step) { *buf++ = ' '; }
-  buf += vj_escape_string_fast(buf, (const uint8_t *)v->ptr, v->len);
+  buf += VJ_ESCAPE_STRING_FAST_DISPATCH(buf, v->ptr, v->len);
 #else
-  buf += vj_escape_string(buf, (const uint8_t *)k->ptr, k->len, flags);
+  buf += VJ_ESCAPE_STRING_DISPATCH(buf, k->ptr, k->len, flags);
   *buf++ = ':';
   if (ind->indent_step) { *buf++ = ' '; }
-  buf += vj_escape_string(buf, (const uint8_t *)v->ptr, v->len, flags);
+  buf += VJ_ESCAPE_STRING_DISPATCH(buf, v->ptr, v->len, flags);
 #endif
   return buf;
 }
@@ -153,9 +153,9 @@ vj_swiss_encode_one_str_int(uint8_t *buf, const GoString *k, const uint8_t *val_
   }
   *entry_first = 0;
 #ifdef VJ_FAST_STRING_ESCAPE
-  buf += vj_escape_string_fast(buf, (const uint8_t *)k->ptr, k->len);
+  buf += VJ_ESCAPE_STRING_FAST_DISPATCH(buf, k->ptr, k->len);
 #else
-  buf += vj_escape_string(buf, (const uint8_t *)k->ptr, k->len, flags);
+  buf += VJ_ESCAPE_STRING_DISPATCH(buf, k->ptr, k->len, flags);
 #endif
   *buf++ = ':';
   if (ind->indent_step) { *buf++ = ' '; }

@@ -460,9 +460,9 @@ vj_op_string: {
   }
   VM_WRITE_KEY();
 #ifdef VJ_FAST_STRING_ESCAPE
-  buf += vj_escape_string_fast(buf, (const uint8_t *)s->ptr, s->len);
+  buf += VJ_ESCAPE_STRING_FAST_DISPATCH(buf, s->ptr, s->len);
 #else
-  buf += vj_escape_string(buf, (const uint8_t *)s->ptr, s->len, VJ_ST_GET_FLAGS(vmstate));
+  buf += VJ_ESCAPE_STRING_DISPATCH(buf, s->ptr, s->len, VJ_ST_GET_FLAGS(vmstate));
 #endif
   VM_NEXT_SHORT();
 }
@@ -514,9 +514,9 @@ vj_op_kstring: {
   }
   VM_WRITE_KEY_ALWAYS();
 #ifdef VJ_FAST_STRING_ESCAPE
-  buf += vj_escape_string_fast(buf, (const uint8_t *)s->ptr, s->len);
+  buf += VJ_ESCAPE_STRING_FAST_DISPATCH(buf, s->ptr, s->len);
 #else
-  buf += vj_escape_string(buf, (const uint8_t *)s->ptr, s->len, VJ_ST_GET_FLAGS(vmstate));
+  buf += VJ_ESCAPE_STRING_DISPATCH(buf, s->ptr, s->len, VJ_ST_GET_FLAGS(vmstate));
 #endif
   VM_NEXT_SHORT();
 }
@@ -1242,9 +1242,9 @@ vj_op_map_str_iter: {
     *buf++ = ',';
     if (indent_step) { VM_WRITE_INDENT(); }
 #ifdef VJ_FAST_STRING_ESCAPE
-    buf += vj_escape_string_fast(buf, (const uint8_t *)k->ptr, k->len);
+    buf += VJ_ESCAPE_STRING_FAST_DISPATCH(buf, k->ptr, k->len);
 #else
-    buf += vj_escape_string(buf, (const uint8_t *)k->ptr, k->len, VJ_ST_GET_FLAGS(vmstate));
+    buf += VJ_ESCAPE_STRING_DISPATCH(buf, k->ptr, k->len, VJ_ST_GET_FLAGS(vmstate));
 #endif
     *buf++ = ':';
     if (indent_step) { *buf++ = ' '; }
@@ -1323,9 +1323,9 @@ vj_op_map_str_iter: {
       VM_CHECK(need);
     }
 #ifdef VJ_FAST_STRING_ESCAPE
-    buf += vj_escape_string_fast(buf, (const uint8_t *)k->ptr, k->len);
+    buf += VJ_ESCAPE_STRING_FAST_DISPATCH(buf, k->ptr, k->len);
 #else
-    buf += vj_escape_string(buf, (const uint8_t *)k->ptr, k->len, VJ_ST_GET_FLAGS(vmstate));
+    buf += VJ_ESCAPE_STRING_DISPATCH(buf, k->ptr, k->len, VJ_ST_GET_FLAGS(vmstate));
 #endif
     *buf++ = ':';
     if (indent_step) { *buf++ = ' '; }
@@ -1407,9 +1407,9 @@ vj_op_map_str_iter_end: {
     *buf++ = ',';
     if (indent_step) { VM_WRITE_INDENT(); }
 #ifdef VJ_FAST_STRING_ESCAPE
-    buf += vj_escape_string_fast(buf, (const uint8_t *)k->ptr, k->len);
+    buf += VJ_ESCAPE_STRING_FAST_DISPATCH(buf, k->ptr, k->len);
 #else
-    buf += vj_escape_string(buf, (const uint8_t *)k->ptr, k->len, VJ_ST_GET_FLAGS(vmstate));
+    buf += VJ_ESCAPE_STRING_DISPATCH(buf, k->ptr, k->len, VJ_ST_GET_FLAGS(vmstate));
 #endif
     *buf++ = ':';
     if (indent_step) { *buf++ = ' '; }

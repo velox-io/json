@@ -261,7 +261,7 @@ fi
 #  ISAs are listed, the Go init() in encvm_<os>_<arch>.go selects
 #  the best one at runtime via golang.org/x/sys/cpu detection.
 #  darwin: arm64 (neon)
-#  linux:  arm64 (neon) or amd64 (sse42 avx2 avx512)
+#  linux:  arm64 (neon) or amd64 (avx2)
 # ============================================================
 
 get_available_isas() {
@@ -279,12 +279,12 @@ get_available_isas() {
         linux)
             case "$arch" in
                 arm64) echo "neon" ;;
-                amd64) echo "sse42 avx2 avx512" ;;
+                amd64) echo "avx2" ;;
             esac
             ;;
         windows)
             if [ "$arch" = "amd64" ]; then
-                echo "sse42 avx2 avx512"
+                echo "avx2"
             else
                 echo ""
             fi
@@ -292,7 +292,7 @@ get_available_isas() {
         *)
             case "$arch" in
                 arm64) echo "neon" ;;
-                amd64) echo "sse42 avx2 avx512" ;;
+                amd64) echo "avx2" ;;
             esac
             ;;
     esac

@@ -1,5 +1,5 @@
 /*
- * strfn_nonascii.c — Non-ASCII run processing for JSON string escaping
+ * Non-ASCII run processing for JSON string escaping
  *
  * Contains vj_escape_nonascii_run and its helper functions:
  *   - vj_escape_line_terms: SIMD-accelerated U+2028/U+2029 scan
@@ -8,8 +8,6 @@
  * These are extracted into a separate translation unit because they are
  * ISA-independent and MODE-independent:
  *   - Their behavior depends only on the runtime `flags` parameter.
- *   - They use at most SSE2 intrinsics (for the line-terminator scan),
- *     which are available on all target ISAs (sse42, avx2, avx512).
  *   - They do not reference any MODE_* or ISA_* preprocessor macros.
  *
  * When these lived as `static inline` in strfn.h, the compiler produced
@@ -72,8 +70,7 @@ static inline void vj_escape_line_terms(uint8_t **out_ptr, const uint8_t *src, i
     }
     /* Check the two continuation bytes for line terminator:
      * U+2028 = E2 80 A8,  U+2029 = E2 80 A9. */
-    if (i + 2 < end && src[i + 1] == 0x80 &&
-        (src[i + 2] == 0xA8 || src[i + 2] == 0xA9)) {
+    if (i + 2 < end && src[i + 1] == 0x80 && (src[i + 2] == 0xA8 || src[i + 2] == 0xA9)) {
       uint32_t cp = (src[i + 2] == 0xA8) ? 0x2028 : 0x2029;
       out += write_unicode_escape_na(out, cp);
       i += 3;
@@ -280,8 +277,6 @@ int64_t vj_escape_nonascii_run(uint8_t **out_ptr, const uint8_t *src, int64_t i,
  *    - Without VJ_FLAGS_ESCAPE_INVALID_UTF8, non-ASCII bytes are NOT
  *      counted — they pass through as-is.
  *
- *  Cost: read-only SIMD scan — AVX2 processes 32 bytes/iter,
- *  SSE2/NEON 16 bytes/iter, plus popcount per chunk.
  * ================================================================ */
 int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint32_t flags) {
   int64_t esc_count = 0;
@@ -296,8 +291,7 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
   for (; i + 32 <= src_len; i += 32) {
     __m256i v = _mm256_loadu_si256((const __m256i *)&src[i]);
 
-    __m256i ctrl_safe =
-        _mm256_cmpeq_epi8(_mm256_max_epu8(v, _mm256_set1_epi8(0x20)), v);
+    __m256i ctrl_safe = _mm256_cmpeq_epi8(_mm256_max_epu8(v, _mm256_set1_epi8(0x20)), v);
 
     __m256i eq_q  = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('"'));
     __m256i eq_bs = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('\\'));
@@ -307,8 +301,7 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
       __m256i eq_lt  = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('<'));
       __m256i eq_gt  = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('>'));
       __m256i eq_amp = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('&'));
-      bad = _mm256_or_si256(bad,
-              _mm256_or_si256(eq_lt, _mm256_or_si256(eq_gt, eq_amp)));
+      bad = _mm256_or_si256(bad, _mm256_or_si256(eq_lt, _mm256_or_si256(eq_gt, eq_amp)));
     }
 
     /* When UTF-8 validation is enabled, non-ASCII bytes (>= 0x80) may
@@ -329,8 +322,7 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
   for (; i + 16 <= src_len; i += 16) {
     __m128i v = _mm_loadu_si128((const __m128i *)&src[i]);
 
-    __m128i ctrl_safe =
-        _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x20)), v);
+    __m128i ctrl_safe = _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x20)), v);
 
     __m128i eq_q  = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));
     __m128i eq_bs = _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'));
@@ -340,8 +332,7 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
       __m128i eq_lt  = _mm_cmpeq_epi8(v, _mm_set1_epi8('<'));
       __m128i eq_gt  = _mm_cmpeq_epi8(v, _mm_set1_epi8('>'));
       __m128i eq_amp = _mm_cmpeq_epi8(v, _mm_set1_epi8('&'));
-      bad = _mm_or_si128(bad,
-              _mm_or_si128(eq_lt, _mm_or_si128(eq_gt, eq_amp)));
+      bad = _mm_or_si128(bad, _mm_or_si128(eq_lt, _mm_or_si128(eq_gt, eq_amp)));
     }
 
     if (check_utf8) {
@@ -359,8 +350,7 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
   if (i < src_len) {
     __m128i v = _mm_loadu_si128((const __m128i *)&src[i]);
 
-    __m128i ctrl_safe =
-        _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x20)), v);
+    __m128i ctrl_safe = _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x20)), v);
 
     __m128i eq_q  = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));
     __m128i eq_bs = _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'));
@@ -370,8 +360,7 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
       __m128i eq_lt  = _mm_cmpeq_epi8(v, _mm_set1_epi8('<'));
       __m128i eq_gt  = _mm_cmpeq_epi8(v, _mm_set1_epi8('>'));
       __m128i eq_amp = _mm_cmpeq_epi8(v, _mm_set1_epi8('&'));
-      bad = _mm_or_si128(bad,
-              _mm_or_si128(eq_lt, _mm_or_si128(eq_gt, eq_amp)));
+      bad = _mm_or_si128(bad, _mm_or_si128(eq_lt, _mm_or_si128(eq_gt, eq_amp)));
     }
 
     int remaining = (int)(src_len - i);

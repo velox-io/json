@@ -5,10 +5,8 @@
 #if !defined(ARCH)
 #error "ARCH must be defined (arm64 or amd64)"
 #endif
-#if !defined(ISA_NEON) && !defined(ISA_SSE42) && !defined(ISA_AVX2) &&         \
-    !defined(ISA_AVX512)
-#error                                                                         \
-    "ISA must be defined (use -DISA_NEON, -DISA_SSE42, -DISA_AVX2, or -DISA_AVX512)"
+#if !defined(ISA_NEON) && !defined(ISA_AVX2) && !defined(ISA_AVX512)
+#error "ISA must be defined (use -DISA_NEON, -DISA_AVX2, or -DISA_AVX512)"
 #endif
 
 /* ---------- Mode configuration ----------
@@ -50,12 +48,8 @@
 
 #if defined(ISA_NEON)
 #define VJ_VM_EXEC_FN_NAME VJ_VM_EXEC_NAME(VJ_MODE_TAG, neon)
-#elif defined(ISA_SSE42)
-#define VJ_VM_EXEC_FN_NAME VJ_VM_EXEC_NAME(VJ_MODE_TAG, sse42)
 #elif defined(ISA_AVX2)
 #define VJ_VM_EXEC_FN_NAME VJ_VM_EXEC_NAME(VJ_MODE_TAG, avx2)
-#elif defined(ISA_AVX512)
-#define VJ_VM_EXEC_FN_NAME VJ_VM_EXEC_NAME(VJ_MODE_TAG, avx512)
 #endif
 
 /* ---------- Engine implementation ----------

@@ -89,7 +89,7 @@ get_isa() {
     local arch=$2
     case "$arch" in
         arm64) echo "neon" ;;
-        amd64) echo "sse42" ;;
+        amd64) echo "avx2" ;;
         *)     echo "" ;;
     esac
 }

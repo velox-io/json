@@ -159,8 +159,7 @@ static inline int vj_escape_mask_16_impl(const uint8_t *src, const int html) {
 
   /* c < 0x20: max_epu8(v, 0x20) != v → cmpeq gives 0 for ctrl chars.
    * (Must use 0x20, not 0x1F, so that byte 0x1F is correctly flagged.) */
-  __m128i ctrl_safe =
-      _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x20)), v);
+  __m128i ctrl_safe = _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x20)), v);
 
   /* c == '"' or c == '\\' */
   __m128i eq_q = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));
@@ -193,8 +192,7 @@ static inline int vj_escape_mask_16_html(const uint8_t *src) {
 /* Fast 16-byte mask: only c < 0x20, '"', '\\'.  No non-ASCII, no HTML. */
 static inline int vj_escape_mask_16_fast(const uint8_t *src) {
   __m128i v = _mm_loadu_si128((const __m128i *)src);
-  __m128i ctrl_safe =
-      _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x20)), v);
+  __m128i ctrl_safe = _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x20)), v);
   __m128i eq_q = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));
   __m128i eq_bs = _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'));
   __m128i bad = _mm_or_si128(eq_q, eq_bs);
@@ -209,8 +207,7 @@ static inline int vj_escape_mask_16_fast(const uint8_t *src) {
 static inline int vj_escape_mask_32_impl(const uint8_t *src, const int html) {
   __m256i v = _mm256_loadu_si256((const __m256i *)src);
 
-  __m256i ctrl_safe =
-      _mm256_cmpeq_epi8(_mm256_max_epu8(v, _mm256_set1_epi8(0x20)), v);
+  __m256i ctrl_safe = _mm256_cmpeq_epi8(_mm256_max_epu8(v, _mm256_set1_epi8(0x20)), v);
 
   __m256i eq_q = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('"'));
   __m256i eq_bs = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('\\'));
@@ -222,8 +219,7 @@ static inline int vj_escape_mask_32_impl(const uint8_t *src, const int html) {
     __m256i eq_lt = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('<'));
     __m256i eq_gt = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('>'));
     __m256i eq_amp = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('&'));
-    bad = _mm256_or_si256(bad,
-            _mm256_or_si256(eq_lt, _mm256_or_si256(eq_gt, eq_amp)));
+    bad = _mm256_or_si256(bad, _mm256_or_si256(eq_lt, _mm256_or_si256(eq_gt, eq_amp)));
   }
 
   __m256i safe = _mm256_andnot_si256(bad, ctrl_safe);
@@ -240,8 +236,7 @@ static inline int vj_escape_mask_32_html(const uint8_t *src) {
 /* Fast 32-byte mask: only c < 0x20, '"', '\\'.  No non-ASCII, no HTML. */
 static inline int vj_escape_mask_32_fast(const uint8_t *src) {
   __m256i v = _mm256_loadu_si256((const __m256i *)src);
-  __m256i ctrl_safe =
-      _mm256_cmpeq_epi8(_mm256_max_epu8(v, _mm256_set1_epi8(0x20)), v);
+  __m256i ctrl_safe = _mm256_cmpeq_epi8(_mm256_max_epu8(v, _mm256_set1_epi8(0x20)), v);
   __m256i eq_q = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('"'));
   __m256i eq_bs = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('\\'));
   __m256i bad = _mm256_or_si256(eq_q, eq_bs);
@@ -263,9 +258,8 @@ static inline int vj_escape_mask_32_fast(const uint8_t *src) {
  *
  * This function is ISA-independent and MODE-independent: its behavior depends
  * only on the runtime `flags` parameter.  It uses at most SSE2 intrinsics
- * (for the line-terminator scan), which are available on all target ISAs
- * (sse42, avx2, avx512).  Placing it in a separate translation unit avoids
- * 9 identical copies (one per ISA×MODE encvm.c compilation).
+ * (for the line-terminator scan), which are available on all target ISAs.
+ * Placing it in a separate translation unit avoids identical copies.
  *
  * Returns number of source bytes consumed (the entire non-ASCII run).
  * Writes escaped output to *out_ptr and advances it. */
@@ -308,8 +302,8 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
  * after static inline expansion the dead branch and the unused mask function
  * are eliminated entirely by the optimiser.
  *
- * On platforms with SIMD (SSE2/NEON/AVX2) the function uses wide scans;
- * on all others it degrades gracefully to SWAR (8 bytes) + byte-by-byte.
+ * On platforms with SIMD the function uses wide scans; on all others it degrades
+ * gracefully to SWAR (8 bytes) + byte-by-byte.
  *
  * Key optimizations:
  *   1. Inline ASCII escape — no function call for the common case.
@@ -336,12 +330,11 @@ static inline int escape_string_content_impl(uint8_t *buf, const uint8_t *src, i
 #if defined(__AVX2__)
     /* ---- AVX2: scan 32 bytes at a time ---- */
     if (i + 32 <= src_len) {
-      int mask = html ? vj_escape_mask_32_html(&src[i])
-                      : vj_escape_mask_32(&src[i]);
+      int mask = html ? vj_escape_mask_32_html(&src[i]) : vj_escape_mask_32(&src[i]);
+
       if (mask == 0) {
         /* All 32 bytes are safe — bulk copy via AVX2 store. */
-        _mm256_storeu_si256((__m256i *)out,
-                            _mm256_loadu_si256((const __m256i *)&src[i]));
+        _mm256_storeu_si256((__m256i *)out, _mm256_loadu_si256((const __m256i *)&src[i]));
         out += 32;
         i += 32;
         continue;
@@ -355,8 +348,7 @@ static inline int escape_string_content_impl(uint8_t *buf, const uint8_t *src, i
           if (safe < 16) {
             copy_small(out, &src[i], safe);
           } else {
-            _mm_storeu_si128((__m128i *)out,
-                             _mm_loadu_si128((const __m128i *)&src[i]));
+            _mm_storeu_si128((__m128i *)out, _mm_loadu_si128((const __m128i *)&src[i]));
             copy_small(out + 16, &src[i + 16], safe - 16);
           }
           out += safe;
@@ -385,12 +377,11 @@ static inline int escape_string_content_impl(uint8_t *buf, const uint8_t *src, i
 #if defined(__SSE2__) || defined(__aarch64__)
     /* ---- SIMD: scan 16 bytes at a time ---- */
     if (i + 16 <= src_len) {
-      int mask = html ? vj_escape_mask_16_html(&src[i])
-                      : vj_escape_mask_16(&src[i]);
+      int mask = html ? vj_escape_mask_16_html(&src[i]) : vj_escape_mask_16(&src[i]);
+
       if (mask == 0) {
         /* All 16 bytes are safe — bulk copy via SIMD store. */
-        _mm_storeu_si128((__m128i *)out,
-                         _mm_loadu_si128((const __m128i *)&src[i]));
+        _mm_storeu_si128((__m128i *)out, _mm_loadu_si128((const __m128i *)&src[i]));
         out += 16;
         i += 16;
         continue;
@@ -429,8 +420,7 @@ static inline int escape_string_content_impl(uint8_t *buf, const uint8_t *src, i
   simd_tail: ;
     {
       __m128i v = _mm_loadu_si128((const __m128i *)&src[i]);
-      int mask = html ? vj_escape_mask_16_html(&src[i])
-                      : vj_escape_mask_16(&src[i]);
+      int mask = html ? vj_escape_mask_16_html(&src[i]) : vj_escape_mask_16(&src[i]);
       int remaining = (int)(src_len - i);
       int relevant_mask = mask & ((1 << remaining) - 1);
       if (__builtin_expect(relevant_mask == 0, 1)) {
@@ -530,8 +520,7 @@ static inline int escape_string_content_fast(uint8_t *buf, const uint8_t *src, i
     if (i + 32 <= src_len) {
       int mask = vj_escape_mask_32_fast(&src[i]);
       if (mask == 0) {
-        _mm256_storeu_si256((__m256i *)out,
-                            _mm256_loadu_si256((const __m256i *)&src[i]));
+        _mm256_storeu_si256((__m256i *)out, _mm256_loadu_si256((const __m256i *)&src[i]));
         out += 32;
         i += 32;
         continue;
@@ -543,8 +532,7 @@ static inline int escape_string_content_fast(uint8_t *buf, const uint8_t *src, i
           if (safe < 16) {
             copy_small(out, &src[i], safe);
           } else {
-            _mm_storeu_si128((__m128i *)out,
-                             _mm_loadu_si128((const __m128i *)&src[i]));
+            _mm_storeu_si128((__m128i *)out, _mm_loadu_si128((const __m128i *)&src[i]));
             copy_small(out + 16, &src[i + 16], safe - 16);
           }
           out += safe;
@@ -570,8 +558,7 @@ static inline int escape_string_content_fast(uint8_t *buf, const uint8_t *src, i
     if (i + 16 <= src_len) {
       int mask = vj_escape_mask_16_fast(&src[i]);
       if (mask == 0) {
-        _mm_storeu_si128((__m128i *)out,
-                         _mm_loadu_si128((const __m128i *)&src[i]));
+        _mm_storeu_si128((__m128i *)out, _mm_loadu_si128((const __m128i *)&src[i]));
         out += 16;
         i += 16;
         continue;
@@ -705,5 +692,289 @@ static inline int vj_escape_string_fast(uint8_t *buf, const uint8_t *src, int64_
   *out++ = '"';
   return (int)(out - buf);
 }
+
+/*
+ *  AVX2 length-based dispatch: SSE-only escape functions
+ *
+ *  When compiled with -mavx2, the main escape functions use 256-bit
+ *  AVX2 instructions.  For short strings, the ymm register setup
+ *  overhead makes AVX2 slower than pure 128-bit SSE.
+ * */
+
+#if defined(__AVX2__)
+
+/* Threshold for switching from SSE to AVX2 escape path.
+ * Below this length, SSE-only functions avoid ymm register pressure
+ * and vzeroupper overhead.  Tunable via benchmarks. */
+#define VJ_AVX2_STRING_THRESHOLD 64
+
+/* ---- SSE-only escape (full flags path) ---- */
+static inline int escape_string_content_impl_sse(uint8_t *buf, const uint8_t *src,
+                                                  int64_t src_len, uint32_t flags,
+                                                  const int html) {
+  uint8_t *out = buf;
+  int64_t i = 0;
+
+  if (src_len <= 16)
+    goto simd_tail_sse_impl;
+
+  while (i < src_len) {
+    if (i + 16 <= src_len) {
+      int mask = html ? vj_escape_mask_16_html(&src[i]) : vj_escape_mask_16(&src[i]);
+
+      if (mask == 0) {
+        _mm_storeu_si128((__m128i *)out, _mm_loadu_si128((const __m128i *)&src[i]));
+        out += 16;
+        i += 16;
+        continue;
+      }
+      do {
+        int safe = __builtin_ctz(mask);
+        if (safe > 0) {
+          copy_small(out, &src[i], safe);
+          out += safe;
+          i += safe;
+        }
+        uint8_t _c = src[i];
+        if (__builtin_expect(_c >= 0x80, 0)) {
+          i += vj_escape_nonascii_run(&out, src, i, src_len, flags);
+          break;
+        }
+        if (_c < 0x20 || _c == '"' || _c == '\\') {
+          out += escape_byte(out, _c);
+        } else if ((html) && (_c == '<' || _c == '>' || _c == '&')) {
+          out += write_unicode_escape(out, _c);
+        } else {
+          *out++ = _c;
+        }
+        i++;
+        mask = (unsigned)mask >> 1 >> safe;
+      } while (mask != 0);
+      continue;
+    }
+
+  simd_tail_sse_impl: ;
+    {
+      __m128i v = _mm_loadu_si128((const __m128i *)&src[i]);
+      int mask = html ? vj_escape_mask_16_html(&src[i]) : vj_escape_mask_16(&src[i]);
+
+      int remaining = (int)(src_len - i);
+      int relevant_mask = mask & ((1 << remaining) - 1);
+      if (__builtin_expect(relevant_mask == 0, 1)) {
+        _mm_storeu_si128((__m128i *)out, v);
+        out += remaining;
+        return (int)(out - buf);
+      }
+    }
+
+    if (i + 8 <= src_len) {
+      uint64_t word;
+      __builtin_memcpy(&word, &src[i], 8);
+      int mask = vj_escape_mask_8(word, html);
+      if (mask == 0) {
+        __builtin_memcpy(out, &src[i], 8);
+        out += 8;
+        i += 8;
+        continue;
+      }
+      do {
+        int safe = __builtin_ctz(mask);
+        if (safe > 0) {
+          copy_small(out, &src[i], safe);
+          out += safe;
+          i += safe;
+        }
+        uint8_t _c = src[i];
+        if (__builtin_expect(_c >= 0x80, 0)) {
+          i += vj_escape_nonascii_run(&out, src, i, src_len, flags);
+          break;
+        }
+        if (_c < 0x20 || _c == '"' || _c == '\\') {
+          out += escape_byte(out, _c);
+        } else if ((html) && (_c == '<' || _c == '>' || _c == '&')) {
+          out += write_unicode_escape(out, _c);
+        } else {
+          *out++ = _c;
+        }
+        i++;
+        mask = (unsigned)mask >> 1 >> safe;
+      } while (mask != 0);
+      continue;
+    }
+
+    /* Byte-by-byte tail */
+    uint8_t c = src[i];
+    if (c >= 0x20 && c < 0x80 && c != '"' && c != '\\' &&
+        !(html && (c == '<' || c == '>' || c == '&'))) {
+      *out++ = c;
+      i++;
+    } else {
+      uint8_t _c = src[i];
+      if (__builtin_expect(_c < 0x80, 1)) {
+        if (_c < 0x20 || _c == '"' || _c == '\\') {
+          out += escape_byte(out, _c);
+        } else if ((html) && (_c == '<' || _c == '>' || _c == '&')) {
+          out += write_unicode_escape(out, _c);
+        } else {
+          *out++ = _c;
+        }
+        i++;
+      } else {
+        i += vj_escape_nonascii_run(&out, src, i, src_len, flags);
+      }
+    }
+  }
+  return (int)(out - buf);
+}
+
+/* ---- SSE-only fast escape ---- */
+static inline int escape_string_content_fast_sse(uint8_t *buf, const uint8_t *src, int64_t src_len) {
+  uint8_t *out = buf;
+  int64_t i = 0;
+
+  if (src_len <= 16)
+    goto simd_tail_fast_sse_impl;
+
+  while (i < src_len) {
+    if (i + 16 <= src_len) {
+      int mask = vj_escape_mask_16_fast(&src[i]);
+      if (mask == 0) {
+        _mm_storeu_si128((__m128i *)out, _mm_loadu_si128((const __m128i *)&src[i]));
+        out += 16;
+        i += 16;
+        continue;
+      }
+      do {
+        int safe = __builtin_ctz(mask);
+        if (safe > 0) {
+          copy_small(out, &src[i], safe);
+          out += safe;
+          i += safe;
+        }
+        {
+          uint8_t _c = src[i];
+          if (_c < 0x20 || _c == '"' || _c == '\\') {
+            out += escape_byte(out, _c);
+          } else {
+            *out++ = _c;
+          }
+        }
+        i++;
+        mask = (unsigned)mask >> 1 >> safe;
+      } while (mask != 0);
+      continue;
+    }
+
+  simd_tail_fast_sse_impl: ;
+    {
+      __m128i v = _mm_loadu_si128((const __m128i *)&src[i]);
+      int mask = vj_escape_mask_16_fast(&src[i]);
+      int remaining = (int)(src_len - i);
+      int relevant_mask = mask & ((1 << remaining) - 1);
+      if (__builtin_expect(relevant_mask == 0, 1)) {
+        _mm_storeu_si128((__m128i *)out, v);
+        out += remaining;
+        return (int)(out - buf);
+      }
+    }
+
+    if (i + 8 <= src_len) {
+      uint64_t word;
+      __builtin_memcpy(&word, &src[i], 8);
+      int mask = vj_escape_mask_8_fast(word);
+      if (mask == 0) {
+        __builtin_memcpy(out, &src[i], 8);
+        out += 8;
+        i += 8;
+        continue;
+      }
+      do {
+        int safe = __builtin_ctz(mask);
+        if (safe > 0) {
+          copy_small(out, &src[i], safe);
+          out += safe;
+          i += safe;
+        }
+        {
+          uint8_t _c = src[i];
+          if (_c < 0x20 || _c == '"' || _c == '\\') {
+            out += escape_byte(out, _c);
+          } else {
+            *out++ = _c;
+          }
+        }
+        i++;
+        mask = (unsigned)mask >> 1 >> safe;
+      } while (mask != 0);
+      continue;
+    }
+
+    /* Byte-by-byte tail */
+    uint8_t c = src[i];
+    if (c >= 0x20 && c != '"' && c != '\\') {
+      *out++ = c;
+      i++;
+    } else {
+      if (c < 0x20 || c == '"' || c == '\\') {
+        out += escape_byte(out, c);
+      } else {
+        *out++ = c;
+      }
+      i++;
+    }
+  }
+  return (int)(out - buf);
+}
+
+/* ---- SSE-only wrappers with quotes ---- */
+
+static inline int escape_string_content_sse(uint8_t *buf, const uint8_t *src,
+                                             int64_t src_len, uint32_t flags) {
+  if (flags & VJ_FLAGS_ESCAPE_HTML)
+    return escape_string_content_impl_sse(buf, src, src_len, flags, /*html=*/1);
+  return escape_string_content_impl_sse(buf, src, src_len, flags, /*html=*/0);
+}
+
+static inline int vj_escape_string_sse(uint8_t *buf, const uint8_t *src, int64_t src_len, uint32_t flags) {
+  uint8_t *out = buf;
+  *out++ = '"';
+  if (src_len > 0) {
+    out += escape_string_content_sse(out, src, src_len, flags);
+  }
+  *out++ = '"';
+  return (int)(out - buf);
+}
+
+static inline int vj_escape_string_fast_sse(uint8_t *buf, const uint8_t *src, int64_t src_len) {
+  uint8_t *out = buf;
+  *out++ = '"';
+  if (src_len > 0) {
+    out += escape_string_content_fast_sse(out, src, src_len);
+  }
+  *out++ = '"';
+  return (int)(out - buf);
+}
+
+/* ---- Dispatch macros: always use SSE-only path under AVX2 ----
+ * AVX2 string escape showed regressions in benchmarks (ymm register
+ * pressure, vzeroupper overhead).  Route everything through the
+ * 128-bit SSE path which is consistently faster on tested hardware. */
+
+#define VJ_ESCAPE_STRING_DISPATCH(buf, ptr, len, flags)                        \
+  vj_escape_string_sse((buf), (const uint8_t *)(ptr), (len), (flags))
+
+#define VJ_ESCAPE_STRING_FAST_DISPATCH(buf, ptr, len)                          \
+  vj_escape_string_fast_sse((buf), (const uint8_t *)(ptr), (len))
+
+#else /* !__AVX2__ */
+
+/* Non-AVX2 builds: dispatch macros call the standard functions directly. */
+#define VJ_ESCAPE_STRING_DISPATCH(buf, ptr, len, flags)                        \
+  vj_escape_string((buf), (const uint8_t *)(ptr), (len), (flags))
+
+#define VJ_ESCAPE_STRING_FAST_DISPATCH(buf, ptr, len)                          \
+  vj_escape_string_fast((buf), (const uint8_t *)(ptr), (len))
+
+#endif /* __AVX2__ */
 
 #endif /* VJ_ENCVM_STRING_H */

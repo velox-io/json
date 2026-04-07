@@ -82,9 +82,17 @@ encode_primitive_value(uint8_t *buf, const uint8_t *bend, const void *ptr,
     *buf++ = '"';
     if (s->len > 0) {
 #ifdef VJ_FAST_STRING_ESCAPE
+#if defined(__AVX2__)
+      buf += escape_string_content_fast_sse(buf, s->ptr, s->len);
+#else
       buf += escape_string_content_fast(buf, s->ptr, s->len);
+#endif
+#else
+#if defined(__AVX2__)
+      buf += escape_string_content_sse(buf, s->ptr, s->len, flags);
 #else
       buf += escape_string_content(buf, s->ptr, s->len, flags);
+#endif
 #endif
     }
     *buf++ = '"';

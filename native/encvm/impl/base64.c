@@ -28,14 +28,12 @@ static inline int64_t base64_encoded_len(int64_t len) {
 
 /* --- Scalar base64 — used for tail bytes (< 12 remaining) --- */
 
-static inline uint8_t *base64_encode_scalar(uint8_t *buf,
-                                             const uint8_t *data,
-                                             int64_t len) {
+static inline uint8_t *base64_encode_scalar(uint8_t *buf, const uint8_t *data,
+                                            int64_t len) {
   int64_t i = 0;
   int64_t full_groups = len - (len % 3);
   for (; i < full_groups; i += 3) {
-    uint32_t triple = ((uint32_t)data[i] << 16) |
-                      ((uint32_t)data[i + 1] << 8) |
+    uint32_t triple = ((uint32_t)data[i] << 16) | ((uint32_t)data[i + 1] << 8) |
                       ((uint32_t)data[i + 2]);
     buf[0] = B64_CHARS[(triple >> 18) & 0x3F];
     buf[1] = B64_CHARS[(triple >> 12) & 0x3F];
@@ -46,8 +44,7 @@ static inline uint8_t *base64_encode_scalar(uint8_t *buf,
 
   int64_t remainder = len - i;
   if (remainder == 2) {
-    uint32_t triple = ((uint32_t)data[i] << 16) |
-                      ((uint32_t)data[i + 1] << 8);
+    uint32_t triple = ((uint32_t)data[i] << 16) | ((uint32_t)data[i + 1] << 8);
     buf[0] = B64_CHARS[(triple >> 18) & 0x3F];
     buf[1] = B64_CHARS[(triple >> 12) & 0x3F];
     buf[2] = B64_CHARS[(triple >> 6) & 0x3F];
@@ -74,11 +71,10 @@ static inline __m128i base64_encode_simd_12(__m128i input) {
    * Each 3-byte group is replicated into a 4-byte slot:
    *   [a0,a1,a2] → [a1,a0,a2,a1]
    * so the two 16-bit words contain all bits for 4 base64 indices. */
-  const __m128i shuf = _mm_setr_epi8(
-    1, 0, 2, 1,    /* group A: [a₁ a₀ a₂ a₁] */
-    4, 3, 5, 4,    /* group B */
-    7, 6, 8, 7,    /* group C */
-    10, 9, 11, 10  /* group D */
+  const __m128i shuf = _mm_setr_epi8(1, 0, 2, 1,   /* group A: [a₁ a₀ a₂ a₁] */
+                                     4, 3, 5, 4,   /* group B */
+                                     7, 6, 8, 7,   /* group C */
+                                     10, 9, 11, 10 /* group D */
   );
   __m128i shuffled = _mm_shuffle_epi8(input, shuf);
 
@@ -104,22 +100,22 @@ static inline __m128i base64_encode_simd_12(__m128i input) {
   result = _mm_or_si128(result, _mm_and_si128(lt26, _mm_set1_epi8(13)));
 
   /* LUT: range_id → ASCII offset to add to 6-bit index.
-   *   0→lowercase(+71)  1..10→digit(-4)  11→'+'(-19)  12→'/'(-16)  13→upper(+65) */
-  const __m128i lut = _mm_setr_epi8(
-    71, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -19, -16, 65, 0, 0
-  );
+   *   0→lowercase(+71)  1..10→digit(-4)  11→'+'(-19)  12→'/'(-16) 13→upper(+65)
+   */
+  const __m128i lut = _mm_setr_epi8(71, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4,
+                                    -19, -16, 65, 0, 0);
   __m128i offsets = _mm_shuffle_epi8(lut, result);
   return _mm_add_epi8(indices, offsets);
 }
 
 #endif /* __SSE2__ || __aarch64__ */
 
-
 /* --- Public entry point --- */
 
-__attribute__((noinline))
-uint8_t *vj_encode_base64(uint8_t *buf, const uint8_t *bend,
-                           const uint8_t *data, int64_t len) {
+__attribute__((noinline)) uint8_t *vj_encode_base64(uint8_t *buf,
+                                                    const uint8_t *bend,
+                                                    const uint8_t *data,
+                                                    int64_t len) {
 
   int64_t b64_len = base64_encoded_len(len);
   int64_t total = 2 + b64_len;

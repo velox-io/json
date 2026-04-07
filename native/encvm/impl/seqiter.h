@@ -92,9 +92,9 @@ vj_seq_encode_string(uint8_t *buf, const uint8_t *elem_ptr,
   const GoString *s = (const GoString *)elem_ptr;
 #ifdef VJ_FAST_STRING_ESCAPE
   (void)flags;
-  buf += vj_escape_string_fast(buf, (const uint8_t *)s->ptr, s->len);
+  buf += VJ_ESCAPE_STRING_FAST_DISPATCH(buf, s->ptr, s->len);
 #else
-  buf += vj_escape_string(buf, (const uint8_t *)s->ptr, s->len, flags);
+  buf += VJ_ESCAPE_STRING_DISPATCH(buf, s->ptr, s->len, flags);
 #endif
   return buf;
 }
