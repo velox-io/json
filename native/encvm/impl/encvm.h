@@ -446,8 +446,18 @@ vj_op_slice_begin: {
 vj_op_string: {
   VM_TRACE_KEY("STRING");
   const GoString *s = (const GoString *)(base + op->field_off);
-  int64_t max_need = 1 + op->key_len + 2 + (s->len * 6) + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE;
-  VM_CHECK(max_need);
+  int64_t overhead = 1 + op->key_len + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE;
+  int64_t max_need = overhead + 2 + (s->len * 6);
+  if (__builtin_expect(buf + max_need > bend, 0)) {
+    /* Pessimistic estimate says buffer is too small.  For long strings
+     * the 6x multiplier is wildly conservative — pre-scan to get a tight
+     * bound before giving up with BufFull. */
+    int64_t tight = overhead + vj_prescan_string_escaped_len(
+        (const uint8_t *)s->ptr, s->len, VJ_ST_GET_FLAGS(vmstate));
+    if (__builtin_expect(buf + tight > bend, 0)) {
+      VM_SAVE_AND_RETURN(VJ_EXIT_BUF_FULL);
+    }
+  }
   VM_WRITE_KEY();
 #ifdef VJ_FAST_STRING_ESCAPE
   buf += vj_escape_string_fast(buf, (const uint8_t *)s->ptr, s->len);
@@ -493,8 +503,15 @@ vj_op_float64: {
 vj_op_kstring: {
   VM_TRACE_KEY("KSTRING");
   const GoString *s = (const GoString *)(base + op->field_off);
-  int64_t max_need = 1 + op->key_len + 2 + (s->len * 6) + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE;
-  VM_CHECK(max_need);
+  int64_t overhead = 1 + op->key_len + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE;
+  int64_t max_need = overhead + 2 + (s->len * 6);
+  if (__builtin_expect(buf + max_need > bend, 0)) {
+    int64_t tight = overhead + vj_prescan_string_escaped_len(
+        (const uint8_t *)s->ptr, s->len, VJ_ST_GET_FLAGS(vmstate));
+    if (__builtin_expect(buf + tight > bend, 0)) {
+      VM_SAVE_AND_RETURN(VJ_EXIT_BUF_FULL);
+    }
+  }
   VM_WRITE_KEY_ALWAYS();
 #ifdef VJ_FAST_STRING_ESCAPE
   buf += vj_escape_string_fast(buf, (const uint8_t *)s->ptr, s->len);

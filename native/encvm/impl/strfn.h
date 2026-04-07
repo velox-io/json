@@ -271,6 +271,12 @@ static inline int vj_escape_mask_32_fast(const uint8_t *src) {
  * Writes escaped output to *out_ptr and advances it. */
 int64_t vj_escape_nonascii_run(uint8_t **out_ptr, const uint8_t *src, int64_t i, int64_t src_len, uint32_t flags);
 
+/* Pre-scan a string to compute a tight upper bound on the escaped length
+ * (including quotes).  Much cheaper than the actual escape — read-only SIMD
+ * scan with popcount.  Used by the VM for long strings to avoid the
+ * pessimistic s->len * 6 estimate that causes frequent BufFull exits. */
+int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint32_t flags);
+
 /* ---- Inline ASCII escape macro ----
  *
  * Handles a single byte at src[i] that was flagged by SIMD/SWAR.
