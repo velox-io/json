@@ -27,6 +27,7 @@ type encodeState struct {
 	tplKey       string                            // L1 cache key for indentTpl (survives pool recycle)
 
 	flushFn func([]byte) error // streaming sink for Encoder
+	bufHint int                // user-requested initial buffer cap (WithBufSize); 0 = default
 }
 
 // vmCtx offset must remain 0 for the native stack alignment rule.
@@ -60,6 +61,7 @@ func acquireEncodeState() *encodeState {
 
 func releaseEncodeState(es *encodeState) {
 	es.flushFn = nil // clear closure reference before pooling
+	es.bufHint = 0   // clear per-call override
 
 	es.flags = 0
 
@@ -147,7 +149,11 @@ func encodingSizeHint(ti *EncTypeInfo, ptr unsafe.Pointer) int {
 }
 
 func (es *encodeState) growBuf(hint int) {
-	if hint > cap(es.buf) {
-		es.buf = gort.MakeDirtyBytes(0, max(encBufInitSize, hint*4))
+	if es.bufHint > 0 {
+		es.buf = gort.MakeDirtyBytes(0, es.bufHint)
+	} else {
+		if hint > cap(es.buf) {
+			es.buf = gort.MakeDirtyBytes(0, max((encBufInitSize/hint)*hint, hint*2))
+		}
 	}
 }

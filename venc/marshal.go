@@ -57,6 +57,15 @@ func WithFastEscape() MarshalOption {
 	return func(es *encodeState) { es.flags &^= uint32(escapeHTML | escapeLineTerms | escapeInvalidUTF8) }
 }
 
+// WithBufSize sets the initial encoder buffer capacity.
+func WithBufSize(n int) MarshalOption {
+	return func(es *encodeState) {
+		if n > 0 {
+			es.bufHint = n
+		}
+	}
+}
+
 // Marshal serializes v to JSON.
 //
 // Pointer T: handled inline — v is 8 bytes, dereference without &v so v
@@ -114,6 +123,12 @@ func (es *encodeState) marshalWith(ti *EncTypeInfo, ptr unsafe.Pointer) ([]byte,
 		hint = encodingSizeHint(ti, ptr)
 		ti.AdaptiveHint.Store(int64(hint))
 	}
+
+	// When the user requested a smaller buffer (WithBufSize) and the pool
+	// buffer is larger than needed, replace it with a right-sized one.
+	if es.bufHint > 0 && cap(es.buf) > es.bufHint && hint <= es.bufHint {
+		es.buf = gort.MakeDirtyBytes(0, es.bufHint)
+	}
 	es.growBuf(hint)
 
 	if err := es.encodeTop(ti, ptr); err != nil {
@@ -121,7 +136,7 @@ func (es *encodeState) marshalWith(ti *EncTypeInfo, ptr unsafe.Pointer) ([]byte,
 	}
 
 	n := len(es.buf)
-	adapted := n + n/16 // +6% headroom for VM pessimistic checks
+	adapted := n + n/32 // +3% headroom for VM pessimistic checks
 	if int64(adapted) > ti.AdaptiveHint.Load() {
 		ti.AdaptiveHint.Store(int64(adapted))
 	}
