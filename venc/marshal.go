@@ -57,11 +57,15 @@ func WithFastEscape() MarshalOption {
 	return func(es *encodeState) { es.flags &^= uint32(escapeHTML | escapeLineTerms | escapeInvalidUTF8) }
 }
 
-// WithBufSize sets the initial encoder buffer capacity.
+// WithBufSize sets a fixed working buffer size for encoding. If es.buf's
+// capacity is less than n, a new buffer of size n is allocated; otherwise the
+// existing buffer is kept. After encoding, the result is copied into a
+// tight-fit allocation (exactly len(output) bytes) and returned, so es.buf
+// retains its full capacity for pool reuse.
 func WithBufSize(n int) MarshalOption {
 	return func(es *encodeState) {
 		if n > 0 {
-			es.bufHint = n
+			es.bufSize = n
 		}
 	}
 }
@@ -124,24 +128,37 @@ func (es *encodeState) marshalWith(ti *EncTypeInfo, ptr unsafe.Pointer) ([]byte,
 		ti.AdaptiveHint.Store(int64(hint))
 	}
 
-	// When the user requested a smaller buffer (WithBufSize) and the pool
-	// buffer is larger than needed, replace it with a right-sized one.
-	if es.bufHint > 0 && cap(es.buf) > es.bufHint && hint <= es.bufHint {
-		es.buf = gort.MakeDirtyBytes(0, es.bufHint)
+	// WithBufSize: ensure es.buf has at least bufSize capacity as the
+	// working buffer. After encoding, a tight copy is returned so es.buf
+	// stays in the pool at its full capacity for reuse.
+	if es.bufSize > 0 {
+		if cap(es.buf) < es.bufSize {
+			es.buf = gort.MakeDirtyBytes(0, es.bufSize)
+		}
+	} else {
+		es.growBuf(hint)
 	}
-	es.growBuf(hint)
 
 	if err := es.encodeTop(ti, ptr); err != nil {
 		return nil, err
 	}
 
 	n := len(es.buf)
-	adapted := n + n/32 // +3% headroom for VM pessimistic checks
-	if int64(adapted) > ti.AdaptiveHint.Load() {
+	adapted := n + n/32 // +3% headroom
+	if adapted > hint {
 		ti.AdaptiveHint.Store(int64(adapted))
 	}
 
-	result := es.buf[:n]
+	if es.bufSize > 0 {
+		// Tight copy: allocate exactly n bytes for the caller;
+		// es.buf keeps its full capacity for pool reuse.
+		result := make([]byte, n)
+		copy(result, es.buf)
+		es.buf = es.buf[:0]
+		return result, nil
+	}
+
+	result := es.buf[:n:n] // cap=n prevents caller append from corrupting pool buffer
 	es.buf = es.buf[n:]
 	return result, nil
 }

@@ -27,7 +27,7 @@ type encodeState struct {
 	tplKey       string                            // L1 cache key for indentTpl (survives pool recycle)
 
 	flushFn func([]byte) error // streaming sink for Encoder
-	bufHint int                // user-requested initial buffer cap (WithBufSize); 0 = default
+	bufSize int
 }
 
 // vmCtx offset must remain 0 for the native stack alignment rule.
@@ -48,7 +48,8 @@ var encodeStatePool = sync.Pool{
 var indentTplCache sync.Map
 
 func init() {
-	encodeStatePool.Put(&encodeState{buf: gort.MakeDirtyBytes(0, encBufInitSize)})
+	es := acquireEncodeState()
+	releaseEncodeState(es)
 }
 
 func acquireEncodeState() *encodeState {
@@ -61,7 +62,7 @@ func acquireEncodeState() *encodeState {
 
 func releaseEncodeState(es *encodeState) {
 	es.flushFn = nil // clear closure reference before pooling
-	es.bufHint = 0   // clear per-call override
+	es.bufSize = 0   // clear per-call override
 
 	es.flags = 0
 
@@ -142,18 +143,14 @@ func (es *encodeState) buildIndentTpl(prefix, indent string) {
 func encodingSizeHint(ti *EncTypeInfo, ptr unsafe.Pointer) int {
 	if fn := ti.SizeFn; fn != nil {
 		if predicted := fn(ptr); predicted > 0 {
-			return predicted + predicted/20 // +5% headroom
+			return predicted + predicted/32
 		}
 	}
 	return ti.HintBytes
 }
 
 func (es *encodeState) growBuf(hint int) {
-	if es.bufHint > 0 {
-		es.buf = gort.MakeDirtyBytes(0, es.bufHint)
-	} else {
-		if hint > cap(es.buf) {
-			es.buf = gort.MakeDirtyBytes(0, max((encBufInitSize/hint)*hint, hint*2))
-		}
+	if hint > cap(es.buf) {
+		es.buf = gort.MakeDirtyBytes(0, max((encBufInitSize/hint)*hint, hint*2))
 	}
 }

@@ -1,34 +1,36 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 cd "$REPO_ROOT"
 
 
-go test .
-go test -race .
+go test . -count=1
+go test -race . -count=1
 
-go test ./vdec
-go test -race ./vdec
+go test ./vdec -count=1
+go test -race ./vdec -count=1
 
-go test ./venc
-go test -race ./venc
-go test -tags vj_noencvm ./venc
-go test -race -tags vj_noencvm ./venc
-go test -tags vjgcstress ./venc
-go test -race -tags vjgcstress ./venc
+go test ./venc -count=1
+go test -race ./venc -count=1
+go test -tags vj_noencvm ./venc -count=1
+go test -race -tags vj_noencvm ./venc -count=1
+go test -tags vjgcstress ./venc -count=1
+go test -race -tags vjgcstress ./venc -count=1
 
-go test ./tests/
-go test -race ./tests/
-go test -tags vj_noencvm ./tests
-go test -tags vj_noencvm -race ./tests
-go test -tags vjgcstress ./tests
-go test -race -tags vjgcstress ./tests
+go test ./tests/ -count=1
+go test -race ./tests/ -count=1
+go test -tags vj_noencvm ./tests -count=1
+go test -tags vj_noencvm -race ./tests -count=1
+go test -tags vjgcstress ./tests -count=1
+go test -race -tags vjgcstress ./tests -count=1
 
-go test ./ndec/...
-go test -race ./ndec/...
+go test ./ndec/... -count=1
+go test -race ./ndec/... -count=1
 
-go test -C ./benchmark .
-go test -C ./benchmark -race .
-go test -C ./benchmark -tags vj_noencvm .
-go test -C ./benchmark -tags vj_noencvm -race .
+go test -C ./benchmark . -count=1
+go test -C ./benchmark -race . -count=1
+go test -C ./benchmark -tags vj_noencvm . -count=1
+go test -C ./benchmark -tags vj_noencvm -race . -count=1
