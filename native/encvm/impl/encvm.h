@@ -655,6 +655,7 @@ vj_op_slice_end: {
   VM_RESTORE_TRACE_DEPTH(frame);
   VM_TRACE("SLICE_END");
   base = frame->ret_base;
+  frame->ret_base = NULL;
   VJ_ST_SET_FIRST_0(vmstate); /* parent had at least this field */
   VM_NEXT_LONG();
 }
@@ -802,6 +803,7 @@ vj_op_ptr_end: {
   VM_RESTORE_TRACE_DEPTH(frame);
   VM_TRACE("PTR_END");
   base = frame->ret_base;
+  frame->ret_base = NULL;
   VJ_ST_SET_FIRST_0(vmstate); /* parent had at least this ptr field */
   VM_NEXT_SHORT();
 }
@@ -837,6 +839,7 @@ vj_op_ret: {
     ops = frame->call.ret_ops;
     op = (const VjOpHdr *)(ops + frame->call.ret_pc);
     base = frame->ret_base;
+    frame->ret_base = NULL;
     VJ_ST_SET_FIRST_0(vmstate);
     VM_DISPATCH();
   }
@@ -1333,6 +1336,7 @@ map_str_iter_done_resume: {
     f->state &= ~1;
     VJ_ST_DEC_STACK_DEPTH(vmstate);
     base = f->ret_base;
+    f->ret_base = NULL;
     VM_RESTORE_TRACE_DEPTH(f);
     VJ_ST_SET_FIRST_0(vmstate);
     /* Skip body + MAP_STR_ITER_END from current position */
@@ -1417,6 +1421,7 @@ map_str_iter_end_done:
   VM_RESTORE_TRACE_DEPTH(frame);
   VM_TRACE("MAP_STR_ITER_END(done)");
   base = frame->ret_base;
+  frame->ret_base = NULL;
   VJ_ST_SET_FIRST_0(vmstate);
   VM_NEXT_LONG();
 }
