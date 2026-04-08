@@ -346,8 +346,9 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
     esc_count += __builtin_popcount(mask);
   }
 
-  /* ---- SIMD tail: < 16 bytes remaining ---- */
-  if (i < src_len) {
+  /* ---- SIMD tail: < 16 bytes remaining ----
+   * Page-crossing guard: see strfn.h simd_tail comment. */
+  if (i < src_len && __builtin_expect(((uintptr_t)&src[i] & 0xFFF) <= (0x1000 - 16), 1)) {
     __m128i v = _mm_loadu_si128((const __m128i *)&src[i]);
 
     __m128i ctrl_safe = _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x20)), v);
@@ -375,6 +376,20 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
 
     mask &= (1 << remaining) - 1;
     esc_count += __builtin_popcount(mask);
+    i = src_len; /* consumed all remaining bytes */
+  }
+
+  /* Scalar tail for bytes not handled by the SIMD tail above
+   * (page-crossing guard skipped, or no SIMD). */
+  for (; i < src_len; i++) {
+    uint8_t c = src[i];
+    if (c < 0x20 || c == '"' || c == '\\') {
+      esc_count++;
+    } else if (html && (c == '<' || c == '>' || c == '&')) {
+      esc_count++;
+    } else if (check_utf8 && c >= 0x80) {
+      esc_count++;
+    }
   }
 
 #else
