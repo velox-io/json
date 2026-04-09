@@ -1,0 +1,66 @@
+name: Fuzz
+
+on:
+  schedule:
+  # Run every Sunday at 03:00 UTC
+  - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      fuzz-time:
+        description: 'Fuzz duration per target (e.g. 5m, 10m)'
+        required: false
+        default: '120m'
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }} (${{ matrix.os }}, Go ${{ matrix.go-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+        go-version: ['1.24', 'stable']
+        target:
+        - FuzzMarshalString
+        - FuzzMarshalStruct
+        - FuzzMarshalNoCrash
+        - FuzzUnmarshalAny
+        - FuzzUnmarshalStruct
+        - FuzzUnmarshalNested
+        - FuzzNoCrash
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Setup Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: ${{ matrix.go-version }}
+
+    - name: Restore fuzz corpus cache
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cache/go-build/fuzz
+          ~/AppData/Local/go-build/fuzz
+        key: fuzz-corpus-${{ matrix.target }}-${{ matrix.os }}-${{ github.sha }}
+        restore-keys: |
+          fuzz-corpus-${{ matrix.target }}-${{ matrix.os }}-
+
+    - name: Run ${{ matrix.target }}
+      shell: bash
+      run: |
+        FUZZ_TIME="${{ github.event.inputs.fuzz-time || '5m' }}"
+        echo "Running ${{ matrix.target }} for ${FUZZ_TIME} on ${{ matrix.os }} with Go ${{ matrix.go-version }}"
+        go test -fuzz=${{ matrix.target }} -fuzztime=${FUZZ_TIME} .
+
+    - name: Upload crash artifacts
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: fuzz-crash-${{ matrix.target }}-${{ matrix.os }}-go${{ matrix.go-version }}
+        path: testdata/fuzz/${{ matrix.target }}/
+        retention-days: 30
