@@ -147,6 +147,8 @@ func TestScanFloat64(t *testing.T) {
 		{"1.5e2", 150},
 		{"-1.5e-2", -0.015},
 		{"0e0", 0},
+		{"9100000000000000.999", 9.1e15},
+		{"100.0000000000800", 100.00000000008},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {

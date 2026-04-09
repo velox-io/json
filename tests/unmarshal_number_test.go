@@ -561,6 +561,9 @@ func TestNumber_Float64Precision(t *testing.T) {
 		{"long_fraction", `0.1234567890123456789`},
 		{"negative_precision", `-1.112345678195234`},
 		{"exp_precision", `1.112345678195234e5`},
+		// Regression: fuzz-found Eisel-Lemire rounding errors
+		{"fuzz_19digit_frac", `9100000000000000.999`},
+		{"fuzz_16digit_frac", `100.0000000000800`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

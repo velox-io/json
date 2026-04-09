@@ -52,10 +52,12 @@ func FuzzUnmarshalAny(f *testing.F) {
 		"[\n  1,\n  2,\n  3\n]",
 
 		// Edge cases
-		`{"":""}`,           // empty key and value
-		`{"a":0,"a":1}`,     // duplicate keys
-		`[[[[[1]]]]]`,       // deep nesting
-		`0.123456789012345`, // high precision float
+		`{"":""}`,              // empty key and value
+		`{"a":0,"a":1}`,        // duplicate keys
+		`[[[[[1]]]]]`,          // deep nesting
+		`0.123456789012345`,    // high precision float
+		`9100000000000000.999`, // regression: Eisel-Lemire rounding
+		`100.0000000000800`,    // regression: Eisel-Lemire rounding
 
 		// Invalid inputs (should be rejected by both)
 		``, `{`, `}`, `[`, `]`, `"`, `"unterminated`,
