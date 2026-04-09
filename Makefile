@@ -73,15 +73,8 @@ _IS_CROSS := $(if $(or \
 _AUTO_ZIG := $(or $(USE_ZIG),$(_IS_CROSS))
 
 gen:
-	@TOOLCHAIN="$(TOOLCHAIN)" LINUX_SYSROOT="$(LINUX_SYSROOT)" LLVM_DIR="$(LLVM_DIR)" \
+	@TOOLCHAIN="$(TOOLCHAIN)" LINUX_SYSROOT="$(LINUX_SYSROOT)" \
 	bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
-		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
-
-# Generate native artifacts optimized using AutoFDO sample profile data.
-# Requires local/pgo-data/merged.profdata (generated via perf + create_llvm_prof).
-gen-with-pgo:
-	@TOOLCHAIN="$(TOOLCHAIN)" LINUX_SYSROOT="$(LINUX_SYSROOT)" LLVM_DIR="$(LLVM_DIR)" \
-	bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) --pgo-use \
 		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
 # Generate native artifacts for debugging:
@@ -89,7 +82,7 @@ gen-with-pgo:
 # - keep richer syso symbols for native debugging
 # Use with: go test -tags vjdebug -run TestFoo -v
 gen-debug:
-	@EXTRA_CFLAGS="-DVJ_ENCVM_DEBUG" DEBUG_SYMBOLS=1 TOOLCHAIN="$(TOOLCHAIN)" LINUX_SYSROOT="$(LINUX_SYSROOT)" LLVM_DIR="$(LLVM_DIR)" \
+	@EXTRA_CFLAGS="-DVJ_ENCVM_DEBUG" DEBUG_SYMBOLS=1 TOOLCHAIN="$(TOOLCHAIN)" LINUX_SYSROOT="$(LINUX_SYSROOT)" \
 	bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
 		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
@@ -104,12 +97,9 @@ gen-all:
 		echo ""; \
 	done
 
-# Decode VM (Rust) native build
-gen-rsdec:
-	@bash scripts/gen-rsdec.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
+gen-gsdec:
+	@bash scripts/gen-gsdec.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
-gen-rsdec-debug:
-	@bash scripts/gen-rsdec.sh --debug "$(TARGET_OS)" "$(TARGET_ARCH)"
 
 BENCH_FILTER ?= .
 BENCH_TITLE ?= Benchmark Results

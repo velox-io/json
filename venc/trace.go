@@ -15,6 +15,14 @@ const vjTraceEnabled = true
 // vjTraceBufSize must match VJ_TRACE_BUF_SIZE in native/encvm/impl/types.h.
 const vjTraceBufSize = 1048576
 
+// opInstrSize returns the byte size of one instruction (8 or 16).
+func opInstrSize(op uint16) int32 {
+	if isLongOp(op) {
+		return 16
+	}
+	return 8
+}
+
 // VjTraceBuf mirrors the C VjTraceBuf layout.
 type VjTraceBuf struct {
 	Head  uint32
@@ -277,7 +285,7 @@ func dumpBlueprint(bp *Blueprint) {
 
 	var buf bytes.Buffer
 	nOps := 0
-	for pc := int32(0); pc < int32(len(bp.Ops)); pc += opSizeOf(opHdrAt(bp.Ops, pc).OpType) {
+	for pc := int32(0); pc < int32(len(bp.Ops)); pc += opInstrSize(opHdrAt(bp.Ops, pc).OpType) {
 		nOps++
 	}
 	fmt.Fprintf(&buf, "== blueprint: %s (%d ops, %d bytes) ==\n", name, nOps, len(bp.Ops))
@@ -286,7 +294,7 @@ func dumpBlueprint(bp *Blueprint) {
 	for pc := int32(0); pc < int32(len(bp.Ops)); {
 		hdr := opHdrAt(bp.Ops, pc)
 		code := hdr.OpType
-		sz := opSizeOf(code)
+		sz := opInstrSize(code)
 
 		label := opcodeName[code]
 		if label == "" {
@@ -308,7 +316,7 @@ func dumpBlueprint(bp *Blueprint) {
 			buf.WriteString(guide)
 		}
 		sizeTag := "S"
-		if opIsLong[hdr.OpType] {
+		if isLongOp(hdr.OpType) {
 			sizeTag = "L"
 		}
 		// Build annotation suffix (type name for OBJ_OPEN/CALL).
@@ -328,9 +336,9 @@ func dumpBlueprint(bp *Blueprint) {
 					// Key stored in pool (normal fallback, e.g. marshaler/quoted).
 					key := keyPoolBytes(hdr.KeyOff, hdr.KeyLen)
 					fmt.Fprintf(&buf, "[%s] %s(%s) %s%s\n", sizeTag, label, reason, key, ann)
-				} else if fb.TI != nil && len(fb.TI.KeyBytes) > 0 {
-					// Key NOT in pool (overflow); read from EncTypeInfo.
-					fmt.Fprintf(&buf, "[%s] %s(%s) %s%s\n", sizeTag, label, reason, fb.TI.KeyBytes, ann)
+				} else if len(fb.KeyBytes) > 0 {
+					// Key NOT in pool (overflow); read from fbInfo.
+					fmt.Fprintf(&buf, "[%s] %s(%s) %s%s\n", sizeTag, label, reason, fb.KeyBytes, ann)
 				} else {
 					fmt.Fprintf(&buf, "[%s] %s(%s)%s\n", sizeTag, label, reason, ann)
 				}
