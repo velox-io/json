@@ -159,15 +159,41 @@ select_compiler() {
 
 # Check for available compilers
 COMPILER=""
-COMPILER=$(select_compiler "$TARGET")
-if [ -z "$COMPILER" ]; then
-    echo "Error: No suitable compiler found."
-    echo "  - For native builds: install clang"
-    echo "  - For cross-compilation: install zig (brew install zig)"
-    exit 1
+if [ "${USE_LLD_LINK:-0}" = "1" ]; then
+    # lld-link pipeline: no compiler needed for linking stage
+    # (Windows only — compilation was already done in gen-natives.sh)
+    COMPILER="lld-link"
+elif [ "${USE_LLVM:-0}" = "1" ]; then
+    # LLVM pipeline: use the full CC command exported by gen-natives.sh
+    # (includes --target, -ffreestanding, --sysroot etc.)
+    if [ -n "${CC:-}" ]; then
+        COMPILER="clang"
+        # Use exported CC directly — it already has all target-specific flags
+        _EXPORTED_CC="$CC"
+    else
+        COMPILER="clang"
+    fi
+elif [ "${USE_ZIG:-0}" = "1" ]; then
+    # Zig pipeline: use zig cc
+    :
 fi
 
-log "Using compiler: $COMPILER (target: $TARGET, native: $(is_native_target "$TARGET" && echo 'yes' || echo 'no'))"
+if [ -z "$COMPILER" ]; then
+    COMPILER=$(select_compiler "$TARGET")
+    if [ -z "$COMPILER" ]; then
+        echo "Error: No suitable compiler found."
+        echo "  - For native builds: install clang"
+        echo "  - For cross-compilation: install zig (brew install zig)"
+        exit 1
+    fi
+fi
+
+if [ -n "$COMPILER" ]; then
+    case "$COMPILER" in
+        lld-link) log "Using linker: lld-link (Windows COFF pipeline)" ;;
+        *)        log "Using compiler: $COMPILER (target: $TARGET, native: $(is_native_target "$TARGET" && echo 'yes' || echo 'no'))" ;;
+    esac
+fi
 
 # ============================================================
 #  Detect target OS from triple
@@ -205,7 +231,23 @@ get_isa_flags() {
 # Build compiler command prefix (handles zig target)
 compiler_cmd() {
     case "$COMPILER" in
-        clang) echo "clang" ;;
+        lld-link)
+            # No compiler needed for Windows lld-link pipeline
+            echo ""
+            ;;
+        clang)
+            # If gen-natives.sh exported a full CC command (with --target, --sysroot, etc.), use it
+            if [ -n "${_EXPORTED_CC:-}" ]; then
+                echo "$_EXPORTED_CC"
+            else
+                local cmd="clang"
+                # Add -isysroot on macOS so non-Apple clang can find system headers
+                if [ "$(uname -s)" = "Darwin" ]; then
+                    cmd="$cmd -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
+                fi
+                echo "$cmd"
+            fi
+            ;;
         zig)   echo "zig cc -target $TARGET" ;;
     esac
 }
@@ -303,8 +345,15 @@ LDEOF
         zig)   symbolic_flag="" ;;
     esac
 
+    # For cross-compiled Linux targets on macOS, force LLD as linker
+    # (Apple's ld64 doesn't understand ELF linker scripts)
+    local lld_flag=""
+    if [ "${USE_LLVM:-0}" = "1" ] && [ "$(uname -s)" = "Darwin" ] && [ "$TARGET_OS" = "linux" ]; then
+        lld_flag="-fuse-ld=lld"
+    fi
+
     log "  Linking..."
-    $CC_CMD -shared $lto_flag -nostdlib $symbolic_flag -Wl,--build-id=none -Wl,-T,"$TMPDIR/merge.ld" $objs -o "$merged_so"
+    $CC_CMD $lld_flag -shared $lto_flag -nostdlib $symbolic_flag -Wl,--build-id=none -Wl,-T,"$TMPDIR/merge.ld" $objs -o "$merged_so"
 
     log "  Creating object file..."
     run_prelink_obj "$output" "$merged_so" "$(get_export_prefix)"
@@ -319,6 +368,11 @@ prelink_darwin() {
     local lto_flag=""
     [ "$LTO" = true ] && lto_flag="-flto"
 
+    # Use LLD instead of Apple's ld64 — it has no "must link with
+    # libSystem" restriction and supports -nostdlib for dylibs.
+    # This avoids needing any real system SDK or stub libraries.
+    local lld_flags="-fuse-ld=lld -nostdlib"
+
     local export_flag=""
     if [ -n "$EXPORT_LIST" ] && [ -f "$EXPORT_LIST" ]; then
         # zig's Mach-O LLD does not support -exported_symbols_list;
@@ -331,13 +385,14 @@ prelink_darwin() {
 
     log "  Linking dylib..."
     log "    $dylib_tmp"
-    $CC_CMD -O3 $lto_flag -dynamiclib $export_flag $objs -o "$dylib_tmp"
+    $CC_CMD $lld_flags -O3 $lto_flag -dynamiclib $export_flag \
+        $objs -o "$dylib_tmp"
 
     log "  Converting dylib to object..."
     run_prelink_obj "$output" "$dylib_tmp" ""
 }
 
-# Windows (PE/COFF): -shared DLL → prelink-obj
+# Windows (PE/COFF): -shared DLL → prelink-obj  (zig cc path)
 prelink_windows() {
     local output="$1"
     shift
@@ -351,12 +406,45 @@ prelink_windows() {
     echo 'int _DllMainCRTStartup(void *h, unsigned r, void *p) { (void)h; (void)r; (void)p; return 1; }' > "$TMPDIR/dllmain.c"
     $CC_CMD -c "$TMPDIR/dllmain.c" -o "$TMPDIR/dllmain.obj"
 
-    log "  Linking DLL..."
+    log "  Linking DLL (zig cc -shared)..."
     log "    $dll_tmp"
     $CC_CMD -shared $lto_flag -nostdlib -fno-sanitize=undefined $objs "$TMPDIR/dllmain.obj" -o "$dll_tmp"
 
     log "  Converting DLL to COFF object..."
     run_prelink_obj "$output" "$dll_tmp" "$(get_export_prefix)"
+}
+
+# Windows (PE/COFF): lld-link /DLL /NOENTRY /MERGE → prelink-obj coff
+# No DllMain stub needed. Sections merged at link time.
+prelink_windows_lld() {
+    local output="$1"
+    shift
+    local objs="$@"
+    local dll_tmp="$WORKDIR/${BASENAME_NOEXT}.dll"
+
+    # Build prelink-obj if not already built
+    if [ ! -x "$PRELINK_OBJ" ]; then
+        log "  Building prelink-obj..."
+        mkdir -p "$(dirname "$PRELINK_OBJ")"
+        (cd "$REPO_ROOT/scripts/cmd/prelink-obj" && go build -o "$PRELINK_OBJ" .)
+    fi
+
+    log "  Linking DLL (lld-link /MERGE)..."
+    log "    $dll_tmp"
+    lld-link /DLL /NOENTRY /NODEFAULTLIB \
+        /MERGE:.rdata=.text /MERGE:.pdata=.text \
+        /OUT:"$dll_tmp" \
+        $objs
+
+    log "  Converting to COFF object..."
+    local coff_args=("$PRELINK_OBJ" coff)
+    local prefix
+    prefix="$(get_export_prefix)"
+    if [ -n "$prefix" ]; then
+        coff_args+=(-e "$prefix")
+    fi
+    coff_args+=("$dll_tmp" "$output")
+    "${coff_args[@]}"
 }
 
 # ============================================================
@@ -421,9 +509,15 @@ if [ ! -x "$PRELINK_OBJ" ]; then
 fi
 
 case "$TARGET_OS" in
-    darwin)  prelink_darwin  "$OUTPUT" $ALL_OBJS ;;
-    windows) prelink_windows "$OUTPUT" $ALL_OBJS ;;
-    linux)   prelink_elf     "$OUTPUT" $ALL_OBJS ;;
+    darwin)  prelink_darwin       "$OUTPUT" $ALL_OBJS ;;
+    windows)
+        if [ "${USE_LLD_LINK:-0}" = "1" ]; then
+            prelink_windows_lld "$OUTPUT" $ALL_OBJS
+        else
+            prelink_windows     "$OUTPUT" $ALL_OBJS
+        fi
+        ;;
+    linux)   prelink_elf         "$OUTPUT" $ALL_OBJS ;;
     *)       echo "Error: unsupported target OS: $TARGET_OS"; exit 1 ;;
 esac
 

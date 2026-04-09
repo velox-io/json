@@ -11,39 +11,37 @@
 #ifndef VJ_ENCVM_NUMBER_H
 #define VJ_ENCVM_NUMBER_H
 
-// clang-format off
-
-#include <stdint.h>
+#include "memfn.h"
 #include "tables.h"
 #include "util.h"
-#include "memfn.h"
+#include "vj_compat.h"
+#include <stdint.h>
 
 /* ---- SSE2 constants for itoa8 ---- */
 
 #if defined(__SSE2__) || defined(__aarch64__)
 
-static const char     Vec16xA0[16]      __attribute__((aligned(16))) = {
-  '0','0','0','0','0','0','0','0','0','0','0','0','0','0','0','0'
-};
-static const uint16_t Vec8x10[8]        __attribute__((aligned(16))) = {
-  10, 10, 10, 10, 10, 10, 10, 10
-};
-static const uint32_t Vec4x10k[4]       __attribute__((aligned(16))) = {
-  10000, 10000, 10000, 10000
-};
-static const uint32_t Vec4xDiv10k[4]    __attribute__((aligned(16))) = {
-  0xd1b71759, 0xd1b71759, 0xd1b71759, 0xd1b71759
-};
-static const uint16_t VecDivPowers[8]   __attribute__((aligned(16))) = {
-  0x20c5, 0x147b, 0x3334, 0x8000, 0x20c5, 0x147b, 0x3334, 0x8000
-};
-static const uint16_t VecShiftPowers[8] __attribute__((aligned(16))) = {
-  0x0080, 0x0800, 0x2000, 0x8000, 0x0080, 0x0800, 0x2000, 0x8000
-};
+ALIGNED_DECL(16)
+static const char Vec16xA0[16] ALIGNED(16) = {'0', '0', '0', '0', '0', '0',
+                                              '0', '0', '0', '0', '0', '0',
+                                              '0', '0', '0', '0'};
+ALIGNED_DECL(16)
+static const uint16_t Vec8x10[8] ALIGNED(16) = {10, 10, 10, 10, 10, 10, 10, 10};
+ALIGNED_DECL(16)
+static const uint32_t Vec4x10k[4] ALIGNED(16) = {10000, 10000, 10000, 10000};
+ALIGNED_DECL(16)
+static const uint32_t Vec4xDiv10k[4] ALIGNED(16) = {0xd1b71759, 0xd1b71759,
+                                                    0xd1b71759, 0xd1b71759};
+ALIGNED_DECL(16)
+static const uint16_t VecDivPowers[8] ALIGNED(16) = {
+    0x20c5, 0x147b, 0x3334, 0x8000, 0x20c5, 0x147b, 0x3334, 0x8000};
+ALIGNED_DECL(16)
+static const uint16_t VecShiftPowers[8] ALIGNED(16) = {
+    0x0080, 0x0800, 0x2000, 0x8000, 0x0080, 0x0800, 0x2000, 0x8000};
 
-/* Convert an 8-digit number (0..99999999) to 8 ASCII digit values in an XMM register.
- * Uses SSE2 multiplication-based digit extraction (no division). */
-ALWAYS_INLINE __m128i vj_itoa8_sse2(uint32_t v) {
+/* Convert an 8-digit number (0..99999999) to 8 ASCII digit values in an XMM
+ * register. Uses SSE2 multiplication-based digit extraction (no division). */
+INLINE __m128i vj_itoa8_sse2(uint32_t v) {
   __m128i v00 = _mm_cvtsi32_si128(v);
   __m128i v01 = _mm_mul_epu32(v00, *((const __m128i *)Vec4xDiv10k));
   __m128i v02 = _mm_srli_epi64(v01, 45);
@@ -63,7 +61,7 @@ ALWAYS_INLINE __m128i vj_itoa8_sse2(uint32_t v) {
 
 /* Large: 10^8 <= val < 10^16.  Produces up to 16 digits via two itoa8 calls.
  * Leading zeros are stripped using PSHUFB (SSSE3, available under -msse4.2). */
-ALWAYS_INLINE int vj_u64toa_large_sse2(uint8_t *out, uint64_t val) {
+INLINE int vj_u64toa_large_sse2(uint8_t *out, uint64_t val) {
   uint32_t a = (uint32_t)(val / 100000000);
   uint32_t b = (uint32_t)(val % 100000000);
 
@@ -72,7 +70,7 @@ ALWAYS_INLINE int vj_u64toa_large_sse2(uint8_t *out, uint64_t val) {
 
   /* Pack 16-bit digits to 8-bit and add '0' */
   __m128i packed = _mm_packus_epi16(d0, d1);
-  __m128i ascii  = _mm_add_epi8(packed, *((const __m128i *)Vec16xA0));
+  __m128i ascii = _mm_add_epi8(packed, *((const __m128i *)Vec16xA0));
 
   /* Count leading zeros */
   __m128i eq0 = _mm_cmpeq_epi8(ascii, *((const __m128i *)Vec16xA0));
@@ -88,7 +86,7 @@ ALWAYS_INLINE int vj_u64toa_large_sse2(uint8_t *out, uint64_t val) {
 }
 
 /* Extra-large: val >= 10^16.  Scalar prefix (1-4 digits) + SSE2 for last 16. */
-ALWAYS_INLINE int vj_u64toa_xlarge_sse2(uint8_t *out, uint64_t val) {
+INLINE int vj_u64toa_xlarge_sse2(uint8_t *out, uint64_t val) {
   int n = 0;
   uint64_t lo = val % 10000000000000000ULL;
   uint32_t hi = (uint32_t)(val / 10000000000000000ULL);
@@ -114,7 +112,7 @@ ALWAYS_INLINE int vj_u64toa_xlarge_sse2(uint8_t *out, uint64_t val) {
   __m128i d0 = vj_itoa8_sse2((uint32_t)(lo / 100000000));
   __m128i d1 = vj_itoa8_sse2((uint32_t)(lo % 100000000));
   __m128i packed = _mm_packus_epi16(d0, d1);
-  __m128i ascii  = _mm_add_epi8(packed, *((const __m128i *)Vec16xA0));
+  __m128i ascii = _mm_add_epi8(packed, *((const __m128i *)Vec16xA0));
   _mm_storeu_si128((__m128i *)&out[n], ascii);
   return n + 16;
 }
@@ -124,20 +122,23 @@ ALWAYS_INLINE int vj_u64toa_xlarge_sse2(uint8_t *out, uint64_t val) {
 /* ---- Scalar paths (used for all ISAs, and as fallback) ---- */
 
 /* Small: 0..9999 — forward-write with conditional digit skipping. */
-ALWAYS_INLINE int vj_u32toa_small(uint8_t *out, uint32_t val) {
+INLINE int vj_u32toa_small(uint8_t *out, uint32_t val) {
   int n = 0;
   uint32_t d1 = (val / 100) * 2;
   uint32_t d2 = (val % 100) * 2;
 
-  if (val >= 1000) out[n++] = DIGIT_PAIRS[d1];
-  if (val >= 100)  out[n++] = DIGIT_PAIRS[d1 + 1];
-  if (val >= 10)   out[n++] = DIGIT_PAIRS[d2];
+  if (val >= 1000)
+    out[n++] = DIGIT_PAIRS[d1];
+  if (val >= 100)
+    out[n++] = DIGIT_PAIRS[d1 + 1];
+  if (val >= 10)
+    out[n++] = DIGIT_PAIRS[d2];
   out[n++] = DIGIT_PAIRS[d2 + 1];
   return n;
 }
 
 /* Medium: 10000..99999999 — divide by 10000, then digit-pair lookups. */
-ALWAYS_INLINE int vj_u32toa_medium(uint8_t *out, uint32_t val) {
+INLINE int vj_u32toa_medium(uint8_t *out, uint32_t val) {
   int n = 0;
   uint32_t hi = val / 10000;
   uint32_t lo = val % 10000;
@@ -146,9 +147,12 @@ ALWAYS_INLINE int vj_u32toa_medium(uint8_t *out, uint32_t val) {
   uint32_t d3 = (lo / 100) * 2;
   uint32_t d4 = (lo % 100) * 2;
 
-  if (val >= 10000000) out[n++] = DIGIT_PAIRS[d1];
-  if (val >= 1000000)  out[n++] = DIGIT_PAIRS[d1 + 1];
-  if (val >= 100000)   out[n++] = DIGIT_PAIRS[d2];
+  if (val >= 10000000)
+    out[n++] = DIGIT_PAIRS[d1];
+  if (val >= 1000000)
+    out[n++] = DIGIT_PAIRS[d1 + 1];
+  if (val >= 100000)
+    out[n++] = DIGIT_PAIRS[d2];
   out[n++] = DIGIT_PAIRS[d2 + 1];
   out[n++] = DIGIT_PAIRS[d3];
   out[n++] = DIGIT_PAIRS[d3 + 1];
@@ -163,7 +167,7 @@ ALWAYS_INLINE int vj_u32toa_medium(uint8_t *out, uint32_t val) {
  * for the hot integer-encoding path.
  * buf must have >= 20 bytes available. */
 
-ALWAYS_INLINE int write_uint64(uint8_t *buf, uint64_t v) {
+INLINE int write_uint64(uint8_t *buf, uint64_t v) {
   if (v < 10000) {
     return vj_u32toa_small(buf, (uint32_t)v);
   }
@@ -203,7 +207,7 @@ ALWAYS_INLINE int write_uint64(uint8_t *buf, uint64_t v) {
 
 NOINLINE int write_uint64_call(uint8_t *buf, uint64_t v);
 
-ALWAYS_INLINE int write_int64(uint8_t *buf, int64_t v) {
+INLINE int write_int64(uint8_t *buf, int64_t v) {
   if (v >= 0) {
     return write_uint64(buf, (uint64_t)v);
   }

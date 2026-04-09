@@ -3,11 +3,12 @@
 //
 // Usage:
 //
-//	prelink-obj [flags] -o <output> <input>
+//	prelink-obj [flags] -o <output> <input>          # auto-detect format (default)
+//	prelink-obj coff [flags] <input> <output>         # PE→COFF for merged DLLs
 //
 // Flags:
 //
-//	-o <file>           Output file (required)
+//	-o <file>           Output file (required, except for 'coff' subcommand)
 //	-export-prefix <s>  Demote non-matching symbols to local (ELF/PE only)
 //	-no-adrp-patch      Disable ADRP→ADR patching (ARM64)
 //	-q                  Quiet mode
@@ -21,13 +22,18 @@ import (
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `Usage: prelink-obj [flags] -o <output> <input>
+       prelink-obj coff [flags] <input> <output>
 
 Converts a shared library (.so, .dylib, or .dll) into a relocatable object
 with zero relocations. Format is auto-detected by magic bytes.
 
+The 'coff' subcommand is specifically for PE DLLs produced with lld-link /MERGE
+(e.g., gen-windows-syso.sh pipeline). It extracts .text + exports and writes
+a raw COFF .o file.
+
 Flags:
   -o <file>           Output file (required)
-  -export-prefix <s>  Demote non-matching symbols to local (ELF/PE only)
+  -export-prefix <s>  Demote non-matching symbols to local (ELF/PE/coff)
   -no-adrp-patch      Disable ADRP→ADR patching (ARM64); uses 4096 alignment instead
   -q                  Quiet mode
 `)
@@ -70,6 +76,12 @@ func detectFormat(path string) string {
 }
 
 func main() {
+	// Check for 'coff' subcommand first (positional, before flags)
+	if len(os.Args) >= 2 && os.Args[1] == "coff" {
+		runCOFFCommand(os.Args[2:])
+		return
+	}
+
 	var output string
 	var input string
 	var exportPrefix string
@@ -211,4 +223,53 @@ func main() {
 		fmt.Printf("prelink-obj: %s (%s, %d bytes, %d symbols, 0 relocations)\n",
 			output, format, len(result.Blob), len(result.Syms))
 	}
+}
+
+// runCOFFCommand handles the 'coff' subcommand:
+//
+//	prelink-obj coff [-e <prefix>] <input.dll> <output.o>
+//
+// This converts a merged PE DLL (single .text section, e.g., from lld-link /MERGE:.rdata=.text)
+// into a raw COFF .o file with zero relocations.
+func runCOFFCommand(args []string) {
+	var exportPrefix string
+
+	remaining := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-e":
+			i++
+			if i >= len(args) {
+				fatalf("-e requires an argument")
+			}
+			exportPrefix = args[i]
+		default:
+			remaining = append(remaining, args[i])
+		}
+	}
+
+	if len(remaining) != 2 {
+		fatalf("usage: prelink-obj coff [-e <prefix>] <input.dll> <output.o>")
+	}
+	inputPath := remaining[0]
+	outputPath := remaining[1]
+
+	if _, err := os.Stat(inputPath); err != nil {
+		fatalf("input file not found: %s", inputPath)
+	}
+
+	if err := ConvertPEToCOFF(inputPath, outputPath, exportPrefix); err != nil {
+		fatalf("%v", err)
+	}
+
+	fmt.Printf("prelink-obj coff: %s (COFF, %d bytes, 0 relocations)\n",
+		outputPath, fileInfoSize(outputPath))
+}
+
+func fileInfoSize(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return -1
+	}
+	return info.Size()
 }

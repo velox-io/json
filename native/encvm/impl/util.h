@@ -9,8 +9,10 @@
 #include <immintrin.h>
 #endif
 
-#define ALWAYS_INLINE static __attribute__((always_inline)) inline
-#define NOINLINE __attribute__((noinline))
+#include "vj_compat.h"
+
+/* ---- Inline / noinline aliases (backward compat) ------------------- */
+/* INLINE and NOINLINE are defined in vj_compat.h */
 
 /* force_align_arg_pointer: emit AND $-16,%rsp prologue on x86-64 to fix
  * stack misalignment when called from Go ABI (RSP mod 16 == 0 instead of

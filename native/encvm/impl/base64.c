@@ -18,6 +18,8 @@
 #include "base64.h"
 #include "util.h"
 
+#include "vj_compat.h"
+
 static const char B64_CHARS[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -112,10 +114,8 @@ static inline __m128i base64_encode_simd_12(__m128i input) {
 
 /* --- Public entry point --- */
 
-__attribute__((noinline)) uint8_t *vj_encode_base64(uint8_t *buf,
-                                                    const uint8_t *bend,
-                                                    const uint8_t *data,
-                                                    int64_t len) {
+NOINLINE uint8_t *vj_encode_base64(uint8_t *buf, const uint8_t *bend,
+                                   const uint8_t *data, int64_t len) {
 
   int64_t b64_len = base64_encoded_len(len);
   int64_t total = 2 + b64_len;

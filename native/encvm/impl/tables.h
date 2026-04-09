@@ -5,6 +5,8 @@
 
 #include <stdint.h>
 
+#include "vj_compat.h"
+
 // Digit pair table for fast two-digit conversion
 static const char DIGIT_PAIRS[] = "00010203040506070809"
                                   "10111213141516171819"
@@ -19,7 +21,8 @@ static const char DIGIT_PAIRS[] = "00010203040506070809"
 
 /* 9 pre-computed shuffle masks for leading-zero removal (0..8 leading zeros).
  * Each mask is 16 bytes; we store them contiguously and index by nd*16. */
-static const uint8_t VEC_SHIFT_SHUFFLES[] __attribute__((aligned(16))) = {
+ALIGNED_DECL(16)
+static const uint8_t VEC_SHIFT_SHUFFLES[] ALIGNED(16) = {
   /* nd=0: no shift */
   0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
   /* nd=1 */

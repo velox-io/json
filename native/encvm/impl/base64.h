@@ -28,6 +28,6 @@
  *   Advanced buffer pointer on success.
  *   NULL if the output buffer has insufficient space (VJ_EXIT_BUF_FULL). */
 uint8_t *vj_encode_base64(uint8_t *buf, const uint8_t *bend,
-                           const uint8_t *data, int64_t len);
+                          const uint8_t *data, int64_t len);
 
 #endif /* VJ_ENCVM_BASE64_H */

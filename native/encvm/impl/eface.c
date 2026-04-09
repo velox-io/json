@@ -3,6 +3,8 @@
 #include "strfn.h"
 #include "uscale.h"
 
+#include "vj_compat.h"
+
 /* Result from encoding a single primitive value. */
 typedef struct {
   uint8_t *buf;  /* NULL on error */
@@ -13,9 +15,11 @@ typedef struct {
  * Called when ifaceCache lookup finds a primitive (tag != 0).
  * Fixed-size types assume caller pre-checked buffer space;
  * variable-length types (string, raw_message, number) check inline. */
-static __attribute__((noinline)) EncValueResult
-encode_primitive_value(uint8_t *buf, const uint8_t *bend, const void *ptr,
-                    uint16_t etype, uint32_t flags) {
+static NOINLINE EncValueResult encode_primitive_value(uint8_t *buf,
+                                                      const uint8_t *bend,
+                                                      const void *ptr,
+                                                      uint16_t etype,
+                                                      uint32_t flags) {
   switch (etype) {
   case OP_BOOL: {
     uint8_t val = *(const uint8_t *)ptr;
@@ -197,8 +201,8 @@ VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend,
    * For INDIRECT types (maps), data_ptr = &eface.data so MAP_STR_ITER can
    * dereference the map pointer correctly (base+0 → map pointer). */
   const uint8_t *bp_base = (cache_flags & VJ_IFACE_FLAG_INDIRECT)
-                           ? (const uint8_t *)(iface_ptr + 8)
-                           : data_ptr;
-  return (VjIfaceResult){buf, cached_ops, type_ptr, bp_base,
-                         VJ_IFACE_SWITCH_OPS, cache_flags};
+                               ? (const uint8_t *)(iface_ptr + 8)
+                               : data_ptr;
+  return (VjIfaceResult){buf,     cached_ops,          type_ptr,
+                         bp_base, VJ_IFACE_SWITCH_OPS, cache_flags};
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 )
 
 // extractFromPE reads a Windows PE DLL and returns an ExtractResult with
@@ -359,6 +360,47 @@ func writeCOFFObject(path string, textData []byte, syms []SymInfo, machine uint1
 	buf.Write(strtabBytes)
 
 	return os.WriteFile(path, buf.Bytes(), 0644)
+}
+
+// ConvertPEToCOFF reads a PE DLL (e.g., one produced with lld-link /MERGE:.rdata=.text,
+// which has a single merged .text section with zero relocations) and writes a raw
+// COFF .o file suitable for Go's linker (.syso).
+//
+// This is the standalone equivalent of the inline Python script in gen-windows-syso.sh.
+// It reuses ExtractFromPE for parsing and WriteCOFFObject for output.
+func ConvertPEToCOFF(inputPath, outputPath string, exportPrefix string) error {
+	result, err := extractFromPE(inputPath)
+	if err != nil {
+		return fmt.Errorf("extracting PE: %w", err)
+	}
+
+	if len(result.Blob) == 0 {
+		return fmt.Errorf("empty .text in input")
+	}
+	if len(result.Syms) == 0 {
+		return fmt.Errorf("no exports found in PE")
+	}
+
+	// Optional export-prefix filtering: demote non-matching symbols to LOCAL
+	if exportPrefix != "" {
+		hasGlobal := false
+		for i := range result.Syms {
+			if !result.Syms[i].Local && !strings.HasPrefix(result.Syms[i].Name, exportPrefix) {
+				result.Syms[i].Local = true
+			} else if !result.Syms[i].Local {
+				hasGlobal = true
+			}
+		}
+		if !hasGlobal {
+			return fmt.Errorf("no global symbols match prefix %q", exportPrefix)
+		}
+	}
+
+	if err := writeCOFFObject(outputPath, result.Blob, result.Syms, result.COFFMachine); err != nil {
+		return fmt.Errorf("writing COFF: %w", err)
+	}
+
+	return verifyCOFFOutput(outputPath)
 }
 
 // verifyCOFFOutput manually parses the COFF header of the output file

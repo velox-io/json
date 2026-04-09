@@ -56,6 +56,16 @@ TARGET_ARCH ?= $(_HOST_ARCH)
 # Set NO_PRELINK=1 to disable prelink path in scripts/gen-natives.sh
 GEN_NATIVE_PRELINK_FLAG := $(if $(NO_PRELINK),--no-prelink,)
 
+# Toolchain selection: auto | llvm | zig
+#   auto = prefer LLVM (clang/lld-link) when tools are available, fallback to zig
+#   llvm = force clang/lld-link (requires LINUX_SYSROOT for Linux targets)
+#   zig  = force zig cc (bundles its own sysroot for all platforms)
+TOOLCHAIN ?= auto
+
+# Linux musl sysroot path (used when TOOLCHAIN=llvm and targeting Linux)
+# Default: /opt/musl/x86_64/current if it exists, otherwise empty
+LINUX_SYSROOT ?= $(shell test -d /opt/linux/sysroot && echo /opt/linux/sysroot || echo "")
+
 # Auto-detect cross-compilation: use zig when target differs from host
 _IS_CROSS := $(if $(or \
   $(filter-out $(_HOST_OS),$(TARGET_OS)), \
@@ -63,13 +73,15 @@ _IS_CROSS := $(if $(or \
 _AUTO_ZIG := $(or $(USE_ZIG),$(_IS_CROSS))
 
 gen:
-	@bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
+	@TOOLCHAIN="$(TOOLCHAIN)" LINUX_SYSROOT="$(LINUX_SYSROOT)" LLVM_DIR="$(LLVM_DIR)" \
+	bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
 		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
 # Generate native artifacts optimized using AutoFDO sample profile data.
 # Requires local/pgo-data/merged.profdata (generated via perf + create_llvm_prof).
 gen-with-pgo:
-	@bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) --pgo-use \
+	@TOOLCHAIN="$(TOOLCHAIN)" LINUX_SYSROOT="$(LINUX_SYSROOT)" LLVM_DIR="$(LLVM_DIR)" \
+	bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) --pgo-use \
 		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
 # Generate native artifacts for debugging:
@@ -77,8 +89,20 @@ gen-with-pgo:
 # - keep richer syso symbols for native debugging
 # Use with: go test -tags vjdebug -run TestFoo -v
 gen-debug:
-	@EXTRA_CFLAGS="-DVJ_ENCVM_DEBUG" DEBUG_SYMBOLS=1 bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
+	@EXTRA_CFLAGS="-DVJ_ENCVM_DEBUG" DEBUG_SYMBOLS=1 TOOLCHAIN="$(TOOLCHAIN)" LINUX_SYSROOT="$(LINUX_SYSROOT)" LLVM_DIR="$(LLVM_DIR)" \
+	bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
 		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
+
+# Build encvm syso for all 4 supported platforms
+GEN_ALL_PLATFORMS := darwin/arm64 linux/amd64 linux/arm64 windows/amd64
+
+gen-all:
+	@for platform in $(GEN_ALL_PLATFORMS); do \
+		os=$${platform%%/*}; arch=$${platform##*/}; \
+		echo "=== Building encvm for $$os/$$arch ==="; \
+		$(MAKE) gen TARGET_OS=$$os TARGET_ARCH=$$arch || exit 1; \
+		echo ""; \
+	done
 
 # Decode VM (Rust) native build
 gen-rsdec:
@@ -124,4 +148,4 @@ bench-pack: bench-build
 	tar czf $(BENCH_PACK) -C $(CURDIR) Makefile scripts/bench.sh scripts/benchcmp.sh scripts/bench-run.sh $(BENCH_BIN)
 	@echo "Packed: $(BENCH_PACK)"
 
-.PHONY: lint lint-ci fmt test test-coverage bclean fuzz fuzz-parallel fuzz-concurrent gen gen-debug gen-pgo-use gen-rsdec gen-rsdec-debug bench-build bench-pack benchviz benchcmp
+.PHONY: lint lint-ci fmt test test-coverage bclean fuzz fuzz-parallel fuzz-concurrent gen gen-all gen-debug gen-pgo-use gen-rsdec gen-rsdec-debug bench-build bench-pack benchviz benchcmp

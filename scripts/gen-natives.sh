@@ -231,29 +231,123 @@ get_clang_target() {
     esac
 }
 
-# Select compiler
-USE_ZIG=false
-if [ "$FORCE_ZIG" = true ] || [ "$NEEDS_CROSS_COMPILE" = true ]; then
-    if command -v zig &> /dev/null; then
-        USE_ZIG=true
-        ZIG_TARGET=$(get_zig_target "$TARGET_OS" "$TARGET_ARCH")
-        CC="zig cc -target $ZIG_TARGET"
-        if [ "$FORCE_ZIG" = true ] && [ "$NEEDS_CROSS_COMPILE" = false ]; then
-            echo "Using zig cc (forced, target: $ZIG_TARGET)"
+# ============================================================
+#  Unified Toolchain Selection
+#
+#  TOOLCHAIN (env): auto | llvm | zig
+#    auto  = prefer LLVM when tools are available, fallback to zig
+#    llvm = force clang/lld-link for all platforms
+#    zig  = force zig cc (bundles its own sysroot)
+#
+#  LINUX_SYSROOT (env): path to musl sysroot headers for LLVM Linux targets
+#     Default: /opt/musl/x86_64/current if it exists
+#
+#  Output variables:
+#    RESOLVED_TOOLCHAIN - resolved value: "lld" or "zig"
+#    USE_LLVM           - true if using LLVM toolchain
+#    USE_ZIG            - true if using zig toolchain
+#    USE_LLD_LINK        - true if Windows lld-link pipeline is active
+#    CC                 - compiler command with all flags
+# ============================================================
+
+resolve_toolchain() {
+    local requested="${TOOLCHAIN:-auto}"
+    case "$requested" in
+        auto)
+            # Auto-detect: prefer llvm when the target's requirements are met
+            if [ "$TARGET_OS" = "windows" ] && command -v lld-link &>/dev/null; then
+                echo "lld"
+            elif [ "$TARGET_OS" = "linux" ] && [ -n "${LINUX_SYSROOT:-}" ]; then
+                echo "lld"
+            elif [ "$NEEDS_CROSS_COMPILE" != true ] && command -v clang &>/dev/null; then
+                echo "lld"
+            elif command -v zig &>/dev/null; then
+                echo "zig"
+            else
+                echo "Error: no suitable toolchain found (need clang or zig)"
+                exit 1
+            fi
+            ;;
+        llvm) echo "lld" ;;
+        zig)  echo "zig" ;;
+        *)
+            echo "Error: unknown TOOLCHAIN=$requested (expected: auto, llvm, zig)"
+            exit 1
+            ;;
+    esac
+}
+
+RESOLVED_TOOLCHAIN=$(resolve_toolchain)
+USE_LLVM=0
+USE_ZIG=0
+USE_LLD_LINK=0
+
+if [ "$RESOLVED_TOOLCHAIN" = "lld" ]; then
+    USE_LLVM=1
+
+    case "$TARGET_OS" in
+        windows)
+            # Windows: clang compiles .c → .obj, lld-link links → DLL (no DllMain needed)
+            USE_LLD_LINK=1
+            CC="clang --target=x86_64-pc-windows-msvc -ffreestanding"
+            echo "Using llvm pipeline for windows (clang + lld-link)"
+            ;;
+        linux)
+            # Linux: clang with musl target triple + optional sysroot
+            linux_triple=""
+            case "$TARGET_ARCH" in
+                amd64|x86_64)   linux_triple="x86_64-linux-musl" ;;
+                arm64|aarch64)  linux_triple="aarch64-linux-musl" ;;
+                *)               linux_triple="${TARGET_ARCH}-linux-musl" ;;
+            esac
+            CC="clang --target=$linux_triple -ffreestanding"
+            if [ -n "${LINUX_SYSROOT:-}" ]; then
+                CC="$CC --sysroot=$LINUX_SYSROOT"
+                sysroot_note=" (sysroot: $LINUX_SYSROOT)"
+            fi
+            echo "Using llvm pipeline for linux ($linux_triple$sysroot_note)"
+            ;;
+        darwin)
+            # Darwin: clang with Apple target triple + macOS SDK
+            darwin_target=""
+            case "$TARGET_ARCH" in
+                amd64|x86_64)   darwin_target="x86_64-apple-darwin" ;;
+                arm64|aarch64)  darwin_target="arm64-apple-darwin" ;;
+                *)               darwin_target="${TARGET_ARCH}-apple-darwin" ;;
+            esac
+            CC="clang --target=$darwin_target"
+            if [ "$(uname -s)" = "Darwin" ]; then
+                CC="$CC -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
+            fi
+            echo "Using llvm pipeline for darwin ($darwin_target)"
+            ;;
+    esac
+
+elif [ "$RESOLVED_TOOLCHAIN" = "zig" ]; then
+    USE_ZIG=1
+
+    if [ "$FORCE_ZIG" = true ] || [ "$NEEDS_CROSS_COMPILE" = true ]; then
+        if command -v zig &> /dev/null; then
+            ZIG_TARGET=$(get_zig_target "$TARGET_OS" "$TARGET_ARCH")
+            CC="zig cc -target $ZIG_TARGET"
+            if [ "$FORCE_ZIG" = true ]; then
+                echo "Using zig cc (forced, target: $ZIG_TARGET)"
+            else
+                echo "Cross-compiling with zig cc (target: $ZIG_TARGET)"
+            fi
         else
-            echo "Cross-compiling with zig cc (target: $ZIG_TARGET)"
+            echo "Error: zig requested but zig is not installed."
+            exit 1
         fi
     else
-        if [ "$FORCE_ZIG" = true ]; then
-            echo "Error: --zig requested but zig is not installed."
-        else
-            echo "Error: Cross-compilation requires zig."
-        fi
-        exit 1
+        # Native build with zig on non-cross target — unusual but supported
+        ZIG_TARGET=$(get_zig_target "$TARGET_OS" "$TARGET_ARCH")
+        CC="zig cc -target $ZIG_TARGET"
+        echo "Using zig cc (native, target: $ZIG_TARGET)"
     fi
-else
-    CC="clang"
 fi
+
+export RESOLVED_TOOLCHAIN USE_LLVM USE_ZIG USE_LLD_LINK CC
 
 # ============================================================
 #  Platform-ISA constraints
@@ -323,15 +417,18 @@ USE_LTO=true
 if [ "$DISABLE_PRELINK" = true ]; then
     USE_LTO=false
     echo "Note: LTO disabled (prelink disabled; relocatable -r path requires native object format)"
-elif [ "$USE_ZIG" = true ] && [ "$TARGET_OS" = "darwin" ]; then
+elif [ "$USE_ZIG" = "1" ] && [ "$TARGET_OS" = "darwin" ]; then
     USE_LTO=false
     echo "Note: LTO disabled (zig cc does not support -flto for darwin targets)"
+elif [ "$USE_LLVM" = "1" ] && [ "$TARGET_OS" = "darwin" ]; then
+    USE_LTO=false
+    echo "Note: LTO disabled (lld Mach-O backend does not reliably support -flto)"
 elif [ "$TARGET_OS" = "linux" ] && [ "$TARGET_ARCH" = "arm64" ]; then
     USE_LTO=false
     echo "Note: LTO disabled for linux/arm64 (prelink uses native object format, not LLVM IR bitcode)"
 elif [ "$TARGET_OS" = "windows" ]; then
     USE_LTO=false
-    echo "Note: LTO disabled for windows (zig cc -shared does not support -flto for COFF/PE targets)"
+    echo "Note: LTO disabled for windows (lld-link /DLL does not support -flto for COFF/PE targets)"
 fi
 
 LTO_FLAG=""
@@ -373,6 +470,17 @@ if [ "$TARGET_ARCH" = "arm64" ]; then
     # -mno-outline: prevent compiler from outlining code sequences into
     # separate functions, which would create additional relocations.
     ARCH_FLAGS="-mno-outline"
+    if [ "$TARGET_OS" = "linux" ]; then
+        # Go's linux/arm64 runtime uses X28 as the current goroutine pointer (g).
+        # C code must not clobber it, otherwise crashes on return to Go.
+        ARCH_FLAGS="$ARCH_FLAGS -ffixed-x28"
+    fi
+fi
+
+# PIC flag: only for ELF/Mach-O targets (Windows MSVC does not support -fPIC)
+PIC_FLAG="-fPIC"
+if [ "$TARGET_OS" = "windows" ]; then
+    PIC_FLAG=""
 fi
 
 # ============================================================
@@ -407,6 +515,13 @@ NO_BUILTIN_FLAGS="-fno-builtin-strlen -fno-builtin-strnlen"
 NO_BUILTIN_FLAGS="$NO_BUILTIN_FLAGS -fno-builtin-printf -fno-builtin-fprintf"
 NO_BUILTIN_FLAGS="$NO_BUILTIN_FLAGS -fno-builtin-sprintf -fno-builtin-snprintf"
 
+# Suppress C2y extension warnings for MSVC target:
+# Project uses __forceinline inline (non-static) functions with static const
+# variables inside, which Clang reports as -Wstatic-in-inline for Windows targets.
+if [ "$TARGET_OS" = "windows" ]; then
+    NO_BUILTIN_FLAGS="$NO_BUILTIN_FLAGS -Wno-static-in-inline"
+fi
+
 STDLIB_OBJS=""
 EXTRA_OBJS=""
 
@@ -424,7 +539,7 @@ for stdlib_src in $STDLIB_SOURCES; do
         stdlib_base=$(basename "$stdlib_src" .c)
         stdlib_obj="${OUTPUT_DIR}/${stdlib_base}_${TARGET_OS}_${TARGET_ARCH}.o"
         echo "  Compiling $(basename "$stdlib_obj") (stdlib)"
-        $CC -O3 -fPIC $C_DEBUG_FLAGS -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset $ARCH_FLAGS \
+        $CC -O3 $PIC_FLAG $C_DEBUG_FLAGS -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset $ARCH_FLAGS \
             -I"$(dirname "$stdlib_src")" -I"$REPO_ROOT/native/include" -I"$REPO_ROOT/native" \
             -c "$stdlib_src" -o "$stdlib_obj"
         STDLIB_OBJS="$STDLIB_OBJS $stdlib_obj"
@@ -452,7 +567,7 @@ for extra_src in $EXTRA_SOURCES; do
         EXTRA_LTO_LABEL=""
         if [ "$USE_LTO" = true ]; then EXTRA_LTO_LABEL=" LTO,"; fi
         echo "  Compiling $(basename "$extra_obj") (extra source,${EXTRA_LTO_LABEL} min ISA: $MIN_ISA)"
-        $CC -O3 $LTO_FLAG -fPIC $C_DEBUG_FLAGS -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS $MIN_ISA_FLAGS \
+        $CC -O3 $LTO_FLAG $PIC_FLAG $C_DEBUG_FLAGS -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS $MIN_ISA_FLAGS \
             -I"$(dirname "$extra_src")" -I"$REPO_ROOT/native/include" -I"$REPO_ROOT/native" \
             ${EXTRA_CFLAGS:-} ${PGO_CFLAGS:-} \
             -c "$extra_src" -o "$extra_obj"
@@ -486,7 +601,7 @@ for isa in $ISAS; do
 
         # Step 1: Compile to object (with LTO when supported, for cross-TU inlining)
         echo "  Compiling $(basename "$OFILE")"
-        $CC -O3 $LTO_FLAG -fPIC $C_DEBUG_FLAGS -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS $ISA_FLAGS \
+        $CC -O3 $LTO_FLAG $PIC_FLAG $C_DEBUG_FLAGS -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS $ISA_FLAGS \
             $COMMON_DEFS $COMMON_INCLUDES ${PGO_CFLAGS:-} \
             -c "$SOURCE_FILE" -o "$OFILE"
 

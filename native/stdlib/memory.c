@@ -12,9 +12,11 @@
 #include "memory.h"
 #include <stdint.h>
 
+#include "vj_compat.h"
+
 /* Use __builtin_memcpy throughout the code. The compiler will inline
  * small known-size copies and call our _memcpy symbol for the rest. */
-__attribute__((visibility("hidden"))) void *
+VJ_HIDDEN void *
 vj_memcpy_impl(void *__restrict dst, const void *__restrict src, size_t n) {
   uint8_t *d = (uint8_t *)dst;
   const uint8_t *s = (const uint8_t *)src;
@@ -49,7 +51,7 @@ vj_memcpy_impl(void *__restrict dst, const void *__restrict src, size_t n) {
   return dst;
 }
 
-__attribute__((visibility("hidden"))) void *vj_memset_impl(void *dst, int c,
+VJ_HIDDEN void *vj_memset_impl(void *dst, int c,
                                                            size_t n) {
   uint8_t *d = (uint8_t *)dst;
   uint8_t val = (uint8_t)c;
@@ -67,3 +69,14 @@ __attribute__((visibility("hidden"))) void *vj_memset_impl(void *dst, int c,
   }
   return dst;
 }
+
+/*
+ * MSVC ABI artifact: when targeting x86_64-pc-windows-msvc, clang emits
+ * a reference to _fltused whenever floating-point code appears.  The CRT
+ * normally defines it, but we link with /NODEFAULTLIB.  Provide a const
+ * definition here so it lands in .rdata and gets merged into .text by
+ * /MERGE:.rdata=.text — no extra section, no extra build step.
+ */
+#ifdef _WIN32
+const int _fltused = 1;
+#endif

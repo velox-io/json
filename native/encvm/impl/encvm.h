@@ -28,6 +28,7 @@
 #include "seqiter.h"
 #include "base64.h"
 #include "timefmt.h"
+#include "vj_compat.h"
 
 /* ================================================================
  *  VM Implementation — threaded-code interpreter for variable-length ops
@@ -160,7 +161,8 @@ VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
  */
 #define DT_ENTRY(label) (int32_t)((char *) && label - (char *) && vj_dispatch_base)
 
-  static const int32_t dispatch_table[OP_DISPATCH_COUNT] __attribute__((aligned(64))) = {
+  ALIGNED_DECL(64)
+  static const int32_t dispatch_table[OP_DISPATCH_COUNT] ALIGNED(64) = {
       /* Primitives (1-14) */
       [OP_BOOL] = DT_ENTRY(vj_op_bool),
       [OP_INT] = DT_ENTRY(vj_op_int),

@@ -15,6 +15,8 @@
 
 #include <stddef.h>
 
+#include "vj_compat.h"
+
 /* Platform-specific symbol naming:
  * macOS Mach-O: C symbols have _ prefix (_memcpy, _memset)
  * Linux ELF:    C symbols have no prefix (memcpy, memset) */
@@ -28,11 +30,11 @@
 
 /* Declarations — always visible so each ISA TU can link against
  * the single memcpy/memset compiled from memory.c. */
-__attribute__((visibility("hidden"))) void *
+VJ_HIDDEN void *
 vj_memcpy_impl(void *__restrict dst, const void *__restrict src,
                size_t n) __asm__(VJ_MEMCPY_SYM);
 
-__attribute__((visibility("hidden"))) void *
+VJ_HIDDEN void *
 vj_memset_impl(void *dst, int c, size_t n) __asm__(VJ_MEMSET_SYM);
 
 #endif /* VJ_STDLIB_MEMORY_H */

@@ -8,10 +8,8 @@
 #ifndef VJ_ENCVM_MEMFN_H
 #define VJ_ENCVM_MEMFN_H
 
-// clang-format off
-
-#include <stdint.h>
 #include "util.h"
+#include <stdint.h>
 
 /* ================================================================
  *  Small copy helper
