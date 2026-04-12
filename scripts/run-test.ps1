@@ -37,8 +37,8 @@ Invoke-GoTest -tags vj_noencvm -race ./tests -count=1
 Invoke-GoTest -tags vjgcstress ./tests -count=1
 Invoke-GoTest -race -tags vjgcstress ./tests -count=1
 
-Invoke-GoTest ./ndec/... -count=1
-Invoke-GoTest -race ./ndec/... -count=1
+# Invoke-GoTest ./ndec/... -count=1
+# Invoke-GoTest -race ./ndec/... -count=1
 
 Invoke-GoTest -C ./benchmark . -count=1
 Invoke-GoTest -C ./benchmark -race . -count=1

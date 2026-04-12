@@ -97,10 +97,6 @@ gen-all:
 		echo ""; \
 	done
 
-gen-gsdec:
-	@bash scripts/gen-gsdec.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
-
-
 BENCH_FILTER ?= .
 BENCH_TITLE ?= Benchmark Results
 BENCH_COUNT ?= 5
@@ -138,4 +134,4 @@ bench-pack: bench-build
 	tar czf $(BENCH_PACK) -C $(CURDIR) Makefile scripts/bench.sh scripts/benchcmp.sh scripts/bench-run.sh $(BENCH_BIN)
 	@echo "Packed: $(BENCH_PACK)"
 
-.PHONY: lint lint-ci fmt test test-coverage bclean fuzz fuzz-parallel fuzz-concurrent gen gen-all gen-debug gen-pgo-use gen-rsdec gen-rsdec-debug bench-build bench-pack benchviz benchcmp
+.PHONY: lint lint-ci fmt test test-coverage bclean fuzz fuzz-parallel fuzz-concurrent gen gen-all gen-debug gen-pgo-use bench-build bench-pack benchviz benchcmp

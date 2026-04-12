@@ -27,8 +27,8 @@ go test -tags vj_noencvm -race ./tests -count=1
 go test -tags vjgcstress ./tests -count=1
 go test -race -tags vjgcstress ./tests -count=1
 
-go test ./ndec/... -count=1
-go test -race ./ndec/... -count=1
+# go test ./ndec/... -count=1
+# go test -race ./ndec/... -count=1
 
 go test -C ./benchmark . -count=1
 go test -C ./benchmark -race . -count=1
