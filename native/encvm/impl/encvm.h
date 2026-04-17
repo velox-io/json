@@ -1193,18 +1193,30 @@ VJ_DEFINE_MAP_SWISS_OP(vj_op_map_str_int64, "MAP_STR_INT64", vj_swiss_iterate_st
  *  MAP_STR_ITER (long, 16 bytes):
  *    field_off: map pointer offset in struct
  *    key_len/key_off: struct field key (if any)
- *    operand_a: slot_size (from Go compiler)
+ *    operand_a: interleaved=slot_size, split=elem_stride (from Go compiler)
  *    operand_b: body byte length (excl MAP_STR_ITER_END)
  *
  *  MAP_STR_ITER_END (long, 16 bytes):
  *    operand_a: relative jump back offset (negative, to body start)
- *    operand_b: slot_size (redundant, for back-edge use)
+ *    operand_b: interleaved=slot_size, split=elem_stride (redundant, for back-edge use)
  * ================================================================ */
 
 vj_op_map_str_iter: {
   const VjOpExt *ext = VJ_OP_EXT(op);
-  int32_t slot_size = ext->operand_a;
+  int32_t operand = ext->operand_a;
   int32_t body_len = ext->operand_b;
+
+  /* Derive layout params from flag + operand.
+   * operand = slot_size (interleaved) or elem_stride (split).
+   * String key is always 16 bytes (GoString). */
+  uint32_t _flags = VJ_ST_GET_FLAGS(vmstate);
+  int _split = _flags & VJ_FLAGS_SPLIT_GROUP;
+  int32_t key_stride  = _split ? SWISS_SPLIT_KEY_STRIDE : operand;
+  int32_t elems_off   = _split ? SWISS_SPLIT_ELEMS_OFF
+                               : (int32_t)(SWISS_CTRL_SIZE + 16); /* 8 + elem_off=16 = 24 */
+  int32_t elem_stride = _split ? operand : operand;
+  int32_t group_size  = _split ? (SWISS_SPLIT_ELEMS_OFF + SWISS_GROUP_SLOTS * operand)
+                               : (SWISS_CTRL_SIZE + SWISS_GROUP_SLOTS * operand);
 
   /* Resume detection: check state bit 0 on top frame. */
   int32_t _depth = VJ_ST_GET_STACK_DEPTH(vmstate);
@@ -1219,15 +1231,16 @@ vj_op_map_str_iter: {
     int32_t si = f->map.slot_idx;
     int32_t remaining = f->map.remaining;
 
-    /* Find current slot (we saved position before the slot that needs encoding). */
-    const uint8_t *slot = vj_swiss_next_full_slot(m, slot_size, &di, &gi, &si);
-    if (slot == NULL || remaining <= 0) {
-      /* Shouldn't happen on resume, but handle gracefully: end iteration */
+    /* Find current slot. */
+    const uint8_t *group_base;
+    const uint8_t *key_ptr = vj_swiss_next_full_slot(
+        m, key_stride, group_size, &di, &gi, &si, &group_base);
+    if (key_ptr == NULL || remaining <= 0) {
       goto map_str_iter_done_resume;
     }
 
-    const GoString *k = (const GoString *)slot;
-    const uint8_t *val_ptr = slot + 16; /* elem_off = 16 for all string-key maps */
+    const GoString *k = (const GoString *)key_ptr;
+    const uint8_t *val_ptr = group_base + elems_off + si * elem_stride;
 
     /* Write comma + indent + key */
     {
@@ -1309,11 +1322,13 @@ vj_op_map_str_iter: {
 
     /* Find first full slot */
     int32_t di = 0, gi = 0, si = 0;
-    const uint8_t *slot = vj_swiss_next_full_slot(m, slot_size, &di, &gi, &si);
-    /* slot must be non-NULL since m->used > 0 */
+    const uint8_t *group_base;
+    const uint8_t *key_ptr = vj_swiss_next_full_slot(
+        m, key_stride, group_size, &di, &gi, &si, &group_base);
+    /* key_ptr must be non-NULL since m->used > 0 */
 
-    const GoString *k = (const GoString *)slot;
-    const uint8_t *val_ptr = slot + 16;
+    const GoString *k = (const GoString *)key_ptr;
+    const uint8_t *val_ptr = group_base + elems_off + si * elem_stride;
 
     /* Write first key (no comma) */
     {
@@ -1362,7 +1377,17 @@ map_str_iter_done_resume: {
 
 vj_op_map_str_iter_end: {
   const VjOpExt *ext = VJ_OP_EXT(op);
-  int32_t slot_size = ext->operand_b;
+  int32_t operand = ext->operand_b;
+
+  /* Derive layout params (same logic as MAP_STR_ITER). */
+  uint32_t _flags = VJ_ST_GET_FLAGS(vmstate);
+  int _split = _flags & VJ_FLAGS_SPLIT_GROUP;
+  int32_t key_stride  = _split ? SWISS_SPLIT_KEY_STRIDE : operand;
+  int32_t elems_off   = _split ? SWISS_SPLIT_ELEMS_OFF
+                               : (int32_t)(SWISS_CTRL_SIZE + 16);
+  int32_t elem_stride = operand;
+  int32_t group_size  = _split ? (SWISS_SPLIT_ELEMS_OFF + SWISS_GROUP_SLOTS * operand)
+                               : (SWISS_CTRL_SIZE + SWISS_GROUP_SLOTS * operand);
 
   VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
   int32_t remaining = frame->map.remaining;
@@ -1374,14 +1399,15 @@ vj_op_map_str_iter_end: {
     int32_t gi = frame->map.group_idx;
     int32_t si = frame->map.slot_idx;
 
-    const uint8_t *slot = vj_swiss_next_full_slot(m, slot_size, &di, &gi, &si);
-    if (slot == NULL) {
-      /* Shouldn't happen (remaining > 0), but handle gracefully */
+    const uint8_t *group_base;
+    const uint8_t *key_ptr = vj_swiss_next_full_slot(
+        m, key_stride, group_size, &di, &gi, &si, &group_base);
+    if (key_ptr == NULL) {
       goto map_str_iter_end_done;
     }
 
-    const GoString *k = (const GoString *)slot;
-    const uint8_t *val_ptr = slot + 16;
+    const GoString *k = (const GoString *)key_ptr;
+    const uint8_t *val_ptr = group_base + elems_off + si * elem_stride;
 
     /* Check buffer space for comma + indent + key + ':' + space */
     {
@@ -1391,12 +1417,9 @@ vj_op_map_str_iter_end: {
       int key_space = indent_step ? 1 : 0;
       int64_t need = 1 + ipad + key_space + 2 + (k->len * 6) + 1;
       if (__builtin_expect(buf + need > bend, 0)) {
-        /* Save position for resume — frame already has map state.
-         * Update position to current slot. */
         frame->map.dir_idx = di;
         frame->map.group_idx = (uint8_t)gi;
         frame->map.slot_idx = (uint8_t)si;
-        /* Don't decrement remaining yet — will be decremented on resume */
         frame->state |= 1;
         VM_SAVE_AND_RETURN(VJ_EXIT_BUF_FULL);
       }

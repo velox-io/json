@@ -13,6 +13,9 @@ var SwissMapLayoutOK = gort.SwissMapLayoutOK
 var SwissMapStrIntLayoutOK = gort.SwissMapStrIntLayoutOK
 var SwissMapStrInt64LayoutOK = gort.SwissMapStrInt64LayoutOK
 
+// swissMapGlobalFlags is always 0 in noswissmap mode.
+var swissMapGlobalFlags uint32
+
 type mapsIter = gort.MapsIter
 
 func mapsIterKey(it *mapsIter) unsafe.Pointer  { return gort.MapsIterKey(it) }

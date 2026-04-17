@@ -356,6 +356,7 @@ enum VjExitCode {
 #define VJ_FLAGS_ESCAPE_LINE_TERMS (1 << 1)
 #define VJ_FLAGS_ESCAPE_INVALID_UTF8 (1 << 2)
 #define VJ_FLAGS_FLOAT_EXP_AUTO (1 << 3)
+#define VJ_FLAGS_SPLIT_GROUP (1 << 4) /* GOEXPERIMENT=mapsplitgroup KKKKVVVV */
 
 /* ================================================================
  *  Variable-Length Instruction Format

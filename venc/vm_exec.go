@@ -41,7 +41,7 @@ func (es *encodeState) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	// CurBase lives in heap state, so it must never point at stack memory.
 	ctx.CurBase = base
 
-	ctx.VMState = vmstateBuildInitial(es.flags)
+	ctx.VMState = vmstateBuildInitial(es.flags | swissMapGlobalFlags)
 
 	snap := loadIfaceCacheSnapshot()
 	if len(snap.entries) > 0 {
