@@ -18,11 +18,9 @@ const escapeStringFlags = escapeHTML | escapeLineTerms | escapeInvalidUTF8
 const escapeStdCompat = escapeStringFlags
 
 // EncFloatExpAuto (bit 3) matches encoding/json scientific-notation thresholds.
-// Stored alongside escape flags in encodeState.flags.
 const EncFloatExpAuto uint32 = 1 << 3
 
 // EncSplitGroup (bit 4) signals GOEXPERIMENT=mapsplitgroup (KKKKVVVV layout).
-// Set process-wide at init time; C-side reads it as VJ_FLAGS_SPLIT_GROUP.
 const EncSplitGroup uint32 = 1 << 4
 
 var (

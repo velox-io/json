@@ -13,8 +13,7 @@ var SwissMapLayoutOK = gort.SwissMapLayoutOK
 var SwissMapStrIntLayoutOK = gort.SwissMapStrIntLayoutOK
 var SwissMapStrInt64LayoutOK = gort.SwissMapStrInt64LayoutOK
 
-// swissMapGlobalFlags holds the EncSplitGroup bit if the runtime uses
-// KKKKVVVV group layout. OR'd into encodeState.flags at VM init time.
+// swissMapGlobalFlags holds EncSplitGroup when KKKKVVVV layout is active.
 var swissMapGlobalFlags uint32
 
 func init() {

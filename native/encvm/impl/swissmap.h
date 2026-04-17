@@ -1,20 +1,14 @@
 /*
- * swissmap.h -- Swiss Map iteration for map[string]string, map[string]int,
- * map[string]int64.
+ * swissmap.h
  *
- * Noinline encoders called from the VM dispatch loop.
- * Iterates Go runtime Swiss Map structures and encodes all KV pairs as JSON.
+ * Swiss Map iteration for map[string]string, map[string]int, map[string]int64.
  *
- * Supports both interleaved (KVKVKVKV) and split (KKKKVVVV) group layouts.
- * The flag VJ_FLAGS_SPLIT_GROUP in the VM flags register selects the layout.
- *
- * Universal addressing formula:
+ * Supports interleaved (KVKVKVKV) and split (KKKKVVVV) group layouts via:
  *   key(i)  = group + keys_off  + i * key_stride
  *   elem(i) = group + elems_off + i * elem_stride
  *
- * Architecture: always_inline generic impl + noinline specialized wrappers.
- * Each wrapper passes constant layout params and known function addresses,
- * so the compiler does full constant folding and devirtualization.
+ * always_inline generic impl + noinline specialized wrappers with constant
+ * params for full constant folding.
  */
 
 #ifndef VJ_ENCVM_SWISSMAP_H
@@ -25,20 +19,14 @@
 #include "types.h"
 #include "vj_compat.h"
 
-/* Swiss Map layout constants -- shared across all variants. */
+/* Swiss Map layout constants */
 #define SWISS_GROUP_SLOTS 8
 #define SWISS_CTRL_SIZE 8
 #define SWISS_CTRL_EMPTY 0x80
 
-/* ---- Interleaved layout (KVKVKVKV, default) ----
- *
+/* Interleaved layout (KVKVKVKV, default):
  *   key(i)  = group + 8 + i * slot_size
- *   elem(i) = group + 8 + elem_off + i * slot_size
- *
- * Equivalent universal params:
- *   keys_off = 8, key_stride = slot_size
- *   elems_off = 8 + elem_off, elem_stride = slot_size
- */
+ *   elem(i) = group + 8 + elem_off + i * slot_size */
 #define SWISS_STR_STR_SLOT_SIZE 32
 #define SWISS_STR_STR_ELEM_OFF 16
 #define SWISS_STR_STR_GROUP_SIZE 264
@@ -56,13 +44,10 @@
 #define SWISS_STR_INT_IL_ELEMS_OFF 24   /* 8 + 16 */
 #define SWISS_STR_INT_IL_ELEM_STRIDE 24
 
-/* ---- Split layout (KKKKVVVV, GOEXPERIMENT=mapsplitgroup) ----
- *
+/* Split layout (KKKKVVVV, GOEXPERIMENT=mapsplitgroup):
  *   key(i)  = group + 8 + i * key_size
  *   elem(i) = group + (8 + 8 * key_size) + i * elem_size
- *
- * For string-keyed maps, key_size = 16 (GoString).
- */
+ * String key: key_size = 16 (GoString). */
 #define SWISS_SPLIT_KEYS_OFF 8
 #define SWISS_SPLIT_KEY_STRIDE 16       /* sizeof(GoString) */
 #define SWISS_SPLIT_ELEMS_OFF 136       /* 8 + 8 * 16 */
@@ -70,7 +55,7 @@
 #define SWISS_STR_STR_SPLIT_ELEM_STRIDE 16
 #define SWISS_STR_INT_SPLIT_ELEM_STRIDE 8
 
-/* Backward compat aliases (= str_str interleaved layout). */
+/* Backward compat aliases (= str_str interleaved). */
 #define SWISS_SLOT_SIZE SWISS_STR_STR_SLOT_SIZE
 #define SWISS_ELEM_OFF SWISS_STR_STR_ELEM_OFF
 #define SWISS_GROUP_SIZE SWISS_STR_STR_GROUP_SIZE
@@ -156,9 +141,9 @@ static inline int vj_swiss_indent_pad(const VjSwissIndent *ind) {
                           : 0;
 }
 
-/* --- Encode-one helpers and need calculators -- one per variant --- */
+/* Encode-one helpers and need calculators */
 
-/* map[string]string: key=GoString, val=GoString */
+/* map[string]string */
 static inline uint8_t *
 vj_swiss_encode_one_str_str(uint8_t *buf, const GoString *k,
                             const uint8_t *val_ptr, int *entry_first,
@@ -187,7 +172,7 @@ vj_swiss_encode_one_str_str(uint8_t *buf, const GoString *k,
   return buf;
 }
 
-/* map[string]int / map[string]int64: key=GoString, val=int64 (8 bytes) */
+/* map[string]int / map[string]int64 */
 static inline uint8_t *
 vj_swiss_encode_one_str_int(uint8_t *buf, const GoString *k,
                             const uint8_t *val_ptr, int *entry_first,
@@ -211,7 +196,7 @@ vj_swiss_encode_one_str_int(uint8_t *buf, const GoString *k,
   return buf;
 }
 
-/* Backward-compatible encode_one (delegates to str_str variant). */
+/* Backward-compatible encode_one. */
 static inline uint8_t *vj_swiss_encode_one(uint8_t *buf, const GoString *k,
                                            const GoString *v, int *entry_first,
                                            uint32_t flags,
@@ -235,7 +220,7 @@ static inline int64_t vj_swiss_need_str_int(const GoString *k,
   return 1 + ipad + key_space + 2 + (k->len * 6) + 1 + 21;
 }
 
-/* --- Callback types for encode-one and need-calc --- */
+/* Callback types */
 typedef uint8_t *(*vj_swiss_encode_fn)(uint8_t *buf, const GoString *k,
                                        const uint8_t *val_ptr, int *entry_first,
                                        uint32_t flags,
@@ -243,14 +228,9 @@ typedef uint8_t *(*vj_swiss_encode_fn)(uint8_t *buf, const GoString *k,
 typedef int64_t (*vj_swiss_need_fn)(const GoString *k, const uint8_t *val_ptr,
                                     int ipad, int key_space);
 
-/* --- Core iteration logic (always_inline, parameterized).
- *
- * Uses universal addressing:
+/* Core iteration (always_inline, parameterized).
  *   key(i)  = group + SWISS_CTRL_SIZE + i * key_stride
- *   elem(i) = group + elems_off + i * elem_stride
- *
- * Inlined into each noinline wrapper with constant params,
- * enabling full constant folding and devirtualization. --- */
+ *   elem(i) = group + elems_off + i * elem_stride */
 INLINE VjSwissMapResult vj_swiss_iterate_impl(
     uint8_t *buf, const uint8_t *bend, VjStackFrame *frame, const GoSwissMap *m,
     int32_t remaining, int32_t di, int32_t gi, int32_t si, int entry_first,
@@ -345,7 +325,7 @@ INLINE VjSwissMapResult vj_swiss_iterate_impl(
   return (VjSwissMapResult){buf, VJ_SWISS_DONE};
 }
 
-/* --- Specialized noinline wrappers -- one per map variant --- */
+/* Specialized noinline wrappers */
 
 /* map[string]string */
 NOINLINE static VjSwissMapResult
@@ -397,16 +377,8 @@ vj_swiss_map_iterate(uint8_t *buf, const uint8_t *bend, VjStackFrame *frame,
                                   entry_first, flags, ind);
 }
 
-/* --- vj_swiss_next_full_slot -- generic slot scanner for MAP_STR_ITER.
- *
- * Scans forward to the next full slot. Returns key pointer or NULL.
- * Also outputs group base pointer via *group_out, needed to compute
- * elem address: elem = *group_out + elems_off + si * elem_stride.
- *
- * Parameters:
- *   key_stride: stride between keys (interleaved: slot_size, split: 16)
- *   group_size: total group size in bytes
- * --- */
+/* Scan forward to the next full slot. Returns key pointer or NULL.
+ * Outputs group base via *group_out for elem address computation. */
 NOINLINE static const uint8_t *
 vj_swiss_next_full_slot(const GoSwissMap *m, int32_t key_stride,
                         int32_t group_size, int32_t *di, int32_t *gi,

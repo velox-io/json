@@ -4,8 +4,7 @@ package gort
 
 import "unsafe"
 
-// SwissMapLayout describes the group-internal addressing for Swiss Map key/elem access.
-// Works for both interleaved (KVKVKVKV) and split (KKKKVVVV) layouts via the formula:
+// SwissMapLayout describes group-internal key/elem addressing.
 //
 //	key(i)  = group + KeysOff  + i * KeyStride
 //	elem(i) = group + ElemsOff + i * ElemStride
@@ -17,15 +16,12 @@ type SwissMapLayout struct {
 	GroupSize  uintptr
 }
 
-// ReadMapLayout reads the Swiss Map layout parameters from abi.MapType.
+// ReadMapLayout reads layout parameters from abi.MapType.
 //
-// Go 1.27+ abi.MapType layout (after abi.Type at +48):
+// Go 1.27+ abi.MapType (after abi.Type +48):
 //
-//	+80:  GroupSize  uintptr
-//	+88:  KeysOff   uintptr
-//	+96:  KeyStride uintptr
-//	+104: ElemsOff  uintptr
-//	+112: ElemStride uintptr
+//	+80: GroupSize   +88: KeysOff   +96: KeyStride
+//	+104: ElemsOff   +112: ElemStride
 func ReadMapLayout(mt unsafe.Pointer) SwissMapLayout {
 	return SwissMapLayout{
 		KeysOff:    *(*uintptr)(unsafe.Add(mt, 88)),

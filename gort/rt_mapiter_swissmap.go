@@ -8,8 +8,7 @@ import (
 )
 
 // SwissMapLayoutOK indicates whether the runtime's Swiss Map memory layout
-// matches what our C code expects. When false, map encoding falls back to
-// the Go-based iteration path (slower but correct).
+// matches what our C code expects. False triggers the Go fallback path.
 var SwissMapLayoutOK bool
 
 // SwissMapStrIntLayoutOK is the same as SwissMapLayoutOK but for map[string]int.
@@ -18,9 +17,7 @@ var SwissMapStrIntLayoutOK bool
 // SwissMapStrInt64LayoutOK is the same as SwissMapLayoutOK but for map[string]int64.
 var SwissMapStrInt64LayoutOK bool
 
-// SwissMapSplitGroup is true when the runtime uses KKKKVVVV group layout
-// (GOEXPERIMENT=mapsplitgroup), false for interleaved KVKVKVKV.
-// Only meaningful when SwissMapLayoutOK is true.
+// SwissMapSplitGroup is true for KKKKVVVV group layout (GOEXPERIMENT=mapsplitgroup).
 var SwissMapSplitGroup bool
 
 func init() {
@@ -49,21 +46,15 @@ func init() {
 	// Detect split vs interleaved group layout.
 	if SwissMapLayoutOK {
 		layout := ReadMapLayout(TypePtr(reflect.TypeFor[map[string]string]()))
-		// In split layout, ElemsOff > 8 + KeyStride (keys are packed first).
-		// In interleaved layout, ElemsOff == 8 + elemOff (within a single slot).
-		// A simple test: split has KeyStride == key size (16 for string),
-		// interleaved has KeyStride == slot size (>= 24).
 		SwissMapSplitGroup = layout.KeyStride == 16 && layout.ElemsOff > 24
 	}
 }
 
-// verifySwissMapLayout checks that the runtime's Swiss Map struct offsets
+// verifySwissMapLayout checks that the runtime's Swiss Map group offsets
 // match what our C code assumes, using the universal addressing formula:
 //
 //	key(i)  = group + layout.KeysOff  + i * layout.KeyStride
 //	elem(i) = group + layout.ElemsOff + i * layout.ElemStride
-//
-// Uses 2 entries to verify the inter-element stride is correct.
 func verifySwissMapLayout() bool {
 	m := map[string]string{"a": "b", "c": "d"}
 	mp := *(*unsafe.Pointer)(unsafe.Pointer(&m))
@@ -205,15 +196,10 @@ func verifySwissMapStrInt64Layout() bool {
 	return found == 2
 }
 
-// ProbeSwissMapSlotSize determines the slot size for a map[string]V by
-// creating a 2-element map and verifying that both entries are at the expected
-// stride. Requires SwissMapLayoutOK as a precondition.
-//
-// For MAP_STR_ITER, the returned slotSize has dual semantics:
+// ProbeSwissMapSlotSize probes the layout for a map[string]V.
+// The returned slotSize has dual semantics:
 //   - interleaved (KVKVKVKV): actual slot size (key+elem+padding)
 //   - split (KKKKVVVV): elem stride (size of a single elem, aligned)
-//
-// The C-side VM handler uses SwissMapSplitGroup flag to interpret correctly.
 func ProbeSwissMapSlotSize(mapType reflect.Type, valSize uintptr) (slotSize uintptr, ok bool) {
 	if !SwissMapLayoutOK {
 		return 0, false
@@ -225,7 +211,6 @@ func ProbeSwissMapSlotSize(mapType reflect.Type, valSize uintptr) (slotSize uint
 	mt := TypePtr(mapType)
 	layout := ReadMapLayout(mt)
 
-	// Verify by creating a 2-element map and reading back via layout formula.
 	mp := MakeMap(mt, 2, nil)
 	valPtr1 := MapAssignFastStr(mt, mp, "__gort_probe_1__")
 	for i := uintptr(0); i < valSize; i++ {
@@ -270,24 +255,13 @@ func ProbeSwissMapSlotSize(mapType reflect.Type, valSize uintptr) (slotSize uint
 	if SwissMapSplitGroup {
 		return layout.ElemStride, true
 	}
-	return layout.KeyStride, true // KeyStride == SlotSize in interleaved mode
+	return layout.KeyStride, true
 }
 
-// Stack-based map iteration via direct linkname to maps.Iter.Init/Next,
-// bypassing both reflect.MapRange (allocates per entry) and the runtime's
-// linknameIter shim (heap-allocates maps.Iter on every mapiterinit).
-//
-// maps.Iter layout (96 bytes on 64-bit):
-//
-//	key  unsafe.Pointer  // offset 0
-//	elem unsafe.Pointer  // offset 8
-//	...internal fields... // offsets 16-88
-
-// MapsIter is an opaque, stack-allocatable buffer matching maps.Iter.
-// Uses uintptr (not unsafe.Pointer) to prevent the GC from misinterpreting
-// internal integer fields as pointers ("bad pointer in frame" on stack copy).
+// MapsIter is a stack-allocatable buffer matching maps.Iter (96 bytes).
+// Uses uintptr to prevent GC from misinterpreting internal fields as pointers.
 type MapsIter struct {
-	buf [12]uintptr // 96 bytes
+	buf [12]uintptr
 }
 
 func MapsIterKey(it *MapsIter) unsafe.Pointer {
@@ -316,8 +290,6 @@ func _mapsIterInit(it unsafe.Pointer, typ unsafe.Pointer, m unsafe.Pointer)
 func _mapsIterNext(it unsafe.Pointer)
 
 // GoMapIterator mirrors runtime.linknameIter (swissmap only, 32 bytes).
-// In noswissmap mode, runtime.mapiterinit expects the much larger hiter
-// struct (104 bytes), so this type must NOT be used there.
 type GoMapIterator struct {
 	Key  unsafe.Pointer
 	Elem unsafe.Pointer

@@ -1191,14 +1191,12 @@ VJ_DEFINE_MAP_SWISS_OP(vj_op_map_str_int64, "MAP_STR_INT64", vj_swiss_iterate_st
  *  with VM-dispatched value body instructions.
  *
  *  MAP_STR_ITER (long, 16 bytes):
- *    field_off: map pointer offset in struct
- *    key_len/key_off: struct field key (if any)
- *    operand_a: interleaved=slot_size, split=elem_stride (from Go compiler)
+ *    operand_a: interleaved=slot_size, split=elem_stride
  *    operand_b: body byte length (excl MAP_STR_ITER_END)
  *
  *  MAP_STR_ITER_END (long, 16 bytes):
- *    operand_a: relative jump back offset (negative, to body start)
- *    operand_b: interleaved=slot_size, split=elem_stride (redundant, for back-edge use)
+ *    operand_a: relative jump back offset (negative)
+ *    operand_b: same as MAP_STR_ITER operand_a
  * ================================================================ */
 
 vj_op_map_str_iter: {
@@ -1206,24 +1204,20 @@ vj_op_map_str_iter: {
   int32_t operand = ext->operand_a;
   int32_t body_len = ext->operand_b;
 
-  /* Derive layout params from flag + operand.
-   * operand = slot_size (interleaved) or elem_stride (split).
-   * String key is always 16 bytes (GoString). */
+  /* Derive layout from flag + operand. */
   uint32_t _flags = VJ_ST_GET_FLAGS(vmstate);
   int _split = _flags & VJ_FLAGS_SPLIT_GROUP;
   int32_t key_stride  = _split ? SWISS_SPLIT_KEY_STRIDE : operand;
   int32_t elems_off   = _split ? SWISS_SPLIT_ELEMS_OFF
-                               : (int32_t)(SWISS_CTRL_SIZE + 16); /* 8 + elem_off=16 = 24 */
+                               : (int32_t)(SWISS_CTRL_SIZE + 16);
   int32_t elem_stride = _split ? operand : operand;
   int32_t group_size  = _split ? (SWISS_SPLIT_ELEMS_OFF + SWISS_GROUP_SLOTS * operand)
                                : (SWISS_CTRL_SIZE + SWISS_GROUP_SLOTS * operand);
 
-  /* Resume detection: check state bit 0 on top frame. */
   int32_t _depth = VJ_ST_GET_STACK_DEPTH(vmstate);
   int is_resume = (_depth > 0 && (ctx->stack[_depth - 1].state & 1));
 
   if (is_resume) {
-    /* ---- Resume after BUF_FULL ---- */
     VjStackFrame *f = &ctx->stack[_depth - 1];
     const GoSwissMap *m = (const GoSwissMap *)f->map.map_ptr;
     int32_t di = f->map.dir_idx;
@@ -1242,7 +1236,6 @@ vj_op_map_str_iter: {
     const GoString *k = (const GoString *)key_ptr;
     const uint8_t *val_ptr = group_base + elems_off + si * elem_stride;
 
-    /* Write comma + indent + key */
     {
       int ipad = indent_step
         ? (1 + indent_prefix_len + indent_depth * indent_step)
@@ -1261,21 +1254,18 @@ vj_op_map_str_iter: {
     *buf++ = ':';
     if (indent_step) { *buf++ = ' '; }
 
-    /* Update frame for next iteration */
-    si++; /* advance past current slot */
+    si++;
     f->map.dir_idx = di;
     f->map.group_idx = (uint8_t)gi;
     f->map.slot_idx = (uint8_t)si;
     f->map.remaining = remaining - 1;
 
-    /* Set base to value ptr, first=1 for body encoding */
     base = val_ptr;
     VJ_ST_SET_FIRST_1(vmstate);
     VM_TRACE_KEY("MAP_STR_ITER(resume)");
-    VM_NEXT_LONG(); /* enter body */
+    VM_NEXT_LONG();
   }
 
-  /* ---- First entry: read map, handle nil/empty ---- */
   {
     const GoSwissMap *m = *(const GoSwissMap **)(base + op->field_off);
 
@@ -1296,7 +1286,6 @@ vj_op_map_str_iter: {
       VM_JUMP_BYTES(16 + body_len + 16);
     }
 
-    /* ---- Write comma + key + '{' + indent ---- */
     VM_CHECK(op->key_len + 1 + 1 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE
              + VM_INDENT_PAD(indent_depth + 1));
     VM_WRITE_KEY();
@@ -1305,7 +1294,6 @@ vj_op_map_str_iter: {
     VM_INDENT_INC();
     VM_WRITE_INDENT();
 
-    /* Push map frame */
     if (__builtin_expect(VJ_ST_GET_STACK_DEPTH(vmstate) >= VJ_MAX_STACK_DEPTH, 0)) {
       VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);
     }
@@ -1320,12 +1308,10 @@ vj_op_map_str_iter: {
     VM_SAVE_TRACE_DEPTH(frame);
     VJ_ST_INC_STACK_DEPTH(vmstate);
 
-    /* Find first full slot */
     int32_t di = 0, gi = 0, si = 0;
     const uint8_t *group_base;
     const uint8_t *key_ptr = vj_swiss_next_full_slot(
         m, key_stride, group_size, &di, &gi, &si, &group_base);
-    /* key_ptr must be non-NULL since m->used > 0 */
 
     const GoString *k = (const GoString *)key_ptr;
     const uint8_t *val_ptr = group_base + elems_off + si * elem_stride;
@@ -1344,21 +1330,19 @@ vj_op_map_str_iter: {
     *buf++ = ':';
     if (indent_step) { *buf++ = ' '; }
 
-    /* Save position for next iteration (advance past current slot) */
     si++;
     frame->map.dir_idx = di;
     frame->map.group_idx = (uint8_t)gi;
     frame->map.slot_idx = (uint8_t)si;
     frame->map.remaining = (int32_t)m->used - 1;
 
-    /* Set base to value ptr, first=1 for body encoding */
     base = val_ptr;
     VJ_ST_SET_FIRST_1(vmstate);
-    VM_NEXT_LONG(); /* enter body */
+    VM_NEXT_LONG();
   }
 
 map_str_iter_done_resume: {
-    /* Reached from resume path when no more entries */
+    /* Resume path: no more entries */
     VjStackFrame *f = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
     VM_INDENT_DEC();
     VM_CHECK(1 + VM_INDENT_PAD(indent_depth));
@@ -1379,7 +1363,7 @@ vj_op_map_str_iter_end: {
   const VjOpExt *ext = VJ_OP_EXT(op);
   int32_t operand = ext->operand_b;
 
-  /* Derive layout params (same logic as MAP_STR_ITER). */
+  /* Derive layout (same as MAP_STR_ITER). */
   uint32_t _flags = VJ_ST_GET_FLAGS(vmstate);
   int _split = _flags & VJ_FLAGS_SPLIT_GROUP;
   int32_t key_stride  = _split ? SWISS_SPLIT_KEY_STRIDE : operand;
@@ -1393,7 +1377,6 @@ vj_op_map_str_iter_end: {
   int32_t remaining = frame->map.remaining;
 
   if (remaining > 0) {
-    /* More entries: find next full slot */
     const GoSwissMap *m = (const GoSwissMap *)frame->map.map_ptr;
     int32_t di = frame->map.dir_idx;
     int32_t gi = frame->map.group_idx;
@@ -1409,7 +1392,7 @@ vj_op_map_str_iter_end: {
     const GoString *k = (const GoString *)key_ptr;
     const uint8_t *val_ptr = group_base + elems_off + si * elem_stride;
 
-    /* Check buffer space for comma + indent + key + ':' + space */
+    /* Check buffer space */
     {
       int ipad = indent_step
         ? (1 + indent_prefix_len + indent_depth * indent_step)
@@ -1425,7 +1408,6 @@ vj_op_map_str_iter_end: {
       }
     }
 
-    /* Write comma + indent + key */
     *buf++ = ',';
     if (indent_step) { VM_WRITE_INDENT(); }
 #ifdef VJ_FAST_STRING_ESCAPE
@@ -1436,22 +1418,19 @@ vj_op_map_str_iter_end: {
     *buf++ = ':';
     if (indent_step) { *buf++ = ' '; }
 
-    /* Advance past current slot for next iteration */
     si++;
     frame->map.dir_idx = di;
     frame->map.group_idx = (uint8_t)gi;
     frame->map.slot_idx = (uint8_t)si;
     frame->map.remaining = remaining - 1;
 
-    /* Set base to value ptr and jump back to body start */
     base = val_ptr;
     VJ_ST_SET_FIRST_1(vmstate);
     VM_TRACE("MAP_STR_ITER_END(next)");
-    VM_JUMP_BYTES(ext->operand_a); /* relative jump back to body start */
+    VM_JUMP_BYTES(ext->operand_a);
   }
 
 map_str_iter_end_done:
-  /* Done: write indent + '}', pop frame */
   VM_INDENT_DEC();
   VM_CHECK(1 + VM_INDENT_PAD(indent_depth));
   VM_WRITE_INDENT();
