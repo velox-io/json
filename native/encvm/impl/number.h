@@ -22,22 +22,18 @@
 #if defined(__SSE2__) || defined(__aarch64__)
 
 ALIGNED_DECL(16)
-static const char Vec16xA0[16] ALIGNED(16) = {'0', '0', '0', '0', '0', '0',
-                                              '0', '0', '0', '0', '0', '0',
-                                              '0', '0', '0', '0'};
+static const char Vec16xA0[16] ALIGNED(16) = {'0', '0', '0', '0', '0', '0', '0', '0',
+                                              '0', '0', '0', '0', '0', '0', '0', '0'};
 ALIGNED_DECL(16)
 static const uint16_t Vec8x10[8] ALIGNED(16) = {10, 10, 10, 10, 10, 10, 10, 10};
 ALIGNED_DECL(16)
 static const uint32_t Vec4x10k[4] ALIGNED(16) = {10000, 10000, 10000, 10000};
 ALIGNED_DECL(16)
-static const uint32_t Vec4xDiv10k[4] ALIGNED(16) = {0xd1b71759, 0xd1b71759,
-                                                    0xd1b71759, 0xd1b71759};
+static const uint32_t Vec4xDiv10k[4] ALIGNED(16) = {0xd1b71759, 0xd1b71759, 0xd1b71759, 0xd1b71759};
 ALIGNED_DECL(16)
-static const uint16_t VecDivPowers[8] ALIGNED(16) = {
-    0x20c5, 0x147b, 0x3334, 0x8000, 0x20c5, 0x147b, 0x3334, 0x8000};
+static const uint16_t VecDivPowers[8] ALIGNED(16) = {0x20c5, 0x147b, 0x3334, 0x8000, 0x20c5, 0x147b, 0x3334, 0x8000};
 ALIGNED_DECL(16)
-static const uint16_t VecShiftPowers[8] ALIGNED(16) = {
-    0x0080, 0x0800, 0x2000, 0x8000, 0x0080, 0x0800, 0x2000, 0x8000};
+static const uint16_t VecShiftPowers[8] ALIGNED(16) = {0x0080, 0x0800, 0x2000, 0x8000, 0x0080, 0x0800, 0x2000, 0x8000};
 
 /* Convert an 8-digit number (0..99999999) to 8 ASCII digit values in an XMM
  * register. Uses SSE2 multiplication-based digit extraction (no division). */

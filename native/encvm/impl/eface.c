@@ -15,11 +15,8 @@ typedef struct {
  * Called when ifaceCache lookup finds a primitive (tag != 0).
  * Fixed-size types assume caller pre-checked buffer space;
  * variable-length types (string, raw_message, number) check inline. */
-static NOINLINE EncValueResult encode_primitive_value(uint8_t *buf,
-                                                      const uint8_t *bend,
-                                                      const void *ptr,
-                                                      uint16_t etype,
-                                                      uint32_t flags) {
+static NOINLINE EncValueResult encode_primitive_value(uint8_t *buf, const uint8_t *bend, const void *ptr,
+                                                      uint16_t etype, uint32_t flags) {
   switch (etype) {
   case OP_BOOL: {
     uint8_t val = *(const uint8_t *)ptr;
@@ -63,9 +60,7 @@ static NOINLINE EncValueResult encode_primitive_value(uint8_t *buf,
     __builtin_memcpy(&fval, ptr, 4);
     if (__builtin_expect(__builtin_isnan(fval) || __builtin_isinf(fval), 0))
       return (EncValueResult){NULL, VJ_EXIT_NAN_INF};
-    buf += us_write_float32(buf, fval,
-                            (flags & VJ_FLAGS_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO
-                                                              : US_FMT_FIXED);
+    buf += us_write_float32(buf, fval, (flags & VJ_FLAGS_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED);
     break;
   }
   case OP_FLOAT64: {
@@ -73,9 +68,7 @@ static NOINLINE EncValueResult encode_primitive_value(uint8_t *buf,
     __builtin_memcpy(&dval, ptr, 8);
     if (__builtin_expect(__builtin_isnan(dval) || __builtin_isinf(dval), 0))
       return (EncValueResult){NULL, VJ_EXIT_NAN_INF};
-    buf += us_write_float64(buf, dval,
-                            (flags & VJ_FLAGS_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO
-                                                              : US_FMT_FIXED);
+    buf += us_write_float64(buf, dval, (flags & VJ_FLAGS_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED);
     break;
   }
   case OP_STRING: {
@@ -144,10 +137,8 @@ static NOINLINE EncValueResult encode_primitive_value(uint8_t *buf,
  *   ops!=NULL          → SWITCH_OPS  (cached Blueprint, caller pushes frame)
  *
  * Caller must: nil-check type_ptr, write key/comma, pre-check buffer. */
-VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend,
-                                        const uint8_t *iface_ptr,
-                                        const VjIfaceCacheEntry *cache,
-                                        int32_t cache_count, uint32_t flags) {
+VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend, const uint8_t *iface_ptr,
+                                        const VjIfaceCacheEntry *cache, int32_t cache_count, uint32_t flags) {
 
   const void *type_ptr = *(const void **)iface_ptr;
   const uint8_t *data_ptr = *(const uint8_t **)(iface_ptr + 8);
@@ -200,9 +191,6 @@ VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend,
   /* Cached Blueprint → caller pushes VM frame.
    * For INDIRECT types (maps), data_ptr = &eface.data so MAP_STR_ITER can
    * dereference the map pointer correctly (base+0 → map pointer). */
-  const uint8_t *bp_base = (cache_flags & VJ_IFACE_FLAG_INDIRECT)
-                               ? (const uint8_t *)(iface_ptr + 8)
-                               : data_ptr;
-  return (VjIfaceResult){buf,     cached_ops,          type_ptr,
-                         bp_base, VJ_IFACE_SWITCH_OPS, cache_flags};
+  const uint8_t *bp_base = (cache_flags & VJ_IFACE_FLAG_INDIRECT) ? (const uint8_t *)(iface_ptr + 8) : data_ptr;
+  return (VjIfaceResult){buf, cached_ops, type_ptr, bp_base, VJ_IFACE_SWITCH_OPS, cache_flags};
 }

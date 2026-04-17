@@ -27,8 +27,8 @@
 #define VJ_TRACE_BUF_SIZE 1048576 /* 1MB */
 
 typedef struct VjTraceBuf {
-  uint32_t head;  /* write position (wraps via & mask) */
-  uint32_t total; /* total bytes ever written (overflow detect) */
+  uint32_t head;                   /* write position (wraps via & mask) */
+  uint32_t total;                  /* total bytes ever written (overflow detect) */
   uint8_t data[VJ_TRACE_BUF_SIZE]; /* ring buffer */
 } VjTraceBuf;
 
@@ -68,18 +68,18 @@ enum OpType {
 
   /* --- Structural control-flow opcodes (19-31) --- */
   OP_SKIP_IF_ZERO = 19, /* conditional forward jump (omitempty) */
-  OP_CALL = 20, /* subroutine call: push CALL frame, jump to ops[operand_a] */
-  OP_PTR_DEREF = 21,   /* deref pointer, nil→null+jump */
-  OP_PTR_END = 22,     /* pop ptr-deref frame, restore base */
-  OP_SLICE_BEGIN = 23, /* slice loop start */
-  OP_SLICE_END = 24,   /* slice loop end / back-edge */
-  OP_MAP = 25,         /* map yield — Go handles entire map encoding */
+  OP_CALL = 20,         /* subroutine call: push CALL frame, jump to ops[operand_a] */
+  OP_PTR_DEREF = 21,    /* deref pointer, nil→null+jump */
+  OP_PTR_END = 22,      /* pop ptr-deref frame, restore base */
+  OP_SLICE_BEGIN = 23,  /* slice loop start */
+  OP_SLICE_END = 24,    /* slice loop end / back-edge */
+  OP_MAP = 25,          /* map yield — Go handles entire map encoding */
   /* 26: reserved (was OP_MAP_END) */
   OP_OBJ_OPEN = 27,    /* write key + '{', set first=1 (no frame) */
   OP_OBJ_CLOSE = 28,   /* write '}', set first=0 (no frame) */
   OP_ARRAY_BEGIN = 29, /* array loop start (inline data, fixed length) */
   OP_MAP_STR_STR = 30, /* C-native Swiss Map iteration for map[string]string */
-  OP_RET = 31, /* subroutine return: pop CALL frame, restore ops/pc/base */
+  OP_RET = 31,         /* subroutine return: pop CALL frame, restore ops/pc/base */
 
   /* --- Go-only fallback --- */
   OP_FALLBACK = 32, /* custom marshalers, ,string, complex structs */
@@ -100,10 +100,9 @@ enum OpType {
   OP_SEQ_STRING = 41,  /* []string / [N]string — single-instruction loop */
 
   /* --- C-native Swiss Map key iterator (42-43) --- */
-  OP_MAP_STR_ITER = 42, /* Swiss Map string-key iteration: init, write first
-                           key, dispatch body */
-  OP_MAP_STR_ITER_END =
-      43, /* Swiss Map iteration back-edge: advance slot, write key or end */
+  OP_MAP_STR_ITER = 42,     /* Swiss Map string-key iteration: init, write first
+                               key, dispatch body */
+  OP_MAP_STR_ITER_END = 43, /* Swiss Map iteration back-edge: advance slot, write key or end */
 
   /* --- Keyed-field quoted variants (44-45) — ,string tag --- */
   OP_KQINT = 44,   /* struct field int with ,string — quoted: "123" */
@@ -158,8 +157,7 @@ typedef struct {
   int64_t len;
 } GoString;
 
-_Static_assert(sizeof(GoString) == 16,
-               "GoString must be 16 bytes (matching Go string layout)");
+_Static_assert(sizeof(GoString) == 16, "GoString must be 16 bytes (matching Go string layout)");
 
 typedef struct {
   const uint8_t *data;
@@ -167,8 +165,7 @@ typedef struct {
   int64_t cap;
 } GoSlice;
 
-_Static_assert(sizeof(GoSlice) == 24,
-               "GoSlice must be 24 bytes (matching Go slice layout)");
+_Static_assert(sizeof(GoSlice) == 24, "GoSlice must be 24 bytes (matching Go slice layout)");
 
 /* ================================================================
  *  vj_is_zero — omitempty zero-value check
@@ -287,36 +284,31 @@ enum VjExitCode {
 
 /* Low 32 bits: hot-path state */
 #define VJ_ST_STACK_DEPTH_SHIFT 0
-#define VJ_ST_STACK_DEPTH_MASK ((uint64_t)0x000000FF) /* bits [0..7]  */
-#define VJ_ST_FIRST_BIT ((uint64_t)1 << 16)           /* bit  [16]    */
-#define VJ_ST_FLAGS_SHIFT 17
-#define VJ_ST_FLAGS_MASK ((uint64_t)0xFFFE0000) /* bits [17..31]*/
+#define VJ_ST_STACK_DEPTH_MASK  ((uint64_t)0x000000FF) /* bits [0..7]  */
+#define VJ_ST_FIRST_BIT         ((uint64_t)1 << 16)    /* bit  [16]    */
+#define VJ_ST_FLAGS_SHIFT       17
+#define VJ_ST_FLAGS_MASK        ((uint64_t)0xFFFE0000) /* bits [17..31]*/
 
 /* High 32 bits: cold-path state */
-#define VJ_ST_EXIT_SHIFT 32
-#define VJ_ST_EXIT_MASK ((uint64_t)0x000000FF00000000ULL) /* bits [32..39] */
+#define VJ_ST_EXIT_SHIFT  32
+#define VJ_ST_EXIT_MASK   ((uint64_t)0x000000FF00000000ULL) /* bits [32..39] */
 #define VJ_ST_YIELD_SHIFT 40
-#define VJ_ST_YIELD_MASK ((uint64_t)0x0000FF0000000000ULL) /* bits [40..47] */
+#define VJ_ST_YIELD_MASK  ((uint64_t)0x0000FF0000000000ULL) /* bits [40..47] */
 
 /* Access macros — extract fields from vmstate. */
 #define VJ_ST_GET_STACK_DEPTH(st) ((int32_t)((st) & VJ_ST_STACK_DEPTH_MASK))
-#define VJ_ST_GET_FIRST(st) ((int)(((st) & VJ_ST_FIRST_BIT) != 0))
-#define VJ_ST_GET_FLAGS(st)                                                    \
-  ((uint32_t)(((st) & VJ_ST_FLAGS_MASK) >> VJ_ST_FLAGS_SHIFT))
-#define VJ_ST_GET_EXIT(st) ((int32_t)(((st) >> VJ_ST_EXIT_SHIFT) & 0xFF))
-#define VJ_ST_GET_YIELD(st) ((uint32_t)(((st) >> VJ_ST_YIELD_SHIFT) & 0xFF))
+#define VJ_ST_GET_FIRST(st)       ((int)(((st) & VJ_ST_FIRST_BIT) != 0))
+#define VJ_ST_GET_FLAGS(st)       ((uint32_t)(((st) & VJ_ST_FLAGS_MASK) >> VJ_ST_FLAGS_SHIFT))
+#define VJ_ST_GET_EXIT(st)        ((int32_t)(((st) >> VJ_ST_EXIT_SHIFT) & 0xFF))
+#define VJ_ST_GET_YIELD(st)       ((uint32_t)(((st) >> VJ_ST_YIELD_SHIFT) & 0xFF))
 
 /* Mutate macros — modify fields within vmstate. */
 
 /* First-flag mutators */
-#define VJ_ST_SET_FIRST_1(st) ((st) |= VJ_ST_FIRST_BIT)
-#define VJ_ST_SET_FIRST_0(st) ((st) &= ~VJ_ST_FIRST_BIT)
-#define VJ_ST_SET_EXIT(st, v)                                                  \
-  ((st) = ((st) & ~VJ_ST_EXIT_MASK) |                                          \
-          (((uint64_t)(v) & 0xFF) << VJ_ST_EXIT_SHIFT))
-#define VJ_ST_SET_YIELD(st, v)                                                 \
-  ((st) = ((st) & ~VJ_ST_YIELD_MASK) |                                         \
-          (((uint64_t)(v) & 0xFF) << VJ_ST_YIELD_SHIFT))
+#define VJ_ST_SET_FIRST_1(st)  ((st) |= VJ_ST_FIRST_BIT)
+#define VJ_ST_SET_FIRST_0(st)  ((st) &= ~VJ_ST_FIRST_BIT)
+#define VJ_ST_SET_EXIT(st, v)  ((st) = ((st) & ~VJ_ST_EXIT_MASK) | (((uint64_t)(v) & 0xFF) << VJ_ST_EXIT_SHIFT))
+#define VJ_ST_SET_YIELD(st, v) ((st) = ((st) & ~VJ_ST_YIELD_MASK) | (((uint64_t)(v) & 0xFF) << VJ_ST_YIELD_SHIFT))
 
 /* Depth increment/decrement — stack_depth at bits [0..7]: +1/-1 directly.
  * Callers MUST check overflow BEFORE incrementing. */
@@ -335,28 +327,28 @@ enum VjExitCode {
  * was_first receives 1 if bit was set (i.e. first element), 0 otherwise.
  */
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
-#define VJ_ST_BTR_FIRST(st, was_first)                                         \
-  __asm__ volatile("btrq $16, %[state]"                                        \
-                   : [state] "+r"(st), "=@ccc"(was_first)                      \
-                   : /* no input-only */                                       \
+#define VJ_ST_BTR_FIRST(st, was_first)                                                                                 \
+  __asm__ volatile("btrq $16, %[state]"                                                                                \
+                   : [state] "+r"(st), "=@ccc"(was_first)                                                              \
+                   : /* no input-only */                                                                               \
                    : "cc")
 #else
 /* Portable fallback: separate test + clear. */
-#define VJ_ST_BTR_FIRST(st, was_first)                                         \
-  do {                                                                         \
-    (was_first) = (int)(((st) & VJ_ST_FIRST_BIT) != 0);                        \
-    (st) &= ~VJ_ST_FIRST_BIT;                                                  \
+#define VJ_ST_BTR_FIRST(st, was_first)                                                                                 \
+  do {                                                                                                                 \
+    (was_first) = (int)(((st) & VJ_ST_FIRST_BIT) != 0);                                                                \
+    (st) &= ~VJ_ST_FIRST_BIT;                                                                                          \
   } while (0)
 #endif
 
 /* Encoding config flag masks (bits 0-3 of extracted flags).
  * Used by helper functions that receive a uint32_t 'flags' parameter
  * (e.g. vj_escape_string) and by VJ_ST_GET_FLAGS() extraction. */
-#define VJ_FLAGS_ESCAPE_HTML (1 << 0)
-#define VJ_FLAGS_ESCAPE_LINE_TERMS (1 << 1)
+#define VJ_FLAGS_ESCAPE_HTML         (1 << 0)
+#define VJ_FLAGS_ESCAPE_LINE_TERMS   (1 << 1)
 #define VJ_FLAGS_ESCAPE_INVALID_UTF8 (1 << 2)
-#define VJ_FLAGS_FLOAT_EXP_AUTO (1 << 3)
-#define VJ_FLAGS_SPLIT_GROUP (1 << 4) /* GOEXPERIMENT=mapsplitgroup KKKKVVVV */
+#define VJ_FLAGS_FLOAT_EXP_AUTO      (1 << 3)
+#define VJ_FLAGS_SPLIT_GROUP         (1 << 4) /* GOEXPERIMENT=mapsplitgroup KKKKVVVV */
 
 /* ================================================================
  *  Variable-Length Instruction Format
@@ -407,11 +399,9 @@ _Static_assert(sizeof(VjOpExt) == 8, "VjOpExt must be 8 bytes");
  * */
 
 /* Frame type constants — documentation/debug only, not stored in vmstate. */
-#define VJ_FRAME_CALL                                                          \
-  0 /* subroutine call (recurse / ptr deref / iface switch-ops) */
-#define VJ_FRAME_ITER 1 /* linear iteration (slice / array) */
-#define VJ_FRAME_ITER_STR_STR_LEAF                                             \
-  2 /* map[string]string iteration; leaf = no sub-frame push */
+#define VJ_FRAME_CALL              0 /* subroutine call (recurse / ptr deref / iface switch-ops) */
+#define VJ_FRAME_ITER              1 /* linear iteration (slice / array) */
+#define VJ_FRAME_ITER_STR_STR_LEAF 2 /* map[string]string iteration; leaf = no sub-frame push */
 
 /* VjStackFrame — unified frame pushed by all stack-using ops.
  * 32 bytes.
@@ -448,10 +438,9 @@ ALIGN_TYPEDEF(8) typedef struct VjStackFrame {
       int32_t remaining;   /* 20: entries left to encode */
       uint8_t group_idx;   /* 24: group index within current table (max 127) */
       uint8_t slot_idx;    /* 25: slot index within current group (0-7) */
-      uint8_t
-          entry_first; /* 26: 1 = no entry written yet (comma suppression) */
-      uint8_t _pad;    /* 27: alignment padding */
-    } map;             /* 20 bytes */
+      uint8_t entry_first; /* 26: 1 = no entry written yet (comma suppression) */
+      uint8_t _pad;        /* 27: alignment padding */
+    } map;                 /* 20 bytes */
   };
 #pragma pack(pop)
 
@@ -461,10 +450,8 @@ ALIGN_TYPEDEF(8) typedef struct VjStackFrame {
 } ALIGN_TYPEDEF_END(8) VjStackFrame;
 
 _Static_assert(sizeof(VjStackFrame) == 32, "VjStackFrame must be 32 bytes");
-_Static_assert(offsetof(VjStackFrame, ret_base) == 0,
-               "VjStackFrame.ret_base offset");
-_Static_assert(offsetof(VjStackFrame, state) == 28,
-               "VjStackFrame.state offset");
+_Static_assert(offsetof(VjStackFrame, ret_base) == 0, "VjStackFrame.ret_base offset");
+_Static_assert(offsetof(VjStackFrame, state) == 28, "VjStackFrame.state offset");
 
 enum {
   /* Separate from VJ_EXIT_BUF_FULL:
@@ -487,16 +474,15 @@ enum VjYieldReason {
 typedef struct VjIfaceCacheEntry {
   const void *type_ptr; /*  0: Go *abi.Type address */
   const uint8_t *ops;   /*  8: Blueprint ops byte stream, or NULL */
-  uint8_t tag;     /* 16: opcode (= ElemTypeKind) for primitives; 0 = none */
-  uint8_t flags;   /* 17: VJ_IFACE_FLAG_* bits */
-  uint8_t _pad[6]; /* 18: alignment */
+  uint8_t tag;          /* 16: opcode (= ElemTypeKind) for primitives; 0 = none */
+  uint8_t flags;        /* 17: VJ_IFACE_FLAG_* bits */
+  uint8_t _pad[6];      /* 18: alignment */
 } VjIfaceCacheEntry;
 
 /* VjIfaceCacheEntry.flags bits */
 #define VJ_IFACE_FLAG_INDIRECT 0x01 /* base = &eface.data (not *eface.data) */
 
-_Static_assert(sizeof(VjIfaceCacheEntry) == 24,
-               "VjIfaceCacheEntry must be 24 bytes");
+_Static_assert(sizeof(VjIfaceCacheEntry) == 24, "VjIfaceCacheEntry must be 24 bytes");
 
 /* ================================================================
  *  ExecCtx — per-Marshal runtime context
@@ -537,7 +523,7 @@ typedef struct VjExecCtx {
   int16_t indent_depth;      /*  72: logical nesting depth */
   uint8_t indent_step;       /*  74: bytes per indent level (0 = compact) */
   uint8_t indent_prefix_len; /*  75: bytes of prefix before indent */
-  int32_t trace_depth; /*  76: trace indent depth (debug only, else padding) */
+  int32_t trace_depth;       /*  76: trace indent depth (debug only, else padding) */
 
   /* Yield metadata (cold: only accessed on yield) */
   const void *yield_type_ptr;   /*  80: eface.type_ptr on iface miss */
@@ -558,19 +544,14 @@ _Static_assert(offsetof(VjExecCtx, ops_ptr) == 16, "ops_ptr offset");
 _Static_assert(offsetof(VjExecCtx, pc) == 24, "pc offset");
 _Static_assert(offsetof(VjExecCtx, cur_base) == 32, "cur_base offset");
 _Static_assert(offsetof(VjExecCtx, vmstate) == 40, "vmstate offset");
-_Static_assert(offsetof(VjExecCtx, iface_cache_ptr) == 48,
-               "iface_cache_ptr offset");
-_Static_assert(offsetof(VjExecCtx, iface_cache_count) == 56,
-               "iface_cache_count offset");
+_Static_assert(offsetof(VjExecCtx, iface_cache_ptr) == 48, "iface_cache_ptr offset");
+_Static_assert(offsetof(VjExecCtx, iface_cache_count) == 56, "iface_cache_count offset");
 _Static_assert(offsetof(VjExecCtx, indent_tpl) == 64, "indent_tpl offset");
 _Static_assert(offsetof(VjExecCtx, indent_depth) == 72, "indent_depth offset");
 _Static_assert(offsetof(VjExecCtx, indent_step) == 74, "indent_step offset");
-_Static_assert(offsetof(VjExecCtx, indent_prefix_len) == 75,
-               "indent_prefix_len offset");
-_Static_assert(offsetof(VjExecCtx, yield_type_ptr) == 80,
-               "yield_type_ptr offset");
-_Static_assert(offsetof(VjExecCtx, key_pool_base) == 88,
-               "key_pool_base offset");
+_Static_assert(offsetof(VjExecCtx, indent_prefix_len) == 75, "indent_prefix_len offset");
+_Static_assert(offsetof(VjExecCtx, yield_type_ptr) == 80, "yield_type_ptr offset");
+_Static_assert(offsetof(VjExecCtx, key_pool_base) == 88, "key_pool_base offset");
 _Static_assert(offsetof(VjExecCtx, stack) == 96, "stack offset");
 _Static_assert(offsetof(VjExecCtx, trace_buf) == 2144, "trace_buf offset");
 

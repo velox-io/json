@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/velox-io/json/gort"
 	vjson "github.com/velox-io/json"
+	"github.com/velox-io/json/gort"
 )
 
 // TestSwissMapLayoutFlags prints the runtime layout detection results.
@@ -69,7 +69,7 @@ func TestSwissMapSplitGroupCorrectness(t *testing.T) {
 
 	t.Run("map[string]int64", func(t *testing.T) {
 		m := map[string]int64{
-			"big": 1<<50, "neg": -9999999,
+			"big": 1 << 50, "neg": -9999999,
 		}
 		got, err := vjson.Marshal(m)
 		if err != nil {
@@ -88,10 +88,10 @@ func TestSwissMapSplitGroupCorrectness(t *testing.T) {
 
 	t.Run("map[string]any", func(t *testing.T) {
 		m := map[string]any{
-			"str":   "hello",
-			"num":   float64(42),
-			"bool":  true,
-			"null":  nil,
+			"str":    "hello",
+			"num":    float64(42),
+			"bool":   true,
+			"null":   nil,
 			"nested": map[string]any{"inner": "value"},
 		}
 		got, err := vjson.Marshal(m)

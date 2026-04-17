@@ -20,8 +20,7 @@
 
 #include "vj_compat.h"
 
-static const char B64_CHARS[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const char B64_CHARS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /* Compute base64 output length: ceil(len / 3) * 4 */
 static inline int64_t base64_encoded_len(int64_t len) {
@@ -30,13 +29,11 @@ static inline int64_t base64_encoded_len(int64_t len) {
 
 /* --- Scalar base64 — used for tail bytes (< 12 remaining) --- */
 
-static inline uint8_t *base64_encode_scalar(uint8_t *buf, const uint8_t *data,
-                                            int64_t len) {
+static inline uint8_t *base64_encode_scalar(uint8_t *buf, const uint8_t *data, int64_t len) {
   int64_t i = 0;
   int64_t full_groups = len - (len % 3);
   for (; i < full_groups; i += 3) {
-    uint32_t triple = ((uint32_t)data[i] << 16) | ((uint32_t)data[i + 1] << 8) |
-                      ((uint32_t)data[i + 2]);
+    uint32_t triple = ((uint32_t)data[i] << 16) | ((uint32_t)data[i + 1] << 8) | ((uint32_t)data[i + 2]);
     buf[0] = B64_CHARS[(triple >> 18) & 0x3F];
     buf[1] = B64_CHARS[(triple >> 12) & 0x3F];
     buf[2] = B64_CHARS[(triple >> 6) & 0x3F];
@@ -104,8 +101,7 @@ static inline __m128i base64_encode_simd_12(__m128i input) {
   /* LUT: range_id → ASCII offset to add to 6-bit index.
    *   0→lowercase(+71)  1..10→digit(-4)  11→'+'(-19)  12→'/'(-16) 13→upper(+65)
    */
-  const __m128i lut = _mm_setr_epi8(71, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4,
-                                    -19, -16, 65, 0, 0);
+  const __m128i lut = _mm_setr_epi8(71, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -19, -16, 65, 0, 0);
   __m128i offsets = _mm_shuffle_epi8(lut, result);
   return _mm_add_epi8(indices, offsets);
 }
@@ -114,8 +110,7 @@ static inline __m128i base64_encode_simd_12(__m128i input) {
 
 /* --- Public entry point --- */
 
-NOINLINE uint8_t *vj_encode_base64(uint8_t *buf, const uint8_t *bend,
-                                   const uint8_t *data, int64_t len) {
+NOINLINE uint8_t *vj_encode_base64(uint8_t *buf, const uint8_t *bend, const uint8_t *data, int64_t len) {
 
   int64_t b64_len = base64_encoded_len(len);
   int64_t total = 2 + b64_len;

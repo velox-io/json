@@ -44,7 +44,7 @@
 
 /* Two-level expansion so VJ_MODE_TAG is expanded before pasting. */
 #define VJ_VM_EXEC_NAME2(mode, isa) vj_vm_exec_##mode##_##isa
-#define VJ_VM_EXEC_NAME(mode, isa) VJ_VM_EXEC_NAME2(mode, isa)
+#define VJ_VM_EXEC_NAME(mode, isa)  VJ_VM_EXEC_NAME2(mode, isa)
 
 #if defined(ISA_NEON)
 #define VJ_VM_EXEC_FN_NAME VJ_VM_EXEC_NAME(VJ_MODE_TAG, neon)

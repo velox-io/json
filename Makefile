@@ -7,6 +7,7 @@ lint-ci:
 fmt:
 	gofmt -w -s .
 	goimports -w .
+	clang-format -i native/encvm/impl/*.h native/encvm/impl/*.c
 
 test:
 	@./scripts/run-test.sh

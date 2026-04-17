@@ -47,8 +47,7 @@ static inline int vj_time_can_native(const void *loc) {
 /* Get timezone offset (seconds) for a FixedZone.
  * Caller must ensure loc != NULL and vj_time_can_native() == 1. */
 static inline int32_t vj_time_get_offset(const void *loc) {
-  const uint8_t *zone_ptr =
-      *(const uint8_t *const *)((const uint8_t *)loc + 16);
+  const uint8_t *zone_ptr = *(const uint8_t *const *)((const uint8_t *)loc + 16);
   if (zone_ptr == NULL)
     return 0;
   return (int32_t)(*(const int64_t *)(zone_ptr + 16));
@@ -57,29 +56,26 @@ static inline int32_t vj_time_get_offset(const void *loc) {
 /* Constants from Go's time package */
 
 #define VJ_TIME_HAS_MONOTONIC ((uint64_t)1 << 63)
-#define VJ_TIME_NSEC_MASK ((uint64_t)((1 << 30) - 1))
-#define VJ_TIME_NSEC_SHIFT 30
+#define VJ_TIME_NSEC_MASK     ((uint64_t)((1 << 30) - 1))
+#define VJ_TIME_NSEC_SHIFT    30
 
 #define VJ_TIME_WALL_TO_INTERNAL 59453308800LL /* wallToInternal */
 #define VJ_TIME_UNIX_TO_INTERNAL 62135596800LL /* unixToInternal */
-#define VJ_TIME_INTERNAL_TO_ABS 9223371966606163200LL
-#define VJ_TIME_UNIX_TO_ABS                                                    \
-  9223372028741760000LL /* unixToInternal + internalToAbsolute */
-#define VJ_TIME_ABSOLUTE_YEARS 292277022400ULL
-#define VJ_TIME_MARCH_THRU_DEC 306
+#define VJ_TIME_INTERNAL_TO_ABS  9223371966606163200LL
+#define VJ_TIME_UNIX_TO_ABS      9223372028741760000LL /* unixToInternal + internalToAbsolute */
+#define VJ_TIME_ABSOLUTE_YEARS   292277022400ULL
+#define VJ_TIME_MARCH_THRU_DEC   306
 
-#define VJ_SECONDS_PER_DAY 86400
-#define VJ_SECONDS_PER_HOUR 3600
+#define VJ_SECONDS_PER_DAY    86400
+#define VJ_SECONDS_PER_HOUR   3600
 #define VJ_SECONDS_PER_MINUTE 60
 
 /* Extract internal seconds (since year 1) and nanoseconds from time.Time. */
-static inline void vj_time_extract(const GoTime *t, int64_t *out_sec,
-                                   int32_t *out_nsec) {
+static inline void vj_time_extract(const GoTime *t, int64_t *out_sec, int32_t *out_nsec) {
   uint64_t wall = t->wall;
   *out_nsec = (int32_t)(wall & VJ_TIME_NSEC_MASK);
   if (wall & VJ_TIME_HAS_MONOTONIC) {
-    *out_sec = VJ_TIME_WALL_TO_INTERNAL +
-               (int64_t)(wall << 1 >> (VJ_TIME_NSEC_SHIFT + 1));
+    *out_sec = VJ_TIME_WALL_TO_INTERNAL + (int64_t)(wall << 1 >> (VJ_TIME_NSEC_SHIFT + 1));
   } else {
     *out_sec = t->ext;
   }
@@ -93,8 +89,7 @@ static inline void vj_write_2d(uint8_t *buf, int val) {
 /* Format time.Time as RFC3339Nano into buf.  Returns bytes written.
  * Max output: "2006-01-02T15:04:05.999999999+00:00" = 37 bytes (with quotes).
  * year_out receives the computed year (caller checks [0, 9999]). */
-static inline int vj_write_rfc3339nano(uint8_t *buf, const GoTime *t,
-                                       int32_t tz_offset, int *year_out) {
+static inline int vj_write_rfc3339nano(uint8_t *buf, const GoTime *t, int32_t tz_offset, int *year_out) {
   uint8_t *start = buf;
 
   int64_t isec;
@@ -122,8 +117,7 @@ static inline int vj_write_rfc3339nano(uint8_t *buf, const GoTime *t,
   uint32_t mday = 1 + (md & 0xFFFF) / 2141;
 
   uint32_t janFeb = (ayday >= VJ_TIME_MARCH_THRU_DEC) ? 1 : 0;
-  int year =
-      (int)(century * 100 - VJ_TIME_ABSOLUTE_YEARS) + (int)cyear + (int)janFeb;
+  int year = (int)(century * 100 - VJ_TIME_ABSOLUTE_YEARS) + (int)cyear + (int)janFeb;
   uint32_t month = amonth - janFeb * 12;
 
   *year_out = year;

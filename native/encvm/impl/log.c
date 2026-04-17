@@ -26,10 +26,7 @@ static inline long vj_raw_syscall3(long num, long a1, long a2, long a3) {
   register long x0 __asm__("x0") = a1;
   register long x1 __asm__("x1") = a2;
   register long x2 __asm__("x2") = a3;
-  __asm__ volatile("svc #0x80"
-                   : "=r"(x0)
-                   : "r"(x16), "r"(x8), "r"(x0), "r"(x1), "r"(x2)
-                   : "memory", "cc");
+  __asm__ volatile("svc #0x80" : "=r"(x0) : "r"(x16), "r"(x8), "r"(x0), "r"(x1), "r"(x2) : "memory", "cc");
   return x0;
 }
 
@@ -43,10 +40,7 @@ static inline long vj_raw_syscall3(long num, long a1, long a2, long a3) {
 
 static inline long vj_raw_syscall3(long num, long a1, long a2, long a3) {
   long ret;
-  __asm__ volatile("syscall"
-                   : "=a"(ret)
-                   : "a"(num), "D"(a1), "S"(a2), "d"(a3)
-                   : "rcx", "r11", "memory", "cc");
+  __asm__ volatile("syscall" : "=a"(ret) : "a"(num), "D"(a1), "S"(a2), "d"(a3) : "rcx", "r11", "memory", "cc");
   return ret;
 }
 

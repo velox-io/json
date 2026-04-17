@@ -23,12 +23,10 @@ typedef struct {
   const void *type_ptr;      /* eface.type_ptr (CACHE_MISS) */
   const uint8_t *data_ptr;   /* eface.data_ptr (SWITCH_OPS) */
   int32_t action;
-  uint8_t cache_flags;       /* VjIfaceCacheEntry.flags (SWITCH_OPS) */
+  uint8_t cache_flags; /* VjIfaceCacheEntry.flags (SWITCH_OPS) */
 } VjIfaceResult;
 
-VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend,
-                                        const uint8_t *iface_ptr,
-                                        const VjIfaceCacheEntry *cache,
-                                        int32_t cache_count, uint32_t flags);
+VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend, const uint8_t *iface_ptr,
+                                        const VjIfaceCacheEntry *cache, int32_t cache_count, uint32_t flags);
 
 #endif /* VJ_ENCVM_IFACE_H */
