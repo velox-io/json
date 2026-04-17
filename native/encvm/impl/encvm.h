@@ -927,14 +927,11 @@ vj_op_byte_slice: {
     VM_NEXT_SHORT();
   }
 
-  /* Worst-case: key + comma + indent + '"' + ceil(len/3)*4 + '"' */
-  VM_CHECK(op->key_len + 1 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
+  /* key + colon + indent + '"' + ceil(len/3)*4 + '"' */
+  VM_CHECK(op->key_len + 1 + 2 + ((sl->len + 2) / 3) * 4
+           + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
-  uint8_t *result = vj_encode_base64(buf, bend, sl->data, sl->len);
-  if (__builtin_expect(result == NULL, 0)) {
-    VM_SAVE_AND_RETURN(VJ_EXIT_BUF_FULL);
-  }
-  buf = result;
+  buf = vj_encode_base64(buf, bend, sl->data, sl->len);
   VM_NEXT_SHORT();
 }
 
