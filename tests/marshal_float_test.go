@@ -672,3 +672,49 @@ func TestNativeFloat_ValidJSON(t *testing.T) {
 		}
 	}
 }
+
+// TestFloat64_ExpAutoRoundTrip — verify float64 values round-trip correctly with ExpAuto formatting
+func TestFloat64_ExpAutoRoundTrip(t *testing.T) {
+	// Test specific values that were failing (losing precision)
+	testCases := []float64{
+		-1.5055146587107769e-13,
+		math.Float64frombits(0xc3a6b0ff55ab1151),
+		math.Float64frombits(0x4374577787c48705),
+	}
+
+	for _, val := range testCases {
+		w := wrapF64{V: val}
+
+		// Marshal with velox
+		vjsonOut, err := vjson.Marshal(w, vjson.WithFloatExpAuto())
+		if err != nil {
+			t.Fatalf("vjson.Marshal(%v) error: %v", val, err)
+		}
+
+		// Marshal with stdlib
+		stdOut, _ := json.Marshal(w)
+
+		// Extract and compare the formatted numbers
+		vjsonNum := extractNumber(t, string(vjsonOut))
+		stdNum := extractNumber(t, string(stdOut))
+
+		if vjsonNum != stdNum {
+			t.Errorf("ExpAuto mismatch for %v:\n  velox:  %s\n  stdlib: %s", val, string(vjsonOut), string(stdOut))
+		}
+
+		// Parse the formatted output back to float64 and compare bits
+		var vjsonVal wrapF64
+		if err := json.Unmarshal(vjsonOut, &vjsonVal); err != nil {
+			t.Errorf("Failed to unmarshal velox output for %v: %v\n  output: %s", val, err, vjsonOut)
+			continue
+		}
+
+		vjsonBits := math.Float64bits(vjsonVal.V)
+		originalBits := math.Float64bits(val)
+
+		if vjsonBits != originalBits {
+			t.Errorf("round-trip mismatch for bits=%016x:\n  velox:  %s\n  parsed bits: %016x",
+				originalBits, vjsonOut, vjsonBits)
+		}
+	}
+}

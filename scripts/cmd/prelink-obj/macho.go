@@ -214,19 +214,29 @@ func parseMachO(data []byte) (textSeg *machoSegment, extraSegs, allSegs []machoS
 	return textSeg, extraSegs, allSegs, symbols, buildVer, chainedFixupsOff, nil
 }
 
-// findTextExtent returns the end VA of the last useful section in __TEXT.
-func findTextExtent(textSeg *machoSegment) uint64 {
-	var maxEnd uint64
+// findTextExtent returns two extents for the __TEXT segment:
+//   - codeExtent: end VA of code-only sections (__text, __stubs, __stub_helper).
+//     The ADRP patcher must only scan within this range to avoid corrupting
+//     read-only data (e.g., lookup tables) that happens to decode as ADRP.
+//   - dataExtent: end VA of all useful sections (excluding __unwind_info).
+//     Used to determine how much of the segment to copy into the blob.
+func findTextExtent(textSeg *machoSegment) (codeExtent, dataExtent uint64) {
 	for _, sec := range textSeg.Sections {
 		if sec.SectName == "__unwind_info" {
 			continue
 		}
 		secEnd := sec.Addr + sec.Size
-		if secEnd > maxEnd {
-			maxEnd = secEnd
+		if secEnd > dataExtent {
+			dataExtent = secEnd
+		}
+		switch sec.SectName {
+		case "__text", "__stubs", "__stub_helper":
+			if secEnd > codeExtent {
+				codeExtent = secEnd
+			}
 		}
 	}
-	return maxEnd
+	return codeExtent, dataExtent
 }
 
 // chainedRebase represents a resolved rebase fixup.
@@ -318,11 +328,11 @@ func extractFromMachO(path string) (*ExtractResult, error) {
 		return nil, err
 	}
 
-	// Determine code extent
-	codeExtent := findTextExtent(textSeg)
+	// Determine code and data extents within __TEXT
+	codeExtent, dataExtent := findTextExtent(textSeg)
 
 	// Determine blob extent: max VA end across __TEXT and extra segments
-	blobExtent := codeExtent
+	blobExtent := dataExtent
 	for _, seg := range extraSegs {
 		segEnd := seg.VMAddr + seg.VMSize
 		if segEnd > blobExtent {
@@ -334,8 +344,8 @@ func extractFromMachO(path string) (*ExtractResult, error) {
 	segFileOff := int(textSeg.FileOff)
 	blob := make([]byte, blobExtent)
 
-	// Copy __TEXT content
-	copyEnd := min(segFileOff+int(codeExtent), len(data))
+	// Copy __TEXT content (all sections including data)
+	copyEnd := min(segFileOff+int(dataExtent), len(data))
 	copy(blob, data[segFileOff:copyEnd])
 
 	// Append extra segments (with zero-fill gaps between)
