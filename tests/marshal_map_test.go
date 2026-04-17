@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	vjson "github.com/velox-io/json"
+	"github.com/velox-io/json/venc"
 )
 
 type wrapMapStrStr struct {
@@ -787,5 +788,76 @@ func TestNativeMap_Random(t *testing.T) {
 	}
 	if mismatches > 5 {
 		t.Errorf("... and %d more mismatches (total %d/%d)", mismatches-5, mismatches, N)
+	}
+}
+
+func TestNativeMap_SliceOfMap_BufFull(t *testing.T) {
+	type SliceMap struct {
+		Items []map[string]string `json:"items"`
+	}
+
+	// Multiple test cases to cover different map sizes and patterns.
+	cases := []SliceMap{
+		// Original failing case
+		{Items: []map[string]string{
+			{"a": "1"},
+			{"b": "2", "c": "3"},
+			{},
+			nil,
+		}},
+		// All non-empty maps
+		{Items: []map[string]string{
+			{"x": "10"},
+			{"y": "20"},
+			{"z": "30"},
+		}},
+		// Single element (should always pass)
+		{Items: []map[string]string{
+			{"k": "v"},
+		}},
+		// Two elements with multi-key maps
+		{Items: []map[string]string{
+			{"a": "1", "b": "2", "c": "3"},
+			{"d": "4", "e": "5"},
+		}},
+		// Mix of nil, empty, and populated
+		{Items: []map[string]string{
+			nil,
+			{},
+			{"key": "val"},
+			nil,
+			{},
+		}},
+		// Large values to force buffer boundaries at different points
+		{Items: []map[string]string{
+			{"long_key": "a_somewhat_long_value_here"},
+			{"k": "v"},
+		}},
+	}
+
+	for ci, val := range cases {
+		want, _ := json.Marshal(val)
+
+		// Default buffer (no WithBufSize) to test the basic path.
+		got, err := vjson.Marshal(val)
+		if err != nil {
+			t.Fatalf("case=%d: Marshal error: %v", ci, err)
+		}
+		if !mapsEqual(got, want) {
+			t.Errorf("case=%d: mismatch:\n  got:  %s\n  want: %s",
+				ci, got, want)
+		}
+
+		// Sweep buffer sizes to also stress BUF_FULL re-entry.
+		for bufSize := 1; bufSize <= 256; bufSize++ {
+			got, err := vjson.Marshal(val, venc.WithBufSize(bufSize))
+			if err != nil {
+				t.Fatalf("case=%d bufSize=%d: Marshal error: %v", ci, bufSize, err)
+			}
+			if !mapsEqual(got, want) {
+				t.Errorf("case=%d bufSize=%d: mismatch:\n  got:  %s\n  want: %s",
+					ci, bufSize, got, want)
+			}
+		}
 	}
 }

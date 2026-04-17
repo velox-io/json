@@ -476,10 +476,8 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			if !ok {
 				return fmt.Errorf("venc: interp: opMap at PC=%d with no fallback info", pc)
 			}
-			if hdr.KeyLen > 0 {
-				es.interpWriteKey(hdr, first, indent)
-				first = false
-			}
+			es.interpWriteKey(hdr, first, indent)
+			first = false
 			mapPtr := unsafe.Add(base, fb.Offset)
 			if err := fb.TI.Encode(es, mapPtr); err != nil {
 				return err

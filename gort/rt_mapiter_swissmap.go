@@ -45,12 +45,16 @@ func init() {
 
 // verifySwissMapLayout checks that the runtime's Swiss Map struct offsets
 // match what our C code assumes (GoSwissMap/GoSwissTable in types.h).
+//
+// Uses 2 entries so we can verify the inter-slot stride (slotSize) is correct,
+// not just that a single slot's key/elem happen to align. This catches layout
+// changes like GOEXPERIMENT=mapsplitgroup (KKKKVVVV instead of KVKVKVKV).
 func verifySwissMapLayout() bool {
-	m := map[string]string{"a": "b"}
+	m := map[string]string{"a": "b", "c": "d"}
 	mp := *(*unsafe.Pointer)(unsafe.Pointer(&m))
 
 	used := *(*uint64)(mp)
-	if used != 1 {
+	if used != 2 {
 		return false
 	}
 	dirLen := *(*int64)(unsafe.Add(mp, 24))
@@ -59,42 +63,46 @@ func verifySwissMapLayout() bool {
 	}
 	dirPtr := *(*unsafe.Pointer)(unsafe.Add(mp, 16))
 	if dirPtr == nil {
-		return false
-	}
-
-	// Find the full slot (ctrl byte with bit 7 clear).
-	ctrls := *(*uint64)(dirPtr)
-	foundSlot := -1
-	for i := range 8 {
-		ctrl := byte(ctrls >> (i * 8))
-		if ctrl&0x80 == 0 {
-			foundSlot = i
-			break
-		}
-	}
-	if foundSlot < 0 {
 		return false
 	}
 
 	const slotSize = 32
 	const elemOff = 16
-	keyPtr := unsafe.Add(dirPtr, 8+uintptr(foundSlot)*slotSize)
-	key := *(*string)(keyPtr)
-	if key != "a" {
-		return false
-	}
 
-	elemPtr := unsafe.Add(dirPtr, 8+uintptr(foundSlot)*slotSize+elemOff)
-	elem := *(*string)(elemPtr)
-	return elem == "b"
+	// Find both full slots and verify key+elem at each.
+	ctrls := *(*uint64)(dirPtr)
+	found := 0
+	for i := range 8 {
+		ctrl := byte(ctrls >> (i * 8))
+		if ctrl&0x80 != 0 {
+			continue
+		}
+		slotBase := unsafe.Add(dirPtr, 8+uintptr(i)*slotSize)
+		key := *(*string)(slotBase)
+		elem := *(*string)(unsafe.Add(slotBase, elemOff))
+		switch key {
+		case "a":
+			if elem != "b" {
+				return false
+			}
+		case "c":
+			if elem != "d" {
+				return false
+			}
+		default:
+			return false
+		}
+		found++
+	}
+	return found == 2
 }
 
 func verifySwissMapStrIntLayout() bool {
-	m := map[string]int{"a": 42}
+	m := map[string]int{"a": 42, "c": 99}
 	mp := *(*unsafe.Pointer)(unsafe.Pointer(&m))
 
 	used := *(*uint64)(mp)
-	if used != 1 {
+	if used != 2 {
 		return false
 	}
 	dirLen := *(*int64)(unsafe.Add(mp, 24))
@@ -106,38 +114,42 @@ func verifySwissMapStrIntLayout() bool {
 		return false
 	}
 
-	ctrls := *(*uint64)(dirPtr)
-	foundSlot := -1
-	for i := range 8 {
-		ctrl := byte(ctrls >> (i * 8))
-		if ctrl&0x80 == 0 {
-			foundSlot = i
-			break
-		}
-	}
-	if foundSlot < 0 {
-		return false
-	}
-
 	const slotSize = 24
 	const elemOff = 16
-	keyPtr := unsafe.Add(dirPtr, 8+uintptr(foundSlot)*slotSize)
-	key := *(*string)(keyPtr)
-	if key != "a" {
-		return false
-	}
 
-	elemPtr := unsafe.Add(dirPtr, 8+uintptr(foundSlot)*slotSize+elemOff)
-	elem := *(*int)(elemPtr)
-	return elem == 42
+	ctrls := *(*uint64)(dirPtr)
+	found := 0
+	for i := range 8 {
+		ctrl := byte(ctrls >> (i * 8))
+		if ctrl&0x80 != 0 {
+			continue
+		}
+		slotBase := unsafe.Add(dirPtr, 8+uintptr(i)*slotSize)
+		key := *(*string)(slotBase)
+		elem := *(*int)(unsafe.Add(slotBase, elemOff))
+		switch key {
+		case "a":
+			if elem != 42 {
+				return false
+			}
+		case "c":
+			if elem != 99 {
+				return false
+			}
+		default:
+			return false
+		}
+		found++
+	}
+	return found == 2
 }
 
 func verifySwissMapStrInt64Layout() bool {
-	m := map[string]int64{"a": 42}
+	m := map[string]int64{"a": 42, "c": 99}
 	mp := *(*unsafe.Pointer)(unsafe.Pointer(&m))
 
 	used := *(*uint64)(mp)
-	if used != 1 {
+	if used != 2 {
 		return false
 	}
 	dirLen := *(*int64)(unsafe.Add(mp, 24))
@@ -149,35 +161,39 @@ func verifySwissMapStrInt64Layout() bool {
 		return false
 	}
 
-	ctrls := *(*uint64)(dirPtr)
-	foundSlot := -1
-	for i := range 8 {
-		ctrl := byte(ctrls >> (i * 8))
-		if ctrl&0x80 == 0 {
-			foundSlot = i
-			break
-		}
-	}
-	if foundSlot < 0 {
-		return false
-	}
-
 	const slotSize = 24
 	const elemOff = 16
-	keyPtr := unsafe.Add(dirPtr, 8+uintptr(foundSlot)*slotSize)
-	key := *(*string)(keyPtr)
-	if key != "a" {
-		return false
-	}
 
-	elemPtr := unsafe.Add(dirPtr, 8+uintptr(foundSlot)*slotSize+elemOff)
-	elem := *(*int64)(elemPtr)
-	return elem == 42
+	ctrls := *(*uint64)(dirPtr)
+	found := 0
+	for i := range 8 {
+		ctrl := byte(ctrls >> (i * 8))
+		if ctrl&0x80 != 0 {
+			continue
+		}
+		slotBase := unsafe.Add(dirPtr, 8+uintptr(i)*slotSize)
+		key := *(*string)(slotBase)
+		elem := *(*int64)(unsafe.Add(slotBase, elemOff))
+		switch key {
+		case "a":
+			if elem != 42 {
+				return false
+			}
+		case "c":
+			if elem != 99 {
+				return false
+			}
+		default:
+			return false
+		}
+		found++
+	}
+	return found == 2
 }
 
 // ProbeSwissMapSlotSize determines the slot size for a map[string]V by
-// creating a 1-element map and inspecting the Swiss Map memory layout.
-// Requires SwissMapLayoutOK as a precondition.
+// creating a 2-element map and verifying that both slots are at the expected
+// stride. Requires SwissMapLayoutOK as a precondition.
 func ProbeSwissMapSlotSize(mapType reflect.Type, valSize uintptr) (slotSize uintptr, ok bool) {
 	if !SwissMapLayoutOK {
 		return 0, false
@@ -189,14 +205,18 @@ func ProbeSwissMapSlotSize(mapType reflect.Type, valSize uintptr) (slotSize uint
 	expectedSlotSize := (16 + valSize + 7) &^ 7
 
 	mt := TypePtr(mapType)
-	mp := MakeMap(mt, 1, nil)
-	valPtr := MapAssignFastStr(mt, mp, "__gort_probe__")
+	mp := MakeMap(mt, 2, nil)
+	valPtr1 := MapAssignFastStr(mt, mp, "__gort_probe_1__")
 	for i := uintptr(0); i < valSize; i++ {
-		*(*byte)(unsafe.Add(valPtr, i)) = 0
+		*(*byte)(unsafe.Add(valPtr1, i)) = 0
+	}
+	valPtr2 := MapAssignFastStr(mt, mp, "__gort_probe_2__")
+	for i := uintptr(0); i < valSize; i++ {
+		*(*byte)(unsafe.Add(valPtr2, i)) = 0
 	}
 
 	used := *(*uint64)(mp)
-	if used != 1 {
+	if used != 2 {
 		return 0, false
 	}
 	dirLen := *(*int64)(unsafe.Add(mp, 24))
@@ -209,21 +229,20 @@ func ProbeSwissMapSlotSize(mapType reflect.Type, valSize uintptr) (slotSize uint
 	}
 
 	ctrls := *(*uint64)(dirPtr)
-	foundSlot := -1
+	found := 0
 	for i := range 8 {
 		ctrl := byte(ctrls >> (i * 8))
-		if ctrl&0x80 == 0 {
-			foundSlot = i
-			break
+		if ctrl&0x80 != 0 {
+			continue
 		}
+		keyPtr := unsafe.Add(dirPtr, 8+uintptr(i)*expectedSlotSize)
+		key := *(*string)(keyPtr)
+		if key != "__gort_probe_1__" && key != "__gort_probe_2__" {
+			return 0, false
+		}
+		found++
 	}
-	if foundSlot < 0 {
-		return 0, false
-	}
-
-	keyPtr := unsafe.Add(dirPtr, 8+uintptr(foundSlot)*expectedSlotSize)
-	key := *(*string)(keyPtr)
-	if key != "__gort_probe__" {
+	if found != 2 {
 		return 0, false
 	}
 
