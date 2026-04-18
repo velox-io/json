@@ -79,7 +79,7 @@ static EncValueResult encode_primitive_value(uint8_t *buf, const uint8_t *bend, 
   }
   case OP_STRING: {
     const GoString *s = (const GoString *)ptr;
-    int64_t str_need = 2 + (s->len * 6);
+    int64_t str_need  = 2 + (s->len * 6);
     if (__builtin_expect(buf + str_need > bend, 0))
       return (EncValueResult){NULL, VJ_EXIT_BUF_FULL};
     *buf++ = '"';
@@ -146,25 +146,25 @@ static EncValueResult encode_primitive_value(uint8_t *buf, const uint8_t *bend, 
 VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend, const uint8_t *iface_ptr,
                                         const VjIfaceCacheEntry *cache, int32_t cache_count, uint32_t flags) {
 
-  const void *type_ptr = *(const void **)iface_ptr;
+  const void *type_ptr    = *(const void **)iface_ptr;
   const uint8_t *data_ptr = *(const uint8_t **)(iface_ptr + 8);
 
   /* Binary search the sorted cache by type pointer. */
-  uint8_t tag = 0;
+  uint8_t tag               = 0;
   const uint8_t *cached_ops = NULL;
-  uint8_t cache_flags = 0;
-  int found = 0;
+  uint8_t cache_flags       = 0;
+  int found                 = 0;
 
   {
     int32_t lo = 0, hi = cache_count - 1;
     while (lo <= hi) {
-      int32_t mid = (lo + hi) >> 1;
+      int32_t mid         = (lo + hi) >> 1;
       const void *mid_ptr = cache[mid].type_ptr;
       if (mid_ptr == type_ptr) {
-        tag = cache[mid].tag;
-        cached_ops = cache[mid].ops;
+        tag         = cache[mid].tag;
+        cached_ops  = cache[mid].ops;
         cache_flags = cache[mid].flags;
-        found = 1;
+        found       = 1;
         break;
       }
       if ((uintptr_t)mid_ptr < (uintptr_t)type_ptr)

@@ -34,6 +34,13 @@ func MapLen(m unsafe.Pointer) int
 //go:linkname TypedMemmove runtime.typedmemmove
 func TypedMemmove(typ unsafe.Pointer, dst unsafe.Pointer, src unsafe.Pointer)
 
+// Memmove 是 runtime.memmove 的直通入口. 用于已知 src/dst 都不含 GC 指针
+// 的场合 (noscan 数据), 跳过 typedmemmove 的 ptrmask + write barrier 检查.
+//
+//go:linkname Memmove runtime.memmove
+//go:noescape
+func Memmove(dst unsafe.Pointer, src unsafe.Pointer, n uintptr)
+
 //go:linkname MallocGC runtime.mallocgc
 func MallocGC(size uintptr, typ unsafe.Pointer, needzero bool) unsafe.Pointer
 

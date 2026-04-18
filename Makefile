@@ -8,6 +8,7 @@ fmt:
 	gofmt -w -s .
 	goimports -w .
 	clang-format -i native/encvm/impl/*.h native/encvm/impl/*.c
+	clang-format -i native/ndec/impl/ndec/core/*.h native/ndec/impl/ndec/*.h
 
 test:
 	@./scripts/run-test.sh
@@ -98,6 +99,11 @@ gen-all:
 		echo ""; \
 	done
 
+ndec:
+	@TOOLCHAIN="$(TOOLCHAIN)" LINUX_SYSROOT="$(LINUX_SYSROOT)" \
+	bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(GEN_NATIVE_PRELINK_FLAG) \
+		native/ndec/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
+
 BENCH_FILTER ?= .
 BENCH_TITLE ?= Benchmark Results
 BENCH_COUNT ?= 5
@@ -135,4 +141,4 @@ bench-pack: bench-build
 	tar czf $(BENCH_PACK) -C $(CURDIR) Makefile scripts/bench.sh scripts/benchcmp.sh scripts/bench-run.sh $(BENCH_BIN)
 	@echo "Packed: $(BENCH_PACK)"
 
-.PHONY: lint lint-ci fmt test test-coverage bclean fuzz fuzz-parallel fuzz-concurrent gen gen-all gen-debug gen-pgo-use bench-build bench-pack benchviz benchcmp
+.PHONY: lint lint-ci fmt test test-coverage bclean fuzz fuzz-parallel fuzz-concurrent gen gen-all gen-debug gen-pgo-use ndec bench-build bench-pack benchviz benchcmp

@@ -50,6 +50,10 @@ linters:
     - std-error-handling
     rules:
     - linters:
+      - govet
+      path: ndec/typeinfo_promote_test\.go
+      text: 'repeats json tag'
+    - linters:
       - errcheck
       - gosec
       path: _test\.go

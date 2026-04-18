@@ -46,7 +46,7 @@ int main(void) {
   int failed = 0;
 
   for (int i = 0; i < ncases; i++) {
-    int n = vj_write_float64(buf, cases[i].value, VJ_FTOA_EXP_AUTO);
+    int n  = vj_write_float64(buf, cases[i].value, VJ_FTOA_EXP_AUTO);
     buf[n] = '\0';
 
     if (strcmp((char *)buf, cases[i].expected) != 0) {

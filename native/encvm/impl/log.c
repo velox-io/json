@@ -14,7 +14,7 @@ NOINLINE int vj_fprintf_stderr(const char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
 
-  int total = 0;
+  int total        = 0;
   const char *span = fmt;
 
   for (const char *p = fmt; *p; p++) {
@@ -44,21 +44,21 @@ NOINLINE int vj_fprintf_stderr(const char *fmt, ...) {
     }
     case 'd': {
       int32_t v = va_arg(ap, int32_t);
-      start = vj_fmt_i32(end, v);
+      start     = vj_fmt_i32(end, v);
       vj_raw_write_stderr(start, (int)(end - start));
       total += (int)(end - start);
       break;
     }
     case 'u': {
       uint32_t v = va_arg(ap, uint32_t);
-      start = vj_fmt_u32(end, v);
+      start      = vj_fmt_u32(end, v);
       vj_raw_write_stderr(start, (int)(end - start));
       total += (int)(end - start);
       break;
     }
     case 'x': {
       uint32_t v = va_arg(ap, uint32_t);
-      start = vj_fmt_hex32(end, v);
+      start      = vj_fmt_hex32(end, v);
       vj_raw_write_stderr(start, (int)(end - start));
       total += (int)(end - start);
       break;

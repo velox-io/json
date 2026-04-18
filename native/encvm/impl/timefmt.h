@@ -68,7 +68,7 @@ static inline int32_t vj_time_get_offset(const void *loc) {
 /* Extract internal seconds (since year 1) and nanoseconds from time.Time. */
 static inline void vj_time_extract(const GoTime *t, int64_t *out_sec, int32_t *out_nsec) {
   uint64_t wall = t->wall;
-  *out_nsec = (int32_t)(wall & VJ_TIME_NSEC_MASK);
+  *out_nsec     = (int32_t)(wall & VJ_TIME_NSEC_MASK);
   if (wall & VJ_TIME_HAS_MONOTONIC) {
     *out_sec = VJ_TIME_WALL_TO_INTERNAL + (int64_t)(wall << 1 >> (VJ_TIME_NSEC_SHIFT + 1));
   } else {
@@ -92,41 +92,41 @@ static inline int vj_write_rfc3339nano(uint8_t *buf, const GoTime *t, int32_t tz
   vj_time_extract(t, &isec, &nsec);
 
   int64_t unix_sec = isec - VJ_TIME_UNIX_TO_INTERNAL + (int64_t)tz_offset;
-  uint64_t abs = (uint64_t)(unix_sec + VJ_TIME_UNIX_TO_ABS);
+  uint64_t abs     = (uint64_t)(unix_sec + VJ_TIME_UNIX_TO_ABS);
 
   /* Split into days and time-of-day */
-  uint64_t days = abs / VJ_SECONDS_PER_DAY;
+  uint64_t days    = abs / VJ_SECONDS_PER_DAY;
   uint32_t day_sec = (uint32_t)(abs % VJ_SECONDS_PER_DAY);
 
   /* Neri-Schneider: days → year/month/day */
-  uint64_t d4 = 4 * days + 3;
+  uint64_t d4      = 4 * days + 3;
   uint64_t century = d4 / 146097;
-  uint32_t cd = (uint32_t)(d4 % 146097) | 3;
+  uint32_t cd      = (uint32_t)(d4 % 146097) | 3;
 
-  uint64_t mul = (uint64_t)2939745 * (uint64_t)cd;
+  uint64_t mul   = (uint64_t)2939745 * (uint64_t)cd;
   uint32_t cyear = (uint32_t)(mul >> 32);
   uint32_t ayday = (uint32_t)((uint32_t)mul / 2939745 / 4);
 
-  uint32_t md = 2141 * ayday + 197913;
+  uint32_t md     = 2141 * ayday + 197913;
   uint32_t amonth = md >> 16;
-  uint32_t mday = 1 + (md & 0xFFFF) / 2141;
+  uint32_t mday   = 1 + (md & 0xFFFF) / 2141;
 
   uint32_t janFeb = (ayday >= VJ_TIME_MARCH_THRU_DEC) ? 1 : 0;
-  int year = (int)(century * 100 - VJ_TIME_ABSOLUTE_YEARS) + (int)cyear + (int)janFeb;
-  uint32_t month = amonth - janFeb * 12;
+  int year        = (int)(century * 100 - VJ_TIME_ABSOLUTE_YEARS) + (int)cyear + (int)janFeb;
+  uint32_t month  = amonth - janFeb * 12;
 
   *year_out = year;
 
   /* Clock */
   uint32_t hour = day_sec / VJ_SECONDS_PER_HOUR;
-  uint32_t rem = day_sec % VJ_SECONDS_PER_HOUR;
-  uint32_t min = rem / VJ_SECONDS_PER_MINUTE;
-  uint32_t sec = rem % VJ_SECONDS_PER_MINUTE;
+  uint32_t rem  = day_sec % VJ_SECONDS_PER_HOUR;
+  uint32_t min  = rem / VJ_SECONDS_PER_MINUTE;
+  uint32_t sec  = rem % VJ_SECONDS_PER_MINUTE;
 
   /* "YYYY-MM-DDTHH:MM:SS" */
   *buf++ = '"';
   {
-    int y = year;
+    int y  = year;
     buf[0] = (uint8_t)('0' + y / 1000);
     y %= 1000;
     buf[1] = (uint8_t)('0' + y / 100);
@@ -175,7 +175,7 @@ static inline int vj_write_rfc3339nano(uint8_t *buf, const GoTime *t, int32_t tz
     int off = tz_offset;
     if (off < 0) {
       *buf++ = '-';
-      off = -off;
+      off    = -off;
     } else {
       *buf++ = '+';
     }

@@ -1,0 +1,64 @@
+{
+  "id": 12345,
+  "name": "Alice Johnson",
+  "email": "alice@example.com",
+  "bio": "Software engineer with 10 years of experience in distributed systems, cloud architecture, and high-performance computing. Previously at Google and Amazon.",
+  "scores": [
+    98.5,
+    87.3,
+    95.1,
+    100.0,
+    92.8,
+    88.6,
+    76.4,
+    91.2,
+    83.9,
+    97.0
+  ],
+  "tags": [
+    "admin",
+    "verified",
+    "premium",
+    "early-adopter",
+    "contributor"
+  ],
+  "address": {
+    "street": "742 Evergreen Terrace",
+    "city": "Springfield",
+    "state": "IL",
+    "zip": "62704",
+    "country": "United States"
+  },
+  "phones": [
+    "+1-555-0101",
+    "+1-555-0102",
+    "+1-555-0103"
+  ],
+  "metadata": {
+    "created": "2024-01-15T08:30:00Z",
+    "updated": "2025-12-01T14:22:33Z",
+    "login_count": 1847,
+    "verified_email": true,
+    "rating": 4.8,
+    "notes": "Preferred contact method is email. Active in open-source community and frequent conference speaker on systems performance."
+  },
+  "permissions": [
+    "read",
+    "write",
+    "delete",
+    "admin",
+    "audit",
+    "export",
+    "import"
+  ],
+  "favorites": {
+    "color": "blue",
+    "language": "Rust",
+    "editor": "Neovim",
+    "os": "Arch Linux",
+    "book": "The Art of Computer Programming",
+    "food": "Sushi",
+    "hobby": "Rock climbing"
+  }
+}
+

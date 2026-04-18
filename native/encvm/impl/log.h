@@ -32,10 +32,10 @@
 
 static inline long vj_raw_syscall3(long num, long a1, long a2, long a3) {
   register long x16 __asm__("x16") = num;
-  register long x8 __asm__("x8") = num;
-  register long x0 __asm__("x0") = a1;
-  register long x1 __asm__("x1") = a2;
-  register long x2 __asm__("x2") = a3;
+  register long x8 __asm__("x8")   = num;
+  register long x0 __asm__("x0")   = a1;
+  register long x1 __asm__("x1")   = a2;
+  register long x2 __asm__("x2")   = a3;
   __asm__ volatile("svc #0x80" : "=r"(x0) : "r"(x16), "r"(x8), "r"(x0), "r"(x1), "r"(x2) : "memory", "cc");
   return x0;
 }
@@ -74,7 +74,7 @@ static inline char *vj_fmt_u32(char *end, uint32_t v) {
 
 static inline char *vj_fmt_i32(char *end, int32_t v) {
   uint32_t u = (v < 0) ? (uint32_t)(-(int64_t)v) : (uint32_t)v;
-  end = vj_fmt_u32(end, u);
+  end        = vj_fmt_u32(end, u);
   if (v < 0)
     *--end = '-';
   return end;

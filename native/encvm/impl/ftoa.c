@@ -77,7 +77,7 @@ static inline int us_skewed(int e) {
 static inline us_scaler us_prescale(int e, int p, int lp) {
   us_scaler c;
   c.pm = POW10TAB[p + 348];
-  c.s = -(e + lp + 3);
+  c.s  = -(e + lp + 3);
   return c;
 }
 
@@ -87,13 +87,13 @@ static inline us_scaler us_prescale(int e, int p, int lp) {
  */
 static inline us_unrounded us_uscale(uint64_t x, us_scaler c) {
   us_uint128_t full = (us_uint128_t)x * c.pm.hi;
-  uint64_t hi = (uint64_t)(full >> 64);
-  uint64_t mid = (uint64_t)full;
-  uint64_t sticky = 1;
+  uint64_t hi       = (uint64_t)(full >> 64);
+  uint64_t mid      = (uint64_t)full;
+  uint64_t sticky   = 1;
   if ((hi & (((uint64_t)1 << (c.s & 63)) - 1)) == 0) {
     /* Slow path: check low bits via pm.lo correction */
     uint64_t mid2 = (uint64_t)((us_uint128_t)x * c.pm.lo >> 64);
-    sticky = (mid - mid2 > 1) ? 1 : 0;
+    sticky        = (mid - mid2 > 1) ? 1 : 0;
     hi -= (mid < mid2) ? 1 : 0;
   }
   return (hi >> c.s) | sticky;
@@ -108,13 +108,13 @@ static inline uint64_t us_rotr64(uint64_t x, int k) {
 /* Remove trailing decimal zeros from x * 10^p; updates *xp / *pp in place. */
 static inline void us_trim_zeros(uint64_t *xp, int *pp) {
   uint64_t x = *xp;
-  int p = *pp;
+  int p      = *pp;
 
-  static const uint64_t inv5 = 0xcccccccccccccccdULL;
+  static const uint64_t inv5   = 0xcccccccccccccccdULL;
   static const uint64_t inv5p2 = 0x8f5c28f5c28f5c29ULL;
   static const uint64_t inv5p4 = 0xd288ce703afb7e91ULL;
   static const uint64_t inv5p8 = 0xc767074b22e90e21ULL;
-  static const uint64_t max64 = ~(uint64_t)0;
+  static const uint64_t max64  = ~(uint64_t)0;
 
   uint64_t d;
 
@@ -163,7 +163,7 @@ static inline void us_trim_zeros(uint64_t *xp, int *pp) {
 static inline void us_unpack64(double f, uint64_t *m, int *e) {
   uint64_t bits;
   __builtin_memcpy(&bits, &f, 8);
-  *m = ((uint64_t)1 << 63) | ((bits & (((uint64_t)1 << 52) - 1)) << 11);
+  *m      = ((uint64_t)1 << 63) | ((bits & (((uint64_t)1 << 52) - 1)) << 11);
   int exp = (int)((bits >> 52) & 0x7FF);
   if (exp == 0) {
     /* Subnormal: clear implicit bit, normalize */
@@ -196,17 +196,17 @@ static inline void us_short64(double f, uint64_t *d_out, int *p_out) {
 
   if (m == ((uint64_t)1 << 63) && e > minExp) {
     /* Power of two: skewed footprint */
-    p = -us_skewed(e + z);
+    p  = -us_skewed(e + z);
     mn = m - ((uint64_t)1 << (z - 2)); /* m - 1/4 * 2^(e+z) */
   } else {
     if (e < minExp) {
       z = 11 + (minExp - e);
     }
-    p = -us_log10Pow2(e + z);
+    p  = -us_log10Pow2(e + z);
     mn = m - ((uint64_t)1 << (z - 1)); /* m - 1/2 * 2^(e+z) */
   }
   uint64_t mx = m + ((uint64_t)1 << (z - 1)); /* m + 1/2 * 2^(e+z) */
-  int odd = (int)(m >> z) & 1;
+  int odd     = (int)(m >> z) & 1;
 
   us_scaler pre = us_prescale(e, p, us_log2Pow10(p));
   uint64_t dmin = us_ceil(us_nudge(us_uscale(mn, pre), +odd));
@@ -261,8 +261,8 @@ static inline int us_write_mantissa_digits(uint8_t *buf, uint64_t mantissa, uint
   uint32_t i = olength;
   if (mantissa >> 32 != 0) {
     const uint64_t q = mantissa / 100000000;
-    uint32_t low8 = (uint32_t)(mantissa - q * 100000000);
-    mantissa = q;
+    uint32_t low8    = (uint32_t)(mantissa - q * 100000000);
+    mantissa         = q;
     const uint32_t c = low8 % 10000;
     low8 /= 10000;
     const uint32_t dd = low8 % 10000;
@@ -298,8 +298,8 @@ static inline int us_write_mantissa_digits(uint8_t *buf, uint64_t mantissa, uint
   }
   if (output2 >= 10) {
     const uint32_t c = output2 << 1;
-    buf[1] = DIGIT_PAIRS[c + 1];
-    buf[0] = DIGIT_PAIRS[c];
+    buf[1]           = DIGIT_PAIRS[c + 1];
+    buf[0]           = DIGIT_PAIRS[c];
   } else {
     buf[0] = (char)('0' + output2);
   }
@@ -330,8 +330,8 @@ static inline int us_format_fixed(uint8_t *buf, uint64_t mantissa, int32_t expon
   } else {
     int32_t absExp = -exponent;
     if ((int32_t)olength <= absExp) {
-      buf[idx++] = '0';
-      buf[idx++] = '.';
+      buf[idx++]           = '0';
+      buf[idx++]           = '.';
       int32_t leadingZeros = absExp - (int32_t)olength;
       for (int32_t i = 0; i < leadingZeros; i++)
         buf[idx++] = '0';
@@ -392,16 +392,16 @@ static inline int us_format_exp(uint8_t *buf, uint64_t mantissa, int32_t exponen
   buf[idx++] = 'e';
   if (sciExp < 0) {
     buf[idx++] = '-';
-    sciExp = -sciExp;
+    sciExp     = -sciExp;
   } else {
     buf[idx++] = '+';
   }
 
   /* Write exponent without leading zeros */
   if (sciExp >= 100) {
-    uint32_t q = (uint32_t)sciExp / 100;
-    buf[idx++] = (uint8_t)('0' + q);
-    uint32_t r = (uint32_t)sciExp - q * 100;
+    uint32_t q  = (uint32_t)sciExp / 100;
+    buf[idx++]  = (uint8_t)('0' + q);
+    uint32_t r  = (uint32_t)sciExp - q * 100;
     uint32_t d0 = r << 1;
     __builtin_memcpy(buf + idx, DIGIT_PAIRS + d0, 2);
     idx += 2;
@@ -421,7 +421,7 @@ static inline int us_format_exp(uint8_t *buf, uint64_t mantissa, int32_t exponen
 int vj_write_float64(uint8_t *buf, double value, int flags) {
   uint64_t bits;
   __builtin_memcpy(&bits, &value, 8);
-  const int sign = (bits >> 63) != 0;
+  const int sign              = (bits >> 63) != 0;
   const uint64_t ieeeMantissa = bits & (((uint64_t)1 << 52) - 1);
   const uint32_t ieeeExponent = (uint32_t)((bits >> 52) & 0x7FF);
 
@@ -438,12 +438,12 @@ int vj_write_float64(uint8_t *buf, double value, int flags) {
   /* Small integer fast path */
   if (ieeeExponent != 0) {
     uint64_t m2 = ((uint64_t)1 << 52) | ieeeMantissa;
-    int32_t e2 = (int32_t)ieeeExponent - 1023 - 52;
+    int32_t e2  = (int32_t)ieeeExponent - 1023 - 52;
     if (e2 <= 0 && e2 >= -52) {
       uint64_t mask = ((uint64_t)1 << -e2) - 1;
       if ((m2 & mask) == 0) {
         uint64_t mantissa = m2 >> -e2;
-        int32_t exponent = 0;
+        int32_t exponent  = 0;
         /* Strip trailing zeros */
         while (mantissa != 0) {
           uint64_t q = mantissa / 10;
@@ -480,7 +480,7 @@ int vj_write_float64(uint8_t *buf, double value, int flags) {
 int vj_write_float32(uint8_t *buf, float value, int flags) {
   uint32_t bits;
   __builtin_memcpy(&bits, &value, 4);
-  const int sign = (bits >> 31) != 0;
+  const int sign              = (bits >> 31) != 0;
   const uint32_t ieeeMantissa = bits & ((1u << 23) - 1);
   const uint32_t ieeeExponent = (bits >> 23) & 0xFF;
 
@@ -538,7 +538,7 @@ int vj_write_float32(uint8_t *buf, float value, int flags) {
     mn = m - ((uint64_t)1 << (z - 1));
   }
   uint64_t mx = m + ((uint64_t)1 << (z - 1));
-  int odd = (int)(m >> z) & 1;
+  int odd     = (int)(m >> z) & 1;
 
   us_scaler pre = us_prescale(e, p2, us_log2Pow10(p2));
   uint64_t dmin = us_ceil(us_nudge(us_uscale(mn, pre), +odd));

@@ -37,14 +37,14 @@ static inline int vj_write_unicode_escape(uint8_t *buf, uint32_t cp) {
  * window) simply bulk-copies via SIMD store. */
 static inline void vj_escape_line_terms(uint8_t **out_ptr, const uint8_t *src, int64_t start, int64_t end) {
   uint8_t *out = *out_ptr;
-  int64_t i = start;
+  int64_t i    = start;
 
 #if defined(__SSE2__) || defined(__aarch64__)
   const __m128i ve2 = _mm_set1_epi8((char)0xE2);
 
   while (i + 16 <= end) {
     __m128i v = _mm_loadu_si128((const __m128i *)&src[i]);
-    int mask = _mm_movemask_epi8(_mm_cmpeq_epi8(v, ve2));
+    int mask  = _mm_movemask_epi8(_mm_cmpeq_epi8(v, ve2));
     if (mask == 0) {
       _mm_storeu_si128((__m128i *)out, v);
       out += 16;
@@ -114,8 +114,8 @@ static inline void vj_escape_line_terms(uint8_t **out_ptr, const uint8_t *src, i
  * intercepting U+2028/2029 costs just one extra byte comparison per rune. */
 static inline void vj_validate_utf8_run(uint8_t **out_ptr, const uint8_t *src, int64_t start, int64_t end,
                                         const int check_line_terms) {
-  uint8_t *out = *out_ptr;
-  int64_t i = start;
+  uint8_t *out        = *out_ptr;
+  int64_t i           = start;
   int64_t flush_start = i;
 
   while (i < end) {
@@ -161,7 +161,8 @@ static inline void vj_validate_utf8_run(uint8_t **out_ptr, const uint8_t *src, i
       }
       goto invalid_byte;
     } else if ((b0 & 0xF8) == 0xF0) {
-      if (i + 4 <= end && (src[i + 1] & 0xC0) == 0x80 && (src[i + 2] & 0xC0) == 0x80 && (src[i + 3] & 0xC0) == 0x80) {
+      if (i + 4 <= end && (src[i + 1] & 0xC0) == 0x80 && (src[i + 2] & 0xC0) == 0x80 &&
+          (src[i + 3] & 0xC0) == 0x80) {
         uint32_t cp = ((uint32_t)(b0 & 0x07) << 18) | ((uint32_t)(src[i + 1] & 0x3F) << 12) |
                       ((uint32_t)(src[i + 2] & 0x3F) << 6) | (src[i + 3] & 0x3F);
         if (cp >= 0x10000 && cp <= 0x10FFFF) {

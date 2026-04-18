@@ -1,0 +1,7 @@
+{
+	"bool": true,
+	"int": 42,
+	"int64": 9223372036854775807,
+	"float64": 3.14159265358979,
+	"string": "hello world benchmark"
+}

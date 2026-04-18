@@ -31,9 +31,11 @@ static const uint32_t Vec4x10k[4] ALIGNED(16) = {10000, 10000, 10000, 10000};
 ALIGNED_DECL(16)
 static const uint32_t Vec4xDiv10k[4] ALIGNED(16) = {0xd1b71759, 0xd1b71759, 0xd1b71759, 0xd1b71759};
 ALIGNED_DECL(16)
-static const uint16_t VecDivPowers[8] ALIGNED(16) = {0x20c5, 0x147b, 0x3334, 0x8000, 0x20c5, 0x147b, 0x3334, 0x8000};
+static const uint16_t VecDivPowers[8] ALIGNED(16) = {0x20c5, 0x147b, 0x3334, 0x8000,
+                                                     0x20c5, 0x147b, 0x3334, 0x8000};
 ALIGNED_DECL(16)
-static const uint16_t VecShiftPowers[8] ALIGNED(16) = {0x0080, 0x0800, 0x2000, 0x8000, 0x0080, 0x0800, 0x2000, 0x8000};
+static const uint16_t VecShiftPowers[8] ALIGNED(16) = {0x0080, 0x0800, 0x2000, 0x8000,
+                                                       0x0080, 0x0800, 0x2000, 0x8000};
 
 /* Convert an 8-digit number (0..99999999) to 8 ASCII digit values in an XMM
  * register. Uses SSE2 multiplication-based digit extraction (no division). */
@@ -66,7 +68,7 @@ INLINE int vj_u64toa_large_sse2(uint8_t *out, uint64_t val) {
 
   /* Pack 16-bit digits to 8-bit and add '0' */
   __m128i packed = _mm_packus_epi16(d0, d1);
-  __m128i ascii = _mm_add_epi8(packed, *((const __m128i *)Vec16xA0));
+  __m128i ascii  = _mm_add_epi8(packed, *((const __m128i *)Vec16xA0));
 
   /* Count leading zeros */
   __m128i eq0 = _mm_cmpeq_epi8(ascii, *((const __m128i *)Vec16xA0));
@@ -74,7 +76,7 @@ INLINE int vj_u64toa_large_sse2(uint8_t *out, uint64_t val) {
   uint32_t nd = __builtin_ctz(~bm | 0x8000);
 
   /* Shift digits left to remove leading zeros */
-  __m128i shuf = _mm_loadu_si128((const __m128i *)&VEC_SHIFT_SHUFFLES[nd * 16]);
+  __m128i shuf   = _mm_loadu_si128((const __m128i *)&VEC_SHIFT_SHUFFLES[nd * 16]);
   __m128i result = _mm_shuffle_epi8(ascii, shuf);
 
   _mm_storeu_si128((__m128i *)out, result);
@@ -83,7 +85,7 @@ INLINE int vj_u64toa_large_sse2(uint8_t *out, uint64_t val) {
 
 /* Extra-large: val >= 10^16.  Scalar prefix (1-4 digits) + SSE2 for last 16. */
 INLINE int vj_u64toa_xlarge_sse2(uint8_t *out, uint64_t val) {
-  int n = 0;
+  int n       = 0;
   uint64_t lo = val % 10000000000000000ULL;
   uint32_t hi = (uint32_t)(val / 10000000000000000ULL);
 
@@ -105,10 +107,10 @@ INLINE int vj_u64toa_xlarge_sse2(uint8_t *out, uint64_t val) {
   }
 
   /* Remaining 16 digits — always exactly 16 (zero-padded) */
-  __m128i d0 = vj_itoa8_sse2((uint32_t)(lo / 100000000));
-  __m128i d1 = vj_itoa8_sse2((uint32_t)(lo % 100000000));
+  __m128i d0     = vj_itoa8_sse2((uint32_t)(lo / 100000000));
+  __m128i d1     = vj_itoa8_sse2((uint32_t)(lo % 100000000));
   __m128i packed = _mm_packus_epi16(d0, d1);
-  __m128i ascii = _mm_add_epi8(packed, *((const __m128i *)Vec16xA0));
+  __m128i ascii  = _mm_add_epi8(packed, *((const __m128i *)Vec16xA0));
   _mm_storeu_si128((__m128i *)&out[n], ascii);
   return n + 16;
 }
@@ -119,7 +121,7 @@ INLINE int vj_u64toa_xlarge_sse2(uint8_t *out, uint64_t val) {
 
 /* Small: 0..9999 — forward-write with conditional digit skipping. */
 INLINE int vj_u32toa_small(uint8_t *out, uint32_t val) {
-  int n = 0;
+  int n       = 0;
   uint32_t d1 = (val / 100) * 2;
   uint32_t d2 = (val % 100) * 2;
 
@@ -135,7 +137,7 @@ INLINE int vj_u32toa_small(uint8_t *out, uint32_t val) {
 
 /* Medium: 10000..99999999 — divide by 10000, then digit-pair lookups. */
 INLINE int vj_u32toa_medium(uint8_t *out, uint32_t val) {
-  int n = 0;
+  int n       = 0;
   uint32_t hi = val / 10000;
   uint32_t lo = val % 10000;
   uint32_t d1 = (hi / 100) * 2;
@@ -183,7 +185,7 @@ INLINE int write_uint64(uint8_t *buf, uint64_t v) {
     while (v >= 100) {
       uint64_t q = v / 100;
       uint32_t r = (uint32_t)(v - q * 100);
-      v = q;
+      v          = q;
       pos -= 2;
       __builtin_memcpy(&tmp[pos], &DIGIT_PAIRS[r * 2], 2);
     }

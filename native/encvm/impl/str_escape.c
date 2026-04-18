@@ -10,7 +10,7 @@
 /* Non-ASCII run dispatcher */
 
 int64_t vj_escape_nonascii_run(uint8_t **out_ptr, const uint8_t *src, int64_t i, int64_t src_len, uint32_t flags) {
-  const int check_utf8 = (flags & VJ_FLAGS_ESCAPE_INVALID_UTF8) != 0;
+  const int check_utf8       = (flags & VJ_FLAGS_ESCAPE_INVALID_UTF8) != 0;
   const int check_line_terms = (flags & VJ_FLAGS_ESCAPE_LINE_TERMS) != 0;
 
   /* Find end of non-ASCII run. */
@@ -22,7 +22,7 @@ int64_t vj_escape_nonascii_run(uint8_t **out_ptr, const uint8_t *src, int64_t i,
     if (check_line_terms) {
       vj_escape_line_terms(out_ptr, src, i, run_end);
     } else {
-      uint8_t *out = *out_ptr;
+      uint8_t *out    = *out_ptr;
       int64_t run_len = run_end - i;
       __builtin_memcpy(out, &src[i], run_len);
       *out_ptr = out + run_len;
@@ -61,9 +61,9 @@ int64_t vj_escape_nonascii_run(uint8_t **out_ptr, const uint8_t *src, int64_t i,
  *
  * ================================================================ */
 int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint32_t flags) {
-  int64_t esc_count = 0;
-  int64_t i = 0;
-  const int html = (flags & VJ_FLAGS_ESCAPE_HTML) != 0;
+  int64_t esc_count    = 0;
+  int64_t i            = 0;
+  const int html       = (flags & VJ_FLAGS_ESCAPE_HTML) != 0;
   const int check_utf8 = (flags & VJ_FLAGS_ESCAPE_INVALID_UTF8) != 0;
 
 #if defined(__AVX2__) || defined(__SSE2__) || defined(__aarch64__)
@@ -75,15 +75,15 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
 
     __m256i ctrl_safe = _mm256_cmpeq_epi8(_mm256_max_epu8(v, _mm256_set1_epi8(0x20)), v);
 
-    __m256i eq_q = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('"'));
+    __m256i eq_q  = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('"'));
     __m256i eq_bs = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('\\'));
-    __m256i bad = _mm256_or_si256(eq_q, eq_bs);
+    __m256i bad   = _mm256_or_si256(eq_q, eq_bs);
 
     if (html) {
-      __m256i eq_lt = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('<'));
-      __m256i eq_gt = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('>'));
+      __m256i eq_lt  = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('<'));
+      __m256i eq_gt  = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('>'));
       __m256i eq_amp = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('&'));
-      bad = _mm256_or_si256(bad, _mm256_or_si256(eq_lt, _mm256_or_si256(eq_gt, eq_amp)));
+      bad            = _mm256_or_si256(bad, _mm256_or_si256(eq_lt, _mm256_or_si256(eq_gt, eq_amp)));
     }
 
     if (check_utf8) {
@@ -92,7 +92,7 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
     }
 
     __m256i safe = _mm256_andnot_si256(bad, ctrl_safe);
-    int mask = ~_mm256_movemask_epi8(safe);
+    int mask     = ~_mm256_movemask_epi8(safe);
 
     esc_count += __builtin_popcount(mask);
   }
@@ -104,15 +104,15 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
 
     __m128i ctrl_safe = _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x20)), v);
 
-    __m128i eq_q = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));
+    __m128i eq_q  = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));
     __m128i eq_bs = _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'));
-    __m128i bad = _mm_or_si128(eq_q, eq_bs);
+    __m128i bad   = _mm_or_si128(eq_q, eq_bs);
 
     if (html) {
-      __m128i eq_lt = _mm_cmpeq_epi8(v, _mm_set1_epi8('<'));
-      __m128i eq_gt = _mm_cmpeq_epi8(v, _mm_set1_epi8('>'));
+      __m128i eq_lt  = _mm_cmpeq_epi8(v, _mm_set1_epi8('<'));
+      __m128i eq_gt  = _mm_cmpeq_epi8(v, _mm_set1_epi8('>'));
       __m128i eq_amp = _mm_cmpeq_epi8(v, _mm_set1_epi8('&'));
-      bad = _mm_or_si128(bad, _mm_or_si128(eq_lt, _mm_or_si128(eq_gt, eq_amp)));
+      bad            = _mm_or_si128(bad, _mm_or_si128(eq_lt, _mm_or_si128(eq_gt, eq_amp)));
     }
 
     if (check_utf8) {
@@ -121,7 +121,7 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
     }
 
     __m128i safe = _mm_andnot_si128(bad, ctrl_safe);
-    int mask = ~_mm_movemask_epi8(safe) & 0xFFFF;
+    int mask     = ~_mm_movemask_epi8(safe) & 0xFFFF;
 
     esc_count += __builtin_popcount(mask);
   }
@@ -133,15 +133,15 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
 
     __m128i ctrl_safe = _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x20)), v);
 
-    __m128i eq_q = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));
+    __m128i eq_q  = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));
     __m128i eq_bs = _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'));
-    __m128i bad = _mm_or_si128(eq_q, eq_bs);
+    __m128i bad   = _mm_or_si128(eq_q, eq_bs);
 
     if (html) {
-      __m128i eq_lt = _mm_cmpeq_epi8(v, _mm_set1_epi8('<'));
-      __m128i eq_gt = _mm_cmpeq_epi8(v, _mm_set1_epi8('>'));
+      __m128i eq_lt  = _mm_cmpeq_epi8(v, _mm_set1_epi8('<'));
+      __m128i eq_gt  = _mm_cmpeq_epi8(v, _mm_set1_epi8('>'));
       __m128i eq_amp = _mm_cmpeq_epi8(v, _mm_set1_epi8('&'));
-      bad = _mm_or_si128(bad, _mm_or_si128(eq_lt, _mm_or_si128(eq_gt, eq_amp)));
+      bad            = _mm_or_si128(bad, _mm_or_si128(eq_lt, _mm_or_si128(eq_gt, eq_amp)));
     }
 
     int remaining = (int)(src_len - i);
@@ -152,7 +152,7 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
     }
 
     __m128i safe = _mm_andnot_si128(bad, ctrl_safe);
-    int mask = ~_mm_movemask_epi8(safe) & 0xFFFF;
+    int mask     = ~_mm_movemask_epi8(safe) & 0xFFFF;
 
     mask &= (1 << remaining) - 1;
     esc_count += __builtin_popcount(mask);
