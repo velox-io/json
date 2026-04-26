@@ -12,7 +12,6 @@ import (
 	"github.com/velox-io/json/typ"
 )
 
-// Opcodes must stay in sync with native/encvm/impl/types.h.
 const (
 	opBool    uint16 = 1
 	opInt     uint16 = 2
@@ -29,46 +28,45 @@ const (
 	opFloat64 uint16 = 13
 	opString  uint16 = 14
 
-	opInterface  uint16 = 15 // interface{} dispatch
-	opRawMessage uint16 = 16 // raw byte copy
-	opNumber     uint16 = 17 // json.Number copy
-	opByteSlice  uint16 = 18 // []byte base64
+	opInterface  uint16 = 15
+	opRawMessage uint16 = 16
+	opNumber     uint16 = 17
+	opByteSlice  uint16 = 18
 
-	opSkipIfZero uint16 = 19 // omitempty jump
-	opCall       uint16 = 20 // subroutine call
-	opPtrDeref   uint16 = 21 // nil -> null, else deref
-	opPtrEnd     uint16 = 22 // restore parent base
-	opSliceBegin uint16 = 23 // slice loop start
-	opSliceEnd   uint16 = 24 // slice loop back-edge
-	opMap        uint16 = 25 // yield whole map to Go
-	// _opMapEnd    uint16 = 26 // reserved
-	opObjOpen    uint16 = 27 // write key + '{'
-	opObjClose   uint16 = 28 // write '}'
-	opArrayBegin uint16 = 29 // fixed array loop start
-	opMapStrStr  uint16 = 30 // native map[string]string
-	opRet        uint16 = 31 // subroutine return
+	opSkipIfZero uint16 = 19
+	opCall       uint16 = 20
+	opPtrDeref   uint16 = 21
+	opPtrEnd     uint16 = 22
+	opSliceBegin uint16 = 23
+	opSliceEnd   uint16 = 24
+	opMap        uint16 = 25
+	opObjOpen    uint16 = 27
+	opObjClose   uint16 = 28
+	opArrayBegin uint16 = 29
+	opMapStrStr  uint16 = 30
+	opRet        uint16 = 31
 
-	opFallback uint16 = 32 // Go fallback
+	opFallback uint16 = 32
 
 	opKString uint16 = 33
 	opKInt    uint16 = 34
 	opKInt64  uint16 = 35
 
-	opMapStrInt   uint16 = 36 // native map[string]int
-	opMapStrInt64 uint16 = 37 // native map[string]int64
+	opMapStrInt   uint16 = 36
+	opMapStrInt64 uint16 = 37
 
-	opSeqFloat64 uint16 = 38 // native []/[N]float64
-	opSeqInt     uint16 = 39 // native []/[N]int
-	opSeqInt64   uint16 = 40 // native []/[N]int64
-	opSeqString  uint16 = 41 // native []/[N]string
+	opSeqFloat64 uint16 = 38
+	opSeqInt     uint16 = 39
+	opSeqInt64   uint16 = 40
+	opSeqString  uint16 = 41
 
-	opMapStrIter    uint16 = 42 // native map[string]V key iterator
-	opMapStrIterEnd uint16 = 43 // iterator back-edge
+	opMapStrIter    uint16 = 42
+	opMapStrIterEnd uint16 = 43
 
-	opKQInt   uint16 = 44 // int with ,string
-	opKQInt64 uint16 = 45 // int64 with ,string
+	opKQInt   uint16 = 44
+	opKQInt64 uint16 = 45
 
-	opTime uint16 = 46 // native time.Time
+	opTime uint16 = 46
 )
 
 func kindToOpcode(k typ.ElemTypeKind) uint16 {
@@ -86,20 +84,18 @@ func kindToOpcode(k typ.ElemTypeKind) uint16 {
 	}
 }
 
-// VM exits live in VMState bits [32..39]. YIELD means Go must inspect vmstateGetYield.
 const (
 	vjExitOK        int32 = 0
 	vjExitBufFull   int32 = 1
 	vjExitStackOvfl int32 = 3
 	vjExitNanInf    int32 = 5
-	vjExitYieldToGo int32 = 6 // VM yielded to Go semantic handlers
+	vjExitYieldToGo int32 = 6
 )
 
-// Yield reasons live in VMState bits [40..47].
 const (
-	yieldFallback   uint32 = 1 // custom marshaler / ,string / unsupported type
-	yieldIfaceMiss  uint32 = 2 // interface{} cache miss — need Go compilation
-	yieldMapHandoff uint32 = 3 // map encoding handoff — Go takes over full map field encoding
+	yieldFallback   uint32 = 1
+	yieldIfaceMiss  uint32 = 2
+	yieldMapHandoff uint32 = 3
 )
 
 // fbInfo.Reason values — Go-side only diagnostic codes for trace output.
@@ -114,7 +110,6 @@ const (
 	fbReasonOverflow                   // field offset or key exceeds native encoding limits
 )
 
-// VMState mirrors the native packed state: depth in [0..7], first in bit 16, flags in [17..31], exit in [32..39], yield in [40..47].
 const (
 	vjStStackDepthMask = uint64(0x000000FF)
 	vjStFirstBit       = uint64(1) << 16
@@ -147,31 +142,28 @@ func vmstateBuildInitial(flags uint32) uint64 {
 	return vjStFirstBit | (uint64(flags) << vjStFlagsShift)
 }
 
-// VjOpHdr matches the native 8-byte instruction header. KeyOff indexes the global key pool.
 type VjOpHdr struct {
-	OpType   uint16 //  0: opcode | 0x8000 for extended (16-byte) instructions
-	KeyLen   uint8  //  2: pre-encoded key length (max 255)
-	_pad0    uint8  //  3: alignment padding
-	FieldOff uint16 //  4: field offset in struct (max 65535)
-	KeyOff   uint16 //  6: offset into global key pool
+	OpType   uint16
+	KeyLen   uint8
+	_pad0    uint8
+	FieldOff uint16
+	KeyOff   uint16
 }
 
 var _ [8]byte = [unsafe.Sizeof(VjOpHdr{})]byte{}
 
-// VjOpExt is the 8-byte suffix for 16-byte instructions.
 type VjOpExt struct {
-	OperandA int32 //  0: jump byte offset, elem_size, etc.
-	OperandB int32 //  4: body byte length, ZeroCheckTag, etc.
+	OperandA int32
+	OperandB int32
 }
 
 var _ [8]byte = [unsafe.Sizeof(VjOpExt{})]byte{}
 
-// Blueprint is an immutable compiled VM program. Keys live in the shared key pool.
 type Blueprint struct {
-	Name        string          // debug/trace only
-	Ops         []byte          // linear instruction byte stream, terminated by opRet (8-byte aligned via alignedOps)
-	Fallbacks   map[int]*fbInfo // byte offset → fallback field info (only for OP_FALLBACK instructions)
-	Annotations map[int]string  // byte offset → debug annotation (type names for OBJ_OPEN/CALL); nil in non-debug builds
+	Name        string
+	Ops         []byte
+	Fallbacks   map[int]*fbInfo
+	Annotations map[int]string
 }
 
 // fbInfo records the Go fallback attached to one OP_FALLBACK pc.
@@ -192,8 +184,6 @@ func opExtAt(ops []byte, pc int32) *VjOpExt {
 	return (*VjOpExt)(unsafe.Pointer(&ops[pc+8]))
 }
 
-// VjStackFrame matches the native 32-byte frame ABI. `first` stays in VMState.
-// Payload stores CALL {ret_ops, ret_pc} or ITER/MAP {data, count, idx}.
 type VjStackFrame struct {
 	RetBase unsafe.Pointer // 0: parent base
 	Payload [20]byte       // 8: native union payload
@@ -251,20 +241,18 @@ type VjExecCtx struct {
 
 var _ [2152]byte = [unsafe.Sizeof(VjExecCtx{})]byte{}
 
-// VjIfaceCacheEntry maps a Go type to a primitive tag or compiled ops.
 type VjIfaceCacheEntry struct {
-	TypePtr unsafe.Pointer // *abi.Type
-	OpsPtr  unsafe.Pointer // &Blueprint.Ops[0] (byte stream), nil if not compilable by C
-	Tag     uint8          // opcode for primitives (= typ.ElemTypeKind); 0 = none
-	Flags   uint8          // VJ_IFACE_FLAG_* bits (e.g. INDIRECT for maps)
+	TypePtr unsafe.Pointer
+	OpsPtr  unsafe.Pointer
+	Tag     uint8
+	Flags   uint8
 	_pad    [6]byte
 }
 
 var _ [24]byte = [unsafe.Sizeof(VjIfaceCacheEntry{})]byte{}
 
-// ifaceCacheSnapshot is an immutable sorted cache snapshot.
 type ifaceCacheSnapshot struct {
-	entries []VjIfaceCacheEntry // sorted by TypePtr (ascending)
+	entries []VjIfaceCacheEntry
 }
 
 func (s *ifaceCacheSnapshot) lookup(typePtr unsafe.Pointer) *VjIfaceCacheEntry {
@@ -294,7 +282,6 @@ func loadIfaceCacheSnapshot() *ifaceCacheSnapshot {
 	return globalIfaceCache.current.Load()
 }
 
-// blueprintRegistry resolves ctx.OpsPtr back to the active Blueprint after SWITCH_OPS.
 var blueprintRegistry atomic.Pointer[map[unsafe.Pointer]*Blueprint]
 var initPrimitiveIfaceCacheOnce sync.Once
 
@@ -308,16 +295,14 @@ func init() {
 	initPrimitiveIfaceCacheOnce.Do(initPrimitiveIfaceCache)
 }
 
-// globalKeyPool stores all pre-encoded JSON keys in one append-only COW pool.
 var globalKeyPool struct {
 	current atomic.Pointer[keyPoolSnapshot]
 	mu      sync.Mutex // guards writes (append + publish)
 }
 
-// keyPoolSnapshot is an immutable key-pool snapshot.
 type keyPoolSnapshot struct {
-	data []byte                  // contiguous key bytes
-	idx  map[string]keyPoolEntry // dedup index: key_bytes → (offset, len)
+	data []byte
+	idx  map[string]keyPoolEntry
 }
 
 type keyPoolEntry struct {
@@ -325,14 +310,11 @@ type keyPoolEntry struct {
 	len uint8
 }
 
-// globalKeyPoolInsert deduplicates key bytes and appends them to the shared pool.
-// ok=false means only a new key overflowed the 64KB address space; dedup hits still succeed.
 func globalKeyPoolInsert(keyBytes []byte) (off uint16, klen uint8, ok bool) {
 	if len(keyBytes) == 0 {
 		return 0, 0, true
 	}
 	if len(keyBytes) > 255 {
-		// internal bug: compiler falls back before reaching here
 		panic("venc: key too long for uint8 key_len (>255 bytes)")
 	}
 
@@ -375,13 +357,11 @@ func loadKeyPoolSnapshot() *keyPoolSnapshot {
 	return globalKeyPool.current.Load()
 }
 
-// keyPoolBytes reads key bytes from the current pool snapshot.
 func keyPoolBytes(off uint16, klen uint8) []byte {
 	snap := globalKeyPool.current.Load()
 	return snap.data[off : uint16(off)+uint16(klen)]
 }
 
-// registerBlueprintOps publishes the ops pointer -> Blueprint mapping for SWITCH_OPS.
 func registerBlueprintOps(bp *Blueprint) {
 	if bp == nil || len(bp.Ops) == 0 {
 		return
@@ -397,7 +377,6 @@ func registerBlueprintOps(bp *Blueprint) {
 	blueprintRegistry.Store(&newMap)
 }
 
-// insertIfaceCache publishes one more interface cache entry via COW.
 func insertIfaceCache(typePtr unsafe.Pointer, bp *Blueprint, tag uint8, flags uint8) {
 	globalIfaceCache.mu.Lock()
 	defer globalIfaceCache.mu.Unlock()
@@ -429,7 +408,6 @@ func insertIfaceCache(typePtr unsafe.Pointer, bp *Blueprint, tag uint8, flags ui
 	globalIfaceCache.current.Store(&ifaceCacheSnapshot{entries: newEntries})
 }
 
-// initPrimitiveIfaceCache seeds primitive entries and pre-warms common composite interface types.
 func initPrimitiveIfaceCache() {
 	primitives := []struct {
 		t   reflect.Type
@@ -502,7 +480,6 @@ func initPrimitiveIfaceCache() {
 	globalIfaceCache.current.Store(&ifaceCacheSnapshot{entries: table})
 }
 
-// activeBlueprint resolves the Blueprint currently backing ctx.OpsPtr.
 func activeBlueprint(ctx *VjExecCtx, rootBP *Blueprint) *Blueprint {
 	if ctx.OpsPtr == unsafe.Pointer(&rootBP.Ops[0]) {
 		return rootBP

@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	defaultBufSize = 128 * 1024 // default read buffer size (128KB)
-	minReadSize    = 512        // minimum free space to attempt a read
+	defaultBufSize = 128 * 1024
+	minReadSize    = 512
 )
 
 // DecoderOption configures a [Decoder].
@@ -111,7 +111,6 @@ func (d *Decoder) CopyString() {
 	}
 }
 
-// parser returns the owned Parser, acquiring one from the pool on first use.
 func (d *Decoder) parser() *Parser {
 	if d.sc == nil {
 		d.sc = parsers.Get()
@@ -297,7 +296,6 @@ func (d *Decoder) retryDecode(sc *Parser, valueStart int, ti *DecTypeInfo, ptr u
 	}
 }
 
-// More reports whether there appears to be another value in the stream.
 func (d *Decoder) More() bool {
 	if d.buf != nil {
 		if skipWS(d.buf[:d.bufLen], d.scanAt) < d.bufLen {
@@ -307,7 +305,6 @@ func (d *Decoder) More() bool {
 	return !d.eof
 }
 
-// Buffered returns a reader over the unscanned portion of the buffer.
 func (d *Decoder) Buffered() io.Reader {
 	if d.buf == nil || d.scanAt >= d.bufLen {
 		return bytes.NewReader(nil)
@@ -319,12 +316,9 @@ func (d *Decoder) Buffered() io.Reader {
 // whether consecutive Decode calls return the same underlying error object.
 func (d *Decoder) Err() error { return d.err }
 
-// DecodeValue is a generic convenience wrapper around [Decoder.Decode].
 func DecodeValue[T any](d *Decoder, v *T) error {
 	return d.Decode(v)
 }
-
-// --- Buffer management ---
 
 func (d *Decoder) ensureData() error {
 	if d.buf != nil && d.scanAt < d.bufLen {

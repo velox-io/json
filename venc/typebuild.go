@@ -12,7 +12,6 @@ import (
 
 var encTypeCache sync.Map
 
-// Fast cache: direct-mapped, sits in front of encTypeCache (sync.Map).
 const encFastCacheSize = 32 // must be power of two
 
 type encCacheEntry struct {
@@ -32,7 +31,6 @@ var (
 	encPtrCache encFastCache // rtype(*T) → EncTypeInfo(T) for pointer-unwrap fast path
 )
 
-// EncTypeInfoOf returns the cached encode descriptor.
 func EncTypeInfoOf(t reflect.Type) *EncTypeInfo {
 	rtp := uintptr(gort.TypePtr(t))
 	idx := encFastCacheIndex(rtp)
@@ -81,7 +79,6 @@ func buildEncTypeInfo(t reflect.Type) *EncTypeInfo {
 	return eti
 }
 
-// buildEncRec resolves recursive types through the goroutine-local build map.
 func buildEncRec(t reflect.Type, building map[reflect.Type]*EncTypeInfo) *EncTypeInfo {
 	if v, ok := encTypeCache.Load(t); ok {
 		return v.(*EncTypeInfo)
@@ -98,7 +95,6 @@ func buildEncRec(t reflect.Type, building map[reflect.Type]*EncTypeInfo) *EncTyp
 	return et
 }
 
-// newEncTypeFromUT creates a new EncType from a shared UniType.
 func newEncTypeFromUT(ut *typ.UniType) *EncTypeInfo {
 	et := &EncTypeInfo{
 		UniType: ut,
@@ -114,7 +110,6 @@ func newEncTypeFromUT(ut *typ.UniType) *EncTypeInfo {
 	return et
 }
 
-// fillContainerExt populates container-specific encode metadata.
 func fillContainerExt(et *EncTypeInfo, ut *typ.UniType, building map[reflect.Type]*EncTypeInfo) {
 	switch info := ut.Ext.(type) {
 	case *typ.StructTypeInfo:

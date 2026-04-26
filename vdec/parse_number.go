@@ -42,7 +42,6 @@ func scanInt64(src []byte, idx int) (end int, value int64, isFloat bool, ok bool
 		pos++
 	}
 
-	// 19th digit
 	if pos < length && sliceAt(src, pos) >= '0' && sliceAt(src, pos) <= '9' {
 		d := uint64(sliceAt(src, pos) - '0')
 		absValue = absValue*10 + d
@@ -134,7 +133,6 @@ func scanUint64(src []byte, idx int) (end int, value uint64, isFloat bool, ok bo
 		pos++
 	}
 
-	// 20th digit
 	if pos < length && sliceAt(src, pos) >= '0' && sliceAt(src, pos) <= '9' {
 		d := uint64(sliceAt(src, pos) - '0')
 		const cutoff = math.MaxUint64 / 10

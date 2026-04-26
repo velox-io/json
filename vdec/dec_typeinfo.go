@@ -14,7 +14,6 @@ const DecTypeFlagSpecial = typ.TypeFlagHasUnmarshalFn | typ.TypeFlagHasTextUnmar
 // DecTagFlagSpecial marks field tags handled before scanValue.
 const DecTagFlagSpecial = typ.TagFlagQuoted | typ.TagFlagCopyString
 
-// DecTypeInfo is the cached decode descriptor for a Go type.
 type DecTypeInfo struct {
 	Kind      typ.ElemTypeKind
 	TypeFlags typ.TypeFlag
@@ -51,8 +50,6 @@ func (d *DecTypeInfo) ResolvePointer() *DecPointerInfo {
 	return (*DecPointerInfo)(d.Ext)
 }
 
-// DecFieldInfo describes one JSON-visible struct field.
-// TypeInfo remains pointer-based so recursive descriptors can be back-filled.
 type DecFieldInfo struct {
 	Kind     typ.ElemTypeKind // copied for hot-path dispatch
 	TagFlags typ.TagFlag
@@ -61,7 +58,6 @@ type DecFieldInfo struct {
 	TypeInfo *DecTypeInfo
 }
 
-// DecStructInfo describes a struct.
 type DecStructInfo struct {
 	Fields []DecFieldInfo
 
@@ -69,7 +65,6 @@ type DecStructInfo struct {
 	HasMixedCase bool
 }
 
-// LookupFieldBytes looks up a field, then falls back to ASCII fold when needed.
 func (si *DecStructInfo) LookupFieldBytes(key []byte) *DecFieldInfo {
 	k := unsafe.String(unsafe.SliceData(key), len(key))
 
@@ -88,7 +83,6 @@ func (si *DecStructInfo) LookupFieldBytes(key []byte) *DecFieldInfo {
 	return nil
 }
 
-// DecSliceInfo describes a slice.
 type DecSliceInfo struct {
 	ElemTI         *DecTypeInfo
 	ElemSize       uintptr
@@ -100,10 +94,8 @@ type DecSliceInfo struct {
 	EmaAlpha int32 // EMA denominator; default 2
 }
 
-// ArraySpecialScanner handles array element types with dedicated numeric loops.
 type ArraySpecialScanner func(src []byte, idx int, arrayLen int, elemSize uintptr, ptr unsafe.Pointer) (int, error)
 
-// DecArrayInfo describes a fixed-size array.
 type DecArrayInfo struct {
 	ElemTI      *DecTypeInfo
 	ElemSize    uintptr
@@ -113,7 +105,6 @@ type DecArrayInfo struct {
 	ScanArrayFn ArraySpecialScanner
 }
 
-// DecMapInfo describes a map.
 type DecMapInfo struct {
 	ValTI   *DecTypeInfo
 	KeyTI   *DecTypeInfo
@@ -132,7 +123,6 @@ type DecMapInfo struct {
 	ScanMapFn func(sc *Parser, src []byte, idx int, ptr unsafe.Pointer) (int, error)
 }
 
-// DecPointerInfo describes a pointer.
 type DecPointerInfo struct {
 	ElemTI     *DecTypeInfo
 	ElemSize   uintptr

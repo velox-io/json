@@ -12,7 +12,6 @@ func (a *labelAllocator) Alloc() Label {
 	return a.next
 }
 
-// compilePipeline is the ordered list of IR optimization passes.
 var compilePipeline = []CompilerPass{
 	&eliminateTrampolinesPass{},
 }
@@ -25,20 +24,11 @@ func runPasses(insts []IRInst, nextLabel Label) []IRInst {
 	return insts
 }
 
-// eliminateTrampolinesPass
-// Detects trampoline subroutines of the form:
-//
-//	label L1: CALL L2, RET
-//
-// and rewrites all CALL L1 → CALL L2, then removes the dead trampoline.
-
 type eliminateTrampolinesPass struct{}
 
 func (p *eliminateTrampolinesPass) Name() string { return "eliminate-trampolines" }
 
 func (p *eliminateTrampolinesPass) Run(insts []IRInst, _ *labelAllocator) []IRInst {
-	// 1. Scan for trampoline patterns: irLabel, opCall, opRet
-	// Build a redirect map: trampoline label → final target label.
 	redirect := make(map[Label]Label)
 	for i := 0; i+2 < len(insts); i++ {
 		if insts[i].Op == irLabel &&
@@ -51,7 +41,6 @@ func (p *eliminateTrampolinesPass) Run(insts []IRInst, _ *labelAllocator) []IRIn
 		return insts
 	}
 
-	// Chase redirect chains (A→B→C becomes A→C).
 	for src, dst := range redirect {
 		for {
 			next, ok := redirect[dst]
@@ -63,7 +52,6 @@ func (p *eliminateTrampolinesPass) Run(insts []IRInst, _ *labelAllocator) []IRIn
 		redirect[src] = dst
 	}
 
-	// 2. Rewrite all CALL targets that hit a trampoline.
 	for i := range insts {
 		if insts[i].Op == opCall {
 			if final, ok := redirect[insts[i].Target]; ok {
@@ -72,7 +60,6 @@ func (p *eliminateTrampolinesPass) Run(insts []IRInst, _ *labelAllocator) []IRIn
 		}
 	}
 
-	// 3. Remove dead trampolines (irLabel + opCall + opRet sequences).
 	trampolineLabels := make(map[Label]bool, len(redirect))
 	for l := range redirect {
 		trampolineLabels[l] = true

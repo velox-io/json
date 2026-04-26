@@ -9,7 +9,6 @@ import (
 	"github.com/velox-io/json/typ"
 )
 
-// typeName keeps trace output compact for anonymous structs.
 func typeName(t reflect.Type) string {
 	s := t.String()
 	if !strings.HasPrefix(s, "struct {") {
@@ -22,7 +21,6 @@ func typeName(t reflect.Type) string {
 	return s[:maxLen] + " ...}"
 }
 
-// alignedOps gives the C VM an 8-byte-aligned instruction buffer.
 func alignedOps(data []byte) []byte {
 	n := len(data)
 	if n == 0 {
@@ -34,15 +32,12 @@ func alignedOps(data []byte) []byte {
 	return dst
 }
 
-// fieldContext carries the struct field placement info needed by type emitters.
-// Zero value means standalone/keyless context (top-level or nested element).
 type fieldContext struct {
 	FieldOff uintptr // field offset within struct
 	KeyOff   uint16  // key position in global pool
 	KeyLen   uint8   // key length; 0 = no key
 }
 
-// fieldFBInfo constructs a full field-level fbInfo.
 func fieldFBInfo(fi *EncFieldInfo, fc fieldContext, reason int32) *fbInfo {
 	return &fbInfo{
 		TI:       fi.Type,
@@ -54,7 +49,6 @@ func fieldFBInfo(fi *EncFieldInfo, fc fieldContext, reason int32) *fbInfo {
 	}
 }
 
-// typeFBInfo constructs a minimal type-level fbInfo (no field metadata).
 func typeFBInfo(ti *EncTypeInfo, offset uintptr, reason int32) *fbInfo {
 	return &fbInfo{
 		TI:     ti,
@@ -63,15 +57,11 @@ func typeFBInfo(ti *EncTypeInfo, offset uintptr, reason int32) *fbInfo {
 	}
 }
 
-// ── Blueprint compiler ──────────────────────────────────────────────
-
-// compileBlueprint compiles an EncTypeInfo into a flat VM program.
 func compileBlueprint(et *EncTypeInfo) *Blueprint {
 	b := &irBuilder{
 		visiting: make(map[*EncTypeInfo]Label),
 	}
 
-	// Emit the type-specific body.
 	switch et.Kind {
 	case typ.KindStruct:
 		rootLabel := b.allocLabel()
@@ -99,7 +89,6 @@ func compileBlueprint(et *EncTypeInfo) *Blueprint {
 
 	b.emit(IRInst{Op: opRet})
 
-	// Drain cycle subroutines (only struct produces these).
 	drainCycleSubs(b)
 
 	insts := runPasses(b.insts, b.nextLabel)
@@ -113,7 +102,6 @@ func compileBlueprint(et *EncTypeInfo) *Blueprint {
 	}
 }
 
-// drainCycleSubs emits subroutines for cycle-participating structs.
 func drainCycleSubs(b *irBuilder) {
 	for len(b.cycleSubs) > 0 {
 		sub := b.cycleSubs[0]
@@ -133,9 +121,6 @@ func drainCycleSubs(b *irBuilder) {
 	}
 }
 
-// ── Struct field dispatch ───────────────────────────────────────────
-
-// emitStructBody emits the field program for one struct body.
 func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 	for i := range si.Fields {
 		fi := &si.Fields[i]
@@ -143,13 +128,11 @@ func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 
 		needsOmitempty := fi.TagFlags&EncTagFlagOmitEmpty != 0
 
-		// Early bail: field offset or key length exceeds native limits.
 		if fieldOff > math.MaxUint16 || len(fi.KeyBytes) > 255 {
 			emitFieldFallbackOverflow(b, fi, fieldOff)
 			continue
 		}
 
-		// Reserve the key in the global pool. All paths below need it.
 		fc, ok := addKeyForField(b, fi, fieldOff)
 		if !ok {
 			emitFieldFallbackOverflow(b, fi, fieldOff)
@@ -307,15 +290,11 @@ func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 	}
 }
 
-// addKeyForField reserves key bytes and builds a fieldContext.
 func addKeyForField(b *irBuilder, fi *EncFieldInfo, fieldOff uintptr) (fieldContext, bool) {
 	off, klen, ok := b.addKey(fi.KeyBytes)
 	return fieldContext{FieldOff: fieldOff, KeyOff: off, KeyLen: klen}, ok
 }
 
-// ── Field-level fallback helpers (need field metadata) ──────────────
-
-// emitFieldFallback emits an opFallback with pre-resolved key and field metadata.
 func emitFieldFallback(b *irBuilder, fc fieldContext, fb *fbInfo) {
 	b.emit(IRInst{
 		Op:       opFallback,
@@ -326,8 +305,6 @@ func emitFieldFallback(b *irBuilder, fc fieldContext, fb *fbInfo) {
 	})
 }
 
-// emitFieldFallbackOverflow emits a fallback for fields exceeding native encoding limits.
-// Called before addKey (fieldOff too large or keyBytes too long).
 func emitFieldFallbackOverflow(b *irBuilder, fi *EncFieldInfo, fieldOff uintptr) {
 	b.emit(IRInst{
 		Op:       opFallback,
@@ -336,9 +313,6 @@ func emitFieldFallbackOverflow(b *irBuilder, fi *EncFieldInfo, fieldOff uintptr)
 	})
 }
 
-// ── Type-level emitters (no field knowledge) ────────────────────────
-
-// emitPrimitive emits one primitive opcode, upgrading hot cases to keyed variants.
 func emitPrimitive(b *irBuilder, kind typ.ElemTypeKind, fc fieldContext) {
 	op := kindToOpcode(kind)
 	if fc.KeyLen > 0 {
@@ -359,7 +333,6 @@ func emitPrimitive(b *irBuilder, kind typ.ElemTypeKind, fc fieldContext) {
 	})
 }
 
-// emitQuotedInt emits the native `,string` int/int64 opcodes.
 func emitQuotedInt(b *irBuilder, kind typ.ElemTypeKind, fc fieldContext) {
 	var op uint16
 	switch kind {
@@ -378,7 +351,6 @@ func emitQuotedInt(b *irBuilder, kind typ.ElemTypeKind, fc fieldContext) {
 	})
 }
 
-// emitNestedStruct inlines a nested struct body unless cycles force a call.
 func emitNestedStruct(b *irBuilder, ti *EncTypeInfo, fc fieldContext) {
 	b.emit(IRInst{
 		Op:         opObjOpen,
@@ -404,7 +376,6 @@ func emitNestedStruct(b *irBuilder, ti *EncTypeInfo, fc fieldContext) {
 	b.emit(IRInst{Op: opObjClose})
 }
 
-// emitPointer wraps the pointee body in PTR_DEREF/PTR_END.
 func emitPointer(b *irBuilder, ti *EncTypeInfo, fc fieldContext) {
 	elemTI := ti.ResolvePointer().ElemType
 	afterLabel := b.allocLabel()
@@ -424,7 +395,6 @@ func emitPointer(b *irBuilder, ti *EncTypeInfo, fc fieldContext) {
 	b.defineLabel(afterLabel)
 }
 
-// emitSlice emits a slice loop or a native sequence opcode.
 func emitSlice(b *irBuilder, ti *EncTypeInfo, fc fieldContext) {
 	si := ti.ResolveSlice()
 	if seqOp := seqOpcode(si.ElemType); seqOp != 0 {
@@ -463,7 +433,6 @@ func emitSlice(b *irBuilder, ti *EncTypeInfo, fc fieldContext) {
 	b.defineLabel(afterLabel)
 }
 
-// emitArray emits an array loop or a native sequence opcode.
 func emitArray(b *irBuilder, ti *EncTypeInfo, fc fieldContext) {
 	ai := ti.ResolveArray()
 	if seqOp := seqOpcode(ai.ElemType); seqOp != 0 {
@@ -505,7 +474,6 @@ func emitArray(b *irBuilder, ti *EncTypeInfo, fc fieldContext) {
 	b.defineLabel(afterLabel)
 }
 
-// emitMap dispatches map encoding: Swiss-map iter, Swiss-map opcode, or Go fallback.
 func emitMap(b *irBuilder, mapTI *EncTypeInfo, fc fieldContext) {
 	mi := mapTI.ResolveMap()
 	if canSwissMapIterInC(mi) {
@@ -525,8 +493,6 @@ func emitMap(b *irBuilder, mapTI *EncTypeInfo, fc fieldContext) {
 	})
 }
 
-// emitMapSwiss emits the specialized Swiss-map opcode (map[string]string, etc.).
-// In keyless context, attaches a fallback for Go VM delegation.
 func emitMapSwiss(b *irBuilder, ti *EncTypeInfo, fc fieldContext) {
 	inst := IRInst{
 		Op:       swissMapOpcode(ti.ResolveMap().MapKind),
@@ -538,7 +504,6 @@ func emitMapSwiss(b *irBuilder, ti *EncTypeInfo, fc fieldContext) {
 	b.emit(inst)
 }
 
-// emitMapSwissIter emits MAP_STR_ITER around the value body.
 func emitMapSwissIter(b *irBuilder, ti *EncTypeInfo, fc fieldContext) {
 	mi := ti.ResolveMap()
 	slotSize := swissMapSlotSize(mi)
@@ -568,7 +533,6 @@ func emitMapSwissIter(b *irBuilder, ti *EncTypeInfo, fc fieldContext) {
 	})
 }
 
-// emitInterface emits the opInterface instruction.
 func emitInterface(b *irBuilder, fc fieldContext) {
 	b.emit(IRInst{
 		Op:       opInterface,
@@ -578,7 +542,6 @@ func emitInterface(b *irBuilder, fc fieldContext) {
 	})
 }
 
-// emitByteSlice emits the native []byte base64 opcode.
 func emitByteSlice(b *irBuilder, fc fieldContext) {
 	b.emit(IRInst{
 		Op:       opByteSlice,
@@ -588,7 +551,6 @@ func emitByteSlice(b *irBuilder, fc fieldContext) {
 	})
 }
 
-// emitTime emits the native time.Time opcode with fallback metadata.
 func emitTime(b *irBuilder, ti *EncTypeInfo, fc fieldContext, fb *fbInfo) {
 	b.emit(IRInst{
 		Op:       opTime,
@@ -599,7 +561,6 @@ func emitTime(b *irBuilder, ti *EncTypeInfo, fc fieldContext, fb *fbInfo) {
 	})
 }
 
-// emitSkipIfZero emits a fixed-distance omitempty jump.
 func emitSkipIfZero(b *irBuilder, fieldOff uintptr, skipBytes int, kind typ.ElemTypeKind) {
 	b.emit(IRInst{
 		Op:       opSkipIfZero,
@@ -609,12 +570,7 @@ func emitSkipIfZero(b *irBuilder, fieldOff uintptr, skipBytes int, kind typ.Elem
 	})
 }
 
-// ── Type body dispatcher (keyless context) ──────────────────────────
-
-// emitTypeBody emits the keyless body for a given type, used after pointer
-// dereference, inside slice/array/map iteration, and other non-field contexts.
 func emitTypeBody(b *irBuilder, elemTI *EncTypeInfo) {
-	// time.Time stays native; other marshal hooks → fallback.
 	if elemTI.TypeFlags&(EncTypeFlagHasMarshalFn|EncTypeFlagHasTextMarshalFn) != 0 {
 		if isTimeType(elemTI) {
 			emitTime(b, elemTI, fieldContext{}, typeFBInfo(elemTI, 0, fbReasonMarshaler))
@@ -697,9 +653,6 @@ func emitTypeBody(b *irBuilder, elemTI *EncTypeInfo) {
 	}
 }
 
-// ── Cycle detection ─────────────────────────────────────────────────
-
-// emitCall reuses or schedules the subroutine for a cycle-participating struct.
 func emitCall(b *irBuilder, ti *EncTypeInfo, fieldOff uintptr) {
 	existingLabel := b.visiting[ti]
 
@@ -711,7 +664,6 @@ func emitCall(b *irBuilder, ti *EncTypeInfo, fieldOff uintptr) {
 			Annotation: typeName(ti.Type),
 		})
 	} else {
-		// Reuse an already pending subroutine label instead of scheduling a dead duplicate.
 		var targetLabel Label
 		for _, p := range b.cycleSubs {
 			if p.ti == ti {
@@ -734,8 +686,6 @@ func emitCall(b *irBuilder, ti *EncTypeInfo, fieldOff uintptr) {
 		})
 	}
 }
-
-// ── Helpers ─────────────────────────────────────────────────────────
 
 func fallbackReasonFromFlags(typeFlags typ.TypeFlag, tagFlags typ.TagFlag) int32 {
 	if typeFlags&EncTypeFlagHasMarshalFn != 0 {
@@ -760,7 +710,6 @@ func isTimeType(ti *EncTypeInfo) bool {
 	return ti.Type == timeType
 }
 
-// seqOpcode picks the native sequence iterator for the small set of supported element types.
 func seqOpcode(elemTI *EncTypeInfo) uint16 {
 	if elemTI.TypeFlags&(EncTypeFlagHasMarshalFn|EncTypeFlagHasTextMarshalFn) != 0 {
 		return 0
@@ -778,7 +727,6 @@ func seqOpcode(elemTI *EncTypeInfo) uint16 {
 	return 0
 }
 
-// canSwissMapInC reports whether the specialized Swiss-map opcode is available.
 func canSwissMapInC(variant typ.MapVariant) bool {
 	switch variant {
 	case typ.MapVariantStrStr:
@@ -791,7 +739,6 @@ func canSwissMapInC(variant typ.MapVariant) bool {
 	return false
 }
 
-// canSwissMapIterInC reports whether MAP_STR_ITER can drive this map.
 func canSwissMapIterInC(mi *EncMapInfo) bool {
 	return mi.IsStringKey && mi.SlotSize != 0
 }

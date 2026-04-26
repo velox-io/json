@@ -10,10 +10,8 @@ import (
 	"github.com/velox-io/json/native/encvm"
 )
 
-// EncoderOption configures an [Encoder].
 type EncoderOption func(*Encoder)
 
-// EncoderSetIndent configures pretty-print indentation.
 func EncoderSetIndent(prefix, indent string) EncoderOption {
 	return func(enc *Encoder) {
 		enc.indentPrefix = prefix
@@ -21,7 +19,6 @@ func EncoderSetIndent(prefix, indent string) EncoderOption {
 	}
 }
 
-// EncoderSetEscapeHTML toggles HTML escaping.
 func EncoderSetEscapeHTML(on bool) EncoderOption {
 	return func(enc *Encoder) {
 		if on {
@@ -32,7 +29,6 @@ func EncoderSetEscapeHTML(on bool) EncoderOption {
 	}
 }
 
-// EncoderSetEscapeLineTerms toggles U+2028/U+2029 escaping.
 func EncoderSetEscapeLineTerms(on bool) EncoderOption {
 	return func(enc *Encoder) {
 		if on {
@@ -43,7 +39,6 @@ func EncoderSetEscapeLineTerms(on bool) EncoderOption {
 	}
 }
 
-// EncoderSetFloatExpAuto matches encoding/json float thresholds.
 func EncoderSetFloatExpAuto(on bool) EncoderOption {
 	return func(enc *Encoder) {
 		if on {
@@ -54,7 +49,6 @@ func EncoderSetFloatExpAuto(on bool) EncoderOption {
 	}
 }
 
-// Encoder writes one JSON value plus a trailing newline per call.
 type Encoder struct {
 	w            io.Writer
 	err          error // sticky write error
@@ -63,7 +57,6 @@ type Encoder struct {
 	flags        uint32 // escapeFlags (bits 0-2) | vjEncFloatExpAuto (bit 3)
 }
 
-// NewEncoder builds a streaming encoder for w.
 func NewEncoder(w io.Writer, opts ...EncoderOption) *Encoder {
 	enc := &Encoder{
 		w: w,
@@ -74,13 +67,11 @@ func NewEncoder(w io.Writer, opts ...EncoderOption) *Encoder {
 	return enc
 }
 
-// SetIndent updates pretty-print indentation.
 func (enc *Encoder) SetIndent(prefix, indent string) {
 	enc.indentPrefix = prefix
 	enc.indentString = indent
 }
 
-// SetEscapeHTML toggles HTML escaping.
 func (enc *Encoder) SetEscapeHTML(on bool) {
 	if on {
 		enc.flags |= uint32(escapeHTML)
@@ -89,7 +80,6 @@ func (enc *Encoder) SetEscapeHTML(on bool) {
 	}
 }
 
-// SetEscapeLineTerms toggles U+2028/U+2029 escaping.
 func (enc *Encoder) SetEscapeLineTerms(on bool) {
 	if on {
 		enc.flags |= uint32(escapeLineTerms)
@@ -98,13 +88,11 @@ func (enc *Encoder) SetEscapeLineTerms(on bool) {
 	}
 }
 
-// Encode writes v plus a trailing newline. Write errors stay sticky.
 func (enc *Encoder) Encode(v any) error {
 	if enc.err != nil {
 		return enc.err
 	}
 
-	// v is an eface{*_type, data}. Extract type and data pointer directly.
 	rt := reflect.TypeOf(v)
 	if rt == nil {
 		return enc.write([]byte("null\n"))
@@ -141,10 +129,6 @@ func (enc *Encoder) Encode(v any) error {
 	return err
 }
 
-// EncodeValue avoids interface boxing for generic callers.
-//
-// Pointer T: inline fast path — dereference without &v, zero escape.
-// Value T:   thin shim → encodeValueSlowPtr to isolate &v escape.
 func EncodeValue[T any](enc *Encoder, v T) error {
 	if enc.err != nil {
 		return enc.err
@@ -154,7 +138,6 @@ func EncodeValue[T any](enc *Encoder, v T) error {
 		return encodeValueSlow(enc, v, rt)
 	}
 
-	// Pointer fast path.
 	elemPtr := *(*unsafe.Pointer)(unsafe.Pointer(&v))
 	if elemPtr == nil {
 		return enc.write([]byte("null\n"))
@@ -164,8 +147,6 @@ func EncodeValue[T any](enc *Encoder, v T) error {
 	return enc.encodePtr(ti, elemPtr)
 }
 
-// encodeValueSlow is a thin inlineable shim that takes &v and forwards to
-// encodeValueSlowPtr, avoiding a second copy of the (potentially large) value.
 func encodeValueSlow[T any](enc *Encoder, v T, rt reflect.Type) error {
 	return encodeValueSlowPtr(enc, &v, rt)
 }
@@ -175,7 +156,6 @@ func encodeValueSlowPtr[T any](enc *Encoder, v *T, rt reflect.Type) error {
 	return enc.encodePtr(ti, unsafe.Pointer(v))
 }
 
-// encodePtr shares the streaming encode path used by Encode and EncodeValue.
 func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	es := acquireEncodeState()
 	defer releaseEncodeState(es)

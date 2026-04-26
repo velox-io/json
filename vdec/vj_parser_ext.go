@@ -11,7 +11,6 @@ import (
 	"github.com/velox-io/json/typ"
 )
 
-// scanValueSpecial handles type-level slow paths kept out of scanValue.
 func (sc *Parser) scanValueSpecial(src []byte, idx int, ti *DecTypeInfo, ptr unsafe.Pointer) (int, error) {
 	if ti.TypeFlags&typ.TypeFlagRawMessage != 0 {
 		endIdx, err := skipValue(src, idx)
@@ -143,7 +142,6 @@ func (sc *Parser) scanValueSpecial(src []byte, idx int, ti *DecTypeInfo, ptr uns
 	}
 }
 
-// scanFieldTagged handles `,string` and `,copy` field tags.
 func (sc *Parser) scanFieldTagged(src []byte, idx int, fi *DecFieldInfo, ti *DecTypeInfo, ptr unsafe.Pointer) (int, error) {
 	copyStr := fi.TagFlags&typ.TagFlagCopyString != 0
 
@@ -183,8 +181,6 @@ func (sc *Parser) scanFieldTagged(src []byte, idx int, fi *DecFieldInfo, ti *Dec
 	return newIdx, err
 }
 
-// scanQuotedValue decodes the payload of a `,string` field.
-// Bare values still go through the normal scanValue path.
 func (sc *Parser) scanQuotedValue(src []byte, idx int, ti *DecTypeInfo, copyStr bool, ptr unsafe.Pointer) (int, error) {
 	newIdx, inner, err := sc.scanString(src, idx)
 	if err != nil {
@@ -265,7 +261,6 @@ func (sc *Parser) scanQuotedValue(src []byte, idx int, ti *DecTypeInfo, copyStr 
 	return newIdx, nil
 }
 
-// scanPointerQuoted applies `,string` after pointer allocation/reuse.
 func (sc *Parser) scanPointerQuoted(src []byte, idx int, ti *DecTypeInfo, copyStr bool, ptr unsafe.Pointer) (int, error) {
 	pDec := ti.ResolvePointer()
 
@@ -304,7 +299,6 @@ func (sc *Parser) scanPointerQuoted(src []byte, idx int, ti *DecTypeInfo, copySt
 	return newIdx, nil
 }
 
-// resolveMapKey parses a JSON object key into typed map-key storage.
 func resolveMapKey(keyStr string, keyType reflect.Type, keyTI *DecTypeInfo, keyPtr unsafe.Pointer) error {
 	if keyTI.TypeFlags&typ.TypeFlagHasTextUnmarshalFn != 0 {
 		return keyTI.TextUnmarshalFn(keyPtr, []byte(keyStr))
@@ -349,7 +343,6 @@ func resolveMapKey(keyStr string, keyType reflect.Type, keyTI *DecTypeInfo, keyP
 	return newSyntaxError(fmt.Sprintf("vjson: unsupported map key type: %v", keyType), 0)
 }
 
-// scanNumberToString stores the raw text for json.Number.
 func (sc *Parser) scanNumberToString(src []byte, idx int, ptr unsafe.Pointer) (int, error) {
 	if idx >= len(src) {
 		return idx, errUnexpectedEOF
@@ -381,7 +374,6 @@ func (sc *Parser) scanNumberToString(src []byte, idx int, ptr unsafe.Pointer) (i
 	}
 }
 
-// scanStruct is the cold-path struct decoder used by scanValueSpecial.
 func (sc *Parser) scanStruct(src []byte, idx int, dec *DecStructInfo, base unsafe.Pointer) (int, error) {
 	idx++
 	idx = skipWSLong(src, idx)

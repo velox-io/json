@@ -13,7 +13,6 @@ const (
 	escapeInvalidUTF8                         // replace invalid UTF-8 with \ufffd
 )
 
-// escapeStringFlags selects the slow-path string checks. Zero enables the native fast VM.
 const escapeStringFlags = escapeHTML | escapeLineTerms | escapeInvalidUTF8
 const escapeStdCompat = escapeStringFlags
 
@@ -52,12 +51,10 @@ func init() {
 
 const hexDigits = "0123456789abcdef"
 
-// AppendQuotedJSONString is the minimal key-encoding helper used by the root package.
 func AppendQuotedJSONString(buf []byte, s string) []byte {
 	return appendEscapedString(buf, s, 0)
 }
 
-// appendEscapedString quotes a string and falls back to rune decoding only when needed.
 func appendEscapedString(buf []byte, s string, flags escapeFlags) []byte {
 	buf = append(buf, '"')
 
@@ -246,7 +243,6 @@ func appendEscapeByte(buf []byte, c byte) []byte {
 	return append(buf, '\\', 'u', '0', '0', hexDigits[c>>4], hexDigits[c&0x0F])
 }
 
-// appendUnicodeEscape emits a BMP escape or surrogate pair.
 func appendUnicodeEscape(buf []byte, r rune) []byte {
 	if r <= 0xFFFF {
 		return append(buf,

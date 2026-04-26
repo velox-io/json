@@ -7,13 +7,10 @@ import (
 	"unsafe"
 )
 
-// SwissMapLayoutOK is always false when Swiss Tables are disabled.
 var SwissMapLayoutOK = false
 
-// SwissMapStrIntLayoutOK is always false when Swiss Tables are disabled.
 var SwissMapStrIntLayoutOK = false
 
-// SwissMapStrInt64LayoutOK is always false when Swiss Tables are disabled.
 var SwissMapStrInt64LayoutOK = false
 
 func init() {
@@ -60,9 +57,6 @@ func MapsIterNext(it *MapsIter) {
 	noswissMapiternext(unsafe.Pointer(it))
 }
 
-// Linknames to the old (noswissmap) map iteration runtime.
-// Takes unsafe.Pointer because our MapsIter buffer matches hiter layout.
-//
 //go:linkname noswissMapiterinit runtime.mapiterinit
 func noswissMapiterinit(t unsafe.Pointer, m unsafe.Pointer, it unsafe.Pointer) //nolint:revive
 

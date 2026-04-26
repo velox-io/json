@@ -5,10 +5,8 @@ import (
 	"unsafe"
 )
 
-// errVMContinue keeps the VM loop hot when Go finishes a batch-slice takeover.
 var errVMContinue = errors.New("venc: vm continue")
 
-// handleInterfaceYield encodes the yielded interface{} value and may take over the rest of a []interface{} loop in Go.
 func (es *encodeState) handleInterfaceYield(ctx *VjExecCtx, activeBP *Blueprint) error {
 	hdr := opHdrAt(activeBP.Ops, ctx.PC)
 	isFirst := vmstateGetFirst(ctx.VMState)

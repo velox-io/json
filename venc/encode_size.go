@@ -7,9 +7,6 @@ import (
 	"github.com/velox-io/json/typ"
 )
 
-// bindSizeFn compiles a per-type size prediction function that scans runtime
-// data (slice/map/string lengths, pointer nil-ness) without touching values.
-// Sets SizeFn to nil for types that can't be predicted (interface{}, custom marshal).
 func bindSizeFn(ti *EncTypeInfo) {
 	ti.SizeFn = buildSizeFn(ti, 0)
 }
@@ -19,7 +16,6 @@ func buildSizeFn(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 		return nil // too deep, fall back to static hint
 	}
 
-	// Custom marshal hooks: unpredictable output.
 	if ti.TypeFlags&EncTypeFlagHasMarshalFn != 0 || ti.TypeFlags&EncTypeFlagHasTextMarshalFn != 0 {
 		return nil
 	}
@@ -56,21 +52,12 @@ func buildSizeFn(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 	}
 }
 
-// --- Constant size functions ---
-
 func sizeBool(_ unsafe.Pointer) int  { return 5 } // "false"
 func sizeInt(_ unsafe.Pointer) int   { return 12 }
 func sizeFloat(_ unsafe.Pointer) int { return 24 }
 
-// --- Runtime-dependent size functions ---
-
-// sizeAny returns a conservative estimate for interface{} fields.
-// Most interface{} values in real-world JSON are null (4 bytes) or short
-// strings/numbers. 16 is a reasonable middle ground.
 func sizeAny(_ unsafe.Pointer) int { return 16 }
 
-// sizeString reads the string length and estimates JSON output as 2 + len.
-// Escape overhead is not accounted for; callers add their own headroom if needed.
 func sizeString(ptr unsafe.Pointer) int {
 	slen := *(*int)(unsafe.Add(ptr, unsafe.Sizeof(uintptr(0)))) // string.len
 	return 2 + slen
@@ -91,8 +78,6 @@ func sizeRawMessage(ptr unsafe.Pointer) int {
 	}
 	return sh.Len
 }
-
-// --- Container size functions (compiled closures) ---
 
 func buildSizeStruct(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 	si := ti.ResolveStruct()
@@ -134,8 +119,6 @@ func buildSizeStruct(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 			continue
 		}
 
-		// Struct fields use tighter estimates than top-level scalars because
-		// the per-field overhead (key+comma) already provides buffer headroom.
 		var fixedFieldSize int
 		switch fi.Type.Kind {
 		case typ.KindBool:
@@ -152,7 +135,6 @@ func buildSizeStruct(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 			continue
 		}
 
-		// For omitempty scalars, add to sizers with isZeroFn check.
 		if fixedFieldSize > 0 && omit {
 			fixed := overhead + fixedFieldSize
 			sizers = append(sizers, fieldSizer{
@@ -234,7 +216,6 @@ func buildSizeSlice(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 		}
 	}
 
-	// Fallback: static per-element hint.
 	elemHint := computeHintBytes(si.ElemType, depth+1)
 
 	return func(ptr unsafe.Pointer) int {
@@ -260,7 +241,6 @@ func buildSizeArray(ti *EncTypeInfo, _ int) func(ptr unsafe.Pointer) int {
 	elemHint := computeHintBytes(ai.ElemType, 0)
 	arrayLen := ai.ArrayLen
 
-	// Array size is data-independent (fixed element count).
 	if arrayLen == 0 {
 		return func(_ unsafe.Pointer) int { return 2 }
 	}
@@ -312,7 +292,6 @@ func buildSizePointer(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 	}
 }
 
-// computeHintBytes returns a one-time static output-size estimate.
 func computeHintBytes(ti *EncTypeInfo, depth int) int {
 	if depth > 8 {
 		return 32 // cap recursive hint growth

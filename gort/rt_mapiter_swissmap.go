@@ -11,10 +11,8 @@ import (
 // matches what our C code expects. False triggers the Go fallback path.
 var SwissMapLayoutOK bool
 
-// SwissMapStrIntLayoutOK is the same as SwissMapLayoutOK but for map[string]int.
 var SwissMapStrIntLayoutOK bool
 
-// SwissMapStrInt64LayoutOK is the same as SwissMapLayoutOK but for map[string]int64.
 var SwissMapStrInt64LayoutOK bool
 
 // SwissMapSplitGroup is true for KKKKVVVV group layout (GOEXPERIMENT=mapsplitgroup).
@@ -38,12 +36,10 @@ func init() {
 		panic("gort: MapsIter size mismatch")
 	}
 
-	// Verify Swiss Map memory layout for C-native map iteration.
 	SwissMapLayoutOK = verifySwissMapLayout()
 	SwissMapStrIntLayoutOK = verifySwissMapStrIntLayout()
 	SwissMapStrInt64LayoutOK = verifySwissMapStrInt64Layout()
 
-	// Detect split vs interleaved group layout.
 	if SwissMapLayoutOK {
 		layout := ReadMapLayout(TypePtr(reflect.TypeFor[map[string]string]()))
 		SwissMapSplitGroup = layout.KeyStride == 16 && layout.ElemsOff > 24
@@ -289,7 +285,6 @@ func _mapsIterInit(it unsafe.Pointer, typ unsafe.Pointer, m unsafe.Pointer)
 //go:noescape
 func _mapsIterNext(it unsafe.Pointer)
 
-// GoMapIterator mirrors runtime.linknameIter (swissmap only, 32 bytes).
 type GoMapIterator struct {
 	Key  unsafe.Pointer
 	Elem unsafe.Pointer

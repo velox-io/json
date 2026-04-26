@@ -8,9 +8,6 @@ import (
 	"github.com/velox-io/json/typ"
 )
 
-// scanStringToSlice handles a JSON string token targeting a typ.KindSlice field.
-// Only []byte (elem = uint8, size = 1) is supported — base64-decode the string.
-// All other slice types return an error.
 func (sc *Parser) scanStringToSlice(src []byte, idx int, ti *DecTypeInfo, ptr unsafe.Pointer) (int, error) {
 	sDec := ti.ResolveSlice()
 	if sDec.ElemTI.Kind != typ.KindUint8 || sDec.ElemSize != 1 {
@@ -45,10 +42,6 @@ func (sc *Parser) scanStringToSlice(src []byte, idx int, ti *DecTypeInfo, ptr un
 	return newIdx, nil
 }
 
-// scanStringToArray handles a JSON string token targeting a typ.KindArray field.
-// Only [N]byte (elem = uint8, size = 1) is supported — base64-decode the string.
-// Decoded bytes are copied into the fixed-size array; if shorter, remaining bytes
-// are zeroed; if longer, excess is silently truncated.
 func (sc *Parser) scanStringToArray(src []byte, idx int, ti *DecTypeInfo, ptr unsafe.Pointer) (int, error) {
 	aDec := ti.ResolveArray()
 	if aDec.ElemTI.Kind != typ.KindUint8 || aDec.ElemSize != 1 {

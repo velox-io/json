@@ -12,10 +12,8 @@ import (
 
 const vjTraceEnabled = true
 
-// vjTraceBufSize must match VJ_TRACE_BUF_SIZE in native/encvm/impl/types.h.
 const vjTraceBufSize = 1048576
 
-// opInstrSize returns the byte size of one instruction (8 or 16).
 func opInstrSize(op uint16) int32 {
 	if isLongOp(op) {
 		return 16
@@ -23,20 +21,16 @@ func opInstrSize(op uint16) int32 {
 	return 8
 }
 
-// VjTraceBuf mirrors the C VjTraceBuf layout.
 type VjTraceBuf struct {
 	Head  uint32
 	Total uint32
 	Data  [vjTraceBufSize]byte
 }
 
-// allocTraceBuf allocates a new trace ring buffer for the VM.
 func allocTraceBuf() *VjTraceBuf {
 	return new(VjTraceBuf)
 }
 
-// fbReasonLabels maps fallback reason codes to human-readable labels.
-// When trace output contains "YIELD(fb:N)", Go replaces it with "YIELD(<label>)".
 var fbReasonLabels = [...]string{
 	fbReasonUnknown:       "fallback",
 	fbReasonMarshaler:     "marshaler",
@@ -47,8 +41,6 @@ var fbReasonLabels = [...]string{
 	fbReasonOverflow:      "overflow",
 }
 
-// expandFallbackReasons replaces any "YIELD(fb:N)" tokens in trace output
-// with human-readable "YIELD(<reason>)" labels using fbReasonLabels.
 func expandFallbackReasons(data []byte) []byte {
 	prefix := []byte("YIELD(fb:")
 	for {
@@ -56,7 +48,6 @@ func expandFallbackReasons(data []byte) []byte {
 		if i < 0 {
 			return data
 		}
-		// Find the closing ')' after the number.
 		numStart := i + len(prefix)
 		numEnd := numStart
 		for numEnd < len(data) && data[numEnd] >= '0' && data[numEnd] <= '9' {
@@ -67,17 +58,14 @@ func expandFallbackReasons(data []byte) []byte {
 			data = data[numEnd:]
 			continue
 		}
-		// Parse the number.
 		var n int32
 		for _, c := range data[numStart:numEnd] {
 			n = n*10 + int32(c-'0')
 		}
-		// Look up the label.
 		label := "fallback"
 		if n >= 0 && int(n) < len(fbReasonLabels) && fbReasonLabels[n] != "" {
 			label = fbReasonLabels[n]
 		}
-		// Replace "YIELD(fb:N)" with "YIELD(<label>)".
 		replacement := []byte("YIELD(" + label + ")")
 		data = append(data[:i], append(replacement, data[numEnd+1:]...)...)
 	}
@@ -130,8 +118,6 @@ func addIndentGuides(data []byte) []byte {
 	return out
 }
 
-// flushVMTrace reads pending trace data from the ring buffer and prints
-// it to stderr. Called after each VM exit (buffer full, yield, done, error).
 func (m *encodeState) flushVMTrace() {
 	if m.vmCtx.TraceBuf == nil {
 		return
@@ -141,58 +127,44 @@ func (m *encodeState) flushVMTrace() {
 		return
 	}
 
-	// Calculate readable range.
 	var start, length uint32
 	if tb.Total <= vjTraceBufSize {
-		// No overflow: all data is valid.
 		start = 0
 		length = tb.Head
 	} else {
-		// Overflow: oldest data starts at head (next write position).
 		start = tb.Head
 		length = vjTraceBufSize
 	}
 
-	// Read the ring buffer in order.
 	out := make([]byte, 0, length)
 	for i := uint32(0); i < length; i++ {
 		idx := (start + i) & (vjTraceBufSize - 1)
 		out = append(out, tb.Data[idx])
 	}
 
-	// Post-process: expand fallback reasons and add indentation guides.
 	out = expandFallbackReasons(out)
 	out = addIndentGuides(out)
 
 	fmt.Fprintf(os.Stderr, "── vm trace (%d bytes) ──\n%s",
 		length, out)
 
-	// Reset for next VM invocation.
 	tb.Head = 0
 	tb.Total = 0
 }
 
-// setupVMTrace sets up the trace buffer on the encodeState's VM context.
-// Called from acquireEncodeState when vjdebug build tag is active.
 func (m *encodeState) setupVMTrace() {
 	if m.vmCtx.TraceBuf == nil {
 		tb := allocTraceBuf()
 		m.vmCtx.TraceBuf = unsafe.Pointer(tb)
 	} else {
-		// Reset existing buffer for reuse.
 		tb := (*VjTraceBuf)(m.vmCtx.TraceBuf)
 		tb.Head = 0
 		tb.Total = 0
 	}
 }
 
-// traceBlueprints associates each encodeState with the blueprints collected
-// during a single execVM call. Package-level to avoid adding fields to
-// the encodeState struct (which is pooled and performance-sensitive).
 var traceBlueprints sync.Map // *encodeState → *[]*Blueprint
 
-// traceRecordBlueprint appends bp to the per-encodeState blueprint list,
-// skipping duplicates (same pointer).
 func (m *encodeState) traceRecordBlueprint(bp *Blueprint) {
 	val, _ := traceBlueprints.LoadOrStore(m, &[]*Blueprint{})
 	list := val.(*[]*Blueprint)
@@ -204,8 +176,6 @@ func (m *encodeState) traceRecordBlueprint(bp *Blueprint) {
 	*list = append(*list, bp)
 }
 
-// traceFlushBlueprints prints all collected blueprints for this encodeState
-// to stderr, then removes the entry from the map.
 func (m *encodeState) traceFlushBlueprints() {
 	val, ok := traceBlueprints.LoadAndDelete(m)
 	if !ok {
@@ -220,7 +190,6 @@ func (m *encodeState) traceFlushBlueprints() {
 	}
 }
 
-// opcodeName maps opcode values to human-readable names.
 var opcodeName = map[uint16]string{
 	opBool:       "BOOL",
 	opInt:        "INT",
@@ -267,10 +236,6 @@ var opcodeName = map[uint16]string{
 	opTime:          "TIME",
 }
 
-// dumpBlueprint prints one blueprint's instruction listing to stderr
-// with indentation that reflects structural nesting (OBJ_OPEN/CLOSE,
-// SLICE_BEGIN/END, etc.), mirroring the trace output style.
-// Line numbers stay left-aligned; only the opcode+key is indented.
 func dumpBlueprint(bp *Blueprint) {
 	name := bp.Name
 	if name == "" {
@@ -319,7 +284,6 @@ func dumpBlueprint(bp *Blueprint) {
 		if isLongOp(hdr.OpType) {
 			sizeTag = "L"
 		}
-		// Build annotation suffix (type name for OBJ_OPEN/CALL).
 		ann := ""
 		if bp.Annotations != nil {
 			if a, ok := bp.Annotations[int(pc)]; ok {

@@ -9,13 +9,11 @@ import (
 	"github.com/velox-io/json/gort"
 )
 
-// SliceHeader matches the internal layout of a Go slice.
 type SliceHeader = gort.SliceHeader
 
-// SWAR constants for byte-level searches within a uint64.
 const (
-	lo64 uint64 = 0x0101010101010101 // every byte low bit
-	hi64 uint64 = 0x8080808080808080 // every byte high bit
+	lo64 uint64 = 0x0101010101010101
+	hi64 uint64 = 0x8080808080808080
 )
 
 // hasZeroByte returns a mask with the high bit set for each zero byte in x.
@@ -33,7 +31,6 @@ func firstMarkedByteIndex(mask uint64) int {
 	return bits.TrailingZeros64(mask) >> 3
 }
 
-// unsafeString converts a []byte to string without copying.
 func unsafeString(b []byte) string {
 	if len(b) == 0 {
 		return ""
@@ -41,7 +38,6 @@ func unsafeString(b []byte) string {
 	return unsafe.String(unsafe.SliceData(b), len(b))
 }
 
-// rtypePtr extracts the *abi.Type from a reflect.Type interface value.
 func rtypePtr(t reflect.Type) unsafe.Pointer {
 	return gort.TypePtr(t)
 }

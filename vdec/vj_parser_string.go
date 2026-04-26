@@ -7,10 +7,6 @@ import (
 	"github.com/velox-io/json/typ"
 )
 
-// unescapeSinglePass scans src from firstEscIdx for the closing '"', unescaping
-// as it goes. src[start:firstEscIdx] is the prefix before the first backslash.
-// Returns (endIdx past closing quote, decoded []byte, error).
-// Decoded bytes land in arena (zero-copy), scratch→arena/heap, or heap overflow.
 func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, []byte, error) {
 	n := len(src)
 
@@ -202,8 +198,6 @@ done:
 	return i + 1, result, nil
 }
 
-// processEscapedString handles strings with escape sequences.
-// Thin wrapper around unescapeSinglePass that assigns the result to the target field.
 func (sc *Parser) processEscapedString(src []byte, start, firstEscIdx int, ti *DecTypeInfo, ptr unsafe.Pointer) (int, error) {
 	endIdx, result, err := sc.unescapeSinglePass(src, start, firstEscIdx)
 	if err != nil {

@@ -7,15 +7,11 @@ import (
 	"github.com/velox-io/json/typ"
 )
 
-// bindEncodeFn binds ti.Encode after Ext is wired.
-// Pointer closures read ElemType.Encode at call time to handle cycles.
 func bindEncodeFn(ti *EncTypeInfo) {
-	// Already bound (e.g. from encTypeCache hit).
 	if ti.Encode != nil {
 		return
 	}
 
-	// Custom marshal hooks take priority.
 	if ti.TypeFlags&EncTypeFlagHasMarshalFn != 0 {
 		hooks := ti.Hooks
 		ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
@@ -131,7 +127,6 @@ func bindEncodeFn(ti *EncTypeInfo) {
 		}
 
 	case typ.KindPointer:
-		// Read ElemType.Encode at call time (not bind time) to handle cycles.
 		pi := ti.ResolvePointer()
 		ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
 			elemPtr := *(*unsafe.Pointer)(ptr)
@@ -165,8 +160,6 @@ func bindEncodeFn(ti *EncTypeInfo) {
 		}
 	}
 }
-
-// ── Primitive encode functions (stateless, no closure needed) ───────
 
 func fnEncodeBool(es *encodeState, ptr unsafe.Pointer) error {
 	if *(*bool)(ptr) {

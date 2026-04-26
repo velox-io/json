@@ -25,9 +25,7 @@ func (es *encodeState) writeKeySpace(ctx *VjExecCtx) {
 	}
 }
 
-// execVM drives the Go<->C VM loop around one Blueprint.
 func (es *encodeState) execVM(bp *Blueprint, base unsafe.Pointer) error {
-	// m.vmCtx is shared state, so native VM entry cannot be re-entrant.
 	es.inVM = true
 
 	if vjTraceEnabled {
@@ -76,7 +74,6 @@ func (es *encodeState) execVM(bp *Blueprint, base unsafe.Pointer) error {
 
 	err := es.execVMLoop(ctx, bp, vmExec)
 
-	//release
 	es.inVM = false
 	ctx.OpsPtr = nil
 	ctx.CurBase = nil
@@ -89,10 +86,8 @@ func (es *encodeState) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	return err
 }
 
-// execVMLoop keeps the hot VM loop free of defer overhead.
 func (es *encodeState) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(unsafe.Pointer)) error {
 	for {
-		// Flush before re-entry so yield-written bytes reach the writer promptly.
 		if es.flushFn != nil && len(es.buf) > 0 {
 			if err := es.flush(); err != nil {
 				return err
@@ -109,18 +104,15 @@ func (es *encodeState) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(uns
 			es.buf = newBuf
 		}
 
-		// Hand the spare capacity [len:cap) to the C VM as its write region.
 		workBuf := es.buf[len(es.buf):cap(es.buf)]
 		bufStart := uintptr(unsafe.Pointer(&workBuf[0]))
 		ctx.BufCur = bufStart
 		ctx.BufEnd = bufStart + uintptr(len(workBuf))
 
-		// vmExec(unsafe.Pointer(ctx))
 		es.callvm(vmExec, ctx)
 
 		es.flushVMTrace()
 
-		// Bytes written by the VM this iteration.
 		written := int(ctx.BufCur - bufStart)
 
 		switch vmstateGetExit(ctx.VMState) {
@@ -206,7 +198,6 @@ func (es *encodeState) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(uns
 	}
 }
 
-// typeFromRTypePtr rebuilds reflect.Type from a raw runtime type pointer.
 func typeFromRTypePtr(p unsafe.Pointer) reflect.Type {
 	var dummy reflect.Type
 	eface := (*[2]unsafe.Pointer)(unsafe.Pointer(&dummy))
@@ -217,7 +208,6 @@ func typeFromRTypePtr(p unsafe.Pointer) reflect.Type {
 	return dummy
 }
 
-// handleIfaceCacheMiss compiles or tags the concrete interface type and publishes it into the shared cache.
 func (es *encodeState) handleIfaceCacheMiss(ctx *VjExecCtx) error {
 	typePtr := ctx.YieldTypePtr
 	if typePtr == nil {
@@ -263,7 +253,6 @@ func (es *encodeState) encodeAnyIface(ifacePtr unsafe.Pointer) error {
 	return es.encodeAny(*(*any)(ifacePtr))
 }
 
-// handleFallbackYield runs the Go-side fallback for one yielded field.
 func (es *encodeState) handleFallbackYield(ctx *VjExecCtx, bp *Blueprint) error {
 	isFirst := vmstateGetFirst(ctx.VMState)
 
@@ -308,7 +297,6 @@ func (es *encodeState) handleFallbackYield(ctx *VjExecCtx, bp *Blueprint) error 
 	return nil
 }
 
-// handleMapIteration runs the Go-side map encoder for OP_MAP yields.
 func (es *encodeState) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 	hdr := opHdrAt(bp.Ops, ctx.PC)
 	opCodeVal := hdr.OpType
@@ -334,7 +322,6 @@ func (es *encodeState) handleMapIteration(ctx *VjExecCtx, bp *Blueprint) error {
 		es.writeKeySpace(ctx)
 	}
 
-	// map[string]any keeps the value fast path inline.
 	if mapInfo.ValType.Kind == typ.KindAny && mapInfo.IsStringKey {
 		mp := *(*map[string]any)(mapPtr)
 		if err := es.encodeAnyMap(mp); err != nil {

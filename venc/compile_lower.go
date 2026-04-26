@@ -5,7 +5,6 @@ import (
 	"unsafe"
 )
 
-// lower resolves labels and encodes IR into the flat VM byte stream.
 func lower(insts []IRInst) (ops []byte, fallbacks map[int]*fbInfo, annotations map[int]string) {
 	fallbacks = make(map[int]*fbInfo)
 
@@ -70,13 +69,12 @@ func lower(insts []IRInst) (ops []byte, fallbacks map[int]*fbInfo, annotations m
 	}
 
 	if len(ops) != totalSize {
-		panic(fmt.Sprintf("vjson: lower: expected %d bytes, got %d", totalSize, len(ops))) // internal bug: pass1/pass2 size mismatch
+		panic(fmt.Sprintf("vjson: lower: expected %d bytes, got %d", totalSize, len(ops)))
 	}
 
 	return ops, fallbacks, annotations
 }
 
-// resolveOperands converts symbolic labels into the opcode-specific byte offsets.
 func resolveOperands(inst *IRInst, selfOff int, labelOffsets map[Label]int, a, b *int32) {
 	switch inst.Op {
 	case opSkipIfZero:
@@ -133,7 +131,6 @@ func resolveOperands(inst *IRInst, selfOff int, labelOffsets map[Label]int, a, b
 	}
 }
 
-// isLongOp reports whether the opcode carries a VjOpExt suffix.
 func isLongOp(op uint16) bool {
 	switch op {
 	case opSkipIfZero, opCall, opPtrDeref,

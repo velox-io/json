@@ -15,12 +15,8 @@ const (
 	EncTagFlagOmitEmpty         = typ.TagFlagOmitEmpty
 )
 
-// EncodeFn is the per-type encode function, bound at type-registration time.
-// Replaces the runtime Kind switch in encodeTop with O(1) dispatch.
 type EncodeFn func(es *encodeState, ptr unsafe.Pointer) error
 
-// EncTypeInfo is the per-type encode descriptor (singleton per Go type).
-// It holds type-level encoding metadata and a reference to the shared UniType.
 type EncTypeInfo struct {
 	*typ.UniType // embedded shared descriptor
 
@@ -61,7 +57,6 @@ func (t *EncTypeInfo) ResolvePointer() *EncPointerInfo {
 	return (*EncPointerInfo)(t.Ext)
 }
 
-// getBlueprint returns the lazily compiled blueprint for this type.
 func (t *EncTypeInfo) getBlueprint() *Blueprint {
 	cache := t.bpCache()
 	if cache == nil {
@@ -84,13 +79,11 @@ func (t *EncTypeInfo) bpCache() *blueprintCache {
 	return t.bp.Load()
 }
 
-// blueprintCache holds the lazily compiled Blueprint for a type.
 type blueprintCache struct {
 	once      sync.Once
 	blueprint *Blueprint
 }
 
-// EncFieldInfo describes one struct field for encoding.
 type EncFieldInfo struct {
 	Type *EncTypeInfo // field's type descriptor
 
@@ -103,30 +96,25 @@ type EncFieldInfo struct {
 	IsZeroFn       func(ptr unsafe.Pointer) bool
 }
 
-// EncStructInfo describes a struct's encoding layout.
 type EncStructInfo struct {
 	Fields []EncFieldInfo
 }
 
-// EncSliceInfo describes a slice.
 type EncSliceInfo struct {
 	ElemType *EncTypeInfo
 	ElemSize uintptr
 }
 
-// EncArrayInfo describes a fixed-size array.
 type EncArrayInfo struct {
 	ElemType *EncTypeInfo
 	ElemSize uintptr
 	ArrayLen int
 }
 
-// EncPointerInfo describes a pointer's element type.
 type EncPointerInfo struct {
 	ElemType *EncTypeInfo
 }
 
-// EncMapInfo describes a map.
 type EncMapInfo struct {
 	ValType *EncTypeInfo
 	KeyType *EncTypeInfo

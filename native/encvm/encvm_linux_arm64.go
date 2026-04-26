@@ -4,19 +4,13 @@ package encvm
 
 import "unsafe"
 
-// ---- Full mode ----
-
 //go:noescape
 //go:nosplit
 func vjVMExecFullNeon(ctx unsafe.Pointer)
 
-// ---- Fast mode ----
-
 //go:noescape
 //go:nosplit
 func vjVMExecFastNeon(ctx unsafe.Pointer)
-
-// ---- Compact mode ----
 
 //go:noescape
 //go:nosplit

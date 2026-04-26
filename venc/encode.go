@@ -15,8 +15,8 @@ const (
 type encodeState struct {
 	// vmCtx must stay first so VjExecCtx.Stack keeps the native-required alignment.
 	vmCtx VjExecCtx
-	flags uint32 // escape flags | vjEncFloatExpAuto
-	inVM  bool   // blocks re-entrant VM entry
+	flags uint32
+	inVM  bool
 	buf   []byte
 
 	indentString string
@@ -26,11 +26,10 @@ type encodeState struct {
 	nativeIndent bool                              // simple indent pattern (C VM can handle)
 	tplKey       string                            // L1 cache key for indentTpl (survives pool recycle)
 
-	flushFn func([]byte) error // streaming sink for Encoder
+	flushFn func([]byte) error
 	bufSize int
 }
 
-// vmCtx offset must remain 0 for the native stack alignment rule.
 var _ [0]byte = [unsafe.Offsetof(encodeState{}.vmCtx)]byte{}
 
 var encodeStatePool = sync.Pool{
@@ -61,8 +60,8 @@ func acquireEncodeState() *encodeState {
 }
 
 func releaseEncodeState(es *encodeState) {
-	es.flushFn = nil // clear closure reference before pooling
-	es.bufSize = 0   // clear per-call override
+	es.flushFn = nil
+	es.bufSize = 0
 
 	es.flags = 0
 
@@ -72,17 +71,15 @@ func releaseEncodeState(es *encodeState) {
 	// indentTpl and tplKey are intentionally kept: they point into the
 	// global immutable cache and serve as an L1 fast-path on reuse.
 
-	encodeStatePool.Put(es) // always recycle the struct (vmCtx is 2152 bytes)
+	encodeStatePool.Put(es)
 }
 
-// flush writes buffered data through flushFn.
 func (es *encodeState) flush() error {
 	err := es.flushFn(es.buf)
 	es.buf = es.buf[:0]
 	return err
 }
 
-// exec runs a compiled Blueprint through the best available VM.
 func (es *encodeState) exec(bp *Blueprint, base unsafe.Pointer) error {
 	if !es.inVM && es.nativeIndent {
 		return es.execVM(bp, base)
@@ -90,7 +87,6 @@ func (es *encodeState) exec(bp *Blueprint, base unsafe.Pointer) error {
 	return es.interp(bp, base)
 }
 
-// encodeTop dispatches to the compile-time bound encode function.
 func (es *encodeState) encodeTop(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	return ti.Encode(es, ptr)
 }
@@ -117,11 +113,9 @@ func isSimpleIndent(prefix, indent string) int {
 // (survives pool recycle). L2: global sync.Map for all known patterns.
 func (es *encodeState) buildIndentTpl(prefix, indent string) {
 	key := prefix + "\x00" + indent
-	// L1: encodeState-local cache — just a string compare, no map lookup.
 	if key == es.tplKey {
 		return
 	}
-	// L2: global cache.
 	if v, ok := indentTplCache.Load(key); ok {
 		es.indentTpl = v.(*[1 + 255 + maxIndentDepth*8]byte)
 		es.tplKey = key

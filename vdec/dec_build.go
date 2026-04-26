@@ -36,12 +36,10 @@ func buildDecTypeInfo(t reflect.Type) *DecTypeInfo {
 	return dti
 }
 
-// fillStructExt compiles the struct extension into dti.Ext.
 func fillStructExt(dti *DecTypeInfo, info *typ.StructTypeInfo, building map[reflect.Type]*DecTypeInfo) {
 	dti.Ext = unsafe.Pointer(compileStructInfo(info, building))
 }
 
-// newDecTypeInfoFromUT copies the shared type descriptor into decode form.
 func newDecTypeInfoFromUT(ut *typ.UniType) *DecTypeInfo {
 	dti := &DecTypeInfo{
 		Kind:    ut.Kind,
@@ -68,7 +66,6 @@ func newDecTypeInfoFromUT(ut *typ.UniType) *DecTypeInfo {
 	return dti
 }
 
-// fillContainerExt populates non-struct container extensions.
 func fillContainerExt(dti *DecTypeInfo, ut *typ.UniType) {
 	switch info := ut.Ext.(type) {
 	case *typ.SliceTypeInfo:
@@ -82,7 +79,6 @@ func fillContainerExt(dti *DecTypeInfo, ut *typ.UniType) {
 	}
 }
 
-// compileStructInfo keeps field type descriptors pointer-based for recursion.
 func compileStructInfo(info *typ.StructTypeInfo, building map[reflect.Type]*DecTypeInfo) *DecStructInfo {
 	si := &DecStructInfo{}
 	si.Fields = make([]DecFieldInfo, len(info.Fields))
@@ -100,7 +96,6 @@ func compileStructInfo(info *typ.StructTypeInfo, building map[reflect.Type]*DecT
 	return si
 }
 
-// resolveFieldType resolves field descriptors while preserving recursive shells.
 func resolveFieldType(fieldUT *typ.UniType, building map[reflect.Type]*DecTypeInfo) *DecTypeInfo {
 	t := fieldUT.Type
 	if v, ok := decTypeCache.Load(t); ok {
@@ -120,7 +115,6 @@ func resolveFieldType(fieldUT *typ.UniType, building map[reflect.Type]*DecTypeIn
 	return dti
 }
 
-// fillContainerExtRec threads the build map through nested containers.
 func fillContainerExtRec(dti *DecTypeInfo, ut *typ.UniType, building map[reflect.Type]*DecTypeInfo) {
 	switch info := ut.Ext.(type) {
 	case *typ.SliceTypeInfo:

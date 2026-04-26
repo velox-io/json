@@ -13,7 +13,6 @@ var SwissMapLayoutOK = gort.SwissMapLayoutOK
 var SwissMapStrIntLayoutOK = gort.SwissMapStrIntLayoutOK
 var SwissMapStrInt64LayoutOK = gort.SwissMapStrInt64LayoutOK
 
-// swissMapGlobalFlags holds EncSplitGroup when KKKKVVVV layout is active.
 var swissMapGlobalFlags uint32
 
 func init() {

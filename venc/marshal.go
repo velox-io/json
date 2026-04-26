@@ -7,35 +7,28 @@ import (
 	"github.com/velox-io/json/gort"
 )
 
-// MarshalOption configures encoding behavior.
 type MarshalOption func(*encodeState)
 
-// WithEscapeHTML enables HTML escaping.
 func WithEscapeHTML() MarshalOption {
 	return func(es *encodeState) { es.flags |= uint32(escapeHTML) }
 }
 
-// WithoutEscapeHTML disables HTML escaping.
 func WithoutEscapeHTML() MarshalOption {
 	return func(es *encodeState) { es.flags &^= uint32(escapeHTML) }
 }
 
-// WithEscapeLineTerms escapes U+2028 and U+2029.
 func WithEscapeLineTerms() MarshalOption {
 	return func(es *encodeState) { es.flags |= uint32(escapeLineTerms) }
 }
 
-// WithoutEscapeLineTerms leaves U+2028 and U+2029 unescaped.
 func WithoutEscapeLineTerms() MarshalOption {
 	return func(es *encodeState) { es.flags &^= uint32(escapeLineTerms) }
 }
 
-// WithUTF8Correction replaces invalid UTF-8 with \ufffd.
 func WithUTF8Correction() MarshalOption {
 	return func(es *encodeState) { es.flags |= uint32(escapeInvalidUTF8) }
 }
 
-// WithoutUTF8Correction preserves invalid UTF-8 bytes.
 func WithoutUTF8Correction() MarshalOption {
 	return func(es *encodeState) { es.flags &^= uint32(escapeInvalidUTF8) }
 }
@@ -47,12 +40,10 @@ func WithStdCompat() MarshalOption {
 	}
 }
 
-// WithFloatExpAuto matches encoding/json scientific-notation thresholds.
 func WithFloatExpAuto() MarshalOption {
 	return func(es *encodeState) { es.flags |= EncFloatExpAuto }
 }
 
-// WithFastEscape leaves only the mandatory JSON escapes enabled.
 func WithFastEscape() MarshalOption {
 	return func(es *encodeState) { es.flags &^= uint32(escapeHTML | escapeLineTerms | escapeInvalidUTF8) }
 }
@@ -79,7 +70,6 @@ func WithBufSize(n int) MarshalOption {
 func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
 	rt := reflect.TypeFor[T]()
 	if rt.Kind() == reflect.Pointer {
-		// Pointer fast path — inline to avoid extra call overhead on the hot path.
 		elemPtr := *(*unsafe.Pointer)(unsafe.Pointer(&v))
 		if elemPtr == nil {
 			return []byte("null"), nil
@@ -99,15 +89,10 @@ func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
 	return marshalSlow(v, rt, opts)
 }
 
-// marshalSlow is a thin shim that takes &v and forwards to marshalSlowPtr.
-// It must stay small enough to be inlined, so that the compiler folds it
-// into Marshal — v lives on Marshal's stack frame and is never copied again.
 func marshalSlow[T any](v T, rt reflect.Type, opts []MarshalOption) ([]byte, error) {
 	return marshalSlowPtr(&v, rt, opts)
 }
 
-// marshalSlowPtr does the real work for value-typed T. It receives *T so
-// the (potentially large) value is not copied a second time.
 func marshalSlowPtr[T any](v *T, rt reflect.Type, opts []MarshalOption) ([]byte, error) {
 	es := acquireEncodeState()
 	defer releaseEncodeState(es)
@@ -119,8 +104,6 @@ func marshalSlowPtr[T any](v *T, rt reflect.Type, opts []MarshalOption) ([]byte,
 	return es.marshalWith(ti, unsafe.Pointer(v))
 }
 
-// marshalWith is the shared tail for Marshal: sets up the buffer, runs the
-// encoder, updates the adaptive hint, and splits the result out of es.buf.
 func (es *encodeState) marshalWith(ti *EncTypeInfo, ptr unsafe.Pointer) ([]byte, error) {
 	hint := int(ti.AdaptiveHint.Load())
 	if hint == 0 {
@@ -128,9 +111,6 @@ func (es *encodeState) marshalWith(ti *EncTypeInfo, ptr unsafe.Pointer) ([]byte,
 		ti.AdaptiveHint.Store(int64(hint))
 	}
 
-	// WithBufSize: ensure es.buf has at least bufSize capacity as the
-	// working buffer. After encoding, a tight copy is returned so es.buf
-	// stays in the pool at its full capacity for reuse.
 	if es.bufSize > 0 {
 		if cap(es.buf) < es.bufSize {
 			es.buf = gort.MakeDirtyBytes(0, es.bufSize)
@@ -176,17 +156,12 @@ func withIndent(prefix, indent string) MarshalOption {
 	}
 }
 
-// AppendMarshal appends the JSON encoding of v to dst.
-//
-// Same pointer/value split as Marshal — pointer path inline, value path in
-// appendMarshalSlow to isolate &v escape.
 func AppendMarshal[T any](dst []byte, v T, opts ...MarshalOption) ([]byte, error) {
 	rt := reflect.TypeFor[T]()
 	if rt.Kind() != reflect.Pointer {
 		return appendMarshalSlow(dst, v, rt, opts)
 	}
 
-	// Pointer fast path.
 	elemPtr := *(*unsafe.Pointer)(unsafe.Pointer(&v))
 	if elemPtr == nil {
 		return append(dst, "null"...), nil

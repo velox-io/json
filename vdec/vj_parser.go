@@ -348,7 +348,7 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *DecTypeInfo, ptr unsafe.Poi
 					}
 					return idx, newSyntaxError(fmt.Sprintf("vjson: expected ',' or '}' in object, got %q", sliceAt(src, idx)), idx)
 				}
-			} //inline scanStruct end
+			}
 		case typ.KindMap:
 			return sc.scanMap(src, idx, ti, ptr)
 		case typ.KindAny:
@@ -702,7 +702,6 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *DecTypeInfo, ptr unsafe.Po
 		if numErr != nil {
 			return end, numErr
 		}
-		// v, err := strconv.ParseFloat(unsafeString(src[idx:end]), 32)
 		v, err := strconv.ParseFloat(unsafeString(sliceRangeT(src, idx, end)), 32)
 		if err != nil {
 			return end, newSyntaxErrorWrap(fmt.Sprintf("vjson: invalid float %q: %v", src[idx:end], err), end, err)
@@ -855,7 +854,6 @@ func (sc *Parser) scanNumberAny(src []byte, idx int) (int, any, error) {
 	if numErr != nil {
 		return end, nil, numErr
 	}
-	// span := src[idx:end]
 	span := sliceRangeT(src, idx, end)
 
 	// json.Number path: preserve the raw text, no float conversion.
@@ -1168,7 +1166,6 @@ func (sc *Parser) scanSlice(src []byte, idx int, sDec *DecSliceInfo, ptr unsafe.
 		base = unsafe_NewArray(sDec.ElemRType, sliceCap)
 	} else {
 		backingBytes = make([]byte, sliceCap*int(elemSize))
-		// base = unsafe.Pointer(&backingBytes[0])
 		base = slicePtr(backingBytes)
 	}
 
@@ -1335,7 +1332,6 @@ func (sc *Parser) scanPointer(src []byte, idx int, ti *DecTypeInfo, ptr unsafe.P
 		if idx+4 > len(src) {
 			return idx, errUnexpectedEOF
 		}
-		// if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null
 		if *(*uint32)(unsafe.Pointer(&src[idx])) != litU32Null {
 			return idx, newSyntaxError(fmt.Sprintf("vjson: invalid literal at offset %d", idx), idx)
 		}
@@ -1352,7 +1348,6 @@ func (sc *Parser) scanPointer(src []byte, idx int, ti *DecTypeInfo, ptr unsafe.P
 			elemPtr = sc.ptrAlloc(pDec.ElemRType, pDec.ElemSize)
 		} else {
 			backing := make([]byte, pDec.ElemSize)
-			// elemPtr = unsafe.Pointer(&backing[0])
 			elemPtr = slicePtr(backing)
 		}
 	}
@@ -1422,9 +1417,7 @@ func (sc *Parser) scanValueAny(src []byte, idx int) (int, any, error) {
 		}
 		return idx + 4, nil, nil
 	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-':
-		// if (src[idx] >= '0' && src[idx] <= '9') || src[idx] == '-' {
 		return sc.scanNumberAny(src, idx)
-		// }
 	default:
 		return idx, nil, newSyntaxError(fmt.Sprintf("vjson: unexpected character %q in any value", src[idx]), idx)
 	}
@@ -1466,13 +1459,11 @@ func skipValue(src []byte, idx int) (int, error) {
 	case '{', '[':
 		return skipContainer(src, idx)
 	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-':
-		// if (src[idx] >= '0' && src[idx] <= '9') || src[idx] == '-' {
 		end, _, numErr := scanNumberSpan(src, idx)
 		if numErr != nil {
 			return end, numErr
 		}
 		return end, nil
-		// }
 	default:
 		return idx, newSyntaxError(fmt.Sprintf("vjson: unexpected character %q", src[idx]), idx)
 	}
@@ -1485,14 +1476,12 @@ func skipStringEscape(src []byte, escIdx, n int) (int, error) {
 		return escIdx, errUnexpectedEOF
 	}
 
-	// next := src[escIdx+1]
 	next := sliceAt(src, escIdx+1)
 	if next == 'u' {
 		// \uXXXX — exactly 4 hex digits.
 		if escIdx+5 >= n {
 			return escIdx, errUnexpectedEOF
 		}
-		// if !isHexChar(src[escIdx+2]) || !isHexChar(src[escIdx+3]) || !isHexChar(src[escIdx+4]) || !isHexChar(src[escIdx+5])
 		if !isHexChar(sliceAt(src, escIdx+2)) || !isHexChar(sliceAt(src, escIdx+3)) || !isHexChar(sliceAt(src, escIdx+4)) || !isHexChar(sliceAt(src, escIdx+5)) {
 			return escIdx, newSyntaxError(fmt.Sprintf("vjson: invalid unicode escape in string at offset %d", escIdx), escIdx)
 		}
@@ -1512,7 +1501,6 @@ func skipString(src []byte, idx int) (int, error) {
 	limit := n - 8
 
 	// SWAR scan 8 bytes at a time for '"', '\\', or control chars (< 0x20).
-	// base := unsafe.Pointer(&src[0])
 	base := slicePtr(src)
 	for i <= limit {
 		w := *(*uint64)(unsafe.Add(base, i))
@@ -1576,7 +1564,6 @@ outer:
 	for i < n && depth > 0 {
 		// Fast path: SWAR scan 8 bytes at a time for { } [ ] "
 		if i+8 <= n {
-			// base := unsafe.Pointer(&src[0])
 			base := slicePtr(src)
 			w := *(*uint64)(unsafe.Add(base, i))
 

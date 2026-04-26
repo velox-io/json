@@ -11,7 +11,6 @@ import (
 	"github.com/velox-io/json/gort"
 )
 
-// Fast cache: direct-mapped, sits in front of decTypeCache (sync.Map).
 const fastCacheSize = 32 // must be power of two
 
 type fastCacheEntry struct {

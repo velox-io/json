@@ -37,23 +37,19 @@ func TypedMemmove(typ unsafe.Pointer, dst unsafe.Pointer, src unsafe.Pointer)
 //go:linkname MallocGC runtime.mallocgc
 func MallocGC(size uintptr, typ unsafe.Pointer, needzero bool) unsafe.Pointer
 
-// goIface matches the runtime iface layout {itab, data}.
 type GoIface struct {
 	Tab  unsafe.Pointer
 	Data unsafe.Pointer
 }
 
-// extractItab extracts the cached *itab from a non-empty interface pointer.
 func ExtractItab(ifacePtr unsafe.Pointer) unsafe.Pointer {
 	return (*GoIface)(ifacePtr).Tab
 }
 
-// TypePtr extracts the *abi.Type from a reflect.Type interface value.
 func TypePtr(t reflect.Type) unsafe.Pointer {
 	return *(*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(&t), unsafe.Sizeof(uintptr(0))))
 }
 
-// SliceHeader matches the internal layout of a Go slice.
 type SliceHeader struct {
 	Data unsafe.Pointer
 	Len  int

@@ -1,16 +1,11 @@
 package vdec
 
-// dec_lookup.go implements struct field lookup strategies for the decoder.
-// This is a vdec-internal copy — the root package's perfecthash.go serves
-// marshal (and will eventually be cleaned up to marshal-only or shared).
-
 import (
 	"math/bits"
 	"strings"
 	"unsafe"
 )
 
-// fieldLookup is the interface for struct field lookup strategies.
 type fieldLookup interface {
 	lookup(si *DecStructInfo, key string) *DecFieldInfo
 }
@@ -75,7 +70,6 @@ func buildBitmapLookup8(dec *DecStructInfo) *bitmapLookup8 {
 	return b
 }
 
-// perfectHashBase holds the common state for all perfect-hash strategies.
 type perfectHashBase struct {
 	seed  uint64
 	shift uint8
@@ -121,7 +115,6 @@ func (l *mapLookup) lookup(_ *DecStructInfo, key string) *DecFieldInfo {
 	return l.m[key]
 }
 
-// buildLookup selects and constructs the optimal lookup strategy.
 func buildDecLookup(dec *DecStructInfo) {
 	for i := range dec.Fields {
 		if dec.Fields[i].JSONName != toLowerASCII(dec.Fields[i].JSONName) {
@@ -218,8 +211,6 @@ func buildMapFallback(dec *DecStructInfo) {
 	dec.Lookup = &mapLookup{m: m}
 }
 
-// --- Hash mixers (identical to root package) ---
-
 func simpleMixer(s string, seed uint64) uint64 {
 	n := uint64(len(s))
 	if n == 0 {
@@ -266,8 +257,6 @@ func fnv1aMixer(s string, seed uint64) uint64 {
 	h ^= h >> 33
 	return h
 }
-
-// --- ASCII helpers ---
 
 func equalFoldASCII(a, b string) bool {
 	if len(a) != len(b) {

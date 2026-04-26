@@ -60,7 +60,6 @@ func (es *encodeState) appendQuotedUint64(v uint64) {
 	es.buf = append(es.buf, '"')
 }
 
-// appendJSONFloat64 matches encoding/json float formatting when requested.
 func (es *encodeState) appendJSONFloat64(f float64) {
 	if es.flags&EncFloatExpAuto != 0 {
 		abs := math.Abs(f)
@@ -77,7 +76,6 @@ func (es *encodeState) appendJSONFloat64(f float64) {
 	es.buf = strconv.AppendFloat(es.buf, f, 'f', -1, 64)
 }
 
-// appendJSONFloat32 matches encoding/json float formatting when requested.
 func (es *encodeState) appendJSONFloat32(f float64) {
 	if es.flags&EncFloatExpAuto != 0 {
 		abs := float32(math.Abs(f))
@@ -116,13 +114,11 @@ func (es *encodeState) encodeString(s string) {
 	es.buf = appendEscapedString(es.buf, s, escapeFlags(es.flags))
 }
 
-// encodeQuotedString applies the `,string` double-encoding rule.
 func (es *encodeState) encodeQuotedString(s string) {
 	inner := appendEscapedString(nil, s, escapeFlags(es.flags))
 	es.buf = appendEscapedString(es.buf, unsafeString(inner), escapeFlags(es.flags))
 }
 
-// encodeValueQuoted implements the `,string` field option.
 func (es *encodeState) encodeValueQuoted(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	switch ti.Kind {
 	case typ.KindBool:
@@ -202,7 +198,6 @@ func (es *encodeState) encodeByteSlice(sh *SliceHeader) error {
 	return nil
 }
 
-// encodeByteArray writes [N]byte as base64.
 func (es *encodeState) encodeByteArray(ai *EncArrayInfo, ptr unsafe.Pointer) error {
 	data := unsafe.Slice((*byte)(ptr), ai.ArrayLen)
 	es.buf = append(es.buf, '"')
@@ -260,7 +255,6 @@ func (es *encodeState) encodeMapStringString(ptr unsafe.Pointer) error {
 	return nil
 }
 
-// encodeMapKey writes non-string map keys without building an intermediate string.
 func (es *encodeState) encodeMapKey(keyPtr unsafe.Pointer, keyTI *EncTypeInfo, keyType reflect.Type) error {
 	if keyTI.TypeFlags&EncTypeFlagHasTextMarshalFn != 0 {
 		text, err := keyTI.Hooks.TextMarshalFn(keyPtr)
@@ -308,7 +302,6 @@ func readUintN(ptr unsafe.Pointer, size uintptr) uint64 {
 }
 
 func (es *encodeState) encodeMapGeneric(mi *EncMapInfo, ptr unsafe.Pointer) error {
-	// ptr points to the map variable; the runtime header pointer is one level deeper.
 	mp := *(*unsafe.Pointer)(ptr)
 	if mp == nil {
 		es.buf = append(es.buf, litNull...)
@@ -367,7 +360,6 @@ func (es *encodeState) encodeMapGeneric(mi *EncMapInfo, ptr unsafe.Pointer) erro
 	return nil
 }
 
-// encodeAny handles the common interface{} fast paths before reflecting.
 func (es *encodeState) encodeAny(v any) error {
 	if v == nil {
 		es.buf = append(es.buf, litNull...)
@@ -442,7 +434,6 @@ func (es *encodeState) encodeAny(v any) error {
 	return nil
 }
 
-// encodeAnySlice keeps the common interface{} element types inline.
 func (es *encodeState) encodeAnySlice(arr []any) error {
 	if arr == nil {
 		es.buf = append(es.buf, litNull...)
@@ -507,7 +498,6 @@ func (es *encodeState) encodeAnySlice(arr []any) error {
 	return nil
 }
 
-// encodeAnyMap keeps the common interface{} value types inline.
 func (es *encodeState) encodeAnyMap(mp map[string]any) error {
 	if mp == nil {
 		es.buf = append(es.buf, litNull...)

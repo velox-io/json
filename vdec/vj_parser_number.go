@@ -8,10 +8,6 @@ import (
 	"github.com/velox-io/json/typ"
 )
 
-// scanArrayInt is a specialized path for [N]intX arrays (int, int8, int16, int32, int64).
-// It calls scanInt64 directly, bypassing scanValue/scanNumber dispatch.
-// Like encoding/json, short JSON arrays zero-fill the tail and extra elements
-// are still parsed but discarded.
 func scanArrayInt(src []byte, idx int, arrayLen int, elemSize uintptr, elemKind typ.ElemTypeKind, elemType reflect.Type, ptr unsafe.Pointer) (int, error) {
 	n := len(src)
 	idx++
@@ -83,10 +79,6 @@ func scanArrayInt(src []byte, idx int, arrayLen int, elemSize uintptr, elemKind 
 	}
 }
 
-// scanArrayUint is a specialized path for [N]uintX arrays (uint, uint8, uint16, uint32, uint64).
-// It calls scanUint64 directly, bypassing scanValue/scanNumber dispatch.
-// Like encoding/json, short JSON arrays zero-fill the tail and extra elements
-// are still parsed but discarded.
 func scanArrayUint(src []byte, idx int, arrayLen int, elemSize uintptr, elemKind typ.ElemTypeKind, elemType reflect.Type, ptr unsafe.Pointer) (int, error) {
 	n := len(src)
 	idx++
@@ -158,9 +150,6 @@ func scanArrayUint(src []byte, idx int, arrayLen int, elemSize uintptr, elemKind
 	}
 }
 
-// scanArrayFloat64 is a specialized path for [N]float64 arrays.
-// Like encoding/json, short JSON arrays zero-fill the tail and extra elements
-// are still parsed but discarded.
 func scanArrayFloat64(src []byte, idx int, arrayLen int, elemSize uintptr, ptr unsafe.Pointer) (int, error) {
 	n := len(src)
 	idx++

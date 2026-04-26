@@ -9,11 +9,10 @@ import "unsafe"
 // Available reports whether the native C encoder is linked on this platform.
 var Available bool
 
-// VM entry points — set by platform-specific init() via applyAVX2 / applyNEON.
 var (
-	vmExec        func(ctx unsafe.Pointer) // full mode (indent support)
-	vmExecFast    func(ctx unsafe.Pointer) // fast mode (no escape flag dispatch)
-	vmExecCompact func(ctx unsafe.Pointer) // compact mode (no indent paths)
+	vmExec        func(ctx unsafe.Pointer)
+	vmExecFast    func(ctx unsafe.Pointer)
+	vmExecCompact func(ctx unsafe.Pointer)
 )
 
 // VMExec calls the full-mode native encoder.

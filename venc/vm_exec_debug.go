@@ -8,7 +8,6 @@ import (
 	"unsafe"
 )
 
-// stackExpand forces goroutine stack growth by consuming stack space via recursion.
 func (es *encodeState) StackExpand(v int) {
 	es.stackExpandRecur(v, 128)
 }
@@ -26,7 +25,6 @@ func (es *encodeState) stackExpandRecur(v int, depth int) {
 }
 
 func (es *encodeState) callvm(vmExec func(unsafe.Pointer), ctx *VjExecCtx) {
-	// es.StackExpand(10)
-	runtime.GC() // trigger GC to scan stacks and collect unreachable objects
+	runtime.GC()
 	vmExec(unsafe.Pointer(ctx))
 }
