@@ -20,7 +20,7 @@ STDLIB_SOURCES="native/stdlib/memory.c"
 EXTRA_SOURCES="
   native/encvm/impl/eface.c
   native/encvm/impl/strfn_nonascii.c
-  native/encvm/impl/uscale.c
+  native/encvm/impl/ftoa.c
   native/encvm/impl/log.c
   native/encvm/impl/number.c
   native/encvm/impl/base64.c

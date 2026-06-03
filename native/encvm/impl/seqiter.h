@@ -12,10 +12,10 @@
 #ifndef VJ_ENCVM_SEQITER_H
 #define VJ_ENCVM_SEQITER_H
 
+#include "ftoa.h"
 #include "number.h"
 #include "strfn.h"
 #include "types.h"
-#include "uscale.h"
 #include "vj_compat.h"
 
 /* --- Indent helpers --- */
@@ -64,8 +64,8 @@ static inline uint8_t *vj_seq_encode_float64(uint8_t *buf, const uint8_t *elem_p
     *nan_inf = 1;
     return buf;
   }
-  int fmt = (flags & VJ_FLAGS_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED;
-  buf += us_write_float64(buf, dval, fmt);
+  int fmt = (flags & VJ_FLAGS_FLOAT_EXP_AUTO) ? VJ_FTOA_EXP_AUTO : VJ_FTOA_FIXED;
+  buf += vj_write_float64(buf, dval, fmt);
   return buf;
 }
 

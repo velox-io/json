@@ -1,26 +1,15 @@
-// Standalone test for us_write_float64
-// Build: cc -O2 -I../../include -I. -o test_uscale test_uscale.c
-// Run:   ./test_uscale
+// Standalone test for vj_write_float64
+// Build: cc -O2 -I../../include -I. -o test_ftoa test_ftoa.c
+// Run:   ./test_ftoa
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <stdint.h>
-
-// Avoid math.h conflicts with floor/ceil/round/div in uscale.c
-#define floor us_floor
-#define round us_round
-#define ceil  us_ceil
-#define div   us_div
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define INLINE static inline
 
-#include "uscale.c"
-
-#undef floor
-#undef round
-#undef ceil
-#undef div
+#include "ftoa.c"
 
 // Helper: fabs without math.h
 static double my_fabs(double x) {
@@ -57,7 +46,7 @@ int main(void) {
   int failed = 0;
 
   for (int i = 0; i < ncases; i++) {
-    int n = us_write_float64(buf, cases[i].value, US_FMT_EXP_AUTO);
+    int n = vj_write_float64(buf, cases[i].value, VJ_FTOA_EXP_AUTO);
     buf[n] = '\0';
 
     if (strcmp((char *)buf, cases[i].expected) != 0) {

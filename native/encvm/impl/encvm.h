@@ -21,7 +21,7 @@
 #include "types.h"
 #include "number.h"
 #include "strfn.h"
-#include "uscale.h"
+#include "ftoa.h"
 #include "eface.h"
 #include "trace.h"
 #include "swissmap.h"
@@ -496,7 +496,7 @@ vj_op_float64: {
   }
   VM_CHECK(op->key_len + 1 + 330 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
-  buf += us_write_float64(buf, dval, (VJ_ST_GET_FLAGS(vmstate) & VJ_FLAGS_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED);
+  buf += vj_write_float64(buf, dval, (VJ_ST_GET_FLAGS(vmstate) & VJ_FLAGS_FLOAT_EXP_AUTO) ? VJ_FTOA_EXP_AUTO : VJ_FTOA_FIXED);
   VM_NEXT_SHORT();
 }
 
@@ -777,7 +777,7 @@ vj_op_float32: {
   }
   VM_CHECK(op->key_len + 1 + 60 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
   VM_WRITE_KEY();
-  buf += us_write_float32(buf, fval, (VJ_ST_GET_FLAGS(vmstate) & VJ_FLAGS_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED);
+  buf += vj_write_float32(buf, fval, (VJ_ST_GET_FLAGS(vmstate) & VJ_FLAGS_FLOAT_EXP_AUTO) ? VJ_FTOA_EXP_AUTO : VJ_FTOA_FIXED);
   VM_NEXT_SHORT();
 }
 

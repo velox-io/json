@@ -704,7 +704,7 @@ for isa in $ISAS; do
             fi
 
             # Export symbol list: keep only vj_vm_exec_* as global.
-            # Without this, internal helpers (e.g. us_write_float32) remain
+            # Without this, internal helpers (e.g. vj_write_float32) remain
             # global in every syso, causing duplicate symbol errors.
             if [ -n "${EXPORT_SYMBOL_PREFIX:-}" ]; then
                 EXPORT_LIST="$OUTPUT_DIR/_exports_${mode}_${isa}.txt"

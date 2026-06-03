@@ -1,7 +1,7 @@
 #include "eface.h"
+#include "ftoa.h"
 #include "number.h"
 #include "strfn.h"
-#include "uscale.h"
 
 #include "vj_compat.h"
 
@@ -60,7 +60,7 @@ static NOINLINE EncValueResult encode_primitive_value(uint8_t *buf, const uint8_
     __builtin_memcpy(&fval, ptr, 4);
     if (__builtin_expect(__builtin_isnan(fval) || __builtin_isinf(fval), 0))
       return (EncValueResult){NULL, VJ_EXIT_NAN_INF};
-    buf += us_write_float32(buf, fval, (flags & VJ_FLAGS_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED);
+    buf += vj_write_float32(buf, fval, (flags & VJ_FLAGS_FLOAT_EXP_AUTO) ? VJ_FTOA_EXP_AUTO : VJ_FTOA_FIXED);
     break;
   }
   case OP_FLOAT64: {
@@ -68,7 +68,7 @@ static NOINLINE EncValueResult encode_primitive_value(uint8_t *buf, const uint8_
     __builtin_memcpy(&dval, ptr, 8);
     if (__builtin_expect(__builtin_isnan(dval) || __builtin_isinf(dval), 0))
       return (EncValueResult){NULL, VJ_EXIT_NAN_INF};
-    buf += us_write_float64(buf, dval, (flags & VJ_FLAGS_FLOAT_EXP_AUTO) ? US_FMT_EXP_AUTO : US_FMT_FIXED);
+    buf += vj_write_float64(buf, dval, (flags & VJ_FLAGS_FLOAT_EXP_AUTO) ? VJ_FTOA_EXP_AUTO : VJ_FTOA_FIXED);
     break;
   }
   case OP_STRING: {

@@ -1,63 +1,35 @@
+/*
+ * ftoa.c — Unrounded Scaling float-to-string conversion.
+ *
+ * (BSD-3-Clause, Copyright 2025 The Go Authors)
+ *
+ * Implements the algorithm described in:
+ *   "Floating-Point to Decimal, in One Multiply" by Russ Cox
+ *   https://research.swtch.com/fp
+ *
+ * Everything below is private to this TU: the 11136-byte POW10TAB, the
+ * "unrounded" arithmetic helpers, IEEE-754 unpacking, digit emission.
+ * Internal symbols keep the algorithm-specific `us_` prefix so the
+ * libc-conflicting names (floor/round/ceil) cannot leak.  Only the two
+ * top-level entry points declared in ftoa.h have external linkage.
+ */
+
 // clang-format off
 
-#include "uscale.h"
+#include "ftoa.h"
+
 #include "tables.h"
-
-#ifndef INLINE
 #include "vj_compat.h"
-#endif
 
-/*
- *  Each entry {hi, lo} represents a 128-bit mantissa pm = hi*2^64 - lo
- *  approximating 10^p, scaled so the high bit of hi is always set.
- *  Total: 696 entries = 11136 bytes.
- **/
+/* ---- Internal types ---- */
+
+/* {hi, lo} represents a 128-bit mantissa pm = hi*2^64 - lo approximating
+ * 10^p, scaled so the high bit of hi is always set. */
 typedef struct { uint64_t hi; uint64_t lo; } us_pm_hilo;
 
-#include "z_uscale_table.h"
-
-/*  An "unrounded" uint64_t encodes floor(4*x) | sticky_bit.
- *  Bits [63:2] = integer part, bit 1 = half bit, bit 0 = sticky bit.
- */
-typedef uint64_t unrounded;
-
-static inline uint64_t floor(unrounded u) {
-    return (u + 0) >> 2;
-}
-
-static inline uint64_t round(unrounded u) {
-    /* Round half-to-even */
-    return (u + 1 + ((u >> 2) & 1)) >> 2;
-}
-
-static inline uint64_t ceil(unrounded u) {
-    return (u + 3) >> 2;
-}
-
-static inline unrounded nudge(unrounded u, int delta) {
-    return u + (unrounded)(int64_t)delta;
-}
-
-static inline unrounded div(unrounded u, uint64_t d) {
-    uint64_t x = u;
-    return (x / d) | (u & 1) | (x % d != 0 ? 1 : 0);
-}
-
-/* Logarithm approximations */
-// floor(x * log10(2))
-static inline int us_log10Pow2(int x) {
-    return (x * 78913) >> 18;
-}
-// floor(x * log2(10))
-static inline int us_log2Pow10(int x) {
-    return (x * 108853) >> 15;
-}
-// floor(log10(3/4 * 2^e)) = floor(e*log10(2) - log10(4/3))
-static inline int us_skewed(int e) {
-    return (e * 631305 - 261663) >> 21;
-}
-
-/* --- Core: prescale and uscale --- */
+/* "Unrounded" uint64_t encoding floor(4*x) | sticky_bit.
+ * Bits [63:2] = integer part, bit 1 = half bit, bit 0 = sticky bit. */
+typedef uint64_t us_unrounded;
 
 typedef __uint128_t us_uint128_t;
 
@@ -65,6 +37,48 @@ typedef struct {
     us_pm_hilo pm;
     int s;
 } us_scaler;
+
+/* POW10TAB lives in a separate generated header but is only ever included
+ * here, so the (static const) table has exactly one TU-local copy. */
+#include "z_uscale_table.h"
+
+/* ---- Unrounded arithmetic ---- */
+
+static inline uint64_t us_floor(us_unrounded u) {
+    return (u + 0) >> 2;
+}
+
+/* Round half-to-even */
+static inline uint64_t us_round(us_unrounded u) {
+    return (u + 1 + ((u >> 2) & 1)) >> 2;
+}
+
+static inline uint64_t us_ceil(us_unrounded u) {
+    return (u + 3) >> 2;
+}
+
+static inline us_unrounded us_nudge(us_unrounded u, int delta) {
+    return u + (us_unrounded)(int64_t)delta;
+}
+
+/* ---- Logarithm approximations ---- */
+
+/* floor(x * log10(2)) */
+static inline int us_log10Pow2(int x) {
+    return (x * 78913) >> 18;
+}
+
+/* floor(x * log2(10)) */
+static inline int us_log2Pow10(int x) {
+    return (x * 108853) >> 15;
+}
+
+/* floor(log10(3/4 * 2^e)) = floor(e*log10(2) - log10(4/3)) */
+static inline int us_skewed(int e) {
+    return (e * 631305 - 261663) >> 21;
+}
+
+/* ---- Core uscale ---- */
 
 static inline us_scaler us_prescale(int e, int p, int lp) {
     us_scaler c;
@@ -74,11 +88,10 @@ static inline us_scaler us_prescale(int e, int p, int lp) {
 }
 
 /*
- * uscale returns unround(x * 2^e * 10^p).
- * The caller passes c = prescale(e, p, log2Pow10(p))
- * and x must be left-justified (high bit set).
+ * uscale returns unround(x * 2^e * 10^p) given c = us_prescale(e, p, lp).
+ * x must be left-justified (high bit set).
  */
-static inline unrounded us_uscale(uint64_t x, us_scaler c) {
+static inline us_unrounded us_uscale(uint64_t x, us_scaler c) {
     us_uint128_t full = (us_uint128_t)x * c.pm.hi;
     uint64_t hi = (uint64_t)(full >> 64);
     uint64_t mid = (uint64_t)full;
@@ -92,12 +105,13 @@ static inline unrounded us_uscale(uint64_t x, us_scaler c) {
     return (hi >> c.s) | sticky;
 }
 
-/* trimZeros (division-free trailing zero removal) */
+/* ---- Trailing-zero trim (division-free) ---- */
+
 static inline uint64_t us_rotr64(uint64_t x, int k) {
     return (x >> k) | (x << (64 - k));
 }
 
-// Remove trailing decimal zeros from x * 10^p. Returns updated (x, p) via pointers.
+/* Remove trailing decimal zeros from x * 10^p; updates *xp / *pp in place. */
 static inline void us_trim_zeros(uint64_t *xp, int *pp) {
     uint64_t x = *xp;
     int p = *pp;
@@ -135,6 +149,8 @@ static inline void us_trim_zeros(uint64_t *xp, int *pp) {
     *pp = p;
 }
 
+/* ---- IEEE-754 unpacking ---- */
+
 static inline void us_unpack64(double f, uint64_t *m, int *e) {
     uint64_t bits;
     __builtin_memcpy(&bits, &f, 8);
@@ -154,13 +170,9 @@ static inline void us_unpack64(double f, uint64_t *m, int *e) {
     }
 }
 
-static inline void us_unpack32(float f, uint64_t *m, int *e) {
-    us_unpack64((double)f, m, e);
-}
-
 /*
- * Compute the shortest decimal representation of f.
- * Returns (d, p) such that f = d * 10^p with minimal digits in d.
+ * us_short64 — shortest decimal representation of f.
+ * Returns (d, p) with f = d * 10^p, minimal digits in d.
  * f must be finite and positive.
  */
 static inline void us_short64(double f, uint64_t *d_out, int *p_out) {
@@ -188,8 +200,8 @@ static inline void us_short64(double f, uint64_t *d_out, int *p_out) {
     int odd = (int)(m >> z) & 1;
 
     us_scaler pre = us_prescale(e, p, us_log2Pow10(p));
-    uint64_t dmin = ceil(nudge(us_uscale(mn, pre), +odd));
-    uint64_t dmax = floor(nudge(us_uscale(mx, pre), -odd));
+    uint64_t dmin = us_ceil(us_nudge(us_uscale(mn, pre), +odd));
+    uint64_t dmax = us_floor(us_nudge(us_uscale(mx, pre), -odd));
 
     uint64_t d;
 
@@ -206,13 +218,13 @@ static inline void us_short64(double f, uint64_t *d_out, int *p_out) {
     /* If range contains multiple values, use correctly rounded. */
     d = dmin;
     if (d < dmax) {
-        d = round(us_uscale(m, pre));
+        d = us_round(us_uscale(m, pre));
     }
     *d_out = d;
     *p_out = -p;
 }
 
-/* Formatting helpers */
+/* ---- Digit-count and digit-write helpers ---- */
 
 static inline uint32_t us_decimal_length17(const uint64_t v) {
     if (v >= 10000000000000000ULL) return 17;
@@ -276,7 +288,9 @@ static inline int us_write_mantissa_digits(uint8_t *buf, uint64_t mantissa, uint
     return (int)olength;
 }
 
-INLINE int us_format_fixed(uint8_t *buf, uint64_t mantissa, int32_t exponent, int sign) {
+/* ---- Output formatters ---- */
+
+static inline int us_format_fixed(uint8_t *buf, uint64_t mantissa, int32_t exponent, int sign) {
     int idx = 0;
     if (sign) buf[idx++] = '-';
     if (mantissa == 0) { buf[idx++] = '0'; return idx; }
@@ -308,15 +322,15 @@ INLINE int us_format_fixed(uint8_t *buf, uint64_t mantissa, int32_t exponent, in
 }
 
 /*
- * us_format_exp — scientific notation output (e.g. "1.7976931348623157e+308")
+ * us_format_exp — scientific notation output (e.g. "1.7976931348623157e+308").
  *
- * Given mantissa d and exponent p where value = d * 10^p,
- * output: sign + d[0] + '.' + d[1:] + 'e' + exp_sign + exp_digits
+ * Given mantissa d and exponent p where value = d * 10^p, output:
+ *   sign + d[0] + '.' + d[1:] + 'e' + exp_sign + exp_digits
  *
- * If d has only 1 digit, omit the decimal point (e.g. "1e+21").
- * Exponent never has leading zeros (e.g. "e-9" not "e-09").
+ * If d has only 1 digit, the decimal point is omitted (e.g. "1e+21").
+ * The exponent never has leading zeros (e.g. "e-9", not "e-09").
  */
-INLINE int us_format_exp(uint8_t *buf, uint64_t mantissa, int32_t exponent, int sign) {
+static inline int us_format_exp(uint8_t *buf, uint64_t mantissa, int32_t exponent, int sign) {
     int idx = 0;
     if (sign) buf[idx++] = '-';
     if (mantissa == 0) { buf[idx++] = '0'; return idx; }
@@ -367,9 +381,9 @@ INLINE int us_format_exp(uint8_t *buf, uint64_t mantissa, int32_t exponent, int 
     return idx;
 }
 
-/* Format flags for us_write_float* */
+/* ---- Top-level entry points ---- */
 
-int us_write_float64(uint8_t *buf, double value, int flags) {
+int vj_write_float64(uint8_t *buf, double value, int flags) {
     uint64_t bits;
     __builtin_memcpy(&bits, &value, 8);
     const int sign = (bits >> 63) != 0;
@@ -412,7 +426,7 @@ int us_write_float64(uint8_t *buf, double value, int flags) {
     }
 
     /* Format selection */
-    if (flags & US_FMT_EXP_AUTO) {
+    if (flags & VJ_FTOA_EXP_AUTO) {
         /* EXP_AUTO: switch to 'e' when abs < 1e-6 || abs >= 1e21 */
         double abs_val = sign ? -value : value;
         if (abs_val < 1e-6 || abs_val >= 1e21) {
@@ -422,7 +436,7 @@ int us_write_float64(uint8_t *buf, double value, int flags) {
     return us_format_fixed(buf, d, (int32_t)p, sign);
 }
 
-int us_write_float32(uint8_t *buf, float value, int flags) {
+int vj_write_float32(uint8_t *buf, float value, int flags) {
     uint32_t bits;
     __builtin_memcpy(&bits, &value, 4);
     const int sign = (bits >> 31) != 0;
@@ -481,8 +495,8 @@ int us_write_float32(uint8_t *buf, float value, int flags) {
     int odd = (int)(m >> z) & 1;
 
     us_scaler pre = us_prescale(e, p2, us_log2Pow10(p2));
-    uint64_t dmin = ceil(nudge(us_uscale(mn, pre), +odd));
-    uint64_t dmax = floor(nudge(us_uscale(mx, pre), -odd));
+    uint64_t dmin = us_ceil(us_nudge(us_uscale(mn, pre), +odd));
+    uint64_t dmax = us_floor(us_nudge(us_uscale(mx, pre), -odd));
 
     uint64_t d;
     int pp;
@@ -493,13 +507,13 @@ int us_write_float32(uint8_t *buf, float value, int flags) {
     } else {
         d = dmin;
         if (d < dmax) {
-            d = round(us_uscale(m, pre));
+            d = us_round(us_uscale(m, pre));
         }
         pp = -p2;
     }
 
     /* Format selection */
-    if (flags & US_FMT_EXP_AUTO) {
+    if (flags & VJ_FTOA_EXP_AUTO) {
         /* EXP_AUTO: switch to 'e' when float32(abs) < 1e-6 || float32(abs) >= 1e21 */
         float abs_val = sign ? -value : value;
         if (abs_val < 1e-6f || abs_val >= 1e21f) {
@@ -508,5 +522,3 @@ int us_write_float32(uint8_t *buf, float value, int flags) {
     }
     return us_format_fixed(buf, d, (int32_t)pp, sign);
 }
-
-
