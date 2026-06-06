@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"strings"
 	"testing"
 
 	vjson "github.com/velox-io/json"
@@ -212,5 +213,22 @@ func TestCaseInsensitive_NonBitmapPath(t *testing.T) {
 				t.Errorf("F9: got %q, want %q", got.F9, tt.wantF9)
 			}
 		})
+	}
+}
+
+func TestEscapes(t *testing.T) {
+	type S struct{}
+
+	var inputs = [][]byte{
+		[]byte(`{"":"\0` + strings.Repeat("p", 28) + `"}`), // \0
+		[]byte(`{"":"\1` + strings.Repeat("p", 28) + `"}`), // \1
+		[]byte(`{"":"\v` + strings.Repeat("p", 28) + `"}`), // \v
+	}
+	for _, input := range inputs {
+		var v S
+		err := vjson.Unmarshal(input, &v)
+		if err == nil {
+			t.Errorf("accpeted invalid json string: %+v", input)
+		}
 	}
 }
