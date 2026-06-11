@@ -5,7 +5,7 @@
 #
 # Variables:
 #   SOURCE_FILE           Main C source (compiled per mode × ISA, with LTO)
-#   STDLIB_SOURCES        Minimal C runtime (memcpy/memset); compiled with -fno-builtin-*
+#   STDLIB_SOURCES        Minimal C runtime (memcpy/memset/memmove/bzero); compiled with stdlib specific no-builtin flags
 #   EXTRA_SOURCES         Additional C sources compiled once per target (LTO, min ISA)
 #   TARGET_DIR            Directory where the final .syso is placed
 #   MODES                 Space-separated build modes; SOURCE_FILE is compiled once per mode × ISA

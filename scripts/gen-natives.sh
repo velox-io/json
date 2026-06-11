@@ -127,6 +127,13 @@ if is_true "${DEBUG_SYMBOLS:-}"; then
     echo "Debug: DEBUG_SYMBOLS enabled (keep richer syso symbols)"
 fi
 
+# Production build: define NDEBUG so <assert.h> assert(...) disappears.
+NDEBUG_FLAG="-DNDEBUG"
+if is_true "${NO_NDEBUG:-}"; then
+    NDEBUG_FLAG=""
+    echo "Debug enabled: NO_NDEBUG=1"
+fi
+
 # ============================================================
 #  AutoFDO (Profile-Guided Optimization) Configuration
 # ============================================================
@@ -506,8 +513,8 @@ echo ""
 # Note: memcpy/memset are NOT listed here because the codebase uses
 # __builtin_memcpy/__builtin_memset exclusively.  -fno-builtin-memcpy
 # would prevent the compiler from inlining __builtin_memcpy(buf,"true",4)
-# as a single mov instruction.  The stdlib sources (memory.c) have their
-# own -fno-builtin-memcpy/memset flags to prevent recursive calls.
+# as a single mov instruction.  The stdlib sources (memory.c) use their
+# own no-builtin flags plus loop idiom disable to prevent recursion.
 NO_BUILTIN_FLAGS="-fno-builtin-strlen -fno-builtin-strnlen"
 #NO_BUILTIN_FLAGS="$NO_BUILTIN_FLAGS -fno-builtin-memcmp -fno-builtin-bcmp"
 #NO_BUILTIN_FLAGS="$NO_BUILTIN_FLAGS -fno-builtin-memchr -fno-builtin-strchr"
@@ -528,10 +535,10 @@ EXTRA_OBJS=""
 # ============================================================
 #  Compile stdlib sources (minimal C runtime, ISA-independent)
 #
-#  These provide basic libc functions (memcpy, memset, etc.) that the
-#  main code may call. We compile them with -fno-builtin-memcpy/memset
-#  because they contain manual loops that the compiler could otherwise
-#  optimize into memcpy/memset calls, causing infinite recursion.
+#  These provide basic libc functions that the main code may call.
+#  We compile them with stdlib specific no-builtin flags and disable
+#  loop idiom recognition so the compiler cannot fold the hand written
+#  loops back into libc calls and recurse into the same symbols.
 # ============================================================
 
 for stdlib_src in $STDLIB_SOURCES; do
@@ -539,7 +546,10 @@ for stdlib_src in $STDLIB_SOURCES; do
         stdlib_base=$(basename "$stdlib_src" .c)
         stdlib_obj="${OUTPUT_DIR}/${stdlib_base}_${TARGET_OS}_${TARGET_ARCH}.o"
         echo "  Compiling $(basename "$stdlib_obj") (stdlib)"
-        $CC -O3 $PIC_FLAG $C_DEBUG_FLAGS -fno-stack-protector -fno-builtin-memcpy -fno-builtin-memset $ARCH_FLAGS \
+        $CC -O3 $PIC_FLAG $C_DEBUG_FLAGS -fno-stack-protector \
+            -fno-builtin-memcpy -fno-builtin-memset -fno-builtin-memmove -fno-builtin-bzero \
+            -mllvm -disable-loop-idiom-all \
+            $ARCH_FLAGS $NDEBUG_FLAG \
             -I"$(dirname "$stdlib_src")" -I"$REPO_ROOT/native/include" -I"$REPO_ROOT/native" \
             -c "$stdlib_src" -o "$stdlib_obj"
         STDLIB_OBJS="$STDLIB_OBJS $stdlib_obj"
@@ -567,7 +577,7 @@ for extra_src in $EXTRA_SOURCES; do
         EXTRA_LTO_LABEL=""
         if [ "$USE_LTO" = true ]; then EXTRA_LTO_LABEL=" LTO,"; fi
         echo "  Compiling $(basename "$extra_obj") (extra source,${EXTRA_LTO_LABEL} min ISA: $MIN_ISA)"
-        $CC -O3 $LTO_FLAG $PIC_FLAG $C_DEBUG_FLAGS -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS $MIN_ISA_FLAGS \
+        $CC -O3 $LTO_FLAG $PIC_FLAG $C_DEBUG_FLAGS -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS $MIN_ISA_FLAGS $NDEBUG_FLAG \
             -I"$(dirname "$extra_src")" -I"$REPO_ROOT/native/include" -I"$REPO_ROOT/native" \
             ${EXTRA_CFLAGS:-} ${PGO_CFLAGS:-} \
             -c "$extra_src" -o "$extra_obj"
@@ -596,7 +606,7 @@ for isa in $ISAS; do
         # Use ISA_XXX macro instead of ISA=xxx to avoid preprocessor identifier comparison issues
         ISA_UPPER=$(printf '%s' "$isa" | tr '[:lower:]' '[:upper:]')
         ISA_MACRO="-DISA_${ISA_UPPER}"
-        COMMON_DEFS="$ISA_MACRO $MODE_FLAG -DOS=${TARGET_OS} -DARCH=${TARGET_ARCH} ${EXTRA_CFLAGS:-}"
+        COMMON_DEFS="$ISA_MACRO $MODE_FLAG -DOS=${TARGET_OS} -DARCH=${TARGET_ARCH} $NDEBUG_FLAG ${EXTRA_CFLAGS:-}"
         COMMON_INCLUDES="-I$(dirname "$SOURCE_FILE") -I$VJ_LIB_DIR -I$REPO_ROOT/native/include -I$REPO_ROOT/native"
 
         # Step 1: Compile to object (with LTO when supported, for cross-TU inlining)
@@ -608,7 +618,7 @@ for isa in $ISAS; do
         # Capture flags for .clangd from the first ISA/mode combination
         if [ "$CLANGD_FLAGS_COLLECTED" = false ]; then
             CLANGD_FLAGS_COLLECTED=true
-            CLANGD_ADD_FLAGS="$ISA_MACRO $MODE_FLAG -DOS=${TARGET_OS} -DARCH=${TARGET_ARCH} -I$REPO_ROOT/native/include -I$REPO_ROOT/native"
+            CLANGD_ADD_FLAGS="$ISA_MACRO $MODE_FLAG -DOS=${TARGET_OS} -DARCH=${TARGET_ARCH} $NDEBUG_FLAG -I$REPO_ROOT/native/include -I$REPO_ROOT/native"
         fi
 
         # Step 2: Generate assembly for debugging (optional)
