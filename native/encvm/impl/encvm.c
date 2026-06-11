@@ -1,12 +1,10 @@
 /*
  * encvm entry point — build configuration and public symbol.
  *
- * Defines VJ_VM_EXEC_FN_NAME — the mode×ISA-suffixed public symbol
- * (e.g. vj_vm_exec_full_neon) — as a thin wrapper that inlines the VM
- * body (vj_exec, defined in encvm.h).
+ * Defines VJ_VM_EXEC_FN_NAME (e.g. vj_vm_exec_full_neon), then
+ * includes encvm.h which emits the VM body as that public symbol.
  *
- * This file is compiled once per mode (full/compact/fast) × ISA
- * (neon/avx2) combination to produce multiple entry points. */
+ * Compile once per mode (full/compact/fast) × ISA (neon/avx2). */
 
 /* Build configuration validation */
 #if !defined(OS)
@@ -37,11 +35,8 @@
 #define VJ_COMPACT_INDENT
 #endif
 
-/* Entry-point symbol name
- * Define VJ_VM_EXEC_FN_NAME before including encvm.h.
- * encvm.h provides vj_exec() as a static INLINE VM body;
- * the wrapper below emits the public mode+ISA-suffixed symbol
- * (e.g. vj_vm_exec_full_neon) that inlines vj_exec at O2. */
+/* Define VJ_VM_EXEC_FN_NAME before including encvm.h.
+ * encvm.h uses it to emit the VM body as the public symbol. */
 
 #if defined(MODE_FAST)
 #define VJ_MODE_TAG fast
@@ -63,24 +58,6 @@
 #define VJ_VM_EXEC_FN_NAME VJ_VM_EXEC_NAME(VJ_MODE_TAG, avx2)
 #endif
 
-/* Engine implementation
- *
- * Stack alignment (x86-64 only):
- * The Go compiler generates an internal ABI wrapper around the Plan9
- * asm trampoline (vjVMExecFast*.abi0).  This wrapper's stack frame
- * layout causes RSP at the .abi0 entry — and therefore at this C
- * entry after JMP — to be 16-byte aligned (RSP mod 16 == 0), whereas
- * the x86-64 SysV ABI requires RSP mod 16 == 8 at function entry
- * (i.e. RSP+8 is 16-aligned, accounting for the CALL return address).
- *
- * This 8-byte misalignment causes the C compiler's generated movdqa
- * (aligned 128-bit SSE store to stack) to fault with SIGSEGV.
- *
- * VJ_ALIGN_STACK (force_align_arg_pointer) on the VM function in
- * encvm.h unconditionally emits AND $-16,%rsp, making it robust
- * against any upstream Go ABI layout changes. */
-#include "encvm.h"
-
 /* Windows export declaration — needed so the entry function appears in the
  * PE export directory when linking as a DLL. */
 #ifdef _WIN32
@@ -89,13 +66,18 @@
 #define VJ_EXPORT
 #endif
 
-/* Public entry point — thin wrapper that inlines the VM body.
- * vj_exec() is defined in encvm.h as static INLINE (always_inline).
+/* force_align_arg_pointer: emit AND $-16,%rsp prologue on x86-64 to fix
+ * stack misalignment when called from Go ABI (RSP mod 16 == 0 instead of
+ * SysV-required RSP mod 16 == 8).  No-op on non-x86-64 targets.
  *
- * Called from Go through a NOSPLIT trampoline. Total stack must stay
- * within ~800 bytes (normal) / ~1600 bytes (-race).
- *
- */
-VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
-  vj_exec(ctx);
-}
+ * On Windows x64 the trampoline uses CALL (not JMP), so RSP is already
+ * mod 16 == 8 at entry — no realignment needed.  The attribute would be
+ * a no-op (AND on already-aligned RSP) but is excluded for clarity. */
+
+#if defined(__x86_64__) && !defined(_WIN32)
+#define VJ_ALIGN_STACK __attribute__((force_align_arg_pointer))
+#else
+#define VJ_ALIGN_STACK
+#endif
+
+#include "encvm.h"

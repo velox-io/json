@@ -46,17 +46,13 @@
     return;                                                                     \
   } while (0)
 
-/* vj_exec — VM entry-point body.
- *
- * Defined as static INLINE (always_inline) so the compiler can inline it
- * directly into the public entry point defined by encvm.c.  The entry
- * point (e.g. VJ_VM_EXEC_FN_NAME → vj_vm_exec_full_neon) is a thin
- * wrapper that calls vj_exec(ctx).
- *
- * This function is NOT the public symbol — encvm.c defines the public
- * entry point with the mode+ISA-suffixed name and proper export/alignment
- * attributes. */
+/* vj_exec — VM entry point.
+ * When VJ_VM_EXEC_FN_NAME is defined, emits the public symbol directly. */
+#ifdef VJ_VM_EXEC_FN_NAME
+VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
+#else
 INLINE void vj_exec(VjExecCtx *ctx) {
+#endif
 
   /* Load context into registers / locals */
   uint8_t *buf = ctx->buf_cur;
@@ -1551,6 +1547,7 @@ vj_op_yield: {
 #undef VM_RESTORE_TRACE_DEPTH
 #undef VM_SAVE_TRACE_DEPTH_CTX
 #ifdef VJ_COMPACT_INDENT
+#undef VJ_COMPACT_INDENT
 #undef indent_tpl
 #undef indent_depth
 #undef indent_step
