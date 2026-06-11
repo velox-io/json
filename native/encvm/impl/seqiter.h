@@ -1,5 +1,5 @@
 /*
- * seqiter.h — C-native sequence iterators for primitive slice/array encoding.
+ * C-native sequence iterators for primitive slice/array encoding.
  *
  * Single-instruction loop: one opcode encodes the entire [elem,elem,...],
  * eliminating per-element VM dispatch overhead.
@@ -18,7 +18,7 @@
 #include "types.h"
 #include "vj_compat.h"
 
-/* --- Indent helpers --- */
+/* Indent helpers */
 
 typedef struct {
   const uint8_t *indent_tpl;
@@ -40,7 +40,7 @@ static inline int vj_seq_indent_pad(const VjSeqIndent *ind) {
   return ind->indent_step ? (1 + ind->indent_prefix_len + ind->indent_depth * ind->indent_step) : 0;
 }
 
-/* --- Result struct and action codes --- */
+/* Result struct and action codes */
 
 enum VjSeqAction {
   VJ_SEQ_DONE = 0,
@@ -54,7 +54,7 @@ typedef struct {
   int32_t resume_idx;
 } VjSeqResult;
 
-/* --- Encode-one helpers --- */
+/* Encode-one helpers */
 
 /* float64: encode with NaN/Inf check */
 static inline uint8_t *vj_seq_encode_float64(uint8_t *buf, const uint8_t *elem_ptr, uint32_t flags, int *nan_inf) {
@@ -91,7 +91,7 @@ static inline uint8_t *vj_seq_encode_string(uint8_t *buf, const uint8_t *elem_pt
   return buf;
 }
 
-/* --- Need calculators --- */
+/* Need calculators */
 
 static inline int64_t vj_seq_need_float64(const uint8_t *elem_ptr, int ipad) {
   (void)elem_ptr;
@@ -108,7 +108,7 @@ static inline int64_t vj_seq_need_string(const uint8_t *elem_ptr, int ipad) {
   return 1 + ipad + 2 + (s->len * 6);
 }
 
-/* --- Callback types --- */
+/* Callback types */
 typedef uint8_t *(*vj_seq_encode_fn)(uint8_t *buf, const uint8_t *elem_ptr, uint32_t flags, int *nan_inf);
 typedef int64_t (*vj_seq_need_fn)(const uint8_t *elem_ptr, int ipad);
 
@@ -143,7 +143,7 @@ INLINE VjSeqResult vj_seq_iterate_impl(uint8_t *buf, const uint8_t *bend, const 
   return (VjSeqResult){buf, VJ_SEQ_DONE, 0};
 }
 
-/* --- Specialized noinline wrappers --- */
+/* Specialized noinline wrappers */
 
 NOINLINE static VjSeqResult vj_seq_iterate_float64(uint8_t *buf, const uint8_t *bend, const uint8_t *data,
                                                    int64_t count, int32_t start_idx, uint32_t flags,
@@ -173,7 +173,7 @@ NOINLINE static VjSeqResult vj_seq_iterate_string(uint8_t *buf, const uint8_t *b
 /* --- VM opcode handler macro.
  * Reads slice/array source, handles nil/empty, delegates to iterate fn.
  * On BUF_FULL pushes seq frame for resume.
- * Expanded inside the VM dispatch function in encvm.h. --- */
+ * Expanded inside the VM dispatch function in encvm.h. */
 
 #define VJ_DEFINE_SEQ_OP(OP_LABEL, TRACE_LABEL, ITERATE_FN, HAS_NAN_CHECK)                                             \
   OP_LABEL: {                                                                                                          \

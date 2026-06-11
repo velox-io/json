@@ -1,3 +1,9 @@
+/*
+ * Shared lookup tables.
+ *
+ * DIGIT_PAIRS: "00010203...99" — two-digit ASCII format.
+ * VEC_SHIFT_SHUFFLES: pshufb masks for leading-zero stripping in itoa. */
+
 #ifndef VJ_ENCVM_TABLES_H
 #define VJ_ENCVM_TABLES_H
 

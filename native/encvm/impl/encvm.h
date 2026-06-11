@@ -1,15 +1,7 @@
 /*
- * encvm.h — Velox JSON C Encoding Engine
+ * VM bytecode interpreter
  *
- * STACK BUDGET — Go goroutine nosplit constraint
- * ───────────────────────────────────────────────
- * The VM entry function (e.g. vj_vm_exec_full_neon) is called from Go
- * through a NOSPLIT trampoline — no Go stack-growth check fires between
- * the last morestack-enabled Go frame and the C code.  The total stack
- * consumed by the nosplit chain must stay within Go's stackNosplit budget:
- *
- *   stackNosplit = StackNosplitBase (800) × StackGuardMultiplier (1 or 2)
- *                = 800 bytes (normal) / 1600 bytes (-race)
+ * vj_exec() walks a variable-length opcode stream encoding Go values to JSON.
  *
  */
 
@@ -54,25 +46,19 @@
     return;                                                                     \
   } while (0)
 
-/* VJ_VM_EXEC_FN_NAME must be defined by the including .c file before
- * #include "encvm.h".  It expands to the suffixed entry-point symbol
- * name (e.g. vj_vm_exec_full_sse42).  This eliminates the wrapper
- * function and avoids an extra jmp/call into the VM body. */
-#ifndef VJ_VM_EXEC_FN_NAME
-#error "VJ_VM_EXEC_FN_NAME must be defined before including encvm.h"
-#endif
+/* vj_exec — VM entry-point body.
+ *
+ * Defined as static INLINE (always_inline) so the compiler can inline it
+ * directly into the public entry point defined by encvm.c.  The entry
+ * point (e.g. VJ_VM_EXEC_FN_NAME → vj_vm_exec_full_neon) is a thin
+ * wrapper that calls vj_exec(ctx).
+ *
+ * This function is NOT the public symbol — encvm.c defines the public
+ * entry point with the mode+ISA-suffixed name and proper export/alignment
+ * attributes. */
+INLINE void vj_exec(VjExecCtx *ctx) {
 
-/* On Windows, __declspec(dllexport) is needed so that the entry function
- * appears in the PE export directory when linking as a DLL.  */
-#ifdef _WIN32
-#define VJ_EXPORT __declspec(dllexport)
-#else
-#define VJ_EXPORT
-#endif
-
-VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
-
-  /* ---- Load context into registers / locals ---- */
+  /* Load context into registers / locals */
   uint8_t *buf = ctx->buf_cur;
   uint8_t *bend = (uint8_t *)ctx->buf_end;
   const uint8_t *ops = ctx->ops_ptr;
@@ -153,7 +139,7 @@ VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
   #define VM_SAVE_INDENT_DEPTH() (ctx->indent_depth = indent_depth)
 #endif
 
-/* ---- Computed goto dispatch table ----
+/* Computed goto dispatch table
  *
  * int32 offsets from base label.
  * Covers primitive, data, structural, and fallback opcodes.
@@ -252,7 +238,7 @@ VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
   //}
   #endif
 
-/* ---- Check buffer space ---- */
+/* Check buffer space */
 #define VM_CHECK(n)                                                             \
   do {                                                                          \
     if (__builtin_expect(buf + (n) > bend, 0)) {                                \
@@ -260,7 +246,7 @@ VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
     }                                                                           \
   } while (0)
 
-/* ---- Indent helpers ---- */
+/* Indent helpers */
 
 /* Max indent bytes for VM_CHECK: '\n' + prefix + indent_depth * indent_step.
  * Returns 0 in compact mode (indent_step == 0). */
@@ -277,7 +263,7 @@ VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
     }                                                                           \
   } while (0)
 
-/* ---- Write pre-encoded key with comma prefix ---- */
+/* Write pre-encoded key with comma prefix */
 #define VM_WRITE_KEY()                                                          \
   do {                                                                          \
     VM_PIN_VMSTATE();                                                           \
@@ -303,7 +289,7 @@ VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
     }                                                                           \
   } while (0)
 
-/* ---- Write pre-encoded key unconditionally (keyed-field variants) ----
+/* Write pre-encoded key unconditionally (keyed-field variants)
  * Same as VM_WRITE_KEY() but without the if (op->key_len > 0) branch.
  * Used by OP_KSTRING/OP_KINT/OP_KINT64 where key is always present. */
 #define VM_WRITE_KEY_ALWAYS()                                                   \
@@ -325,7 +311,7 @@ VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
     if (indent_step) { *buf++ = ' '; }                                          \
   } while (0)
 
-/* ---- Dispatch macro (ADR/LEA trick for PIC computed goto) ----
+/* Dispatch macro (ADR/LEA trick for PIC computed goto)
  *
  * Anti-tail-merge: The "r"(op) input operand forces the compiler to
  * treat each expansion as depending on a unique op value, preventing
@@ -500,7 +486,7 @@ vj_op_float64: {
   VM_NEXT_SHORT();
 }
 
-/* --- Keyed-field variants: unconditional key write (no key_len branch) --- */
+/* Keyed-field variants: unconditional key write (no key_len branch) */
 
 vj_op_kstring: {
   VM_TRACE_KEY("KSTRING");
@@ -642,7 +628,7 @@ vj_op_skip_if_zero: {
   VM_NEXT_LONG();
 }
 
-/* --- slice/array loop body --- */
+/* slice/array loop body */
 
 vj_op_slice_end: {
   VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
@@ -679,7 +665,7 @@ vj_op_slice_end: {
   VM_NEXT_LONG();
 }
 
-  /* -- other primitives + pointer deref */
+  /* other primitives + pointer deref */
 
 vj_op_bool: {
   VM_TRACE_KEY("BOOL");
@@ -827,7 +813,7 @@ vj_op_ptr_end: {
   VM_NEXT_SHORT();
 }
 
-/* --- call/ret, raw_message, number, byte_slice, array --- */
+/* call/ret, raw_message, number, byte_slice, array */
 
 vj_op_call: {
   VM_TRACE("CALL");
@@ -978,7 +964,7 @@ vj_op_array_begin: {
   VM_NEXT_LONG();
 }
 
-/* --- COLD: map / interface / yield --- */
+/* COLD: map / interface / yield */
 
 vj_op_map: {
   VM_TRACE_KEY("MAP");
@@ -1001,7 +987,7 @@ vj_op_map_str_str: {
   int entry_first;
 
   if (is_resume) {
-    /* ---- Resume: read saved state from frame ---- */
+    /* Resume: read saved state from frame */
     VjStackFrame *f = &ctx->stack[_depth - 1];
     m = (const GoSwissMap *)f->map.map_ptr;
     remaining = f->map.remaining;
@@ -1010,7 +996,7 @@ vj_op_map_str_str: {
     si = f->map.slot_idx;
     entry_first = f->map.entry_first;
   } else {
-    /* ---- First entry: read map, handle nil/empty ---- */
+    /* First entry: read map, handle nil/empty */
     m = *(const GoSwissMap **)(base + op->field_off);
 
     if (m == NULL || m->used == 0) {
@@ -1030,7 +1016,7 @@ vj_op_map_str_str: {
       VM_NEXT_SHORT();
     }
 
-    /* ---- Write comma + key + '{' + indent ---- */
+    /* Write comma + key + '{' + indent */
     VM_CHECK(op->key_len + 1 + 1 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE + VM_INDENT_PAD(indent_depth + 1));
     VM_WRITE_KEY();
     *buf++ = '{';
@@ -1045,7 +1031,7 @@ vj_op_map_str_str: {
     entry_first = 1;
   }
 
-  /* ---- Delegate iteration to out-of-line function ---- */
+  /* Delegate iteration to out-of-line function */
   {
     if (__builtin_expect(VJ_ST_GET_STACK_DEPTH(vmstate) >= VJ_MAX_STACK_DEPTH, 0)) {
       VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);
@@ -1444,7 +1430,7 @@ map_str_iter_end_done:
   VM_NEXT_LONG();
 }
 
-/* --- Sequence iterator opcode handlers (macro defined in seqiter.h) --- */
+/* Sequence iterator opcode handlers (macro defined in seqiter.h) */
 
 VJ_DEFINE_SEQ_OP(vj_op_seq_float64, "SEQ_FLOAT64", vj_seq_iterate_float64, 1)
 VJ_DEFINE_SEQ_OP(vj_op_seq_int,     "SEQ_INT",     vj_seq_iterate_int,     0)
@@ -1546,7 +1532,7 @@ vj_op_yield: {
   VM_SAVE_AND_RETURN(VJ_EXIT_YIELD);
 }
 
-/* ---- Cleanup macros ---- */
+/* Cleanup macros */
 #undef VM_CHECK
 #undef VM_KEY_SPACE
 #undef VM_WRITE_KEY

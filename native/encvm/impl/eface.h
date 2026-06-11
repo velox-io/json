@@ -1,7 +1,8 @@
-/* iface.h -- interface{} (eface) value encoder.
+/*
+ * interface{} encoding
  *
- * Out-of-line to keep the VM dispatch loop compact and avoid register
- * spill from the cold interface path (binary search + tag switch). */
+ * vj_encode_interface_value resolves the runtime type and dispatches
+ * to inline primitive encoding, a cached Blueprint, or a Go fallback. */
 
 #ifndef VJ_ENCVM_IFACE_H
 #define VJ_ENCVM_IFACE_H

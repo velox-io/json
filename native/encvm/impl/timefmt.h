@@ -1,14 +1,9 @@
 /*
- * timefmt.h — RFC 3339 Nano time formatting for Go time.Time
+ * RFC 3339 Nano time formatting for Go time.Time.
  *
- * C-native formatting of time.Time to RFC3339Nano for the encoder VM.
- *
- * Coverage:
- *   - loc == NULL → UTC, suffix "Z"
- *   - loc != NULL && zone_len == 1 → FixedZone, suffix ±HH:MM
- *   - Otherwise → yield to Go (DST / complex Location)
- *   - year ∉ [0, 9999] → yield to Go
- */
+ * Formats to RFC3339Nano: "2006-01-02T15:04:05.999999999Z07:00".
+ * Handles UTC (suffix "Z") and FixedZone (suffix ±HH:MM).  Yields
+ * to Go for DST, complex locations, or years outside [0, 9999]. */
 
 #ifndef VJ_TIMEFMT_H
 #define VJ_TIMEFMT_H

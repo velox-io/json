@@ -1,8 +1,7 @@
 /*
- * memfn.h — Velox JSON C Engine: Memory Primitives
+ * SIMD-accelerated memory copy helpers
  *
- * SIMD-accelerated inline copy helpers used throughout the encoder.
- * All functions are static inline to enable inlining at call sites.
+ * Static inline copy functions for 0-128 bytes — used by the VM
  */
 
 #ifndef VJ_ENCVM_MEMFN_H

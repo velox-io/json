@@ -1,7 +1,7 @@
 /*
- * z_uscale_table.h - Unrounded Scaling float-to-string conversion table
+ * Unrounded Scaling float-to-string conversion table
  *
- * C implementation of the algorithm described in:
+ * Precomputed pow10 table for the algorithm described in:
  *   "Floating-Point to Decimal, in One Multiply" by Russ Cox
  *   https://research.swtch.com/fp
  *

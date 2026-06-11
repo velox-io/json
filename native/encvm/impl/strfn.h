@@ -1,3 +1,13 @@
+/*
+ * JSON string escaping.
+ *
+ * Escapes control characters, quotes, backslashes, and optionally HTML
+ * characters and line terminators (U+2028/U+2029).  Non-ASCII runs are
+ * dispatched to vj_escape_nonascii_run (str_escape.c).
+ *
+ * vj_escape_nonascii_run(out, src, i, len, flags) → bytes consumed
+ * vj_prescan_string_escaped_len(src, len, flags) → upper-bound length */
+
 #ifndef VJ_ENCVM_STRING_H
 #define VJ_ENCVM_STRING_H
 
@@ -7,7 +17,7 @@
 
 // clang-format off
 
-/* ---- String escape (JSON) ----
+/* String escape (JSON)
  *
  * Writes the string content (WITHOUT surrounding quotes) to buf.
  * Returns number of bytes written.
@@ -16,7 +26,7 @@
 
 static const char HEX_DIGITS[] = "0123456789abcdef";
 
-/* ---- Escape lookup table ----
+/* Escape lookup table
  *
  * For bytes that need escaping (c < 0x20, '"', '\\'), this table gives:
  *   ESCAPE_LUT[c] = replacement char for the \X form (e.g. 'n' for \n)
@@ -208,7 +218,7 @@ static inline int vj_escape_mask_16_fast(const uint8_t *src) {
   return vj_escape_mask_16_fast_v(_mm_loadu_si128((const __m128i *)src));
 }
 
-/* ---- AVX2 32-byte escape mask ---- */
+/* AVX2 32-byte escape mask */
 #if defined(__AVX2__)
 
 /* 32-byte escape mask (AVX2): same logic as 16-byte but with 256-bit vectors.
@@ -257,7 +267,7 @@ static inline int vj_escape_mask_32_fast(const uint8_t *src) {
 
 #endif /* __SSE2__ || __aarch64__ */
 
-/* ---- Non-ASCII run dispatcher (implemented in strfn_nonascii.c) ----
+/* Non-ASCII run dispatcher (implemented in str_escape.c)
  *
  * Processes an entire contiguous run of non-ASCII bytes (>= 0x80) starting at
  * src[i]. Dispatches to the appropriate handler based on flags:
@@ -279,7 +289,7 @@ int64_t vj_escape_nonascii_run(uint8_t **out_ptr, const uint8_t *src, int64_t i,
  * pessimistic s->len * 6 estimate that causes frequent BufFull exits. */
 int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint32_t flags);
 
-/* ---- Inline ASCII escape macro ----
+/* Inline ASCII escape macro
  *
  * Handles a single byte at src[i] that was flagged by SIMD/SWAR.
  * For ASCII (< 0x80): inlines the escape directly (no function call).
@@ -337,7 +347,7 @@ static inline int escape_string_content_impl(uint8_t *buf, const uint8_t *src, i
 
   while (i < src_len) {
 #if defined(__AVX2__)
-    /* ---- AVX2: scan 32 bytes at a time ---- */
+    /* AVX2: scan 32 bytes at a time */
     if (i + 32 <= src_len) {
       int mask = html ? vj_escape_mask_32_html(&src[i]) : vj_escape_mask_32(&src[i]);
 
@@ -384,7 +394,7 @@ static inline int escape_string_content_impl(uint8_t *buf, const uint8_t *src, i
 #endif /* __AVX2__ */
 
 #if defined(__SSE2__) || defined(__aarch64__)
-    /* ---- SIMD: scan 16 bytes at a time ---- */
+    /* SIMD: scan 16 bytes at a time */
     if (i + 16 <= src_len) {
       int mask = html ? vj_escape_mask_16_html(&src[i]) : vj_escape_mask_16(&src[i]);
 
@@ -422,7 +432,7 @@ static inline int escape_string_content_impl(uint8_t *buf, const uint8_t *src, i
       continue;
     }
 
-    /* ---- SIMD tail: < 16 bytes remaining (or short string entry) ----
+    /* SIMD tail: < 16 bytes remaining (or short string entry)
      *
      * Load 16 bytes from &src[i], masking the result to [i, src_len).
      * The load may over-read past src_len, which is safe as long as it
@@ -451,7 +461,7 @@ static inline int escape_string_content_impl(uint8_t *buf, const uint8_t *src, i
   simd_tail_scalar:;
 #endif /* __SSE2__ || __aarch64__ */
 
-    /* ---- SWAR: scan 8 bytes at a time (scalar tail) ---- */
+    /* SWAR: scan 8 bytes at a time (scalar tail) */
     if (i + 8 <= src_len) {
       uint64_t word;
       __builtin_memcpy(&word, &src[i], 8);
@@ -489,7 +499,7 @@ static inline int escape_string_content_impl(uint8_t *buf, const uint8_t *src, i
       continue;
     }
 
-    /* ---- Byte-by-byte tail: fewer than 8 bytes remaining ---- */
+    /* Byte-by-byte tail: fewer than 8 bytes remaining */
     uint8_t c = src[i];
     if (c >= 0x20 && c < 0x80 && c != '"' && c != '\\' && !(html && (c == '<' || c == '>' || c == '&'))) {
       *out++ = c;
@@ -606,7 +616,7 @@ static inline int escape_string_content_fast(uint8_t *buf, const uint8_t *src, i
       continue;
     }
 
-    /* ---- SIMD tail: page-crossing guard + fast path. */
+    /* SIMD tail: page-crossing guard + fast path. */
   simd_tail_fast:
     if (__builtin_expect(((uintptr_t)&src[i] & 0xFFF) > (0x1000 - 16), 0))
       goto simd_tail_fast_scalar;
@@ -731,7 +741,7 @@ static inline int vj_escape_string_fast(uint8_t *buf, const uint8_t *src, int64_
  * and vzeroupper overhead.  Tunable via benchmarks. */
 #define VJ_AVX2_STRING_THRESHOLD 64
 
-/* ---- SSE-only escape (full flags path) ---- */
+/* SSE-only escape (full flags path) */
 static inline int escape_string_content_impl_sse(uint8_t *buf, const uint8_t *src, int64_t src_len, uint32_t flags,
                                                  const int html) {
   uint8_t *out = buf;
@@ -851,7 +861,7 @@ static inline int escape_string_content_impl_sse(uint8_t *buf, const uint8_t *sr
   return (int)(out - buf);
 }
 
-/* ---- SSE-only fast escape ---- */
+/* SSE-only fast escape */
 static inline int escape_string_content_fast_sse(uint8_t *buf, const uint8_t *src, int64_t src_len) {
   uint8_t *out = buf;
   int64_t i = 0;
@@ -954,7 +964,7 @@ static inline int escape_string_content_fast_sse(uint8_t *buf, const uint8_t *sr
   return (int)(out - buf);
 }
 
-/* ---- SSE-only wrappers with quotes ---- */
+/* SSE-only wrappers with quotes */
 
 static inline int escape_string_content_sse(uint8_t *buf, const uint8_t *src, int64_t src_len, uint32_t flags) {
   if (flags & VJ_FLAGS_ESCAPE_HTML)
@@ -982,7 +992,7 @@ static inline int vj_escape_string_fast_sse(uint8_t *buf, const uint8_t *src, in
   return (int)(out - buf);
 }
 
-/* ---- Dispatch macros: always use SSE-only path under AVX2 ----
+/* Dispatch macros: always use SSE-only path under AVX2
  * AVX2 string escape showed regressions in benchmarks (ymm register
  * pressure, vzeroupper overhead).  Route everything through the
  * 128-bit SSE path which is consistently faster on tested hardware. */

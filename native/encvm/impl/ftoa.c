@@ -1,17 +1,11 @@
 /*
- * ftoa.c — Unrounded Scaling float-to-string conversion.
+ * Unrounded Scaling float-to-string conversion.
  *
  * (BSD-3-Clause, Copyright 2025 The Go Authors)
  *
  * Implements the algorithm described in:
  *   "Floating-Point to Decimal, in One Multiply" by Russ Cox
  *   https://research.swtch.com/fp
- *
- * Everything below is private to this TU: the 11136-byte POW10TAB, the
- * "unrounded" arithmetic helpers, IEEE-754 unpacking, digit emission.
- * Internal symbols keep the algorithm-specific `us_` prefix so the
- * libc-conflicting names (floor/round/ceil) cannot leak.  Only the two
- * top-level entry points declared in ftoa.h have external linkage.
  */
 
 // clang-format off
@@ -19,9 +13,8 @@
 #include "ftoa.h"
 
 #include "tables.h"
-#include "vj_compat.h"
 
-/* ---- Internal types ---- */
+/* Internal types */
 
 /* {hi, lo} represents a 128-bit mantissa pm = hi*2^64 - lo approximating
  * 10^p, scaled so the high bit of hi is always set. */
@@ -42,7 +35,7 @@ typedef struct {
  * here, so the (static const) table has exactly one TU-local copy. */
 #include "z_uscale_table.h"
 
-/* ---- Unrounded arithmetic ---- */
+/* Unrounded arithmetic */
 
 static inline uint64_t us_floor(us_unrounded u) {
     return (u + 0) >> 2;
@@ -61,7 +54,7 @@ static inline us_unrounded us_nudge(us_unrounded u, int delta) {
     return u + (us_unrounded)(int64_t)delta;
 }
 
-/* ---- Logarithm approximations ---- */
+/* Logarithm approximations */
 
 /* floor(x * log10(2)) */
 static inline int us_log10Pow2(int x) {
@@ -78,7 +71,7 @@ static inline int us_skewed(int e) {
     return (e * 631305 - 261663) >> 21;
 }
 
-/* ---- Core uscale ---- */
+/* Core uscale */
 
 static inline us_scaler us_prescale(int e, int p, int lp) {
     us_scaler c;
@@ -105,7 +98,7 @@ static inline us_unrounded us_uscale(uint64_t x, us_scaler c) {
     return (hi >> c.s) | sticky;
 }
 
-/* ---- Trailing-zero trim (division-free) ---- */
+/* Trailing-zero trim (division-free) */
 
 static inline uint64_t us_rotr64(uint64_t x, int k) {
     return (x >> k) | (x << (64 - k));
@@ -149,7 +142,7 @@ static inline void us_trim_zeros(uint64_t *xp, int *pp) {
     *pp = p;
 }
 
-/* ---- IEEE-754 unpacking ---- */
+/* IEEE-754 unpacking */
 
 static inline void us_unpack64(double f, uint64_t *m, int *e) {
     uint64_t bits;
@@ -224,7 +217,7 @@ static inline void us_short64(double f, uint64_t *d_out, int *p_out) {
     *p_out = -p;
 }
 
-/* ---- Digit-count and digit-write helpers ---- */
+/* Digit-count and digit-write helpers */
 
 static inline uint32_t us_decimal_length17(const uint64_t v) {
     if (v >= 10000000000000000ULL) return 17;
@@ -288,7 +281,7 @@ static inline int us_write_mantissa_digits(uint8_t *buf, uint64_t mantissa, uint
     return (int)olength;
 }
 
-/* ---- Output formatters ---- */
+/* Output formatters */
 
 static inline int us_format_fixed(uint8_t *buf, uint64_t mantissa, int32_t exponent, int sign) {
     int idx = 0;
@@ -381,7 +374,7 @@ static inline int us_format_exp(uint8_t *buf, uint64_t mantissa, int32_t exponen
     return idx;
 }
 
-/* ---- Top-level entry points ---- */
+/* Top-level entry points */
 
 int vj_write_float64(uint8_t *buf, double value, int flags) {
     uint64_t bits;

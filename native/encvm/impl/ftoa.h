@@ -1,5 +1,5 @@
 /*
- * ftoa.h — Float-to-ASCII conversion API.
+ * Float-to-ASCII conversion API.
  *
  * Encodes IEEE-754 floats to JSON-compatible decimal strings.  The output
  * is always the shortest round-trip representation, with '.' as the decimal
@@ -7,10 +7,7 @@
  * by the caller; behavior on those inputs is undefined.  Buffer must have
  * >= 32 bytes available.
  *
- * Algorithm (current implementation): Unrounded Scaling, after Russ Cox,
- * "Floating-Point to Decimal, in One Multiply"
- * (https://research.swtch.com/fp).  All algorithm internals live in
- * ftoa.c.
+ * Algorithm: Unrounded Scaling, by Russ Cox (https://research.swtch.com/fp).
  */
 
 #ifndef VJ_ENCVM_FTOA_H

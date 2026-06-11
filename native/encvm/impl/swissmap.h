@@ -1,8 +1,5 @@
 /*
- * swissmap.h
- *
  * Swiss Map iteration for map[string]string, map[string]int, map[string]int64.
- *
  * Supports interleaved (KVKVKVKV) and split (KKKKVVVV) group layouts via:
  *   key(i)  = group + keys_off  + i * key_stride
  *   elem(i) = group + elems_off + i * elem_stride

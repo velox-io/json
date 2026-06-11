@@ -228,7 +228,7 @@ func TestEscapes(t *testing.T) {
 		var v S
 		err := vjson.Unmarshal(input, &v)
 		if err == nil {
-			t.Errorf("accpeted invalid json string: %+v", input)
+			t.Errorf("accepted invalid json string: %+v", input)
 		}
 	}
 }

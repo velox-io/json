@@ -1,5 +1,5 @@
 /*
- * types.h — Velox JSON C Engine: Type Definitions & Constants
+ * Shared types, enums, and constants for the encoder VM
  *
  * Shared enums, structs, and constants used by all encoder modules.
  * Included first by encvm.h — no dependencies on other impl headers.
@@ -44,7 +44,7 @@ typedef struct VjTraceBuf {
  * ================================================================ */
 
 enum OpType {
-  /* --- Primitives (1-14, = ElemTypeKind) --- */
+  /* Primitives (1-14, = ElemTypeKind) */
   OP_BOOL = 1,
   OP_INT = 2, /* Go int  — 8 bytes on 64-bit */
   OP_INT8 = 3,
@@ -60,13 +60,13 @@ enum OpType {
   OP_FLOAT64 = 13,
   OP_STRING = 14, /* Go string {ptr, len} */
 
-  /* --- Non-primitive data ops (15-18) --- */
+  /* Non-primitive data ops (15-18) */
   OP_INTERFACE = 15,   /* interface{} — noinline C encoder or yield */
   OP_RAW_MESSAGE = 16, /* json.RawMessage — direct byte copy */
   OP_NUMBER = 17,      /* json.Number — direct string copy */
   OP_BYTE_SLICE = 18,  /* []byte — base64 encode, yield to Go */
 
-  /* --- Structural control-flow opcodes (19-31) --- */
+  /* Structural control-flow opcodes (19-31) -- */
   OP_SKIP_IF_ZERO = 19, /* conditional forward jump (omitempty) */
   OP_CALL = 20,         /* subroutine call: push CALL frame, jump to ops[operand_a] */
   OP_PTR_DEREF = 21,    /* deref pointer, nil→null+jump */
@@ -81,34 +81,34 @@ enum OpType {
   OP_MAP_STR_STR = 30, /* C-native Swiss Map iteration for map[string]string */
   OP_RET = 31,         /* subroutine return: pop CALL frame, restore ops/pc/base */
 
-  /* --- Go-only fallback --- */
+  /* Go-only fallback */
   OP_FALLBACK = 32, /* custom marshalers, ,string, complex structs */
 
-  /* --- Keyed-field variants (33-35) --- */
+  /* Keyed-field variants (33-35) */
   OP_KSTRING = 33, /* struct field string — unconditional key write */
   OP_KINT = 34,    /* struct field int — unconditional key write */
   OP_KINT64 = 35,  /* struct field int64 — unconditional key write */
 
-  /* --- C-native Swiss Map variants (36-37) --- */
+  /* C-native Swiss Map variants (36-37) */
   OP_MAP_STR_INT = 36,   /* C-native Swiss Map iteration for map[string]int */
   OP_MAP_STR_INT64 = 37, /* C-native Swiss Map iteration for map[string]int64 */
 
-  /* --- C-native sequence iterators (38-41) --- */
+  /* C-native sequence iterators (38-41) */
   OP_SEQ_FLOAT64 = 38, /* []float64 / [N]float64 — single-instruction loop */
   OP_SEQ_INT = 39,     /* []int / [N]int — single-instruction loop */
   OP_SEQ_INT64 = 40,   /* []int64 / [N]int64 — single-instruction loop */
   OP_SEQ_STRING = 41,  /* []string / [N]string — single-instruction loop */
 
-  /* --- C-native Swiss Map key iterator (42-43) --- */
+  /* C-native Swiss Map key iterator (42-43) */
   OP_MAP_STR_ITER = 42,     /* Swiss Map string-key iteration: init, write first
                                key, dispatch body */
   OP_MAP_STR_ITER_END = 43, /* Swiss Map iteration back-edge: advance slot, write key or end */
 
-  /* --- Keyed-field quoted variants (44-45) — ,string tag --- */
+  /* Keyed-field quoted variants (44-45) — ,string tag */
   OP_KQINT = 44,   /* struct field int with ,string — quoted: "123" */
   OP_KQINT64 = 45, /* struct field int64 with ,string — quoted: "123" */
 
-  /* --- time.Time (46) — native RFC3339Nano formatting --- */
+  /* time.Time (46) — native RFC3339Nano formatting */
   OP_TIME = 46, /* time.Time — native RFC3339Nano or yield */
 };
 

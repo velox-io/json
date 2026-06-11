@@ -1,5 +1,5 @@
 /*
- * trace.h — Encoder VM debug trace (ring buffer + macros).
+ * Encoder VM debug trace (ring buffer + macros).
  *
  * Output format: indentation-based (2 spaces per depth level),
  * showing opcode label + field name when available.
@@ -14,8 +14,7 @@
 
 #ifdef VJ_ENCVM_DEBUG
 
-/* ---- Ring-buffer writers (static inline, inlined into noinline entries) ----
- */
+/* Ring-buffer writers (static inline, inlined into noinline entries) */
 
 static inline void vj_trace_write(VjTraceBuf *tb, const char *s, int n) {
   for (int i = 0; i < n; i++) {
@@ -56,7 +55,7 @@ static inline void vj_trace_indent(VjTraceBuf *tb, int32_t depth) {
     tb->total += (uint32_t)(depth * 2);
 }
 
-/* ---- Extract field name from pre-encoded key ----
+/* Extract field name from pre-encoded key
  * key_ptr points to a pre-encoded JSON key like: "name":
  * We extract the text between the first pair of double quotes. */
 
@@ -79,7 +78,7 @@ static inline void vj_trace_key_name(VjTraceBuf *tb, const char *key_ptr, uint16
   vj_trace_str(tb, "\"");
 }
 
-/* ---- Noinline entry points (one CALL per trace site in the VM) ---- */
+/* Noinline entry points (one CALL per trace site in the VM) */
 
 /* Simple label-only trace: indent + LABEL + newline. */
 NOINLINE static void vj_trace_simple(VjTraceBuf *tb, const char *label, int32_t depth) {
@@ -153,7 +152,7 @@ NOINLINE OPTNONE static void vj_trace_yield(VjTraceBuf *tb, uint16_t op_type, in
   vj_trace_opkey(tb, label, depth, op, key_pool);
 }
 
-/* ---- High-level macros (guard on tbuf, delegate to noinline fn) ---- */
+/* High-level macros (guard on tbuf, delegate to noinline fn) */
 
 /* Simple label-only trace — no key, no pc, no base. */
 #define VM_TRACE(label)                                                                                                \

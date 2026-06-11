@@ -1,4 +1,14 @@
-/* ---------- Build configuration validation ---------- */
+/*
+ * encvm entry point — build configuration and public symbol.
+ *
+ * Defines VJ_VM_EXEC_FN_NAME — the mode×ISA-suffixed public symbol
+ * (e.g. vj_vm_exec_full_neon) — as a thin wrapper that inlines the VM
+ * body (vj_exec, defined in encvm.h).
+ *
+ * This file is compiled once per mode (full/compact/fast) × ISA
+ * (neon/avx2) combination to produce multiple entry points. */
+
+/* Build configuration validation */
 #if !defined(OS)
 #error "OS must be defined (linux, darwin, or windows)"
 #endif
@@ -9,7 +19,7 @@
 #error "ISA must be defined (use -DISA_NEON, -DISA_AVX2, or -DISA_AVX512)"
 #endif
 
-/* ---------- Mode configuration ----------
+/* Mode configuration
  * Translate build-system MODE_* flags into engine-internal macros.
  *
  * VJ_FAST_STRING_ESCAPE: when defined, the VM unconditionally uses
@@ -27,10 +37,11 @@
 #define VJ_COMPACT_INDENT
 #endif
 
-/* ---------- Entry-point symbol name ----------
- * Define VJ_VM_EXEC_FN_NAME before including encvm.h so that the VM
- * function body is emitted directly as the public entry point
- * (e.g. vj_vm_exec_full_sse42), eliminating the wrapper+jmp. */
+/* Entry-point symbol name
+ * Define VJ_VM_EXEC_FN_NAME before including encvm.h.
+ * encvm.h provides vj_exec() as a static INLINE VM body;
+ * the wrapper below emits the public mode+ISA-suffixed symbol
+ * (e.g. vj_vm_exec_full_neon) that inlines vj_exec at O2. */
 
 #if defined(MODE_FAST)
 #define VJ_MODE_TAG fast
@@ -52,7 +63,7 @@
 #define VJ_VM_EXEC_FN_NAME VJ_VM_EXEC_NAME(VJ_MODE_TAG, avx2)
 #endif
 
-/* ---------- Engine implementation ----------
+/* Engine implementation
  *
  * Stack alignment (x86-64 only):
  * The Go compiler generates an internal ABI wrapper around the Plan9
@@ -69,3 +80,22 @@
  * encvm.h unconditionally emits AND $-16,%rsp, making it robust
  * against any upstream Go ABI layout changes. */
 #include "encvm.h"
+
+/* Windows export declaration — needed so the entry function appears in the
+ * PE export directory when linking as a DLL. */
+#ifdef _WIN32
+#define VJ_EXPORT __declspec(dllexport)
+#else
+#define VJ_EXPORT
+#endif
+
+/* Public entry point — thin wrapper that inlines the VM body.
+ * vj_exec() is defined in encvm.h as static INLINE (always_inline).
+ *
+ * Called from Go through a NOSPLIT trampoline. Total stack must stay
+ * within ~800 bytes (normal) / ~1600 bytes (-race).
+ *
+ */
+VJ_EXPORT VJ_ALIGN_STACK void VJ_VM_EXEC_FN_NAME(VjExecCtx *ctx) {
+  vj_exec(ctx);
+}

@@ -1,22 +1,28 @@
+/*
+ * vj_encode_interface_value — binary-searches the ifaceCache to decide
+ * the encoding strategy (primitive / cached Blueprint / yield to Go).
+ *
+ * Out-of-line to keep the VM dispatch loop compact.  The inner primitive
+ * encoder (encode_primitive_value) is defined here as a static function.
+ */
+
 #include "eface.h"
 #include "ftoa.h"
-#include "number.h"
+#include "itoa.h"
 #include "strfn.h"
-
-#include "vj_compat.h"
 
 /* Result from encoding a single primitive value. */
 typedef struct {
-  uint8_t *buf;  /* NULL on error */
-  int exit_code; /* 0 = ok, otherwise VJ_EXIT_* */
+  uint8_t *buf;
+  int exit_code;
 } EncValueResult;
 
 /* Encode a primitive value given its data pointer and type tag.
  * Called when ifaceCache lookup finds a primitive (tag != 0).
  * Fixed-size types assume caller pre-checked buffer space;
  * variable-length types (string, raw_message, number) check inline. */
-static NOINLINE EncValueResult encode_primitive_value(uint8_t *buf, const uint8_t *bend, const void *ptr,
-                                                      uint16_t etype, uint32_t flags) {
+static EncValueResult encode_primitive_value(uint8_t *buf, const uint8_t *bend, const void *ptr, uint16_t etype,
+                                             uint32_t flags) {
   switch (etype) {
   case OP_BOOL: {
     uint8_t val = *(const uint8_t *)ptr;
@@ -171,11 +177,9 @@ VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend, const
   if (__builtin_expect(!found, 0))
     return (VjIfaceResult){buf, NULL, type_ptr, NULL, VJ_IFACE_CACHE_MISS, 0};
 
-  /* Not compilable by C (e.g. map) → yield to Go fallback. */
   if (tag == 0 && cached_ops == NULL)
     return (VjIfaceResult){buf, NULL, NULL, NULL, VJ_IFACE_YIELD, 0};
 
-  /* Primitive → encode inline via tag dispatch. */
   if (tag != 0) {
     EncValueResult r = encode_primitive_value(buf, bend, data_ptr, tag, flags);
     if (__builtin_expect(r.buf == NULL, 0)) {
@@ -188,9 +192,6 @@ VjIfaceResult vj_encode_interface_value(uint8_t *buf, const uint8_t *bend, const
     return (VjIfaceResult){r.buf, NULL, NULL, NULL, VJ_IFACE_DONE, 0};
   }
 
-  /* Cached Blueprint → caller pushes VM frame.
-   * For INDIRECT types (maps), data_ptr = &eface.data so MAP_STR_ITER can
-   * dereference the map pointer correctly (base+0 → map pointer). */
   const uint8_t *bp_base = (cache_flags & VJ_IFACE_FLAG_INDIRECT) ? (const uint8_t *)(iface_ptr + 8) : data_ptr;
   return (VjIfaceResult){buf, cached_ops, type_ptr, bp_base, VJ_IFACE_SWITCH_OPS, cache_flags};
 }

@@ -11,7 +11,7 @@
 
 #include "vj_compat.h"
 
-/* ---- Inline / noinline aliases (backward compat) ------------------- */
+/* Inline / noinline aliases (backward compat) */
 /* INLINE and NOINLINE are defined in vj_compat.h */
 
 /* force_align_arg_pointer: emit AND $-16,%rsp prologue on x86-64 to fix
