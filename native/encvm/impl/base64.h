@@ -16,7 +16,6 @@
 
 #include "types.h"
 #include "util.h"
-#include "vj_compat.h"
 
 static const char VJ_B64_CHARS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 

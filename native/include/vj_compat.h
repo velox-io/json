@@ -40,6 +40,20 @@
 #endif
 
 #if defined(_MSC_VER)
+#define VJ_EXPORT __declspec(dllexport)
+#else
+#define VJ_EXPORT
+#endif
+
+/* force_align_arg_pointer: emit AND $-16,%rsp on x86-64 to fix
+ * stack misalignment when called from Go ABI.  No-op elsewhere. */
+#if defined(__x86_64__) && !defined(_WIN32)
+#define VJ_ALIGN_STACK __attribute__((force_align_arg_pointer))
+#else
+#define VJ_ALIGN_STACK
+#endif
+
+#if defined(_MSC_VER)
 #define NO_BUILTIN_FUNC(func)
 #else
 #define NO_BUILTIN_FUNC(func) __attribute__((no_builtin(#func)))

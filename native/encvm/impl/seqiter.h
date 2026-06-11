@@ -16,7 +16,6 @@
 #include "number.h"
 #include "strfn.h"
 #include "types.h"
-#include "vj_compat.h"
 
 /* Indent helpers */
 

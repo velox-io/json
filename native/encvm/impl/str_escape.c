@@ -7,8 +7,6 @@
 
 #include "str_escape.h"
 
-/* Public declarations are in strfn.h. */
-
 /* Non-ASCII run dispatcher */
 
 int64_t vj_escape_nonascii_run(uint8_t **out_ptr, const uint8_t *src, int64_t i, int64_t src_len, uint32_t flags) {

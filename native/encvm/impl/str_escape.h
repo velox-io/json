@@ -4,7 +4,7 @@
  * vj_escape_line_terms — SIMD scan for U+2028/U+2029
  * vj_validate_utf8_run — rune-by-rune UTF-8 validation
  *
- * Used by the entry points in str_escape.c. */
+ * */
 
 #ifndef VJ_ENCVM_STR_ESCAPE_H
 #define VJ_ENCVM_STR_ESCAPE_H

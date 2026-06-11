@@ -14,7 +14,6 @@
 #include "number.h"
 #include "strfn.h"
 #include "types.h"
-#include "vj_compat.h"
 
 /* Swiss Map layout constants */
 #define SWISS_GROUP_SLOTS 8

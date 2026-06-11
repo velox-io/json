@@ -2,7 +2,8 @@
  * Shared lookup tables.
  *
  * DIGIT_PAIRS: "00010203...99" — two-digit ASCII format.
- * VEC_SHIFT_SHUFFLES: pshufb masks for leading-zero stripping in itoa. */
+ * VEC_SHIFT_SHUFFLES: pshufb masks for leading-zero stripping in itoa.
+ */
 
 #ifndef VJ_ENCVM_TABLES_H
 #define VJ_ENCVM_TABLES_H
@@ -48,5 +49,7 @@ static const uint8_t VEC_SHIFT_SHUFFLES[] ALIGNED(16) = {
   /* nd=8 */
   0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
 };
+
+// clang-format on
 
 #endif /* VJ_ENCVM_TABLES_H */

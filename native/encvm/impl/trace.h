@@ -10,7 +10,6 @@
 
 #include "log.h"
 #include "types.h"
-#include "vj_compat.h"
 
 #ifdef VJ_ENCVM_DEBUG
 

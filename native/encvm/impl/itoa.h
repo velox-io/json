@@ -16,9 +16,6 @@
 
 #include "memfn.h"
 #include "tables.h"
-#include "util.h"
-#include "vj_compat.h"
-#include <stdint.h>
 
 /* SSE2 constants for itoa8 */
 
@@ -213,7 +210,5 @@ INLINE int write_int64(uint8_t *buf, int64_t v) {
   uint64_t uv = (uint64_t)(-(v + 1)) + 1;
   return 1 + write_uint64(buf + 1, uv);
 }
-
-// clang-format on
 
 #endif /* VJ_ENCVM_ITOA_H */

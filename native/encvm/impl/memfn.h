@@ -8,7 +8,6 @@
 #define VJ_ENCVM_MEMFN_H
 
 #include "util.h"
-#include <stdint.h>
 
 /* ================================================================
  *  Small copy helper
@@ -166,7 +165,5 @@ static inline void vj_copy_var(uint8_t *dst, const void *src, uint64_t n) {
 }
 
 #endif /* SIMD check */
-
-// clang-format on
 
 #endif /* VJ_ENCVM_MEMFN_H */

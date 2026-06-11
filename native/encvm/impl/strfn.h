@@ -15,8 +15,6 @@
 #include "types.h"
 #include "util.h"
 
-// clang-format off
-
 /* String escape (JSON)
  *
  * Writes the string content (WITHOUT surrounding quotes) to buf.
@@ -34,6 +32,7 @@ static const char HEX_DIGITS[] = "0123456789abcdef";
  *
  * Entries for safe bytes (>= 0x20, not " or \) are unused and zero. */
 static const uint8_t ESCAPE_LUT[256] = {
+    // clang-format off
     /* 0x00-0x07: \u00XX */ 0, 0, 0, 0, 0, 0, 0, 0,
     /* 0x08 \b */ 'b',
     /* 0x09 \t */ 't',
@@ -49,6 +48,7 @@ static const uint8_t ESCAPE_LUT[256] = {
     /* 0x23-0x5B: safe */ [0x23 ... 0x5B] = 0,
     /* 0x5C '\\' */ [0x5C] = '\\',
     /* 0x5D-0xFF: safe/non-ASCII */ [0x5D ... 0xFF] = 0,
+    // clang-format on
 };
 
 // clang-format on
