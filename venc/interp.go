@@ -20,6 +20,19 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 		depth int32  // stack depth
 	)
 
+	// On any non-empty stack at function exit (i.e. an error abort that
+	// skipped pop-time cleanup), clear leftover frames so the recycled
+	// encodeState carries no stale pointers in Payload[0..8] / RetBase.
+	// Normal completion (opRet at depth==0) leaves depth==0, making this
+	// a no-op on the hot path.
+	defer func() {
+		for i := int32(0); i < depth; i++ {
+			frame := &es.vmCtx.Stack[i]
+			frame.RetBase = nil
+			*(*uintptr)(unsafe.Pointer(&frame.Payload[0])) = 0
+		}
+	}()
+
 	for pc < opsLen {
 		hdr := opHdrAt(ops, pc)
 		op := hdr.OpType
@@ -275,6 +288,10 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			base = frame.RetBase
 			frame.RetBase = nil
 			pc = *(*int32)(unsafe.Pointer(&frame.Payload[0]))
+			// Clear Payload[0..8] so the next push sees nil as the wb
+			// "old value", preventing stale interp/iter pointers from
+			// reaching wbBuf via the unsafe.Pointer write barrier.
+			*(*uintptr)(unsafe.Pointer(&frame.Payload[0])) = 0
 			first = false
 
 		case opPtrDeref:
@@ -308,6 +325,8 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 				depth--
 				base = es.vmCtx.Stack[depth].RetBase
 				es.vmCtx.Stack[depth].RetBase = nil
+				// Symmetric pop cleanup: see opRet for rationale.
+				*(*uintptr)(unsafe.Pointer(&es.vmCtx.Stack[depth].Payload[0])) = 0
 				first = false
 			}
 			pc += 8
@@ -379,6 +398,8 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 				// End iteration
 				base = frame.RetBase
 				frame.RetBase = nil
+				// Symmetric pop cleanup: see opRet for rationale.
+				*(*uintptr)(unsafe.Pointer(&frame.Payload[0])) = 0
 				if indent {
 					es.indentDepth--
 					es.appendNewlineIndent()
