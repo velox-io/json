@@ -30,20 +30,32 @@ func UniTypeOf(t reflect.Type) *UniType {
 			return e.ut
 		}
 	}
-	return buildUniType(t, true)
+	return buildUniType(t, nil)
 }
 
-// PartialUniTypeOf returns the shell immediately for recursive type builds.
+// PartialUniTypeOf is the entry point for recursive type builds. The
+// returned shell may have Ext == nil if t is in the current build chain.
 func PartialUniTypeOf(t reflect.Type) *UniType {
+	return partialUniTypeOf(t, nil)
+}
+
+// partialUniTypeOf checks the in-flight building map first to break
+// cycles; otherwise it goes through the global cache and waits on any
+// other goroutine's pending build.
+func partialUniTypeOf(t reflect.Type, building map[reflect.Type]*UniType) *UniType {
+	if ut, ok := building[t]; ok {
+		return ut
+	}
 	if v, ok := uniTypeCache.Load(t); ok {
 		switch e := v.(type) {
 		case *UniType:
 			return e
 		case *uniTypePending:
+			<-e.done
 			return e.ut
 		}
 	}
-	return buildUniType(t, false)
+	return buildUniType(t, building)
 }
 
 var (
@@ -51,7 +63,10 @@ var (
 	numberType     = reflect.TypeFor[json.Number]()
 )
 
-func buildUniType(t reflect.Type, wait bool) *UniType {
+// buildUniType assembles the descriptor for t. building holds shells the
+// current goroutine has in flight, so recursive references reuse them
+// without observing partial mutations through the global cache.
+func buildUniType(t reflect.Type, building map[reflect.Type]*UniType) *UniType {
 	p := &uniTypePending{
 		ut: &UniType{
 			Kind: KindForType(t),
@@ -68,14 +83,17 @@ func buildUniType(t reflect.Type, wait bool) *UniType {
 		case *UniType:
 			return existing
 		case *uniTypePending:
-			if wait {
-				<-existing.done
-			}
+			// Another goroutine owns this build; wait for it to publish.
+			<-existing.done
 			return existing.ut
 		}
 	}
 
 	ut := p.ut
+	if building == nil {
+		building = map[reflect.Type]*UniType{}
+	}
+	building[t] = ut
 
 	// Special aliases override the default reflect.Kind mapping.
 	switch t {
@@ -92,18 +110,19 @@ func buildUniType(t reflect.Type, wait bool) *UniType {
 
 	switch t.Kind() {
 	case reflect.Struct:
-		ut.Ext = buildStructTypeInfo(t)
+		ut.Ext = buildStructTypeInfo(t, building)
 	case reflect.Slice:
-		ut.Ext = buildSliceTypeInfo(t)
+		ut.Ext = buildSliceTypeInfo(t, building)
 	case reflect.Array:
-		ut.Ext = buildArrayTypeInfo(t)
+		ut.Ext = buildArrayTypeInfo(t, building)
 	case reflect.Map:
-		ut.Ext = buildMapTypeInfo(t)
+		ut.Ext = buildMapTypeInfo(t, building)
 	case reflect.Pointer:
-		ut.Ext = buildPointerTypeInfo(t)
+		ut.Ext = buildPointerTypeInfo(t, building)
 	}
 
-	// Publish the completed descriptor in place of the pending shell.
+	// Publish the completed descriptor; close establishes happens-before
+	// for waiters on done.
 	uniTypeCache.Store(t, ut)
 	close(p.done)
 	return ut
@@ -246,14 +265,14 @@ func bindTextUnmarshalerPtr(t reflect.Type) func(unsafe.Pointer, []byte) error {
 	}
 }
 
-func buildStructTypeInfo(t reflect.Type) *StructTypeInfo {
+func buildStructTypeInfo(t reflect.Type, building map[reflect.Type]*UniType) *StructTypeInfo {
 	return &StructTypeInfo{
-		Fields: collectStructFields(t, 0),
+		Fields: collectStructFields(t, 0, building),
 	}
 }
 
-func buildSliceTypeInfo(t reflect.Type) *SliceTypeInfo {
-	elemUT := PartialUniTypeOf(t.Elem())
+func buildSliceTypeInfo(t reflect.Type, building map[reflect.Type]*UniType) *SliceTypeInfo {
+	elemUT := partialUniTypeOf(t.Elem(), building)
 	emptySlice := reflect.MakeSlice(t, 0, 0)
 	return &SliceTypeInfo{
 		ElemType:       elemUT,
@@ -262,8 +281,8 @@ func buildSliceTypeInfo(t reflect.Type) *SliceTypeInfo {
 	}
 }
 
-func buildArrayTypeInfo(t reflect.Type) *ArrayTypeInfo {
-	elemUT := PartialUniTypeOf(t.Elem())
+func buildArrayTypeInfo(t reflect.Type, building map[reflect.Type]*UniType) *ArrayTypeInfo {
+	elemUT := partialUniTypeOf(t.Elem(), building)
 	return &ArrayTypeInfo{
 		ElemType:   elemUT,
 		ElemHasPtr: TypeContainsPointer(t.Elem()),
@@ -271,9 +290,9 @@ func buildArrayTypeInfo(t reflect.Type) *ArrayTypeInfo {
 	}
 }
 
-func buildMapTypeInfo(t reflect.Type) *MapTypeInfo {
-	keyUT := PartialUniTypeOf(t.Key())
-	valUT := PartialUniTypeOf(t.Elem())
+func buildMapTypeInfo(t reflect.Type, building map[reflect.Type]*UniType) *MapTypeInfo {
+	keyUT := partialUniTypeOf(t.Key(), building)
+	valUT := partialUniTypeOf(t.Elem(), building)
 	isStringKey := t.Key().Kind() == reflect.String
 	mi := &MapTypeInfo{
 		KeyType:     keyUT,
@@ -295,8 +314,8 @@ func buildMapTypeInfo(t reflect.Type) *MapTypeInfo {
 	return mi
 }
 
-func buildPointerTypeInfo(t reflect.Type) *PointerTypeInfo {
-	elemUT := PartialUniTypeOf(t.Elem())
+func buildPointerTypeInfo(t reflect.Type, building map[reflect.Type]*UniType) *PointerTypeInfo {
+	elemUT := partialUniTypeOf(t.Elem(), building)
 	return &PointerTypeInfo{
 		ElemType:   elemUT,
 		ElemHasPtr: TypeContainsPointer(t.Elem()),
@@ -306,7 +325,7 @@ func buildPointerTypeInfo(t reflect.Type) *PointerTypeInfo {
 // collectStructFields matches encoding/json field promotion rules.
 // Direct fields win, shallower embedded fields win, and same-depth conflicts
 // cancel. Unexported anonymous structs may still promote exported children.
-func collectStructFields(t reflect.Type, baseOffset uintptr) []StructField {
+func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflect.Type]*UniType) []StructField {
 	type nameInfo struct {
 		depth int
 		index int // index in fields[]; -1 = canceled
@@ -394,7 +413,7 @@ func collectStructFields(t reflect.Type, baseOffset uintptr) []StructField {
 				}
 			}
 
-			fieldUT := PartialUniTypeOf(rf.Type)
+			fieldUT := partialUniTypeOf(rf.Type, building)
 
 			if quoted {
 				switch fieldUT.Kind {

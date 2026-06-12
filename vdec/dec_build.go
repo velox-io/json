@@ -101,6 +101,11 @@ func resolveFieldType(fieldUT *typ.UniType, building map[reflect.Type]*DecTypeIn
 	if v, ok := decTypeCache.Load(t); ok {
 		return v.(*DecTypeInfo)
 	}
+	// Cyclic struct fields can arrive as partial shells (Ext == nil) from
+	// the in-flight UniType build chain. UniTypeOf blocks until complete.
+	if fieldUT.Ext == nil {
+		fieldUT = typ.UniTypeOf(t)
+	}
 	if fieldUT.Kind == typ.KindStruct {
 		if dti, ok := building[t]; ok {
 			return dti
