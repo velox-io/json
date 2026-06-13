@@ -40,29 +40,27 @@ static void trace_append(Trace *t, const char *fmt, ...) {
     t->len += (size_t)n;
 }
 
-static int32_t tr_begin_object(NdecCtx *ctx, void *ud, uint32_t child_phase) {
+static int32_t tr_begin_object(NdecCtx *ctx, void *ud) { (void)ctx;
   trace_append(ud, "{");
-  return ndec_stack_push(ctx, child_phase);
+  return NDEC_PROCEED;
 }
-static int32_t tr_end_object(NdecCtx *ctx, void *ud) {
+static int32_t tr_end_object(NdecCtx *ctx, void *ud) { (void)ctx;
   trace_append(ud, "}");
-  ndec_stack_pop(ctx);
   return NDEC_PROCEED;
 }
-static int32_t tr_begin_array(NdecCtx *ctx, void *ud, uint32_t child_phase) {
+static int32_t tr_begin_array(NdecCtx *ctx, void *ud) { (void)ctx;
   trace_append(ud, "[");
-  return ndec_stack_push(ctx, child_phase);
-}
-static int32_t tr_end_array(NdecCtx *ctx, void *ud) {
-  trace_append(ud, "]");
-  ndec_stack_pop(ctx);
   return NDEC_PROCEED;
 }
-static int32_t tr_scalar_null(NdecCtx *ctx, void *ud) { (void)ctx;
+static int32_t tr_end_array(NdecCtx *ctx, void *ud) { (void)ctx;
+  trace_append(ud, "]");
+  return NDEC_PROCEED;
+}
+static int32_t tr_scalar_null(void *ud) {
   trace_append(ud, "N");
   return NDEC_PROCEED;
 }
-static int32_t tr_scalar_bool(NdecCtx *ctx, void *ud, int v) { (void)ctx;
+static int32_t tr_scalar_bool(void *ud, int v) {
   trace_append(ud, v ? "T" : "F");
   return NDEC_PROCEED;
 }
@@ -70,11 +68,11 @@ static int32_t tr_object_field(NdecCtx *ctx, void *ud, NdecStrInfo key) { (void)
   trace_append(ud, "k<%.*s>", (int)key.raw.len, key.raw.ptr);
   return NDEC_PROCEED;
 }
-static int32_t tr_scalar_number(NdecCtx *ctx, void *ud, NdecRawStr raw) { (void)ctx;
+static int32_t tr_scalar_number(void *ud, NdecRawStr raw) {
   trace_append(ud, "n<%.*s>", (int)raw.len, raw.ptr);
   return NDEC_PROCEED;
 }
-static int32_t tr_scalar_string(NdecCtx *ctx, void *ud, NdecStrInfo str) { (void)ctx;
+static int32_t tr_scalar_string(void *ud, NdecStrInfo str) {
   trace_append(ud, "s<%.*s>", (int)str.raw.len, str.raw.ptr);
   return NDEC_PROCEED;
 }

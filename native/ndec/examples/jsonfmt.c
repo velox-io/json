@@ -74,7 +74,7 @@ static void emit_sep(FmtCtx *f) {
   }
 }
 
-static int32_t on_begin_object(NdecCtx *ctx, void *ud, uint32_t child_phase) { (void)ctx;(void)child_phase;
+static int32_t on_begin_object(NdecCtx *ctx, void *ud) { (void)ctx;
   FmtCtx *f = (FmtCtx *)ud;
   emit_sep(f);
   fputc('{', f->out);
@@ -120,7 +120,7 @@ static int32_t on_object_field(NdecCtx *ctx, void *ud, NdecStrInfo key) { (void)
   return NDEC_PROCEED;
 }
 
-static int32_t on_begin_array(NdecCtx *ctx, void *ud, uint32_t child_phase) { (void)ctx;(void)child_phase;
+static int32_t on_begin_array(NdecCtx *ctx, void *ud) { (void)ctx;
   FmtCtx *f = (FmtCtx *)ud;
   emit_sep(f);
   fputc('[', f->out);
@@ -150,7 +150,7 @@ static int32_t on_end_array(NdecCtx *ctx, void *ud) { (void)ctx;
   return NDEC_PROCEED;
 }
 
-static int32_t on_scalar_string(NdecCtx *ctx, void *ud, NdecStrInfo str) { (void)ctx;
+static int32_t on_scalar_string(void *ud, NdecStrInfo str) {
   FmtCtx *f = (FmtCtx *)ud;
   emit_sep(f);
   emit_quoted(f, str);
@@ -170,7 +170,7 @@ static void trim_trailing_ws(NdecRawStr *raw) {
     raw->len--;
 }
 
-static int32_t on_scalar_number(NdecCtx *ctx, void *ud, NdecRawStr raw) { (void)ctx;
+static int32_t on_scalar_number(void *ud, NdecRawStr raw) {
   FmtCtx *f = (FmtCtx *)ud;
   emit_sep(f);
   trim_trailing_ws(&raw);
@@ -179,7 +179,7 @@ static int32_t on_scalar_number(NdecCtx *ctx, void *ud, NdecRawStr raw) { (void)
   return NDEC_PROCEED;
 }
 
-static int32_t on_scalar_bool(NdecCtx *ctx, void *ud, int value) { (void)ctx;
+static int32_t on_scalar_bool(void *ud, int value) {
   FmtCtx *f = (FmtCtx *)ud;
   emit_sep(f);
   fputs(value ? "true" : "false", f->out);
@@ -187,7 +187,7 @@ static int32_t on_scalar_bool(NdecCtx *ctx, void *ud, int value) { (void)ctx;
   return NDEC_PROCEED;
 }
 
-static int32_t on_scalar_null(NdecCtx *ctx, void *ud) { (void)ctx;
+static int32_t on_scalar_null(void *ud) {
   FmtCtx *f = (FmtCtx *)ud;
   emit_sep(f);
   fputs("null", f->out);

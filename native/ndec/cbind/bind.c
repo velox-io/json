@@ -542,7 +542,8 @@ static int write_string(NdecBindState *bs, NdecBindSlot *slot, NdecRawStr raw) {
   return bs_fail(bs, NDEC_ERR_BIND_TYPE_MISMATCH, "expected string kind");
 }
 
-static int32_t r_begin_object(NdecCtx *ctx, void *ud_v, uint32_t child_phase) {
+static int32_t r_begin_object(NdecCtx *ctx, void *ud_v) {
+  (void)ctx;
   NdecBindState *bs = (NdecBindState *)ud_v;
   NdecBindSlot slot;
   if (slot_for_value(bs, &slot) < 0)
@@ -575,10 +576,6 @@ static int32_t r_begin_object(NdecCtx *ctx, void *ud_v, uint32_t child_phase) {
   }
 
   bs_advance(bs);
-  {
-    int32_t pst = ndec_stack_push(ctx, child_phase);
-    if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
-  }
   return bs_push_struct(bs, obj, type) == 0 ? NDEC_PROCEED : -2;
 }
 
@@ -605,7 +602,6 @@ static int32_t r_end_object(NdecCtx *ctx, void *ud_v) {
   }
 
   bs_pop(bs);
-  ndec_stack_pop(ctx);
   return NDEC_PROCEED;
 }
 
@@ -706,7 +702,8 @@ static int32_t r_object_field(NdecCtx *ctx, void *ud_v, NdecStrInfo key) {
   return NDEC_SKIP;
 }
 
-static int32_t r_begin_array(NdecCtx *ctx, void *ud_v, uint32_t child_phase) {
+static int32_t r_begin_array(NdecCtx *ctx, void *ud_v) {
+  (void)ctx;
   NdecBindState *bs = (NdecBindState *)ud_v;
   NdecBindFrame *f  = BS_TOP(bs);
   if (f->kind != FR_STRUCT || !f->s.pending)
@@ -717,19 +714,11 @@ static int32_t r_begin_array(NdecCtx *ctx, void *ud_v, uint32_t child_phase) {
     void **dst_items = (void **)((uint8_t *)f->s.obj + f->s.pending_offset);
     size_t *dst_len  = (size_t *)((uint8_t *)f->s.obj + f->s.pending_len_offset);
     f->s.pending     = NULL;
-    {
-      int32_t pst = ndec_stack_push(ctx, child_phase);
-      if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
-    }
     return bs_push_array(bs, fld, dst_items, dst_len, NULL, 0) == 0 ? NDEC_PROCEED : -2;
   }
   if (fld->kind == NDEC_KIND_FIXED_ARRAY) {
     void *inline_buf = (uint8_t *)f->s.obj + f->s.pending_offset;
     f->s.pending     = NULL;
-    {
-      int32_t pst = ndec_stack_push(ctx, child_phase);
-      if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
-    }
     return bs_push_array(bs, fld, NULL, NULL, inline_buf, fld->fixed_count) == 0 ? NDEC_PROCEED : -2;
   }
   if (fld->kind == NDEC_KIND_HEAP_ARRAY) {
@@ -742,10 +731,6 @@ static int32_t r_begin_array(NdecCtx *ctx, void *ud_v, uint32_t child_phase) {
     if (!items_ptr && cap > 0)
       return bs_fail(bs, NDEC_ERR_BIND_TYPE_MISMATCH, "heap array items pointer NULL");
     f->s.pending = NULL;
-    {
-      int32_t pst = ndec_stack_push(ctx, child_phase);
-      if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
-    }
     return bs_push_array(bs, fld, NULL, dst_len, items_ptr, cap) == 0 ? NDEC_PROCEED : -2;
   }
   return bs_fail(bs, NDEC_ERR_BIND_TYPE_MISMATCH, "expected array");
@@ -766,7 +751,6 @@ static int32_t r_end_array(NdecCtx *ctx, void *ud_v) {
     if (a->dst_len)
       *a->dst_len = a->count;
     bs_pop(bs);
-    ndec_stack_pop(ctx);
     return NDEC_PROCEED;
   }
 
@@ -785,12 +769,10 @@ static int32_t r_end_array(NdecCtx *ctx, void *ud_v) {
   free(a->scratch);
   a->scratch = NULL;
   bs_pop(bs);
-  ndec_stack_pop(ctx);
   return NDEC_PROCEED;
 }
 
-static int32_t r_scalar_null(NdecCtx *ctx, void *ud_v) {
-  (void)ctx;
+static int32_t r_scalar_null(void *ud_v) {
   NdecBindState *bs = (NdecBindState *)ud_v;
   NdecBindSlot slot;
   if (slot_for_value(bs, &slot) < 0)
@@ -847,8 +829,7 @@ static int32_t r_scalar_null(NdecCtx *ctx, void *ud_v) {
   return NDEC_PROCEED;
 }
 
-static int32_t r_scalar_bool(NdecCtx *ctx, void *ud_v, int value) {
-  (void)ctx;
+static int32_t r_scalar_bool(void *ud_v, int value) {
   NdecBindState *bs = (NdecBindState *)ud_v;
   NdecBindSlot slot;
   if (slot_for_value(bs, &slot) < 0)
@@ -860,8 +841,7 @@ static int32_t r_scalar_bool(NdecCtx *ctx, void *ud_v, int value) {
   return NDEC_PROCEED;
 }
 
-static int32_t r_scalar_number(NdecCtx *ctx, void *ud_v, NdecRawStr raw) {
-  (void)ctx;
+static int32_t r_scalar_number(void *ud_v, NdecRawStr raw) {
   NdecBindState *bs = (NdecBindState *)ud_v;
   NdecBindSlot slot;
   if (slot_for_value(bs, &slot) < 0)
@@ -894,8 +874,7 @@ static int32_t r_scalar_number(NdecCtx *ctx, void *ud_v, NdecRawStr raw) {
   return NDEC_PROCEED;
 }
 
-static int32_t r_scalar_string(NdecCtx *ctx, void *ud_v, NdecStrInfo str) {
-  (void)ctx;
+static int32_t r_scalar_string(void *ud_v, NdecStrInfo str) {
   NdecBindState *bs = (NdecBindState *)ud_v;
 
   /* Intercept the discriminator string of a tagged union before the
@@ -945,15 +924,15 @@ static int32_t r_scalar_string(NdecCtx *ctx, void *ud_v, NdecStrInfo str) {
  * symbol; only ndec_unmarshal_ex below references it.
  */
 
-#define NDEC_R_BEGIN_OBJECT(ctx, ud, child_phase)       r_begin_object((ctx), (ud), (child_phase))
+#define NDEC_R_BEGIN_OBJECT(ctx, ud)       r_begin_object((ctx), (ud))
 #define NDEC_R_END_OBJECT(ctx, ud)         r_end_object((ctx), (ud))
 #define NDEC_R_OBJECT_FIELD(ctx, ud, key)  r_object_field((ctx), (ud), (key))
-#define NDEC_R_BEGIN_ARRAY(ctx, ud, child_phase)        r_begin_array((ctx), (ud), (child_phase))
+#define NDEC_R_BEGIN_ARRAY(ctx, ud)        r_begin_array((ctx), (ud))
 #define NDEC_R_END_ARRAY(ctx, ud)          r_end_array((ctx), (ud))
-#define NDEC_R_SCALAR_NULL(ctx, ud)        r_scalar_null((ctx), (ud))
-#define NDEC_R_SCALAR_BOOL(ctx, ud, v)     r_scalar_bool((ctx), (ud), (v))
-#define NDEC_R_SCALAR_NUMBER(ctx, ud, raw) r_scalar_number((ctx), (ud), (raw))
-#define NDEC_R_SCALAR_STRING(ctx, ud, raw) r_scalar_string((ctx), (ud), (raw))
+#define NDEC_R_SCALAR_NULL(ctx, ud)        r_scalar_null((ud))
+#define NDEC_R_SCALAR_BOOL(ctx, ud, v)     r_scalar_bool((ud), (v))
+#define NDEC_R_SCALAR_NUMBER(ctx, ud, raw) r_scalar_number((ud), (raw))
+#define NDEC_R_SCALAR_STRING(ctx, ud, raw) r_scalar_string((ud), (raw))
 
 #define NDEC_FN_DECL static
 #define NDEC_FN_NAME bind_parse

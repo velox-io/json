@@ -92,14 +92,15 @@ static inline uint8_t *ndec_bind_kvbuf_bump(NdecBindUserData *ud, uint32_t need)
 }
 
 /* BEGIN_MAP fast path. Returns 0 on success; non-zero means caller must
- * yield NDEC_YA_BEGIN_MAP (caller has already pushed child slot).
+ * yield NDEC_YA_BEGIN_MAP.
  *
- * Caller must push child before calling this function. On success,
- * this function fills the child binding from the kvBuf bump. */
-static inline int ndec_bind_begin_map_fast(NdecCtx *ctx, NdecFrame *parent,
-                                           uint32_t child_phase,
+ * Caller passes the already-pushed child frame pointer (parser owns
+ * push). On success this fills the child binding from a kvBuf bump;
+ * on capacity exhaustion the driver fills the binding via the
+ * BEGIN_MAP yield handler. */
+static inline int ndec_bind_begin_map_fast(NdecFrame *parent,
+                                           NdecFrame *child,
                                            NdecBindUserData *ud) {
-  (void)ctx;(void)child_phase;
   const NdecBindTypeInfo *map_ti;
   int32_t parent_idx = -1;
   switch (parent->bind_container_kind) {
@@ -120,8 +121,6 @@ static inline int ndec_bind_begin_map_fast(NdecCtx *ctx, NdecFrame *parent,
   uint8_t *base = ndec_bind_kvbuf_bump(ud, need);
   if (base == 0) return 1;
 
-  /* Child already pushed by caller; fill binding */
-  NdecFrame *child = &ctx->frames[ctx->sp];
   ndec_bind_init_map_child(child, map_ti, base, parent_idx);
   return 0;
 }

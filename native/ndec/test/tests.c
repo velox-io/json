@@ -124,22 +124,20 @@ typedef struct SkipState {
   int field_count;
 } SkipState;
 
-static int32_t skip_begin_object(NdecCtx *ctx, void *ud, uint32_t child_phase) {
+static int32_t skip_begin_object(NdecCtx *ctx, void *ud) { (void)ctx;
   ((SkipState *)ud)->object_count++;
-  return ndec_stack_push(ctx, child_phase);
-}
-static int32_t skip_end_object(NdecCtx *ctx, void *ud) {
-  ((SkipState *)ud)->object_count--;
-  ndec_stack_pop(ctx);
   return NDEC_PROCEED;
 }
-static int32_t skip_begin_array(NdecCtx *ctx, void *ud, uint32_t child_phase) {
-  ((SkipState *)ud)->array_count++;
-  return ndec_stack_push(ctx, child_phase);
+static int32_t skip_end_object(NdecCtx *ctx, void *ud) { (void)ctx;
+  ((SkipState *)ud)->object_count--;
+  return NDEC_PROCEED;
 }
-static int32_t skip_end_array(NdecCtx *ctx, void *ud) {
+static int32_t skip_begin_array(NdecCtx *ctx, void *ud) { (void)ctx;
+  ((SkipState *)ud)->array_count++;
+  return NDEC_PROCEED;
+}
+static int32_t skip_end_array(NdecCtx *ctx, void *ud) { (void)ctx;
   ((SkipState *)ud)->array_count--;
-  ndec_stack_pop(ctx);
   return NDEC_PROCEED;
 }
 static int32_t skip_object_field(NdecCtx *ctx, void *ud, NdecStrInfo key) { (void)ctx;
@@ -449,7 +447,7 @@ typedef struct NumLenState {
   uint32_t len;
   int calls;
 } NumLenState;
-static int32_t num_len_cb(NdecCtx *ctx, void *ud, NdecRawStr raw) { (void)ctx;
+static int32_t num_len_cb(void *ud, NdecRawStr raw) {
   NumLenState *s = (NumLenState *)ud;
   s->calls++;
   s->len = raw.len;
@@ -927,22 +925,18 @@ typedef struct YieldState {
   int cnt_scalar_bool;
 } YieldState;
 
-static int32_t y_begin_object(NdecCtx *ctx, void *ud, uint32_t child_phase) {
+static int32_t y_begin_object(NdecCtx *ctx, void *ud) { (void)ctx;
   YieldState *s = ud;
   s->cnt_begin_object++;
-  /* push before yield so resume dispatches to child phase */
-  int32_t pst = ndec_stack_push(ctx, child_phase);
-  if (pst != NDEC_PROCEED) return pst;
   if (s->yield_begin_object) {
     s->yield_begin_object = 0;
     return NDEC_YIELD;
   }
   return NDEC_PROCEED;
 }
-static int32_t y_end_object(NdecCtx *ctx, void *ud) {
+static int32_t y_end_object(NdecCtx *ctx, void *ud) { (void)ctx;
   YieldState *s = ud;
   s->cnt_end_object++;
-  ndec_stack_pop(ctx);
   if (s->yield_end_object) {
     s->yield_end_object = 0;
     return NDEC_YIELD;
@@ -959,29 +953,25 @@ static int32_t y_object_field(NdecCtx *ctx, void *ud, NdecStrInfo key) { (void)c
   }
   return NDEC_PROCEED;
 }
-static int32_t y_begin_array(NdecCtx *ctx, void *ud, uint32_t child_phase) {
+static int32_t y_begin_array(NdecCtx *ctx, void *ud) { (void)ctx;
   YieldState *s = ud;
   s->cnt_begin_array++;
-  /* push before yield so resume dispatches to child phase */
-  int32_t pst = ndec_stack_push(ctx, child_phase);
-  if (pst != NDEC_PROCEED) return pst;
   if (s->yield_begin_array) {
     s->yield_begin_array = 0;
     return NDEC_YIELD;
   }
   return NDEC_PROCEED;
 }
-static int32_t y_end_array(NdecCtx *ctx, void *ud) {
+static int32_t y_end_array(NdecCtx *ctx, void *ud) { (void)ctx;
   YieldState *s = ud;
   s->cnt_end_array++;
-  ndec_stack_pop(ctx);
   if (s->yield_end_array) {
     s->yield_end_array = 0;
     return NDEC_YIELD;
   }
   return NDEC_PROCEED;
 }
-static int32_t y_scalar_string(NdecCtx *ctx, void *ud, NdecStrInfo str) { (void)ctx;
+static int32_t y_scalar_string(void *ud, NdecStrInfo str) {
   (void)str;
   YieldState *s = ud;
   s->cnt_scalar_string++;
@@ -991,7 +981,7 @@ static int32_t y_scalar_string(NdecCtx *ctx, void *ud, NdecStrInfo str) { (void)
   }
   return NDEC_PROCEED;
 }
-static int32_t y_scalar_number(NdecCtx *ctx, void *ud, NdecRawStr raw) { (void)ctx;
+static int32_t y_scalar_number(void *ud, NdecRawStr raw) {
   (void)raw;
   YieldState *s = ud;
   s->cnt_scalar_number++;
@@ -1001,7 +991,7 @@ static int32_t y_scalar_number(NdecCtx *ctx, void *ud, NdecRawStr raw) { (void)c
   }
   return NDEC_PROCEED;
 }
-static int32_t y_scalar_null(NdecCtx *ctx, void *ud) { (void)ctx;
+static int32_t y_scalar_null(void *ud) {
   YieldState *s = ud;
   s->cnt_scalar_null++;
   if (s->yield_scalar_null) {
@@ -1010,7 +1000,7 @@ static int32_t y_scalar_null(NdecCtx *ctx, void *ud) { (void)ctx;
   }
   return NDEC_PROCEED;
 }
-static int32_t y_scalar_bool(NdecCtx *ctx, void *ud, int value) { (void)ctx;
+static int32_t y_scalar_bool(void *ud, int value) {
   (void)value;
   YieldState *s = ud;
   s->cnt_scalar_bool++;
@@ -1183,7 +1173,7 @@ Test(yield, root_scalar_yield) {
   cr_assert_eq(st.cnt_scalar_number, 1);
 }
 
-static int32_t reactor_err_begin_object(NdecCtx *ctx, void *ud, uint32_t child_phase) { (void)ctx;(void)child_phase;
+static int32_t reactor_err_begin_object(NdecCtx *ctx, void *ud) { (void)ctx;
   (void)ud;
   return -2; /* user error, not NDEC_YIELD which is -1 */
 }
@@ -1217,7 +1207,7 @@ static int32_t esc_object_field(NdecCtx *ctx, void *ud, NdecStrInfo key) { (void
   return NDEC_PROCEED;
 }
 
-static int32_t esc_scalar_string(NdecCtx *ctx, void *ud, NdecStrInfo str) { (void)ctx;
+static int32_t esc_scalar_string(void *ud, NdecStrInfo str) {
   EscapeState *s = ud;
   if (s->string_count < 64)
     s->str_has_escape[s->string_count] = str.has_escape;

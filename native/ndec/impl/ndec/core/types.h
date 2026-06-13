@@ -83,17 +83,31 @@ typedef struct NdecStrInfo {
 typedef struct NdecCtx NdecCtx;
 
 /* Reactor vtable. A NULL reactor means validate-only; individual
- * function pointers may also be NULL (treated as PROCEED). */
+ * function pointers may also be NULL (treated as PROCEED).
+ *
+ * Stack ownership: the parser owns push/pop. Before invoking
+ * begin_object/begin_array the parser has already pushed a fresh frame
+ * (ctx->sp points at the child, parent is at sp-1; child phase is
+ * pre-set by STACK_PUSH). On PROCEED return the parser keeps the push;
+ * on YIELD the parser leaves the push intact and the driver resumes
+ * with sp already advanced. After end_object/end_array the parser has
+ * already popped: the closed frame is at frames[ctx->sp+1], parent at
+ * frames[ctx->sp]. On YIELD the saved sp_local (== parent) is used by
+ * the driver; the closed frame's data is preserved by STACK_POP.
+ *
+ * Scalar hooks do not take a NdecCtx pointer: they cannot mutate the
+ * stack and don't need sp; this keeps the hot path argument count low
+ * (scalars are by far the most frequent reactor calls). */
 typedef struct NdecReactor {
-  int32_t (*begin_object)(NdecCtx *ctx, void *ud, uint32_t child_phase);
+  int32_t (*begin_object)(NdecCtx *ctx, void *ud);
   int32_t (*end_object)(NdecCtx *ctx, void *ud);
   int32_t (*object_field)(NdecCtx *ctx, void *ud, NdecStrInfo key);
-  int32_t (*begin_array)(NdecCtx *ctx, void *ud, uint32_t child_phase);
+  int32_t (*begin_array)(NdecCtx *ctx, void *ud);
   int32_t (*end_array)(NdecCtx *ctx, void *ud);
-  int32_t (*scalar_null)(NdecCtx *ctx, void *ud);
-  int32_t (*scalar_bool)(NdecCtx *ctx, void *ud, int value);
-  int32_t (*scalar_number)(NdecCtx *ctx, void *ud, NdecRawStr raw);
-  int32_t (*scalar_string)(NdecCtx *ctx, void *ud, NdecStrInfo str);
+  int32_t (*scalar_null)(void *ud);
+  int32_t (*scalar_bool)(void *ud, int value);
+  int32_t (*scalar_number)(void *ud, NdecRawStr raw);
+  int32_t (*scalar_string)(void *ud, NdecStrInfo str);
 } NdecReactor;
 
 /* NdecFrame extension point.
@@ -198,17 +212,13 @@ static inline void ndec_ctx_arm_root(NdecCtx *ctx) {
   /* extras fields (bind_type, bind_dst, etc.) are host-written and preserved */
 }
 
-/* Reactor-facing stack helpers.
- *
- * ndec_stack_push: reactor calls this in begin_object/begin_array to
- * allocate and initialize a new frame. Returns NDEC_PROCEED on success
- * or NDEC_ERR_DEPTH on depth overflow. The reactor must call this after
- * it has computed child extras but before writing them to the new frame.
- *
- * ndec_stack_pop: reactor calls this in end_object/end_array to
- * release the current frame. The popped frame at frames[sp+1] is NOT
- * cleared; the reactor must read any needed data from it before or
- * immediately after pop (per I-X2). */
+/* Reactor-facing stack helpers (legacy aux for hosts that still want a
+ * helper rather than direct sp manipulation). The parser itself never
+ * calls these in the current model; push/pop happen inline in the
+ * parser hot path so sp stays in a register. Reactor hooks should
+ * read ctx->sp only when they need to address the just-pushed child
+ * (after begin_*) or the just-closed container (before end_* returns
+ * PROCEED). */
 /* Negative reactor error codes (user-defined range: <= -3).
  * NDEC_ERR_DEPTH is returned as a negative reactor error from
  * ndec_stack_push so the parser's `directive < 0` check catches it. */

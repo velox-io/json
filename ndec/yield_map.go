@@ -393,9 +393,12 @@ func (d *driverState) flushMapFrame(frame *ndecFrame, closing bool) error {
 	}
 	if closing {
 		d.shrinkKvBufTo(frame.BindSliceHdr)
-		// Pop: reactor delegated pop to driver. Parent is at Sp-1.
-		d.ctx.Sp--
-		if d.ctx.Sp >= 0 {
+		// Parser has already popped before yielding from end_object.
+		// sp now points at the parent (frames[sp]); the closed MAP frame
+		// lives at frames[sp+1]. Advance the parent here, except when
+		// sp == 0 (root close): the root frame is a binding sentinel
+		// and must not be advanced as if it were a normal container.
+		if d.ctx.Sp > 0 {
 			parent := &d.ctx.Frames[d.ctx.Sp]
 			switch parent.BindContainerKind {
 			case uint8(bkStruct):
@@ -421,12 +424,13 @@ func (d *driverState) handleFlushMapYield() error {
 	closing := d.userData.YieldFlags == yfMapClosing
 	var frame *ndecFrame
 	if closing {
-		// Parser hasn't POP'd yet in the new model; the closing MAP frame
-		// is at frames[sp]. The reactor yields before pop.
-		if d.ctx.Sp >= ndecMaxDepth {
+		// Parser has already popped: the closed MAP frame lives at
+		// frames[sp+1]; sp now points at the parent. (For root MAP,
+		// sp == 0 and parent == root frame; the closed MAP at frames[1].)
+		if d.ctx.Sp+1 >= ndecMaxDepth {
 			return errFlushMapClosingDepth
 		}
-		frame = &d.ctx.Frames[d.ctx.Sp]
+		frame = &d.ctx.Frames[d.ctx.Sp+1]
 	} else {
 		if d.ctx.Sp < 0 {
 			return errFlushMapNoActiveFrame

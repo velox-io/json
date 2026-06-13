@@ -52,41 +52,55 @@ void ndec_parse_default(NdecCtx *ctx)
   uint32_t _err_pos;
   int32_t _suspend_phase;
 
-/* Reactor dispatch macros */
+/* Reactor dispatch macros.
+ *
+ * Stack ownership: the parser owns push/pop. By the time these macros
+ * fire, sp_local already points at the child (begin_*) or the closing
+ * container (end_*); reactor hooks read sp via macro-injected
+ * arguments (see binding overrides) or, for the default vtable path,
+ * via ctx->sp which is synced just before the call. The vtable path
+ * is cold (validate-only embedders); the binding override path is the
+ * hot one and bypasses the ctx->sp store entirely.
+ *
+ * Return contract:
+ *   PROCEED  : parser keeps sp on begin, pops on end.
+ *   negative : on begin, parser leaves sp at the child (resume re-enters
+ *              the child phase). On end, parser leaves sp at the closing
+ *              container; the driver owns the pop (e.g. MAP FLUSH closing). */
 #ifndef NDEC_R_BEGIN_OBJECT
-#define NDEC_R_BEGIN_OBJECT(ctx, ud, child_phase) \
-  ((reactor && reactor->begin_object) ? reactor->begin_object(ctx, ud, child_phase) : ndec_stack_push(ctx, child_phase))
+#define NDEC_R_BEGIN_OBJECT(ctx, ud) \
+  ((reactor && reactor->begin_object) ? ((ctx)->sp = sp_local, reactor->begin_object(ctx, ud)) : NDEC_PROCEED)
 #endif
 #ifndef NDEC_R_END_OBJECT
 #define NDEC_R_END_OBJECT(ctx, ud) \
-  ((reactor && reactor->end_object) ? (reactor->end_object(ctx, ud)) : (ndec_stack_pop(ctx), NDEC_PROCEED))
+  ((reactor && reactor->end_object) ? ((ctx)->sp = sp_local, reactor->end_object(ctx, ud)) : NDEC_PROCEED)
 #endif
 #ifndef NDEC_R_OBJECT_FIELD
 #define NDEC_R_OBJECT_FIELD(ctx, ud, key)                                                                          \
-  ((reactor && reactor->object_field) ? reactor->object_field((ctx), (ud), (key)) : NDEC_PROCEED)
+  ((reactor && reactor->object_field) ? ((ctx)->sp = sp_local, reactor->object_field((ctx), (ud), (key))) : NDEC_PROCEED)
 #endif
 #ifndef NDEC_R_BEGIN_ARRAY
-#define NDEC_R_BEGIN_ARRAY(ctx, ud, child_phase) \
-  ((reactor && reactor->begin_array) ? reactor->begin_array(ctx, ud, child_phase) : ndec_stack_push(ctx, child_phase))
+#define NDEC_R_BEGIN_ARRAY(ctx, ud) \
+  ((reactor && reactor->begin_array) ? ((ctx)->sp = sp_local, reactor->begin_array(ctx, ud)) : NDEC_PROCEED)
 #endif
 #ifndef NDEC_R_END_ARRAY
 #define NDEC_R_END_ARRAY(ctx, ud) \
-  ((reactor && reactor->end_array) ? (reactor->end_array(ctx, ud)) : (ndec_stack_pop(ctx), NDEC_PROCEED))
+  ((reactor && reactor->end_array) ? ((ctx)->sp = sp_local, reactor->end_array(ctx, ud)) : NDEC_PROCEED)
 #endif
 #ifndef NDEC_R_SCALAR_NULL
-#define NDEC_R_SCALAR_NULL(ctx, ud) ((reactor && reactor->scalar_null) ? reactor->scalar_null(ctx, ud) : NDEC_PROCEED)
+#define NDEC_R_SCALAR_NULL(ctx, ud) ((reactor && reactor->scalar_null) ? reactor->scalar_null(ud) : NDEC_PROCEED)
 #endif
 #ifndef NDEC_R_SCALAR_BOOL
 #define NDEC_R_SCALAR_BOOL(ctx, ud, v)                                                                             \
-  ((reactor && reactor->scalar_bool) ? reactor->scalar_bool((ctx), (ud), (v)) : NDEC_PROCEED)
+  ((reactor && reactor->scalar_bool) ? reactor->scalar_bool((ud), (v)) : NDEC_PROCEED)
 #endif
 #ifndef NDEC_R_SCALAR_NUMBER
 #define NDEC_R_SCALAR_NUMBER(ctx, ud, raw)                                                                         \
-  ((reactor && reactor->scalar_number) ? reactor->scalar_number((ctx), (ud), (raw)) : NDEC_PROCEED)
+  ((reactor && reactor->scalar_number) ? reactor->scalar_number((ud), (raw)) : NDEC_PROCEED)
 #endif
 #ifndef NDEC_R_SCALAR_STRING
 #define NDEC_R_SCALAR_STRING(ctx, ud, raw)                                                                         \
-  ((reactor && reactor->scalar_string) ? reactor->scalar_string((ctx), (ud), (raw)) : NDEC_PROCEED)
+  ((reactor && reactor->scalar_string) ? reactor->scalar_string((ud), (raw)) : NDEC_PROCEED)
 #endif
 
 /* Container-specialized scalar macros. */
@@ -163,10 +177,11 @@ void ndec_parse_default(NdecCtx *ctx)
     goto ndec_error_exit;                                                                                         \
   } while (0)
 
-/* YIELD_OR_ERROR: container enter/exit hooks use this. The reactor has
- * already decided the stack state (push or not push). On YIELD the
- * resume phase is frames[sp].phase (set by reactor during push, or
- * pre-set by parser before the hook call for the parent continuation). */
+/* YIELD_OR_ERROR: container enter/exit hooks. The parser has already
+ * pre-installed the resume phase via STACK_PUSH (begin_*) or by leaving
+ * sp_local at the parent whose phase is the saved continuation
+ * (end_*). On YIELD the cold exit just saves cur_pos / sp; no phase
+ * store on hot path. */
 #define YIELD_OR_ERROR(d)                                                                                         \
   do {                                                                                                            \
     _err_code = (d);                                                                                              \
@@ -174,15 +189,15 @@ void ndec_parse_default(NdecCtx *ctx)
     goto ndec_error_or_yield_exit;                                                                                \
   } while (0)
 
-/* YIELD_WITH_PHASE: scalar and object_field hooks use this when the
- * reactor yields but hasn't moved the stack. The parser writes
- * frames[sp].phase explicitly for the resume dispatch. */
+/* YIELD_WITH_PHASE: scalar and object_field hooks. The hot path stages
+ * phase_val into _suspend_phase and jumps to the cold exit, which
+ * writes frames[sp_local].phase only on YIELD (not on user errors). */
 #define YIELD_WITH_PHASE(d, phase_val)                                                                            \
   do {                                                                                                            \
-    TOP_FRAME()->phase = (phase_val);                                                                             \
-    _err_code          = (d);                                                                                     \
-    _err_pos           = CUR_OFFSET();                                                                            \
-    goto ndec_error_or_yield_exit;                                                                                \
+    _err_code      = (d);                                                                                         \
+    _err_pos       = CUR_OFFSET();                                                                                \
+    _suspend_phase = (phase_val);                                                                                 \
+    goto ndec_yield_with_phase_exit;                                                                              \
   } while (0)
 
 /* Suspend variants. Hot path keeps cur_pos at the last NEXT_STRUCTURAL
@@ -397,9 +412,10 @@ void ndec_parse_default(NdecCtx *ctx)
     }
 
     /* First call: host must have called ndec_ctx_arm_root.
-     * sp = 0, frames[0].phase = ROOT_VALUE. */
+     * sp = 0, frames[0].phase = ROOT_VALUE. ctx->sp will be flushed
+     * from sp_local on save/return; the reactor reads sp from local
+     * arguments (see hot path), not from ctx. */
     sp_local = 0;
-    ctx->sp  = 0;
     // goto ndec_root_value;
   }
 
@@ -412,23 +428,19 @@ ndec_root_value: {
 
   if (ch == '{') {
     TOP_FRAME()->phase = NDEC_PHASE_ROOT_DONE;
-    int32_t directive = NDEC_R_BEGIN_OBJECT(ctx, ud,
-                         NDEC_PHASE_OBJECT_FIELD_OR_END);
-    /* sync sp from reactor (reactor may have pushed) */
-    sp_local = ctx->sp;
+    STACK_PUSH(NDEC_PHASE_OBJECT_FIELD_OR_END);
+    int32_t directive = NDEC_R_BEGIN_OBJECT(ctx, ud);
     if (UNLIKELY(directive < 0)) {
+      /* sp_local already points at the child; resume phase is the
+       * pre-installed child phase from STACK_PUSH. */
       YIELD_OR_ERROR(directive);
     }
-    /* reactor has pushed; sp now points to child.
-     * Resume by child's initial phase. */
     goto ndec_object_field_or_end;
   }
   if (ch == '[') {
     TOP_FRAME()->phase = NDEC_PHASE_ROOT_DONE;
-    int32_t directive = NDEC_R_BEGIN_ARRAY(ctx, ud,
-                         NDEC_PHASE_ARRAY_ELEM_OR_END);
-    /* sync sp from reactor (reactor may have pushed) */
-    sp_local = ctx->sp;
+    STACK_PUSH(NDEC_PHASE_ARRAY_ELEM_OR_END);
+    int32_t directive = NDEC_R_BEGIN_ARRAY(ctx, ud);
     if (UNLIKELY(directive < 0)) {
       YIELD_OR_ERROR(directive);
     }
@@ -497,9 +509,13 @@ ndec_object_field_or_end: {
   }
   if (ch == '}') {
     cur_pos++;
+    /* Pop first so reactor sees parent at sp; closing frame still
+     * lives at frames[sp+1] (data not cleared by STACK_POP). On YIELD
+     * the parser saves sp_local (parent) into ctx->sp; the driver
+     * resolves the closing frame via frames[sp+1] and the parent via
+     * frames[sp]. */
+    STACK_POP();
     int32_t directive = NDEC_R_END_OBJECT(ctx, ud);
-    /* sync sp from reactor (reactor may have popped) */
-    sp_local = ctx->sp;
     if (UNLIKELY(directive < 0)) {
       YIELD_OR_ERROR(directive);
     }
@@ -542,9 +558,8 @@ ndec_object_field_value: {
   }
   if (ch == '{') {
     TOP_FRAME()->phase = NDEC_PHASE_OBJECT_CONTINUE_OR_END;
-    int32_t directive = NDEC_R_BEGIN_OBJECT(ctx, ud,
-                         NDEC_PHASE_OBJECT_FIELD_OR_END);
-    sp_local = ctx->sp;
+    STACK_PUSH(NDEC_PHASE_OBJECT_FIELD_OR_END);
+    int32_t directive = NDEC_R_BEGIN_OBJECT(ctx, ud);
     if (UNLIKELY(directive < 0)) {
       YIELD_OR_ERROR(directive);
     }
@@ -552,9 +567,8 @@ ndec_object_field_value: {
   }
   if (ch == '[') {
     TOP_FRAME()->phase = NDEC_PHASE_OBJECT_CONTINUE_OR_END;
-    int32_t directive = NDEC_R_BEGIN_ARRAY(ctx, ud,
-                         NDEC_PHASE_ARRAY_ELEM_OR_END);
-    sp_local = ctx->sp;
+    STACK_PUSH(NDEC_PHASE_ARRAY_ELEM_OR_END);
+    int32_t directive = NDEC_R_BEGIN_ARRAY(ctx, ud);
     if (UNLIKELY(directive < 0)) {
       YIELD_OR_ERROR(directive);
     }
@@ -635,9 +649,8 @@ ndec_object_continue_or_end: {
   }
   if (ch == '}') {
     cur_pos++;
+    STACK_POP();
     int32_t directive = NDEC_R_END_OBJECT(ctx, ud);
-    /* sync sp from reactor (reactor may have popped) */
-    sp_local = ctx->sp;
     if (UNLIKELY(directive < 0)) {
       YIELD_OR_ERROR(directive);
     }
@@ -657,9 +670,8 @@ ndec_array_elem_or_end: {
 
   if (ch == ']') {
     cur_pos++;
+    STACK_POP();
     int32_t directive = NDEC_R_END_ARRAY(ctx, ud);
-    /* sync sp from reactor (reactor may have popped) */
-    sp_local = ctx->sp;
     if (UNLIKELY(directive < 0)) {
       YIELD_OR_ERROR(directive);
     }
@@ -699,9 +711,8 @@ ndec_array_elem_or_end: {
 
   if (ch == '{') {
     TOP_FRAME()->phase = NDEC_PHASE_ARRAY_CONTINUE_OR_END;
-    int32_t directive = NDEC_R_BEGIN_OBJECT(ctx, ud,
-                         NDEC_PHASE_OBJECT_FIELD_OR_END);
-    sp_local = ctx->sp;
+    STACK_PUSH(NDEC_PHASE_OBJECT_FIELD_OR_END);
+    int32_t directive = NDEC_R_BEGIN_OBJECT(ctx, ud);
     if (UNLIKELY(directive < 0)) {
       YIELD_OR_ERROR(directive);
     }
@@ -709,9 +720,8 @@ ndec_array_elem_or_end: {
   }
   if (ch == '[') {
     TOP_FRAME()->phase = NDEC_PHASE_ARRAY_CONTINUE_OR_END;
-    int32_t directive = NDEC_R_BEGIN_ARRAY(ctx, ud,
-                         NDEC_PHASE_ARRAY_ELEM_OR_END);
-    sp_local = ctx->sp;
+    STACK_PUSH(NDEC_PHASE_ARRAY_ELEM_OR_END);
+    int32_t directive = NDEC_R_BEGIN_ARRAY(ctx, ud);
     if (UNLIKELY(directive < 0)) {
       YIELD_OR_ERROR(directive);
     }
@@ -776,9 +786,8 @@ ndec_array_elem_value: {
   }
   if (ch == '{') {
     TOP_FRAME()->phase = NDEC_PHASE_ARRAY_CONTINUE_OR_END;
-    int32_t directive = NDEC_R_BEGIN_OBJECT(ctx, ud,
-                         NDEC_PHASE_OBJECT_FIELD_OR_END);
-    sp_local = ctx->sp;
+    STACK_PUSH(NDEC_PHASE_OBJECT_FIELD_OR_END);
+    int32_t directive = NDEC_R_BEGIN_OBJECT(ctx, ud);
     if (UNLIKELY(directive < 0)) {
       YIELD_OR_ERROR(directive);
     }
@@ -786,9 +795,8 @@ ndec_array_elem_value: {
   }
   if (ch == '[') {
     TOP_FRAME()->phase = NDEC_PHASE_ARRAY_CONTINUE_OR_END;
-    int32_t directive = NDEC_R_BEGIN_ARRAY(ctx, ud,
-                         NDEC_PHASE_ARRAY_ELEM_OR_END);
-    sp_local = ctx->sp;
+    STACK_PUSH(NDEC_PHASE_ARRAY_ELEM_OR_END);
+    int32_t directive = NDEC_R_BEGIN_ARRAY(ctx, ud);
     if (UNLIKELY(directive < 0)) {
       YIELD_OR_ERROR(directive);
     }
@@ -834,9 +842,8 @@ ndec_array_continue_or_end: {
   }
   if (ch == ']') {
     cur_pos++;
+    STACK_POP();
     int32_t directive = NDEC_R_END_ARRAY(ctx, ud);
-    /* sync sp from reactor (reactor may have popped) */
-    sp_local = ctx->sp;
     if (UNLIKELY(directive < 0)) {
       YIELD_OR_ERROR(directive);
     }
@@ -1013,11 +1020,21 @@ ndec_root_scalar: {
   GOTO_ERROR(NDEC_ERR_SYNTAX, CUR_OFFSET());
 }
 
+ndec_yield_with_phase_exit:
+  /* Cold path for YIELD_WITH_PHASE: scalar / object_field hooks
+   * staged the resume phase via _suspend_phase. Write it now (only
+   * on YIELD; on user errors we fall through to the error exit
+   * below without touching frame.phase). */
+  if (_err_code == NDEC_YIELD) {
+    frames[sp_local].phase = (uint32_t)_suspend_phase;
+  }
+  /* fallthrough to ndec_error_or_yield_exit */
+
 ndec_error_or_yield_exit:
   if (_err_code == NDEC_YIELD) {
     /* The resume phase is already in frames[sp_local].phase, set by
-     * either the reactor (push/pop hooks) or YIELD_WITH_PHASE
-     * (scalar/object_field hooks). No extra store needed. */
+     * STACK_PUSH (begin_* hooks) or by the cold ndec_yield_with_phase_exit
+     * branch above (scalar/object_field hooks). No extra store needed. */
 
     /* If bits == 0 we have consumed every structural of the current
      * chunk. The bootstrap rescan on resume cannot tell the chunk is
@@ -1064,7 +1081,7 @@ ndec_suspend_next_exit:
   cur_pos++; /* advance past the single-byte structural just consumed */
   /* fallthrough */
 ndec_suspend_exit:
-  frames[sp_local].phase = _suspend_phase;
+  frames[sp_local].phase = (uint32_t)_suspend_phase;
   ctx->cur_pos            = cur_pos;
   ctx->chunk_ptr          = chunk_ptr;
   ctx->structural_bits    = bits;
