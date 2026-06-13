@@ -138,10 +138,10 @@ func (d *driverState) handleGrowSliceYield() error {
 }
 
 func (d *driverState) handleGrowSliceStructYield() error {
-	if d.ctx.Depth < 2 {
-		return fmt.Errorf("ndec: grow_slice_struct without parent SLICE frame (depth=%d)", d.ctx.Depth)
+	if d.ctx.Sp < 1 {
+		return fmt.Errorf("ndec: grow_slice_struct without parent SLICE frame (sp=%d)", d.ctx.Sp)
 	}
-	sliceFrame := &d.ctx.Frames[d.ctx.Depth-2]
+	sliceFrame := &d.ctx.Frames[d.ctx.Sp-1]
 	if sliceFrame.BindContainerKind != uint8(bkSlice) {
 		return fmt.Errorf("ndec: grow_slice_struct on non-slice parent (kind=%d)",
 			sliceFrame.BindContainerKind)
@@ -184,7 +184,7 @@ func (d *driverState) handleGrowSliceStructYield() error {
 	}
 
 	idx := sliceFrame.bindArrayIndex()
-	child := &d.ctx.Frames[d.ctx.Depth-1]
+	child := &d.ctx.Frames[d.ctx.Sp]
 	elemDst := unsafe.Add(newBacking, uintptr(idx)*elemSize)
 
 	// Container kind depends on elem type
@@ -195,6 +195,8 @@ func (d *driverState) handleGrowSliceStructYield() error {
 		child.BindDst = elemDst
 		child.BindPendingFieldIdx = -1
 		child.BindContainerKind = uint8(bkStruct)
+		child.Phase = phaseObjectFieldOrEnd
+		child.Data = 0
 		// SLICE<struct> child STRUCT frame: errCtx only reads ParentFieldIdx
 		// on child SLICE/MAP with STRUCT parent paths. STRUCT children do not
 		// read or write it.
@@ -210,12 +212,16 @@ func (d *driverState) handleGrowSliceStructYield() error {
 		child.setBindArrayIndex(0)
 		child.BindArrayCap = 0
 		child.BindContainerKind = uint8(bkSlice)
+		child.Phase = phaseArrayElemOrEnd
+		child.Data = 0
 		// Inner SLICE parent is not a STRUCT, so ParentFieldIdx is not read or written.
 		child.BindSliceHdr = elemDst
 	case bkMap:
 		// []map[K]V: just grow outer backing, child MAP frame filled by BEGIN_MAP yield
 		child.BindContainerKind = uint8(bkMap)
 		child.BindSliceHdr = elemDst
+		child.Phase = phaseObjectFieldOrEnd
+		child.Data = 0
 	default:
 		return fmt.Errorf("ndec: grow_slice_struct with unsupported elem kind %d", elemContainerKind)
 	}
@@ -224,10 +230,10 @@ func (d *driverState) handleGrowSliceStructYield() error {
 
 // handleGrowSlicePtrStruct handles []*Struct begin_object.
 func (d *driverState) handleGrowSlicePtrStruct() error {
-	if d.ctx.Depth < 2 {
-		return fmt.Errorf("ndec: grow_slice_ptr_struct without parent (depth=%d)", d.ctx.Depth)
+	if d.ctx.Sp < 1 {
+		return fmt.Errorf("ndec: grow_slice_ptr_struct without parent (sp=%d)", d.ctx.Sp)
 	}
-	sliceFrame := &d.ctx.Frames[d.ctx.Depth-2]
+	sliceFrame := &d.ctx.Frames[d.ctx.Sp-1]
 	if sliceFrame.BindContainerKind != uint8(bkSlice) {
 		return fmt.Errorf("ndec: grow_slice_ptr_struct on non-slice parent")
 	}
@@ -243,18 +249,20 @@ func (d *driverState) handleGrowSlicePtrStruct() error {
 		if err := d.growOuterBacking(sliceFrame, sliceBT); err != nil {
 			return err
 		}
-		sliceFrame = &d.ctx.Frames[d.ctx.Depth-2]
+		sliceFrame = &d.ctx.Frames[d.ctx.Sp-1]
 	}
 
 	structPtr := gort.UnsafeNew(pointeeBT.rtypePtr())
 	dst := unsafe.Add(unsafe.Pointer(sliceFrame.BindDst), uintptr(idx)*elemSize)
 	*(*unsafe.Pointer)(dst) = structPtr
 
-	child := &d.ctx.Frames[d.ctx.Depth-1]
+	child := &d.ctx.Frames[d.ctx.Sp]
 	child.BindType = unsafe.Pointer(&pointeeBT.base)
 	child.BindDst = structPtr
 	child.BindPendingFieldIdx = -1
 	child.BindContainerKind = uint8(bkStruct)
+	child.Phase = phaseObjectFieldOrEnd
+	child.Data = 0
 	return nil
 }
 

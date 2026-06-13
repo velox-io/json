@@ -87,6 +87,8 @@ NdecStreamStatus ndec_stream_feed(NdecStream *s, const uint8_t *data, size_t len
   ctx->scan_state.prev_escape           = 0;
   ctx->scan_state.prev_structural_or_ws = 1;
   ndec_ctx_set_input(ctx, data, (uint32_t)len, is_final);
+  /* Arm root on first call */
+  if (ctx->sp < 0) ndec_ctx_arm_root(ctx);
   NDEC_STREAM_PARSE(ctx);
 
   const uint8_t *data_end = data + len;

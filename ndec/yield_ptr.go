@@ -60,9 +60,9 @@ func (d *driverState) handleBeginPtrRoot(root *ndecFrame) error {
 		return fmt.Errorf("ndec: root ptr yield on non-ptr root kind %d", rootBT.kind())
 	}
 
-	// Root scalar PTR: depth==1 under sentinel convention (sentinel only,
-	// no STACK_PUSH). Use raw token bytes to decide allocation.
-	if d.ctx.Depth == 1 {
+	// Root scalar PTR: sp==0 (root frame only, no push by reactor).
+	// Use raw token bytes to decide allocation.
+	if d.ctx.Sp == 0 {
 		raw := unsafe.Slice((*byte)(d.userData.RawPtr), d.userData.RawLen)
 		if len(raw) == 4 && raw[0] == 'n' && raw[1] == 'u' && raw[2] == 'l' && raw[3] == 'l' {
 			*(*unsafe.Pointer)(root.BindDst) = nil
@@ -73,8 +73,8 @@ func (d *driverState) handleBeginPtrRoot(root *ndecFrame) error {
 		return writePtrElemRaw(leafSlot, leafBT.kind(), raw)
 	}
 
-	// Root container PTR: depth==2 (sentinel + STACK_PUSH'd root child).
-	// Allocate the ptr chain and rewrite frames[1] from PTR to the leaf
+	// Root container PTR: sp==0 (root frame is PTR).
+	// Allocate the ptr chain and rewrite frames[0] from PTR to the leaf
 	// container kind.
 	topSlot, leafSlot, leafBT := allocPtrChain(rootBT)
 	*(*unsafe.Pointer)(root.BindDst) = topSlot
@@ -110,12 +110,11 @@ func (d *driverState) handleBeginPtrRoot(root *ndecFrame) error {
 
 // handleBeginPtrYield handles *T fields.
 func (d *driverState) handleBeginPtrYield() error {
-	// Root PTR: frames[1].kind == PTR (pre-filled root binding by driver).
-	//   depth==1: root scalar PTR (yield in ndec_root_scalar, no STACK_PUSH)
-	//   depth==2: root container PTR (root_value sees '{'/'[', STACK_PUSH to 2,
-	//             begin_object/begin_array hook yields BEGIN_PTR_*)
-	rootFrame := &d.ctx.Frames[1]
-	if rootFrame.BindContainerKind == uint8(bkPtr) && d.ctx.Depth <= 2 {
+	// Root PTR: frames[0].kind == PTR (pre-filled root binding by driver).
+	//   sp==0: root scalar PTR (yield in ndec_root_scalar, no push)
+	//   sp==1: root container PTR (reactor pushed child, then yielded)
+	rootFrame := &d.ctx.Frames[0]
+	if rootFrame.BindContainerKind == uint8(bkPtr) && d.ctx.Sp <= 1 {
 		return d.handleBeginPtrRoot(rootFrame)
 	}
 
@@ -192,10 +191,10 @@ func (d *driverState) handleBeginPtrYield() error {
 // handleBeginPtrMapValueYield handles map[string]*T values.
 func (d *driverState) handleBeginPtrMapValueYield() error {
 	if d.userData.YieldFlags == yfMapValuePtrStruct {
-		if d.ctx.Depth < 2 {
-			return fmt.Errorf("ndec: map ptr-struct yield without parent frame (depth=%d)", d.ctx.Depth)
+		if d.ctx.Sp < 1 {
+			return fmt.Errorf("ndec: map ptr-struct yield without parent frame (sp=%d)", d.ctx.Sp)
 		}
-		parent := &d.ctx.Frames[d.ctx.Depth-2]
+		parent := &d.ctx.Frames[d.ctx.Sp-1]
 		if parent.BindContainerKind != uint8(bkMap) {
 			return fmt.Errorf("ndec: map ptr-struct yield on non-map parent")
 		}
@@ -209,17 +208,20 @@ func (d *driverState) handleBeginPtrMapValueYield() error {
 		}
 		elemPtr := gort.UnsafeNew(elemVal.rtypePtr())
 		*(*unsafe.Pointer)(mapValueSlotPtr(parent, mapBT, parent.bindKvCount())) = elemPtr
-		child := &d.ctx.Frames[d.ctx.Depth-1]
+		child := &d.ctx.Frames[d.ctx.Sp]
 		child.BindType = unsafe.Pointer(&elemVal.base)
 		child.BindDst = elemPtr
 		child.BindPendingFieldIdx = -1
 		child.BindContainerKind = uint8(bkStruct)
+		child.Phase = phaseObjectFieldOrEnd
+		child.Data = 0
+		d.ctx.Sp++ // push
 		return nil
 	}
-	if d.ctx.Depth == 0 {
+	if d.ctx.Sp < 0 {
 		return fmt.Errorf("ndec: map ptr value yield without active frame")
 	}
-	frame := &d.ctx.Frames[d.ctx.Depth-1]
+	frame := &d.ctx.Frames[d.ctx.Sp]
 	if frame.BindContainerKind != uint8(bkMap) {
 		return fmt.Errorf("ndec: map ptr value yield on non-map frame (kind=%d)", frame.BindContainerKind)
 	}
@@ -246,10 +248,10 @@ func (d *driverState) handleBeginPtrMapValueYield() error {
 
 // handleBeginPtrStruct handles *<struct> fields: alloc + fill child frame.
 func (d *driverState) handleBeginPtrStruct() error {
-	if d.ctx.Depth < 2 {
-		return fmt.Errorf("ndec: ptr-struct yield without parent frame (depth=%d)", d.ctx.Depth)
+	if d.ctx.Sp < 1 {
+		return fmt.Errorf("ndec: ptr-struct yield without parent frame (sp=%d)", d.ctx.Sp)
 	}
-	parent := &d.ctx.Frames[d.ctx.Depth-2]
+	parent := &d.ctx.Frames[d.ctx.Sp-1]
 	if parent.BindContainerKind != uint8(bkStruct) || parent.BindPendingFieldIdx < 0 {
 		return fmt.Errorf("ndec: ptr-struct yield on invalid parent")
 	}
@@ -271,20 +273,22 @@ func (d *driverState) handleBeginPtrStruct() error {
 	*(*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(parent.BindDst), uintptr(fi.Offset))) = elemPtr
 	parent.BindPendingFieldIdx = -1
 
-	child := &d.ctx.Frames[d.ctx.Depth-1]
+	child := &d.ctx.Frames[d.ctx.Sp]
 	child.BindType = unsafe.Pointer(&elemBT.base)
 	child.BindDst = elemPtr
 	child.BindPendingFieldIdx = -1
 	child.BindContainerKind = uint8(bkStruct)
+	child.Phase = phaseObjectFieldOrEnd
+	child.Data = 0
 	return nil
 }
 
 // handleBeginPtrSlice handles *[]T fields (PTR to SLICE container).
 func (d *driverState) handleBeginPtrSlice() error {
-	if d.ctx.Depth < 2 {
+	if d.ctx.Sp < 0 {
 		return fmt.Errorf("ndec: ptr-slice yield without parent")
 	}
-	parent := &d.ctx.Frames[d.ctx.Depth-2]
+	parent := &d.ctx.Frames[d.ctx.Sp]
 	if parent.BindContainerKind != uint8(bkStruct) || parent.BindPendingFieldIdx < 0 {
 		return fmt.Errorf("ndec: ptr-slice yield on invalid parent")
 	}
@@ -308,8 +312,8 @@ func (d *driverState) handleBeginPtrSlice() error {
 	*(*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(parent.BindDst), uintptr(fi.Offset))) = unsafe.Pointer(sh)
 	parent.BindPendingFieldIdx = -1
 
-	// Fill child SLICE frame (parser already STACK_PUSH)
-	child := &d.ctx.Frames[d.ctx.Depth-1]
+	// Fill child SLICE frame (reactor pushes)
+	child := &d.ctx.Frames[d.ctx.Sp]
 	child.BindType = unsafe.Pointer(&sliceTI.base)
 	child.BindDst = nil // lazy alloc
 	child.setBindArrayIndex(0)
@@ -317,15 +321,18 @@ func (d *driverState) handleBeginPtrSlice() error {
 	child.BindContainerKind = uint8(bkSlice)
 	child.ParentFieldIdx = parentFieldIdx
 	child.BindSliceHdr = unsafe.Pointer(sh)
+	child.Phase = phaseArrayElemOrEnd
+	child.Data = 0
+	d.ctx.Sp++ // push
 	return nil
 }
 
 // handleBeginPtrMap handles *map[K]V fields.
 func (d *driverState) handleBeginPtrMap() error {
-	if d.ctx.Depth < 2 {
+	if d.ctx.Sp < 0 {
 		return fmt.Errorf("ndec: ptr-map yield without parent")
 	}
-	parent := &d.ctx.Frames[d.ctx.Depth-2]
+	parent := &d.ctx.Frames[d.ctx.Sp]
 	if parent.BindContainerKind != uint8(bkStruct) || parent.BindPendingFieldIdx < 0 {
 		return fmt.Errorf("ndec: ptr-map yield on invalid parent")
 	}
@@ -350,7 +357,9 @@ func (d *driverState) handleBeginPtrMap() error {
 	// Fill child MAP frame (not lazy since map is already alloc'd)
 	need := int(mapTI.kvSlotSize()) * mapKVBufCount
 	base := d.reserveMapKVBuf(need)
-	child := &d.ctx.Frames[d.ctx.Depth-1]
+	child := &d.ctx.Frames[d.ctx.Sp]
 	initMapFrame(child, mapTI, mapHeader, base, mapKVBufCount, parentFieldIdx)
+	child.Phase = phaseObjectFieldOrEnd
+	child.Data = 0
 	return nil
 }

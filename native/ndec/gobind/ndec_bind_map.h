@@ -14,8 +14,8 @@
  *   forces the caller to fall back to NDEC_YA_BEGIN_MAP so Go can grow.
  *
  * Invariants on entry (parser has already STACK_PUSH'd):
- *   frames[depth-1] = child MAP frame slot (blank)
- *   frames[depth-2] = parent STRUCT / MAP frame
+ *   frames[sp]   = child MAP frame slot (blank)
+ *   frames[sp-1] = parent STRUCT / MAP frame
  *
  * Failure return is reserved for cases the caller must surface to Go:
  *   1. ud->kv_buf_cap has insufficient headroom (needs grow + rebase).
@@ -92,11 +92,14 @@ static inline uint8_t *ndec_bind_kvbuf_bump(NdecBindUserData *ud, uint32_t need)
 }
 
 /* BEGIN_MAP fast path. Returns 0 on success; non-zero means caller must
- * fall back to the original NDEC_YA_BEGIN_MAP yield.
+ * yield NDEC_YA_BEGIN_MAP (caller has already pushed child slot).
  *
- * STACK_PUSH has already happened; child = frames[depth-1], parent = frames[depth-2]. */
-static inline int ndec_bind_begin_map_fast(NdecFrame *parent, NdecFrame *child,
+ * Caller must push child before calling this function. On success,
+ * this function fills the child binding from the kvBuf bump. */
+static inline int ndec_bind_begin_map_fast(NdecCtx *ctx, NdecFrame *parent,
+                                           uint32_t child_phase,
                                            NdecBindUserData *ud) {
+  (void)ctx;(void)child_phase;
   const NdecBindTypeInfo *map_ti;
   int32_t parent_idx = -1;
   switch (parent->bind_container_kind) {
@@ -117,6 +120,8 @@ static inline int ndec_bind_begin_map_fast(NdecFrame *parent, NdecFrame *child,
   uint8_t *base = ndec_bind_kvbuf_bump(ud, need);
   if (base == 0) return 1;
 
+  /* Child already pushed by caller; fill binding */
+  NdecFrame *child = &ctx->frames[ctx->sp];
   ndec_bind_init_map_child(child, map_ti, base, parent_idx);
   return 0;
 }

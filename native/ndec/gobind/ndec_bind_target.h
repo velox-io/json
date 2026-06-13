@@ -17,7 +17,7 @@
  * pending_field_idx (STRUCT) or increments array_index (SLICE).
  *
  * Frame layout: NDEC_FRAME_EXTRA_FIELDS injects binding state into NdecFrame
- * itself (see bind_hooks.h), so binding shares ctx->depth with the parser
+ * itself (see bind_hooks.h), so binding shares ctx->sp with the parser
  * rather than maintaining a parallel stack.
  */
 

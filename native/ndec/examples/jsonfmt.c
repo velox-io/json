@@ -74,7 +74,7 @@ static void emit_sep(FmtCtx *f) {
   }
 }
 
-static int32_t on_begin_object(void *ud) {
+static int32_t on_begin_object(NdecCtx *ctx, void *ud, uint32_t child_phase) { (void)ctx;(void)child_phase;
   FmtCtx *f = (FmtCtx *)ud;
   emit_sep(f);
   fputc('{', f->out);
@@ -88,7 +88,7 @@ static int32_t on_begin_object(void *ud) {
   return NDEC_PROCEED;
 }
 
-static int32_t on_end_object(void *ud) {
+static int32_t on_end_object(NdecCtx *ctx, void *ud) { (void)ctx;
   FmtCtx *f = (FmtCtx *)ud;
   f->indent--;
   f->depth--;
@@ -104,7 +104,7 @@ static int32_t on_end_object(void *ud) {
   return NDEC_PROCEED;
 }
 
-static int32_t on_object_field(void *ud, NdecStrInfo key) {
+static int32_t on_object_field(NdecCtx *ctx, void *ud, NdecStrInfo key) { (void)ctx;
   FmtCtx *f = (FmtCtx *)ud;
   if (f->need_sep)
     fputc(',', f->out);
@@ -120,7 +120,7 @@ static int32_t on_object_field(void *ud, NdecStrInfo key) {
   return NDEC_PROCEED;
 }
 
-static int32_t on_begin_array(void *ud) {
+static int32_t on_begin_array(NdecCtx *ctx, void *ud, uint32_t child_phase) { (void)ctx;(void)child_phase;
   FmtCtx *f = (FmtCtx *)ud;
   emit_sep(f);
   fputc('[', f->out);
@@ -134,7 +134,7 @@ static int32_t on_begin_array(void *ud) {
   return NDEC_PROCEED;
 }
 
-static int32_t on_end_array(void *ud) {
+static int32_t on_end_array(NdecCtx *ctx, void *ud) { (void)ctx;
   FmtCtx *f = (FmtCtx *)ud;
   f->indent--;
   f->depth--;
@@ -150,7 +150,7 @@ static int32_t on_end_array(void *ud) {
   return NDEC_PROCEED;
 }
 
-static int32_t on_scalar_string(void *ud, NdecStrInfo str) {
+static int32_t on_scalar_string(NdecCtx *ctx, void *ud, NdecStrInfo str) { (void)ctx;
   FmtCtx *f = (FmtCtx *)ud;
   emit_sep(f);
   emit_quoted(f, str);
@@ -170,7 +170,7 @@ static void trim_trailing_ws(NdecRawStr *raw) {
     raw->len--;
 }
 
-static int32_t on_scalar_number(void *ud, NdecRawStr raw) {
+static int32_t on_scalar_number(NdecCtx *ctx, void *ud, NdecRawStr raw) { (void)ctx;
   FmtCtx *f = (FmtCtx *)ud;
   emit_sep(f);
   trim_trailing_ws(&raw);
@@ -179,7 +179,7 @@ static int32_t on_scalar_number(void *ud, NdecRawStr raw) {
   return NDEC_PROCEED;
 }
 
-static int32_t on_scalar_bool(void *ud, int value) {
+static int32_t on_scalar_bool(NdecCtx *ctx, void *ud, int value) { (void)ctx;
   FmtCtx *f = (FmtCtx *)ud;
   emit_sep(f);
   fputs(value ? "true" : "false", f->out);
@@ -187,7 +187,7 @@ static int32_t on_scalar_bool(void *ud, int value) {
   return NDEC_PROCEED;
 }
 
-static int32_t on_scalar_null(void *ud) {
+static int32_t on_scalar_null(NdecCtx *ctx, void *ud) { (void)ctx;
   FmtCtx *f = (FmtCtx *)ud;
   emit_sep(f);
   fputs("null", f->out);

@@ -26,10 +26,10 @@ import (
 // The returned frame and fi are direct pointers into ctx.Frames; callers
 // may mutate them.
 func (d *driverState) pendingStructField(label string) (*ndecFrame, *bindFieldInfo, error) {
-	if d.ctx.Depth == 0 {
+	if d.ctx.Sp < 0 {
 		return nil, nil, fmt.Errorf("ndec: %s without active frame", label)
 	}
-	frame := &d.ctx.Frames[d.ctx.Depth-1]
+	frame := &d.ctx.Frames[d.ctx.Sp]
 	if frame.BindContainerKind != uint8(bkStruct) {
 		return nil, nil, fmt.Errorf("ndec: %s on non-struct frame (kind=%d)", label, frame.BindContainerKind)
 	}
@@ -53,10 +53,10 @@ func (d *driverState) pendingStructField(label string) (*ndecFrame, *bindFieldIn
 // frame exists and is a SLICE frame. BindPendingFieldIdx is not read (SLICE
 // frames have no pending_field concept).
 func (d *driverState) currentSliceFrame(label string) (*ndecFrame, error) {
-	if d.ctx.Depth == 0 {
+	if d.ctx.Sp < 0 {
 		return nil, fmt.Errorf("ndec: %s without active frame", label)
 	}
-	frame := &d.ctx.Frames[d.ctx.Depth-1]
+	frame := &d.ctx.Frames[d.ctx.Sp]
 	if frame.BindContainerKind != uint8(bkSlice) {
 		return nil, fmt.Errorf("ndec: %s on non-slice frame (kind=%d)", label, frame.BindContainerKind)
 	}

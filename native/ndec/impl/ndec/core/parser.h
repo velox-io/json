@@ -43,73 +43,77 @@ void ndec_parse_default(NdecCtx *ctx)
   const uint8_t *chunk_ptr   = ctx->chunk_ptr;
   uint64_t bits              = ctx->structural_bits;
   NdecScanState scan_state   = ctx->scan_state;
-  uint32_t depth             = ctx->depth;
+  int32_t sp_local             = ctx->sp;
   NdecFrame *frames          = ctx->frames;
   const NdecReactor *reactor = ctx->reactor;
   void *ud                   = ctx->user_data;
 
   int32_t _err_code;
   uint32_t _err_pos;
-  uint32_t _suspend_phase;
+  int32_t _suspend_phase;
 
 /* Reactor dispatch macros */
 #ifndef NDEC_R_BEGIN_OBJECT
-#define NDEC_R_BEGIN_OBJECT(ud) ((reactor && reactor->begin_object) ? reactor->begin_object(ud) : NDEC_PROCEED)
+#define NDEC_R_BEGIN_OBJECT(ctx, ud, child_phase) \
+  ((reactor && reactor->begin_object) ? reactor->begin_object(ctx, ud, child_phase) : ndec_stack_push(ctx, child_phase))
 #endif
 #ifndef NDEC_R_END_OBJECT
-#define NDEC_R_END_OBJECT(ud) ((reactor && reactor->end_object) ? reactor->end_object(ud) : NDEC_PROCEED)
+#define NDEC_R_END_OBJECT(ctx, ud) \
+  ((reactor && reactor->end_object) ? (reactor->end_object(ctx, ud)) : (ndec_stack_pop(ctx), NDEC_PROCEED))
 #endif
 #ifndef NDEC_R_OBJECT_FIELD
-#define NDEC_R_OBJECT_FIELD(ud, key)                                                                              \
-  ((reactor && reactor->object_field) ? reactor->object_field((ud), (key)) : NDEC_PROCEED)
+#define NDEC_R_OBJECT_FIELD(ctx, ud, key)                                                                          \
+  ((reactor && reactor->object_field) ? reactor->object_field((ctx), (ud), (key)) : NDEC_PROCEED)
 #endif
 #ifndef NDEC_R_BEGIN_ARRAY
-#define NDEC_R_BEGIN_ARRAY(ud) ((reactor && reactor->begin_array) ? reactor->begin_array(ud) : NDEC_PROCEED)
+#define NDEC_R_BEGIN_ARRAY(ctx, ud, child_phase) \
+  ((reactor && reactor->begin_array) ? reactor->begin_array(ctx, ud, child_phase) : ndec_stack_push(ctx, child_phase))
 #endif
 #ifndef NDEC_R_END_ARRAY
-#define NDEC_R_END_ARRAY(ud) ((reactor && reactor->end_array) ? reactor->end_array(ud) : NDEC_PROCEED)
+#define NDEC_R_END_ARRAY(ctx, ud) \
+  ((reactor && reactor->end_array) ? (reactor->end_array(ctx, ud)) : (ndec_stack_pop(ctx), NDEC_PROCEED))
 #endif
 #ifndef NDEC_R_SCALAR_NULL
-#define NDEC_R_SCALAR_NULL(ud) ((reactor && reactor->scalar_null) ? reactor->scalar_null(ud) : NDEC_PROCEED)
+#define NDEC_R_SCALAR_NULL(ctx, ud) ((reactor && reactor->scalar_null) ? reactor->scalar_null(ctx, ud) : NDEC_PROCEED)
 #endif
 #ifndef NDEC_R_SCALAR_BOOL
-#define NDEC_R_SCALAR_BOOL(ud, v)                                                                                 \
-  ((reactor && reactor->scalar_bool) ? reactor->scalar_bool((ud), (v)) : NDEC_PROCEED)
+#define NDEC_R_SCALAR_BOOL(ctx, ud, v)                                                                             \
+  ((reactor && reactor->scalar_bool) ? reactor->scalar_bool((ctx), (ud), (v)) : NDEC_PROCEED)
 #endif
 #ifndef NDEC_R_SCALAR_NUMBER
-#define NDEC_R_SCALAR_NUMBER(ud, raw)                                                                             \
-  ((reactor && reactor->scalar_number) ? reactor->scalar_number((ud), (raw)) : NDEC_PROCEED)
+#define NDEC_R_SCALAR_NUMBER(ctx, ud, raw)                                                                         \
+  ((reactor && reactor->scalar_number) ? reactor->scalar_number((ctx), (ud), (raw)) : NDEC_PROCEED)
 #endif
 #ifndef NDEC_R_SCALAR_STRING
-#define NDEC_R_SCALAR_STRING(ud, raw)                                                                             \
-  ((reactor && reactor->scalar_string) ? reactor->scalar_string((ud), (raw)) : NDEC_PROCEED)
+#define NDEC_R_SCALAR_STRING(ctx, ud, raw)                                                                         \
+  ((reactor && reactor->scalar_string) ? reactor->scalar_string((ctx), (ud), (raw)) : NDEC_PROCEED)
 #endif
 
 /* Container-specialized scalar macros. */
 #ifndef NDEC_R_OBJ_SCALAR_NULL
-#define NDEC_R_OBJ_SCALAR_NULL(ud) NDEC_R_SCALAR_NULL(ud)
+#define NDEC_R_OBJ_SCALAR_NULL(ctx, ud) NDEC_R_SCALAR_NULL(ctx, ud)
 #endif
 #ifndef NDEC_R_OBJ_SCALAR_BOOL
-#define NDEC_R_OBJ_SCALAR_BOOL(ud, v) NDEC_R_SCALAR_BOOL((ud), (v))
+#define NDEC_R_OBJ_SCALAR_BOOL(ctx, ud, v) NDEC_R_SCALAR_BOOL((ctx), (ud), (v))
 #endif
 #ifndef NDEC_R_OBJ_SCALAR_NUMBER
-#define NDEC_R_OBJ_SCALAR_NUMBER(ud, raw) NDEC_R_SCALAR_NUMBER((ud), (raw))
+#define NDEC_R_OBJ_SCALAR_NUMBER(ctx, ud, raw) NDEC_R_SCALAR_NUMBER((ctx), (ud), (raw))
 #endif
 #ifndef NDEC_R_OBJ_SCALAR_STRING
-#define NDEC_R_OBJ_SCALAR_STRING(ud, raw) NDEC_R_SCALAR_STRING((ud), (raw))
+#define NDEC_R_OBJ_SCALAR_STRING(ctx, ud, raw) NDEC_R_SCALAR_STRING((ctx), (ud), (raw))
 #endif
 
 #ifndef NDEC_R_ARR_SCALAR_NULL
-#define NDEC_R_ARR_SCALAR_NULL(ud) NDEC_R_SCALAR_NULL(ud)
+#define NDEC_R_ARR_SCALAR_NULL(ctx, ud) NDEC_R_SCALAR_NULL(ctx, ud)
 #endif
 #ifndef NDEC_R_ARR_SCALAR_BOOL
-#define NDEC_R_ARR_SCALAR_BOOL(ud, v) NDEC_R_SCALAR_BOOL((ud), (v))
+#define NDEC_R_ARR_SCALAR_BOOL(ctx, ud, v) NDEC_R_SCALAR_BOOL((ctx), (ud), (v))
 #endif
 #ifndef NDEC_R_ARR_SCALAR_NUMBER
-#define NDEC_R_ARR_SCALAR_NUMBER(ud, raw) NDEC_R_SCALAR_NUMBER((ud), (raw))
+#define NDEC_R_ARR_SCALAR_NUMBER(ctx, ud, raw) NDEC_R_SCALAR_NUMBER((ctx), (ud), (raw))
 #endif
 #ifndef NDEC_R_ARR_SCALAR_STRING
-#define NDEC_R_ARR_SCALAR_STRING(ud, raw) NDEC_R_SCALAR_STRING((ud), (raw))
+#define NDEC_R_ARR_SCALAR_STRING(ctx, ud, raw) NDEC_R_SCALAR_STRING((ctx), (ud), (raw))
 #endif
 
 /*
@@ -127,16 +131,16 @@ void ndec_parse_default(NdecCtx *ctx)
  *  directly without touching the OBJECT / ARRAY paths.
  */
 #ifndef NDEC_R_ROOT_SCALAR_NULL
-#define NDEC_R_ROOT_SCALAR_NULL(ud) NDEC_R_SCALAR_NULL(ud)
+#define NDEC_R_ROOT_SCALAR_NULL(ctx, ud) NDEC_R_SCALAR_NULL(ctx, ud)
 #endif
 #ifndef NDEC_R_ROOT_SCALAR_BOOL
-#define NDEC_R_ROOT_SCALAR_BOOL(ud, v) NDEC_R_SCALAR_BOOL((ud), (v))
+#define NDEC_R_ROOT_SCALAR_BOOL(ctx, ud, v) NDEC_R_SCALAR_BOOL((ctx), (ud), (v))
 #endif
 #ifndef NDEC_R_ROOT_SCALAR_NUMBER
-#define NDEC_R_ROOT_SCALAR_NUMBER(ud, raw) NDEC_R_SCALAR_NUMBER((ud), (raw))
+#define NDEC_R_ROOT_SCALAR_NUMBER(ctx, ud, raw) NDEC_R_SCALAR_NUMBER((ctx), (ud), (raw))
 #endif
 #ifndef NDEC_R_ROOT_SCALAR_STRING
-#define NDEC_R_ROOT_SCALAR_STRING(ud, raw) NDEC_R_SCALAR_STRING((ud), (raw))
+#define NDEC_R_ROOT_SCALAR_STRING(ctx, ud, raw) NDEC_R_SCALAR_STRING((ctx), (ud), (raw))
 #endif
 
 #define CUR_OFFSET() ((uint32_t)(cur_pos - buf))
@@ -147,7 +151,7 @@ void ndec_parse_default(NdecCtx *ctx)
     ctx->chunk_ptr       = chunk_ptr;                                                                             \
     ctx->structural_bits = bits;                                                                                  \
     ctx->scan_state      = scan_state;                                                                            \
-    ctx->depth           = depth;                                                                                 \
+    ctx->sp              = sp_local;                                                                              \
     ctx->exit_code       = (code);                                                                                \
     return;                                                                                                       \
   } while (0)
@@ -159,27 +163,25 @@ void ndec_parse_default(NdecCtx *ctx)
     goto ndec_error_exit;                                                                                         \
   } while (0)
 
-/* YIELD_OR_ERROR: NDEC_YIELD shares the hot-path `directive < 0` branch
- * with reactor errors; the cold handler splits on _err_code == NDEC_YIELD
- * vs error.
- *
- * Callsite contract for YIELD-supporting hooks:
- *   Container enter/exit (begin_*, end_*): commit all structural
- *   bookkeeping (TOP_FRAME()->phase, STACK_PUSH/POP, cur_pos advance)
- *   before the hook call. On YIELD the saved frames already describe
- *   the post-hook state, so resume dispatches to the child or parent
- *   phase without re-invoking the hook.
- *
- *   Scalars and object_field: cur_pos must be advanced past the scalar
- *   (end or end+1) before the hook call so NEXT_STRUCTURAL on resume
- *   skips past the consumed value. resume_phase selects the logical
- *   next phase (e.g. OBJECT_FIELD_VALUE after object_field); the cold
- *   path writes it only on YIELD. */
-#define YIELD_OR_ERROR(d, resume_phase)                                                                           \
+/* YIELD_OR_ERROR: container enter/exit hooks use this. The reactor has
+ * already decided the stack state (push or not push). On YIELD the
+ * resume phase is frames[sp].phase (set by reactor during push, or
+ * pre-set by parser before the hook call for the parent continuation). */
+#define YIELD_OR_ERROR(d)                                                                                         \
   do {                                                                                                            \
-    _err_code      = (d);                                                                                         \
-    _err_pos       = CUR_OFFSET();                                                                                \
-    _suspend_phase = (resume_phase);                                                                              \
+    _err_code = (d);                                                                                              \
+    _err_pos  = CUR_OFFSET();                                                                                     \
+    goto ndec_error_or_yield_exit;                                                                                \
+  } while (0)
+
+/* YIELD_WITH_PHASE: scalar and object_field hooks use this when the
+ * reactor yields but hasn't moved the stack. The parser writes
+ * frames[sp].phase explicitly for the resume dispatch. */
+#define YIELD_WITH_PHASE(d, phase_val)                                                                            \
+  do {                                                                                                            \
+    TOP_FRAME()->phase = (phase_val);                                                                             \
+    _err_code          = (d);                                                                                     \
+    _err_pos           = CUR_OFFSET();                                                                            \
     goto ndec_error_or_yield_exit;                                                                                \
   } while (0)
 
@@ -296,16 +298,20 @@ void ndec_parse_default(NdecCtx *ctx)
 
 #define STACK_PUSH(child_phase)                                                                                   \
   do {                                                                                                            \
-    if (UNLIKELY(depth >= NDEC_MAX_DEPTH)) {                                                                      \
+    if (UNLIKELY(sp_local + 1 >= NDEC_MAX_DEPTH)) {                                                               \
       GOTO_ERROR(NDEC_ERR_DEPTH, CUR_OFFSET());                                                                   \
     }                                                                                                             \
-    frames[depth].phase = (child_phase);                                                                          \
-    frames[depth].data  = 0;                                                                                      \
-    depth++;                                                                                                      \
+    sp_local++;                                                                                                   \
+    frames[sp_local].phase = (child_phase);                                                                       \
+    frames[sp_local].data  = 0;                                                                                   \
   } while (0)
 
-#define STACK_POP() (depth--)
-#define TOP_FRAME() (&frames[depth - 1])
+#define STACK_POP() (sp_local--)
+#define TOP_FRAME() (&frames[sp_local])
+
+/* Container enter/exit paths now go through the reactor, which uses
+ * ndec_stack_push / ndec_stack_pop (declared in types.h). The STACK_PUSH
+ * and STACK_POP macros remain for internal use (SKIP_VALUE). */
 
   /* Dispatch table. */
 
@@ -352,14 +358,14 @@ void ndec_parse_default(NdecCtx *ctx)
    * call stopped with a partial or padded tail chunk).
    *
    * The three-way scan (full / padded-tail / zero) is duplicated
-   * between the depth == 0 and depth > 0 branches intentionally.
+   * between the sp < 0 (first call) and sp >= 0 (resume) branches
+   * intentionally.
    *
-   * frames[0] is the root sentinel: the parser stores its own state
-   * machine progress in its phase (ROOT_VALUE -> ROOT_DONE), leaving
-   * frames[1] as the first slot host reactors can claim for their root
-   * binding. */
+   * frames[0] is the root frame: phase = ROOT_VALUE (set by
+   * ndec_ctx_arm_root), extras = root binding (written by host).
+   * On resume, sp >= 0 and frames[sp].phase carries the next phase. */
 
-  if ((depth != 0)) {
+  if (sp_local >= 0) {
     if (bits == 0) {
       ptrdiff_t len = buf_end - chunk_ptr;
       if (len >= 64) {
@@ -373,7 +379,7 @@ void ndec_parse_default(NdecCtx *ctx)
         bits              = r.structural & (((uint64_t)1 << (uint32_t)len) - 1);
       }
     }
-    NDEC_DISPATCH_PHASE(frames[depth - 1].phase);
+    NDEC_DISPATCH_PHASE(frames[sp_local].phase);
   } else {
     chunk_ptr     = buf;
     ptrdiff_t len = buf_end - chunk_ptr;
@@ -390,13 +396,10 @@ void ndec_parse_default(NdecCtx *ctx)
       bits = 0;
     }
 
-    /* Install the root sentinel: frames[0].phase = ROOT_VALUE, depth = 1.
-     * Hosts may pre-fill frames[1] with their own root state before
-     * calling in; the first STACK_PUSH on '{' or '[' raises depth to 2
-     * and begin_object / begin_array sees that pre-filled frame. */
-    frames[0].phase = NDEC_PHASE_ROOT_VALUE;
-    frames[0].data  = 0;
-    depth           = 1;
+    /* First call: host must have called ndec_ctx_arm_root.
+     * sp = 0, frames[0].phase = ROOT_VALUE. */
+    sp_local = 0;
+    ctx->sp  = 0;
     // goto ndec_root_value;
   }
 
@@ -409,19 +412,25 @@ ndec_root_value: {
 
   if (ch == '{') {
     TOP_FRAME()->phase = NDEC_PHASE_ROOT_DONE;
-    STACK_PUSH(NDEC_PHASE_OBJECT_FIELD_OR_END);
-    int32_t directive = NDEC_R_BEGIN_OBJECT(ud);
+    int32_t directive = NDEC_R_BEGIN_OBJECT(ctx, ud,
+                         NDEC_PHASE_OBJECT_FIELD_OR_END);
+    /* sync sp from reactor (reactor may have pushed) */
+    sp_local = ctx->sp;
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_OBJECT_FIELD_OR_END);
+      YIELD_OR_ERROR(directive);
     }
+    /* reactor has pushed; sp now points to child.
+     * Resume by child's initial phase. */
     goto ndec_object_field_or_end;
   }
   if (ch == '[') {
     TOP_FRAME()->phase = NDEC_PHASE_ROOT_DONE;
-    STACK_PUSH(NDEC_PHASE_ARRAY_ELEM_OR_END);
-    int32_t directive = NDEC_R_BEGIN_ARRAY(ud);
+    int32_t directive = NDEC_R_BEGIN_ARRAY(ctx, ud,
+                         NDEC_PHASE_ARRAY_ELEM_OR_END);
+    /* sync sp from reactor (reactor may have pushed) */
+    sp_local = ctx->sp;
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ARRAY_ELEM_OR_END);
+      YIELD_OR_ERROR(directive);
     }
     goto ndec_array_elem_or_end;
   }
@@ -439,10 +448,8 @@ ndec_root_done: {
   int32_t ch;
   NEXT_STRUCTURAL(ch);
   if (ch == NDEC_EOF) {
-    /* Pop the root sentinel; input fully consumed. The error exit path
-     * deliberately leaves the sentinel in place so callers seeing
-     * depth != 0 know the parser state is dirty. */
-    STACK_POP();
+    /* sp stays at 0; frames[0] extras still hold root binding.
+     * No STACK_POP needed (no sentinel to pop). */
     NDEC_SAVE_AND_RETURN(NDEC_OK);
   }
   GOTO_ERROR(NDEC_ERR_TRAILING, CUR_OFFSET());
@@ -475,7 +482,7 @@ ndec_object_field_or_end: {
       GOTO_ERROR(NDEC_ERR_SYNTAX, CUR_OFFSET());
     }
     NdecStrInfo key   = {{key_start, (uint32_t)(end - key_start)}, _has_esc};
-    int32_t directive = NDEC_R_OBJECT_FIELD(ud, key);
+    int32_t directive = NDEC_R_OBJECT_FIELD(ctx, ud, key);
     if (UNLIKELY(directive != NDEC_PROCEED)) {
       /* Cold-path classifier: folds SKIP and negative (YIELD / error)
        * into one hot-path branch so PROCEED is a single cbnz/jne. */
@@ -484,20 +491,19 @@ ndec_object_field_or_end: {
         TOP_FRAME()->data  = 0;
         goto ndec_skip_value;
       }
-      YIELD_OR_ERROR(directive, NDEC_PHASE_OBJECT_FIELD_VALUE);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_OBJECT_FIELD_VALUE);
     }
     goto ndec_object_field_value;
   }
   if (ch == '}') {
     cur_pos++;
-    STACK_POP();
-
-    int32_t directive = NDEC_R_END_OBJECT(ud);
-
+    int32_t directive = NDEC_R_END_OBJECT(ctx, ud);
+    /* sync sp from reactor (reactor may have popped) */
+    sp_local = ctx->sp;
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, frames[depth - 1].phase);
+      YIELD_OR_ERROR(directive);
     }
-    NDEC_DISPATCH_PHASE(frames[depth - 1].phase);
+    NDEC_DISPATCH_PHASE(frames[sp_local].phase);
   }
   if (UNLIKELY(ch == NDEC_EOF)) {
     SUSPEND_NEXT(NDEC_PHASE_OBJECT_FIELD_OR_END);
@@ -516,9 +522,9 @@ ndec_object_field_value: {
     PARSE_STRING_SPAN(end, _has_esc, NDEC_PHASE_OBJECT_FIELD_VALUE, value_begin);
     NdecStrInfo str   = {{str_start, (uint32_t)(end - str_start)}, _has_esc};
     cur_pos           = end + 1;
-    int32_t directive = NDEC_R_OBJ_SCALAR_STRING(ud, str);
+    int32_t directive = NDEC_R_OBJ_SCALAR_STRING(ctx, ud, str);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_OBJECT_CONTINUE_OR_END);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_OBJECT_CONTINUE_OR_END);
     }
     goto ndec_object_continue_or_end;
   }
@@ -528,51 +534,53 @@ ndec_object_field_value: {
     PARSE_NUMBER_SPAN(end, NDEC_PHASE_OBJECT_FIELD_VALUE, num_start);
     NdecRawStr raw    = {num_start, (uint32_t)(end - num_start)};
     cur_pos           = end; /* number_span's end is already one-past the last digit */
-    int32_t directive = NDEC_R_OBJ_SCALAR_NUMBER(ud, raw);
+    int32_t directive = NDEC_R_OBJ_SCALAR_NUMBER(ctx, ud, raw);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_OBJECT_CONTINUE_OR_END);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_OBJECT_CONTINUE_OR_END);
     }
     goto ndec_object_continue_or_end;
   }
   if (ch == '{') {
     TOP_FRAME()->phase = NDEC_PHASE_OBJECT_CONTINUE_OR_END;
-    STACK_PUSH(NDEC_PHASE_OBJECT_FIELD_OR_END);
-    int32_t directive = NDEC_R_BEGIN_OBJECT(ud);
+    int32_t directive = NDEC_R_BEGIN_OBJECT(ctx, ud,
+                         NDEC_PHASE_OBJECT_FIELD_OR_END);
+    sp_local = ctx->sp;
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_OBJECT_FIELD_OR_END);
+      YIELD_OR_ERROR(directive);
     }
     goto ndec_object_field_or_end;
   }
   if (ch == '[') {
     TOP_FRAME()->phase = NDEC_PHASE_OBJECT_CONTINUE_OR_END;
-    STACK_PUSH(NDEC_PHASE_ARRAY_ELEM_OR_END);
-    int32_t directive = NDEC_R_BEGIN_ARRAY(ud);
+    int32_t directive = NDEC_R_BEGIN_ARRAY(ctx, ud,
+                         NDEC_PHASE_ARRAY_ELEM_OR_END);
+    sp_local = ctx->sp;
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ARRAY_ELEM_OR_END);
+      YIELD_OR_ERROR(directive);
     }
     goto ndec_array_elem_or_end;
   }
   if (ch == 'n') {
     MATCH_KEYWORD(ndec_match_null, 4, NDEC_PHASE_OBJECT_FIELD_VALUE);
-    int32_t directive = NDEC_R_OBJ_SCALAR_NULL(ud);
+    int32_t directive = NDEC_R_OBJ_SCALAR_NULL(ctx, ud);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_OBJECT_CONTINUE_OR_END);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_OBJECT_CONTINUE_OR_END);
     }
     goto ndec_object_continue_or_end;
   }
   if (ch == 't') {
     MATCH_KEYWORD(ndec_match_true, 4, NDEC_PHASE_OBJECT_FIELD_VALUE);
-    int32_t directive = NDEC_R_OBJ_SCALAR_BOOL(ud, 1);
+    int32_t directive = NDEC_R_OBJ_SCALAR_BOOL(ctx, ud, 1);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_OBJECT_CONTINUE_OR_END);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_OBJECT_CONTINUE_OR_END);
     }
     goto ndec_object_continue_or_end;
   }
   if (ch == 'f') {
     MATCH_KEYWORD(ndec_match_false, 5, NDEC_PHASE_OBJECT_FIELD_VALUE);
-    int32_t directive = NDEC_R_OBJ_SCALAR_BOOL(ud, 0);
+    int32_t directive = NDEC_R_OBJ_SCALAR_BOOL(ctx, ud, 0);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_OBJECT_CONTINUE_OR_END);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_OBJECT_CONTINUE_OR_END);
     }
     goto ndec_object_continue_or_end;
   }
@@ -612,7 +620,7 @@ ndec_object_continue_or_end: {
       GOTO_ERROR(NDEC_ERR_SYNTAX, CUR_OFFSET());
     }
     NdecStrInfo key   = {{key_start, (uint32_t)(end - key_start)}, _has_esc};
-    int32_t directive = NDEC_R_OBJECT_FIELD(ud, key);
+    int32_t directive = NDEC_R_OBJECT_FIELD(ctx, ud, key);
     if (UNLIKELY(directive != NDEC_PROCEED)) {
       /* Cold-path classifier: folds SKIP and negative (YIELD / error)
        * into one hot-path branch so PROCEED is a single cbnz/jne. */
@@ -621,20 +629,19 @@ ndec_object_continue_or_end: {
         TOP_FRAME()->data  = 0;
         goto ndec_skip_value;
       }
-      YIELD_OR_ERROR(directive, NDEC_PHASE_OBJECT_FIELD_VALUE);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_OBJECT_FIELD_VALUE);
     }
     goto ndec_object_field_value;
   }
   if (ch == '}') {
     cur_pos++;
-    STACK_POP();
-
-    int32_t directive = NDEC_R_END_OBJECT(ud);
-
+    int32_t directive = NDEC_R_END_OBJECT(ctx, ud);
+    /* sync sp from reactor (reactor may have popped) */
+    sp_local = ctx->sp;
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, frames[depth - 1].phase);
+      YIELD_OR_ERROR(directive);
     }
-    NDEC_DISPATCH_PHASE(frames[depth - 1].phase);
+    NDEC_DISPATCH_PHASE(frames[sp_local].phase);
   }
   if (UNLIKELY(ch == NDEC_EOF)) {
     /* cur_pos was committed past the previous value's end, so it is
@@ -650,14 +657,13 @@ ndec_array_elem_or_end: {
 
   if (ch == ']') {
     cur_pos++;
-    STACK_POP();
-
-    int32_t directive = NDEC_R_END_ARRAY(ud);
-
+    int32_t directive = NDEC_R_END_ARRAY(ctx, ud);
+    /* sync sp from reactor (reactor may have popped) */
+    sp_local = ctx->sp;
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, frames[depth - 1].phase);
+      YIELD_OR_ERROR(directive);
     }
-    NDEC_DISPATCH_PHASE(frames[depth - 1].phase);
+    NDEC_DISPATCH_PHASE(frames[sp_local].phase);
   }
   if (UNLIKELY(ch == NDEC_EOF)) {
     SUSPEND_NEXT(NDEC_PHASE_ARRAY_ELEM_OR_END);
@@ -671,9 +677,9 @@ ndec_array_elem_or_end: {
     PARSE_STRING_SPAN(end, _has_esc, NDEC_PHASE_ARRAY_ELEM_OR_END, value_begin);
     NdecStrInfo str   = {{str_start, (uint32_t)(end - str_start)}, _has_esc};
     cur_pos           = end + 1;
-    int32_t directive = NDEC_R_ARR_SCALAR_STRING(ud, str);
+    int32_t directive = NDEC_R_ARR_SCALAR_STRING(ctx, ud, str);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
     }
     goto ndec_array_continue_or_end;
   }
@@ -684,52 +690,54 @@ ndec_array_elem_or_end: {
     PARSE_NUMBER_SPAN(end, NDEC_PHASE_ARRAY_ELEM_OR_END, num_start);
     NdecRawStr raw    = {num_start, (uint32_t)(end - num_start)};
     cur_pos           = end;
-    int32_t directive = NDEC_R_ARR_SCALAR_NUMBER(ud, raw);
+    int32_t directive = NDEC_R_ARR_SCALAR_NUMBER(ctx, ud, raw);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
     }
     goto ndec_array_continue_or_end;
   }
 
   if (ch == '{') {
     TOP_FRAME()->phase = NDEC_PHASE_ARRAY_CONTINUE_OR_END;
-    STACK_PUSH(NDEC_PHASE_OBJECT_FIELD_OR_END);
-    int32_t directive = NDEC_R_BEGIN_OBJECT(ud);
+    int32_t directive = NDEC_R_BEGIN_OBJECT(ctx, ud,
+                         NDEC_PHASE_OBJECT_FIELD_OR_END);
+    sp_local = ctx->sp;
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_OBJECT_FIELD_OR_END);
+      YIELD_OR_ERROR(directive);
     }
     goto ndec_object_field_or_end;
   }
   if (ch == '[') {
     TOP_FRAME()->phase = NDEC_PHASE_ARRAY_CONTINUE_OR_END;
-    STACK_PUSH(NDEC_PHASE_ARRAY_ELEM_OR_END);
-    int32_t directive = NDEC_R_BEGIN_ARRAY(ud);
+    int32_t directive = NDEC_R_BEGIN_ARRAY(ctx, ud,
+                         NDEC_PHASE_ARRAY_ELEM_OR_END);
+    sp_local = ctx->sp;
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ARRAY_ELEM_OR_END);
+      YIELD_OR_ERROR(directive);
     }
     goto ndec_array_elem_or_end;
   }
   if (ch == 'n') {
     MATCH_KEYWORD(ndec_match_null, 4, NDEC_PHASE_ARRAY_ELEM_OR_END);
-    int32_t directive = NDEC_R_ARR_SCALAR_NULL(ud);
+    int32_t directive = NDEC_R_ARR_SCALAR_NULL(ctx, ud);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
     }
     goto ndec_array_continue_or_end;
   }
   if (ch == 't') {
     MATCH_KEYWORD(ndec_match_true, 4, NDEC_PHASE_ARRAY_ELEM_OR_END);
-    int32_t directive = NDEC_R_ARR_SCALAR_BOOL(ud, 1);
+    int32_t directive = NDEC_R_ARR_SCALAR_BOOL(ctx, ud, 1);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
     }
     goto ndec_array_continue_or_end;
   }
   if (ch == 'f') {
     MATCH_KEYWORD(ndec_match_false, 5, NDEC_PHASE_ARRAY_ELEM_OR_END);
-    int32_t directive = NDEC_R_ARR_SCALAR_BOOL(ud, 0);
+    int32_t directive = NDEC_R_ARR_SCALAR_BOOL(ctx, ud, 0);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
     }
     goto ndec_array_continue_or_end;
   }
@@ -748,9 +756,9 @@ ndec_array_elem_value: {
     PARSE_STRING_SPAN(end, _has_esc, NDEC_PHASE_ARRAY_ELEM_VALUE, value_begin);
     NdecStrInfo str   = {{str_start, (uint32_t)(end - str_start)}, _has_esc};
     cur_pos           = end + 1;
-    int32_t directive = NDEC_R_ARR_SCALAR_STRING(ud, str);
+    int32_t directive = NDEC_R_ARR_SCALAR_STRING(ctx, ud, str);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
     }
     goto ndec_array_continue_or_end;
   }
@@ -760,51 +768,53 @@ ndec_array_elem_value: {
     PARSE_NUMBER_SPAN(end, NDEC_PHASE_ARRAY_ELEM_VALUE, num_start);
     NdecRawStr raw    = {num_start, (uint32_t)(end - num_start)};
     cur_pos           = end;
-    int32_t directive = NDEC_R_ARR_SCALAR_NUMBER(ud, raw);
+    int32_t directive = NDEC_R_ARR_SCALAR_NUMBER(ctx, ud, raw);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
     }
     goto ndec_array_continue_or_end;
   }
   if (ch == '{') {
     TOP_FRAME()->phase = NDEC_PHASE_ARRAY_CONTINUE_OR_END;
-    STACK_PUSH(NDEC_PHASE_OBJECT_FIELD_OR_END);
-    int32_t directive = NDEC_R_BEGIN_OBJECT(ud);
+    int32_t directive = NDEC_R_BEGIN_OBJECT(ctx, ud,
+                         NDEC_PHASE_OBJECT_FIELD_OR_END);
+    sp_local = ctx->sp;
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_OBJECT_FIELD_OR_END);
+      YIELD_OR_ERROR(directive);
     }
     goto ndec_object_field_or_end;
   }
   if (ch == '[') {
     TOP_FRAME()->phase = NDEC_PHASE_ARRAY_CONTINUE_OR_END;
-    STACK_PUSH(NDEC_PHASE_ARRAY_ELEM_OR_END);
-    int32_t directive = NDEC_R_BEGIN_ARRAY(ud);
+    int32_t directive = NDEC_R_BEGIN_ARRAY(ctx, ud,
+                         NDEC_PHASE_ARRAY_ELEM_OR_END);
+    sp_local = ctx->sp;
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ARRAY_ELEM_OR_END);
+      YIELD_OR_ERROR(directive);
     }
     goto ndec_array_elem_or_end;
   }
   if (ch == 'n') {
     MATCH_KEYWORD(ndec_match_null, 4, NDEC_PHASE_ARRAY_ELEM_VALUE);
-    int32_t directive = NDEC_R_ARR_SCALAR_NULL(ud);
+    int32_t directive = NDEC_R_ARR_SCALAR_NULL(ctx, ud);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
     }
     goto ndec_array_continue_or_end;
   }
   if (ch == 't') {
     MATCH_KEYWORD(ndec_match_true, 4, NDEC_PHASE_ARRAY_ELEM_VALUE);
-    int32_t directive = NDEC_R_ARR_SCALAR_BOOL(ud, 1);
+    int32_t directive = NDEC_R_ARR_SCALAR_BOOL(ctx, ud, 1);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
     }
     goto ndec_array_continue_or_end;
   }
   if (ch == 'f') {
     MATCH_KEYWORD(ndec_match_false, 5, NDEC_PHASE_ARRAY_ELEM_VALUE);
-    int32_t directive = NDEC_R_ARR_SCALAR_BOOL(ud, 0);
+    int32_t directive = NDEC_R_ARR_SCALAR_BOOL(ctx, ud, 0);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_ARRAY_CONTINUE_OR_END);
     }
     cur_pos += 5;
     goto ndec_array_continue_or_end;
@@ -824,14 +834,13 @@ ndec_array_continue_or_end: {
   }
   if (ch == ']') {
     cur_pos++;
-    STACK_POP();
-
-    int32_t directive = NDEC_R_END_ARRAY(ud);
-
+    int32_t directive = NDEC_R_END_ARRAY(ctx, ud);
+    /* sync sp from reactor (reactor may have popped) */
+    sp_local = ctx->sp;
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, frames[depth - 1].phase);
+      YIELD_OR_ERROR(directive);
     }
-    NDEC_DISPATCH_PHASE(frames[depth - 1].phase);
+    NDEC_DISPATCH_PHASE(frames[sp_local].phase);
   }
   if (UNLIKELY(ch == NDEC_EOF)) {
     /* cur_pos is past the previous element or past the closing bracket
@@ -957,33 +966,33 @@ ndec_root_scalar: {
     }
     NdecStrInfo str   = {{str_start, (uint32_t)(end - str_start)}, has_escape};
     cur_pos           = end + 1;
-    int32_t directive = NDEC_R_ROOT_SCALAR_STRING(ud, str);
+    int32_t directive = NDEC_R_ROOT_SCALAR_STRING(ctx, ud, str);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ROOT_DONE);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_ROOT_DONE);
     }
     goto ndec_root_done;
   }
   if (ch == 'n') {
     MATCH_KEYWORD(ndec_match_null, 4, NDEC_PHASE_ROOT_VALUE);
-    int32_t directive = NDEC_R_ROOT_SCALAR_NULL(ud);
+    int32_t directive = NDEC_R_ROOT_SCALAR_NULL(ctx, ud);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ROOT_DONE);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_ROOT_DONE);
     }
     goto ndec_root_done;
   }
   if (ch == 't') {
     MATCH_KEYWORD(ndec_match_true, 4, NDEC_PHASE_ROOT_VALUE);
-    int32_t directive = NDEC_R_ROOT_SCALAR_BOOL(ud, 1);
+    int32_t directive = NDEC_R_ROOT_SCALAR_BOOL(ctx, ud, 1);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ROOT_DONE);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_ROOT_DONE);
     }
     goto ndec_root_done;
   }
   if (ch == 'f') {
     MATCH_KEYWORD(ndec_match_false, 5, NDEC_PHASE_ROOT_VALUE);
-    int32_t directive = NDEC_R_ROOT_SCALAR_BOOL(ud, 0);
+    int32_t directive = NDEC_R_ROOT_SCALAR_BOOL(ctx, ud, 0);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ROOT_DONE);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_ROOT_DONE);
     }
     goto ndec_root_done;
   }
@@ -995,9 +1004,9 @@ ndec_root_scalar: {
     PARSE_NUMBER_SPAN(end, NDEC_PHASE_ROOT_VALUE, num_start);
     NdecRawStr raw    = {num_start, (uint32_t)(end - num_start)};
     cur_pos           = end;
-    int32_t directive = NDEC_R_ROOT_SCALAR_NUMBER(ud, raw);
+    int32_t directive = NDEC_R_ROOT_SCALAR_NUMBER(ctx, ud, raw);
     if (UNLIKELY(directive < 0)) {
-      YIELD_OR_ERROR(directive, NDEC_PHASE_ROOT_DONE);
+      YIELD_WITH_PHASE(directive, NDEC_PHASE_ROOT_DONE);
     }
     goto ndec_root_done;
   }
@@ -1006,15 +1015,9 @@ ndec_root_scalar: {
 
 ndec_error_or_yield_exit:
   if (_err_code == NDEC_YIELD) {
-    /* _suspend_phase was supplied by the callsite as the top frame's
-     * resume phase. For container enter/exit callsites this matches
-     * the pre-written phase; for object_field and scalars it is a
-     * genuine update. Either way, one cold store.
-     *
-     * The root sentinel guarantees depth >= 1 on yield (bootstrap leaves
-     * depth=1, root container close returns to the sentinel at depth=1),
-     * so frames[depth-1] is always valid; no depth==0 guard is needed. */
-    frames[depth - 1].phase = _suspend_phase;
+    /* The resume phase is already in frames[sp_local].phase, set by
+     * either the reactor (push/pop hooks) or YIELD_WITH_PHASE
+     * (scalar/object_field hooks). No extra store needed. */
 
     /* If bits == 0 we have consumed every structural of the current
      * chunk. The bootstrap rescan on resume cannot tell the chunk is
@@ -1039,7 +1042,7 @@ ndec_error_or_yield_exit:
     ctx->chunk_ptr       = chunk_ptr;
     ctx->structural_bits = bits;
     ctx->scan_state      = scan_state;
-    ctx->depth           = depth;
+    ctx->sp              = sp_local;
     ctx->exit_code       = NDEC_SUSPEND;
     return;
   }
@@ -1051,26 +1054,29 @@ ndec_error_exit:
   ctx->chunk_ptr       = chunk_ptr;
   ctx->structural_bits = bits;
   ctx->scan_state      = scan_state;
-  ctx->depth           = depth;
-  ctx->exit_code       = _err_code;
+  ctx->sp              = sp_local;
+  /* Map ndec_stack_push errors to positive exit codes.
+   * User reactor errors pass through unchanged. */
+  ctx->exit_code       = (_err_code == NDEC_ERR_REACTOR_DEPTH) ? NDEC_ERR_DEPTH : (uint32_t)_err_code;
   return;
 
 ndec_suspend_next_exit:
   cur_pos++; /* advance past the single-byte structural just consumed */
   /* fallthrough */
 ndec_suspend_exit:
-  frames[depth - 1].phase = _suspend_phase;
+  frames[sp_local].phase = _suspend_phase;
   ctx->cur_pos            = cur_pos;
   ctx->chunk_ptr          = chunk_ptr;
   ctx->structural_bits    = bits;
   ctx->scan_state         = scan_state;
-  ctx->depth              = depth;
+  ctx->sp                 = sp_local;
   ctx->exit_code          = NDEC_SUSPEND;
   return;
 
 #undef NDEC_SAVE_AND_RETURN
 #undef GOTO_ERROR
 #undef YIELD_OR_ERROR
+#undef YIELD_WITH_PHASE
 #undef NEXT_STRUCTURAL
 #undef STACK_PUSH
 #undef STACK_POP

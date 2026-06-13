@@ -85,7 +85,7 @@ type ndecCtx struct {
 	ScanState      ndecScanState           // off 56  (40 bytes)
 	ExitCode       uint32                  // off 96
 	ErrorPos       uint32                  // off 100
-	Depth          uint32                  // off 104
+	Sp             int32                   // off 104  stack top index (-1 unarmed, 0+ armed)
 	_              uint32                  // off 108  pad to 8-byte align frames
 	Frames         [ndecMaxDepth]ndecFrame // off 112; sizeof = 256*40 = 10240
 }
@@ -117,7 +117,7 @@ func init() {
 	must("ndecCtx.ScanState", unsafe.Offsetof(ndecCtx{}.ScanState), 56)
 	must("ndecCtx.ExitCode", unsafe.Offsetof(ndecCtx{}.ExitCode), 96)
 	must("ndecCtx.ErrorPos", unsafe.Offsetof(ndecCtx{}.ErrorPos), 100)
-	must("ndecCtx.Depth", unsafe.Offsetof(ndecCtx{}.Depth), 104)
+	must("ndecCtx.Sp", unsafe.Offsetof(ndecCtx{}.Sp), 104)
 	must("ndecCtx.Frames", unsafe.Offsetof(ndecCtx{}.Frames), 112)
 }
 

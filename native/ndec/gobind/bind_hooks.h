@@ -53,33 +53,33 @@
 #include "containers/map.h"
 #include "containers/root.h"
 
-#define NDEC_R_BEGIN_OBJECT(ud)      ndec_bind_begin_object((ud), frames, depth)
-#define NDEC_R_END_OBJECT(ud)        ndec_bind_end_object((ud), frames, depth)
-#define NDEC_R_OBJECT_FIELD(ud, key) ndec_bind_object_field((ud), frames, depth, (key))
-#define NDEC_R_BEGIN_ARRAY(ud)       ndec_bind_begin_array((ud), frames, depth)
-#define NDEC_R_END_ARRAY(ud)         ndec_bind_end_array((ud), frames, depth)
+#define NDEC_R_BEGIN_OBJECT(ctx, ud, child_phase)      ndec_bind_begin_object((ctx), (ud), frames, sp_local, (child_phase))
+#define NDEC_R_END_OBJECT(ctx, ud)        ndec_bind_end_object((ctx), (ud), frames, sp_local)
+#define NDEC_R_OBJECT_FIELD(ctx, ud, key) ndec_bind_object_field((ctx), (ud), frames, sp_local, (key))
+#define NDEC_R_BEGIN_ARRAY(ctx, ud, child_phase)       ndec_bind_begin_array((ctx), (ud), frames, sp_local, (child_phase))
+#define NDEC_R_END_ARRAY(ctx, ud)         ndec_bind_end_array((ctx), (ud), frames, sp_local)
 
-#define NDEC_R_OBJ_SCALAR_NULL(ud)        ndec_bind_obj_scalar_null((ud), frames, depth)
-#define NDEC_R_OBJ_SCALAR_BOOL(ud, v)     ndec_bind_obj_scalar_bool((ud), frames, depth, (v))
-#define NDEC_R_OBJ_SCALAR_NUMBER(ud, raw) ndec_bind_obj_scalar_number((ud), frames, depth, (raw))
-#define NDEC_R_OBJ_SCALAR_STRING(ud, raw) ndec_bind_obj_scalar_string((ud), frames, depth, (raw))
+#define NDEC_R_OBJ_SCALAR_NULL(ctx, ud)        ndec_bind_obj_scalar_null((ctx), (ud), frames, sp_local)
+#define NDEC_R_OBJ_SCALAR_BOOL(ctx, ud, v)     ndec_bind_obj_scalar_bool((ctx), (ud), frames, sp_local, (v))
+#define NDEC_R_OBJ_SCALAR_NUMBER(ctx, ud, raw) ndec_bind_obj_scalar_number((ctx), (ud), frames, sp_local, (raw))
+#define NDEC_R_OBJ_SCALAR_STRING(ctx, ud, raw) ndec_bind_obj_scalar_string((ctx), (ud), frames, sp_local, (raw))
 
-#define NDEC_R_ARR_SCALAR_NULL(ud)        ndec_bind_arr_scalar_null((ud), frames, depth)
-#define NDEC_R_ARR_SCALAR_BOOL(ud, v)     ndec_bind_arr_scalar_bool((ud), frames, depth, (v))
-#define NDEC_R_ARR_SCALAR_NUMBER(ud, raw) ndec_bind_arr_scalar_number((ud), frames, depth, (raw))
-#define NDEC_R_ARR_SCALAR_STRING(ud, raw) ndec_bind_arr_scalar_string((ud), frames, depth, (raw))
+#define NDEC_R_ARR_SCALAR_NULL(ctx, ud)        ndec_bind_arr_scalar_null((ctx), (ud), frames, sp_local)
+#define NDEC_R_ARR_SCALAR_BOOL(ctx, ud, v)     ndec_bind_arr_scalar_bool((ctx), (ud), frames, sp_local, (v))
+#define NDEC_R_ARR_SCALAR_NUMBER(ctx, ud, raw) ndec_bind_arr_scalar_number((ctx), (ud), frames, sp_local, (raw))
+#define NDEC_R_ARR_SCALAR_STRING(ctx, ud, raw) ndec_bind_arr_scalar_string((ctx), (ud), frames, sp_local, (raw))
 
 /* ROOT scalar: dedicated root-frame hook reading frames[0].bind_dst directly,
  * with no STRUCT field indirection. The generic NDEC_R_SCALAR_* macros stay
  * unoverridden; binding does not install reactor->scalar_* function pointers,
  * so they fall through to the default vtable (equivalent to NDEC_PROCEED). */
-#define NDEC_R_ROOT_SCALAR_NULL(ud)        ndec_bind_root_scalar_null((ud), frames, depth)
-#define NDEC_R_ROOT_SCALAR_BOOL(ud, v)     ndec_bind_root_scalar_bool((ud), frames, depth, (v))
-#define NDEC_R_ROOT_SCALAR_NUMBER(ud, raw) ndec_bind_root_scalar_number((ud), frames, depth, (raw))
-#define NDEC_R_ROOT_SCALAR_STRING(ud, raw) ndec_bind_root_scalar_string((ud), frames, depth, (raw))
+#define NDEC_R_ROOT_SCALAR_NULL(ctx, ud)        ndec_bind_root_scalar_null((ctx), (ud), frames, sp_local)
+#define NDEC_R_ROOT_SCALAR_BOOL(ctx, ud, v)     ndec_bind_root_scalar_bool((ctx), (ud), frames, sp_local, (v))
+#define NDEC_R_ROOT_SCALAR_NUMBER(ctx, ud, raw) ndec_bind_root_scalar_number((ctx), (ud), frames, sp_local, (raw))
+#define NDEC_R_ROOT_SCALAR_STRING(ctx, ud, raw) ndec_bind_root_scalar_string((ctx), (ud), frames, sp_local, (raw))
 
 /* Called immediately after the parser STACK_PUSH. The child slot at
- * frames[depth-1] has been allocated but its NDEC_FRAME_EXTRA_FIELDS still
+ * frames[sp] has been allocated but its NDEC_FRAME_EXTRA_FIELDS still
  * hold residue from the previous occupant of that slot, so every binding
  * field must be explicitly written.
  *
@@ -93,43 +93,48 @@ INLINE void ndec_bind_push_struct_child(NdecFrame *child, const NdecBindTypeInfo
   child->bind_container_kind          = NDEC_BK_STRUCT;
 }
 
-INLINE int32_t ndec_bind_begin_object(void *ud_v, NdecFrame *frames, uint32_t depth) {
+INLINE int32_t ndec_bind_begin_object(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp, uint32_t child_phase) {
   NdecBindUserData *ud = (NdecBindUserData *)ud_v;
+  (void)ctx;
 
   /* Parser bootstrap: after seeing '{' on the root value, the parser
-   * STACK_PUSHes depth 1->2 and calls begin_object. Entry state:
-   *   depth==2 : child = frames[1], driver pre-filled root binding.
-   *              parent = frames[0] is the sentinel (BindContainerKind=INVALID).
-   *   depth>=3 : child = frames[depth-1] (fresh STACK_PUSH slot, extras are
-   *              stale), parent = frames[depth-2] is a real container frame
-   *              (STRUCT / SLICE / MAP).
+   * calls begin_object. Entry state:
+   *   sp==0 : root entry. parent = frames[0] is the root frame (host
+   *           pre-filled binding). Reactor must push and fill child.
+   *   sp>=1 : nested entry. parent = frames[sp] is a real container
+   *           frame (STRUCT / SLICE / MAP).
    *
-   * Hot path: nested STRUCT object (depth>=3, parent is STRUCT or SLICE). */
+   * Hot path: nested STRUCT object (sp>=1, parent is STRUCT or SLICE). */
 
-  NdecFrame *child = &frames[depth - 1];
-
-  if (NDEC_BIND_LIKELY(depth >= 3)) {
-    NdecFrame *parent = &frames[depth - 2];
+  if (NDEC_BIND_LIKELY(sp >= 1)) {
+    NdecFrame *parent = &frames[sp];
 
     /* SLICE<struct> parent: elem is struct object. */
     if (parent->bind_container_kind == NDEC_BK_SLICE) {
       const NdecBindTypeInfo *slice_ti = parent->bind_type;
       const NdecBindTypeInfo *elem_ti  = slice_ti->elem_type;
       if (NDEC_BIND_UNLIKELY(slice_ti->elem_kind == NDEC_BK_STRUCT)) {
+        int32_t pst = ndec_stack_push(ctx, child_phase);
+        if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
         if (NDEC_BIND_UNLIKELY(parent->as.slice_.array_index >= parent->as.slice_.array_cap)) {
           NDEC_BIND_YIELD(ud, NDEC_YA_GROW_SLICE_STRUCT);
         }
+        NdecFrame *child = &frames[ctx->sp];
         ndec_bind_push_struct_child(child, elem_ti,
                                     parent->bind_dst + parent->as.slice_.array_index * slice_ti->elem_size);
         return NDEC_PROCEED;
       }
       if (slice_ti->elem_kind == NDEC_BK_MAP) {
+        int32_t pst = ndec_stack_push(ctx, child_phase);
+        if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
         if (NDEC_BIND_UNLIKELY(parent->as.slice_.array_index >= parent->as.slice_.array_cap)) {
           NDEC_BIND_YIELD(ud, NDEC_YA_BEGIN_MAP);
         }
         NDEC_BIND_YIELD(ud, NDEC_YA_BEGIN_MAP);
       }
       if (slice_ti->elem_kind == NDEC_BK_PTR && elem_ti != 0 && elem_ti->elem_kind == NDEC_BK_STRUCT) {
+        int32_t pst = ndec_stack_push(ctx, child_phase);
+        if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
         NDEC_BIND_YIELD(ud, NDEC_YA_GROW_SLICE_PTR_STRUCT);
       }
       NDEC_BIND_YIELD_TYPE_MISMATCH(ud, NDEC_YF_TOKEN_OBJECT);
@@ -142,13 +147,21 @@ INLINE int32_t ndec_bind_begin_object(void *ud_v, NdecFrame *frames, uint32_t de
       if (map_ti->elem_kind == NDEC_BK_STRUCT) {
         uint8_t *value_ptr = ndec_bind_map_value_ptr(parent);
         __builtin_memset(value_ptr, 0, map_ti->elem_size);
+        int32_t pst = ndec_stack_push(ctx, child_phase);
+        if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
+        NdecFrame *child = &frames[ctx->sp];
         ndec_bind_push_struct_child(child, elem_ti, value_ptr);
         return NDEC_PROCEED;
       }
       if (map_ti->elem_kind == NDEC_BK_MAP) {
-        if (ndec_bind_begin_map_fast(parent, child, ud) == 0) {
+        /* Optimistic push: child slot allocated, binding left empty
+         * for driver to fill in BEGIN_MAP yield handler. */
+        int32_t pst = ndec_stack_push(ctx, child_phase);
+        if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
+        if (ndec_bind_begin_map_fast(ctx, parent, child_phase, ud) == 0) {
           return NDEC_PROCEED;
         }
+        /* kvBuf bump failed; child already pushed, driver fills binding */
         NDEC_BIND_YIELD(ud, NDEC_YA_BEGIN_MAP);
       }
       if (map_ti->elem_kind == NDEC_BK_PTR && elem_ti != 0 && elem_ti->kind == NDEC_BK_STRUCT) {
@@ -165,14 +178,19 @@ INLINE int32_t ndec_bind_begin_object(void *ud_v, NdecFrame *frames, uint32_t de
     const NdecBindTypeInfo *parent_ti = parent->bind_type;
     const NdecBindFieldInfo *fi       = &parent_ti->fields[idx];
 
-    /* PTR-to-struct: yield Go alloc + fill child slot */
+    /* PTR-to-struct: optimistic push, driver allocs and fills child. */
     if (fi->kind == NDEC_BK_PTR && fi->type != 0 && fi->type->kind == NDEC_BK_STRUCT) {
+      int32_t pst = ndec_stack_push(ctx, child_phase);
+      if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
       NDEC_BIND_YIELD_PTR_STRUCT(ud);
     }
 
-    /* MAP field (or *map): yield BEGIN_MAP, Go lazy allocs + fills MAP frame. */
+    /* MAP field (or *map): optimistic push, then try fast path.
+     * On kvBuf exhaustion, child already pushed, driver fills binding. */
     if ((fi->kind == NDEC_BK_MAP) || (fi->kind == NDEC_BK_PTR && fi->type != 0 && fi->type->kind == NDEC_BK_MAP)) {
-      if (ndec_bind_begin_map_fast(parent, child, ud) == 0) {
+      int32_t pst = ndec_stack_push(ctx, child_phase);
+      if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
+      if (ndec_bind_begin_map_fast(ctx, parent, child_phase, ud) == 0) {
         return NDEC_PROCEED;
       }
       NDEC_BIND_YIELD(ud, NDEC_YA_BEGIN_MAP);
@@ -182,27 +200,36 @@ INLINE int32_t ndec_bind_begin_object(void *ud_v, NdecFrame *frames, uint32_t de
       NDEC_BIND_YIELD_TYPE_MISMATCH(ud, NDEC_YF_TOKEN_OBJECT);
     }
 
+    int32_t pst = ndec_stack_push(ctx, child_phase);
+    if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
+    NdecFrame *child = &frames[ctx->sp];
     ndec_bind_push_struct_child(child, fi->type, parent->bind_dst + fi->offset);
     return NDEC_PROCEED;
   }
 
-  /* depth == 2: root entry. child = frames[1] with driver pre-filled binding.
-   * parent = frames[0] is the sentinel and is not read. Dispatch by child.kind:
+  /* sp == 1: root entry. parent = frames[0] has host pre-filled root binding.
+   * Dispatch by parent.kind:
    * STRUCT (hot path) / MAP / PTR / mismatch. */
   {
-    uint8_t kind = child->bind_container_kind;
+    NdecFrame *parent = &frames[0];
+    uint8_t kind = parent->bind_container_kind;
     if (NDEC_BIND_LIKELY(kind == NDEC_BK_STRUCT)) {
+      int32_t pst = ndec_stack_push(ctx, child_phase);
+      if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
+      ndec_bind_push_struct_child(&frames[ctx->sp], parent->bind_type, parent->bind_dst);
       return NDEC_PROCEED;
     }
     if (kind == NDEC_BK_MAP) {
-      /* Root MAP: yield BEGIN_MAP, Go driver allocs map header + kvBuf sub-region
-       * and rewrites frames[1] as MAP frame. */
+      /* Root MAP: optimistic push child, driver allocs map header +
+       * kvBuf sub-region and fills child binding. */
+      int32_t pst = ndec_stack_push(ctx, child_phase);
+      if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
       NDEC_BIND_YIELD(ud, NDEC_YA_BEGIN_MAP);
     }
     if (kind == NDEC_BK_PTR) {
       /* Root PTR: yield with pointee-kind flags so Go driver performs
        * ptr-chain alloc and rewrites frames[1] as leaf frame. */
-      const NdecBindTypeInfo *pointee = child->bind_type->elem_type;
+      const NdecBindTypeInfo *pointee = parent->bind_type->elem_type;
       if (NDEC_BIND_UNLIKELY(pointee == 0))
         NDEC_BIND_YIELD_TYPE_MISMATCH(ud, NDEC_YF_TOKEN_OBJECT);
       if (pointee->kind == NDEC_BK_STRUCT)
@@ -219,21 +246,19 @@ INLINE int32_t ndec_bind_begin_object(void *ud_v, NdecFrame *frames, uint32_t de
   }
 }
 
-INLINE int32_t ndec_bind_end_object(void *ud_v, NdecFrame *frames, uint32_t depth) {
+INLINE int32_t ndec_bind_end_object(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp) {
   NdecBindUserData *ud = (NdecBindUserData *)ud_v;
-  /* The parser has already done STACK_POP. The popped frame is at
-   * frames[depth] (POP does not clear data). The root sentinel guarantees
-   * depth >= 1 after POP: on a nested close, parent is a real container
-   * frame; on root close, parent = frames[0] is the sentinel
-   * (BindContainerKind=INVALID, falls through default to PROCEED, then the
-   * parser dispatches to root_done).
+  (void)ctx;
+  /* The parser calls end_object with sp still pointing to the closing
+   * container. The reactor owns pop and must call ndec_stack_pop.
+   * The popped frame is at frames[sp]; after pop, parent = frames[sp-1].
+   * On root close: sp = 0, pop is NOT called (root frame stays).
    *
    * MAP frame close: if kv_count > 0, yield FLUSH_MAP (yield_flags =
    * yfMapClosing=1). The driver completes the final batch of mapassign,
-   * frees the KV buffer sub-interval, and advances the parent frame.
-   * When kv_count == 0 (empty map or already flushed), the C side finishes
-   * up and advances the parent. */
-  NdecFrame *popped = &frames[depth];
+   * frees the KV buffer sub-interval, and pops the frame.
+   * When kv_count == 0 (empty map or already flushed), same yield. */
+  NdecFrame *popped = &frames[sp];
   if (popped->bind_container_kind == NDEC_BK_MAP) {
     if (popped->as.map_.kv_count > 0) {
       ud->pending_action = (uint32_t)NDEC_YA_FLUSH_MAP;
@@ -251,8 +276,9 @@ INLINE int32_t ndec_bind_end_object(void *ud_v, NdecFrame *frames, uint32_t dept
   }
 
   /* Non-MAP frame (child STRUCT frame close within a STRUCT parent):
-   * advance parent frame. */
-  NdecFrame *parent = &frames[depth - 1];
+   * pop the child, then advance parent frame. */
+  ndec_stack_pop(ctx);
+  NdecFrame *parent = &frames[ctx->sp];
   switch (parent->bind_container_kind) {
   case NDEC_BK_STRUCT:
     parent->as.struct_.pending_field_idx = -1;
@@ -272,15 +298,16 @@ INLINE int32_t ndec_bind_end_object(void *ud_v, NdecFrame *frames, uint32_t dept
     }
     return NDEC_PROCEED;
   default:
-    /* Root object close: parent is the sentinel, NDEC_BK_INVALID, no advance. */
+    /* Root object close: parent is the root frame; parser dispatches root_done. */
     return NDEC_PROCEED;
   }
 }
 
-INLINE int32_t ndec_bind_object_field(void *ud_v, NdecFrame *frames, uint32_t depth, NdecStrInfo key) {
+INLINE int32_t ndec_bind_object_field(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp, NdecStrInfo key) {
   NdecBindUserData *ud = (NdecBindUserData *)ud_v;
+  (void)ctx;
 
-  NdecFrame *f = &frames[depth - 1];
+  NdecFrame *f = &frames[sp];
 
   /* MAP frame branch: skip lookup, write key string directly into the
    * current KV slot's string header. Slot layout (key and value share
@@ -338,16 +365,16 @@ INLINE int32_t ndec_bind_object_field(void *ud_v, NdecFrame *frames, uint32_t de
   return NDEC_PROCEED;
 }
 
-INLINE int32_t ndec_bind_begin_array(void *ud_v, NdecFrame *frames, uint32_t depth) {
+INLINE int32_t ndec_bind_begin_array(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp, uint32_t child_phase) {
   NdecBindUserData *ud = (NdecBindUserData *)ud_v;
+  (void)ctx;
 
-  /* Parser bootstrap: root sentinel frames[0] + root binding frames[1].
-   * root_value sees '[' and STACK_PUSHes, then calls this hook. Entry state:
-   *   depth==2 : root array. child = frames[1] (driver pre-filled root
-   *              binding), parent = frames[0] is the sentinel
-   *              (BindContainerKind=INVALID).
-   *   depth>=3 : nested array. parent is a real container frame
-   *              (STRUCT / SLICE / MAP).
+  /* Parser bootstrap: root frame frames[0] (host pre-filled).
+   * root_value sees '[' and calls this hook. Entry state:
+   *   sp==0 : root array. parent = frames[0] is the root frame
+   *           (host pre-filled binding).
+   *   sp>=1 : nested array. parent is a real container frame
+   *           (STRUCT / SLICE / MAP).
    *
    * STRUCT parent with pending field being SLICE: lazy alloc. The parent
    * field's slice header is initialized to (empty_slice_data, 0, 0) as the
@@ -362,8 +389,8 @@ INLINE int32_t ndec_bind_begin_array(void *ud_v, NdecFrame *frames, uint32_t dep
    *     target_for_slice_elem, sees array_index (0) >= array_cap (0), gets
    *     NEED_GROW, and yields. The driver allocates backing and overwrites
    *     hdr->data/cap. */
-  if (depth >= 3) {
-    NdecFrame *parent = &frames[depth - 2];
+  if (sp >= 1) {
+    NdecFrame *parent = &frames[sp];
     if (parent->bind_container_kind == NDEC_BK_STRUCT && parent->as.struct_.pending_field_idx >= 0) {
       const NdecBindTypeInfo *parent_ti = parent->bind_type;
       int32_t parent_idx                = parent->as.struct_.pending_field_idx;
@@ -378,7 +405,9 @@ INLINE int32_t ndec_bind_begin_array(void *ud_v, NdecFrame *frames, uint32_t dep
 
         parent->as.struct_.pending_field_idx = -1;
 
-        NdecFrame *child             = &frames[depth - 1];
+        int32_t pst = ndec_stack_push(ctx, child_phase);
+        if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
+        NdecFrame *child             = &frames[ctx->sp];
         child->bind_type             = slice_ti;
         child->bind_dst              = (uint8_t *)0;
         child->as.slice_.array_index = 0;
@@ -399,7 +428,9 @@ INLINE int32_t ndec_bind_begin_array(void *ud_v, NdecFrame *frames, uint32_t dep
         __builtin_memset(arr_base, 0, (size_t)arr_ti->fixed_count * arr_ti->elem_size);
         parent->as.struct_.pending_field_idx = -1;
 
-        NdecFrame *child             = &frames[depth - 1];
+        int32_t pst = ndec_stack_push(ctx, child_phase);
+        if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
+        NdecFrame *child             = &frames[ctx->sp];
         child->bind_type             = arr_ti;
         child->bind_dst              = arr_base;
         child->as.slice_.array_index = 0;
@@ -432,7 +463,9 @@ INLINE int32_t ndec_bind_begin_array(void *ud_v, NdecFrame *frames, uint32_t dep
       hdr->len  = 0;
       hdr->cap  = 0;
 
-      NdecFrame *child             = &frames[depth - 1];
+      int32_t pst = ndec_stack_push(ctx, child_phase);
+      if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
+      NdecFrame *child             = &frames[ctx->sp];
       child->bind_type             = inner_ti;
       child->bind_dst              = (uint8_t *)0;
       child->as.slice_.array_index = 0;
@@ -458,7 +491,9 @@ INLINE int32_t ndec_bind_begin_array(void *ud_v, NdecFrame *frames, uint32_t dep
       hdr->len               = 0;
       hdr->cap               = 0;
 
-      NdecFrame *child             = &frames[depth - 1];
+      int32_t pst = ndec_stack_push(ctx, child_phase);
+      if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
+      NdecFrame *child             = &frames[ctx->sp];
       child->bind_type             = slice_ti;
       child->bind_dst              = (uint8_t *)0;
       child->as.slice_.array_index = 0;
@@ -470,36 +505,48 @@ INLINE int32_t ndec_bind_begin_array(void *ud_v, NdecFrame *frames, uint32_t dep
     }
   }
 
-  /* depth == 2: root array entry. child = frames[1] with driver pre-filled
-   * binding (parent = frames[0] is the sentinel). Dispatch by child.kind:
+  /* sp == 1: root array entry. parent = frames[0] has host pre-filled binding.
+   * Dispatch by parent.kind:
    * SLICE (lazy alloc), FIXED_ARRAY (memset), PTR (yield alloc chain). */
   {
-    NdecFrame *child = &frames[depth - 1];
-    uint8_t kind     = child->bind_container_kind;
+    NdecFrame *parent = &frames[0];
+    uint8_t kind = parent->bind_container_kind;
 
     if (kind == NDEC_BK_SLICE) {
       /* Root SLICE lazy alloc: write empty header to user dst slot,
        * set child.dst=NULL for grow yield to fill on first element. */
-      const NdecBindTypeInfo *slice_ti = child->bind_type;
-      NdecGoSliceHeader *hdr           = (NdecGoSliceHeader *)child->bind_dst;
+      const NdecBindTypeInfo *slice_ti = parent->bind_type;
+      NdecGoSliceHeader *hdr           = (NdecGoSliceHeader *)parent->bind_dst;
       hdr->data                        = slice_ti->empty_slice_data;
       hdr->len                         = 0;
       hdr->cap                         = 0;
 
+      int32_t pst = ndec_stack_push(ctx, child_phase);
+      if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
+      NdecFrame *child             = &frames[ctx->sp];
+      child->bind_type             = slice_ti;
       child->bind_dst              = (uint8_t *)0;
       child->as.slice_.array_index = 0;
       child->as.slice_.array_cap   = 0;
-      /* root frame: parent is the sentinel, errCtx does not read parent_field_idx */
+      child->bind_container_kind   = NDEC_BK_SLICE;
+      /* root frame: errCtx does not read parent_field_idx from root children */
       child->bind_slice_hdr = (void *)hdr;
       return NDEC_PROCEED;
     }
 
     if (kind == NDEC_BK_FIXED_ARRAY) {
       /* Root FIXED_ARRAY: memset all slots to zero, set child array bounds. */
-      const NdecBindTypeInfo *arr_ti = child->bind_type;
-      __builtin_memset(child->bind_dst, 0, (size_t)arr_ti->fixed_count * arr_ti->elem_size);
+      const NdecBindTypeInfo *arr_ti = parent->bind_type;
+      __builtin_memset(parent->bind_dst, 0, (size_t)arr_ti->fixed_count * arr_ti->elem_size);
+
+      int32_t pst = ndec_stack_push(ctx, child_phase);
+      if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
+      NdecFrame *child             = &frames[ctx->sp];
+      child->bind_type             = arr_ti;
+      child->bind_dst              = parent->bind_dst;
       child->as.slice_.array_index = 0;
       child->as.slice_.array_cap   = arr_ti->fixed_count;
+      child->bind_container_kind   = NDEC_BK_FIXED_ARRAY;
       child->bind_slice_hdr        = (void *)0;
       return NDEC_PROCEED;
     }
@@ -507,7 +554,7 @@ INLINE int32_t ndec_bind_begin_array(void *ud_v, NdecFrame *frames, uint32_t dep
     if (kind == NDEC_BK_PTR) {
       /* Root PTR-to-slice/array: yield, Go driver allocs ptr chain + rewrites
        * frames[1] as leaf SLICE/FIXED_ARRAY frame. */
-      const NdecBindTypeInfo *pointee = child->bind_type->elem_type;
+      const NdecBindTypeInfo *pointee = parent->bind_type->elem_type;
       if (NDEC_BIND_UNLIKELY(pointee == 0))
         NDEC_BIND_YIELD_TYPE_MISMATCH(ud, NDEC_YF_TOKEN_ARRAY);
       if (pointee->kind == NDEC_BK_SLICE)
@@ -522,10 +569,12 @@ INLINE int32_t ndec_bind_begin_array(void *ud_v, NdecFrame *frames, uint32_t dep
   NDEC_BIND_YIELD_TYPE_MISMATCH(ud, NDEC_YF_TOKEN_ARRAY);
 }
 
-INLINE int32_t ndec_bind_end_array(void *ud_v, NdecFrame *frames, uint32_t depth) {
+INLINE int32_t ndec_bind_end_array(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp) {
   NdecBindUserData *ud = (NdecBindUserData *)ud_v;
-  /* The parser has already done STACK_POP; the child SLICE frame is at
-   * frames[depth] (POP does not clear data). Close is done inline in C:
+  (void)ctx;
+  /* The parser calls end_array with sp pointing to the closing array.
+   * The popped frame is at frames[sp]. Reactor owns pop and must call
+   * ndec_stack_pop. Close is done inline in C:
    * write final len into the parent field's slice header, then advance
    * the parent frame.
    *
@@ -534,14 +583,15 @@ INLINE int32_t ndec_bind_end_array(void *ud_v, NdecFrame *frames, uint32_t depth
    * is already 0. Skip the write and just advance the parent.
    * Non-empty array: hdr->data/cap were written by the first grow yield.
    * Only len needs to be written here. */
-  NdecFrame *popped = &frames[depth];
+  NdecFrame *popped = &frames[sp];
   /* FIXED_ARRAY frame close: no slice header to update, no cap_hint EMA feed
-   * (fixed size has no semantics). Just advance the parent frame. */
+   * (fixed size has no semantics). Pop the child, then advance the parent frame. */
   if (popped->bind_container_kind == NDEC_BK_FIXED_ARRAY) {
-    /* Root sentinel guarantees depth >= 1 after STACK_POP. On root array
-     * close, parent = frames[0] is the BK_INVALID sentinel; no branch matches.
-     * Parser proceeds to root_done. */
-    NdecFrame *parent = &frames[depth - 1];
+    /* Pop before accessing parent (frames[sp-1] after pop). */
+    ndec_stack_pop(ctx);
+    /* On root array close, parent = frames[0] (root frame).
+     * Parser proceeds to root_done; no parent advance needed. */
+    NdecFrame *parent = &frames[ctx->sp];
     if (NDEC_BIND_LIKELY(parent->bind_container_kind == NDEC_BK_STRUCT)) {
       parent->as.struct_.pending_field_idx = -1;
     } else if (parent->bind_container_kind == NDEC_BK_MAP) {
@@ -578,11 +628,12 @@ INLINE int32_t ndec_bind_end_array(void *ud_v, NdecFrame *frames, uint32_t depth
       }
       atomic_store_explicit(&slice_ti->cap_hint, new_hint, memory_order_relaxed);
     }
-    /* Advance parent frame: STRUCT clears pending, SLICE increments
-     * array_index++, MAP increments kv_count++ (with flush check).
-     * On root array close, parent is the BK_INVALID sentinel; default
-     * does not advance. */
-    NdecFrame *parent = &frames[depth - 1];
+    /* Pop the child, then advance parent frame: STRUCT clears pending,
+     * SLICE increments array_index++, MAP increments kv_count++ (with flush check).
+     * On root array close, parent is the root frame (BK_STRUCT/SLICE/MAP);
+     * the switch below handles the advance, then parser dispatches root_done. */
+    ndec_stack_pop(ctx);
+    NdecFrame *parent = &frames[ctx->sp];
     if (NDEC_BIND_LIKELY(parent->bind_container_kind == NDEC_BK_STRUCT)) {
       parent->as.struct_.pending_field_idx = -1;
     } else if (parent->bind_container_kind == NDEC_BK_MAP) {
@@ -598,36 +649,40 @@ INLINE int32_t ndec_bind_end_array(void *ud_v, NdecFrame *frames, uint32_t depth
 }
 
 /* STRUCT scalar hooks, specialized per container kind. */
-INLINE int32_t ndec_bind_obj_scalar_null(void *ud_v, NdecFrame *frames, uint32_t depth) {
+INLINE int32_t ndec_bind_obj_scalar_null(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp) {
   NdecBindUserData *ud = (NdecBindUserData *)ud_v;
-  NdecFrame *top       = &frames[depth - 1];
+  (void)ctx;
+  NdecFrame *top       = &frames[sp];
   if (top->bind_container_kind == NDEC_BK_MAP) {
     return map_writeval_null(top, ud);
   }
   return struct_writeval_null(top, ud);
 }
 
-INLINE int32_t ndec_bind_obj_scalar_bool(void *ud_v, NdecFrame *frames, uint32_t depth, int v) {
+INLINE int32_t ndec_bind_obj_scalar_bool(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp, int v) {
   NdecBindUserData *ud = (NdecBindUserData *)ud_v;
-  NdecFrame *top       = &frames[depth - 1];
+  (void)ctx;
+  NdecFrame *top       = &frames[sp];
   if (top->bind_container_kind == NDEC_BK_MAP) {
     return map_writeval_bool(top, ud, v);
   }
   return struct_writeval_bool(top, ud, v);
 }
 
-INLINE int32_t ndec_bind_obj_scalar_number(void *ud_v, NdecFrame *frames, uint32_t depth, NdecRawStr raw) {
+INLINE int32_t ndec_bind_obj_scalar_number(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp, NdecRawStr raw) {
   NdecBindUserData *ud = (NdecBindUserData *)ud_v;
-  NdecFrame *top       = &frames[depth - 1];
+  (void)ctx;
+  NdecFrame *top       = &frames[sp];
   if (top->bind_container_kind == NDEC_BK_MAP) {
     return map_writeval_number(top, ud, raw.ptr, raw.len);
   }
   return struct_writeval_number(top, ud, raw.ptr, raw.len);
 }
 
-INLINE int32_t ndec_bind_obj_scalar_string(void *ud_v, NdecFrame *frames, uint32_t depth, NdecStrInfo str) {
+INLINE int32_t ndec_bind_obj_scalar_string(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp, NdecStrInfo str) {
   NdecBindUserData *ud = (NdecBindUserData *)ud_v;
-  NdecFrame *top       = &frames[depth - 1];
+  (void)ctx;
+  NdecFrame *top       = &frames[sp];
 
   const uint8_t *eff_ptr = str.raw.ptr;
   uint32_t eff_len       = str.raw.len;
@@ -648,27 +703,31 @@ INLINE int32_t ndec_bind_obj_scalar_string(void *ud_v, NdecFrame *frames, uint32
 }
 
 /* SLICE scalar hooks, specialized per element write target. */
-INLINE int32_t ndec_bind_arr_scalar_null(void *ud_v, NdecFrame *frames, uint32_t depth) {
+INLINE int32_t ndec_bind_arr_scalar_null(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp) {
   NdecBindUserData *ud = (NdecBindUserData *)ud_v;
-  NdecFrame *top       = &frames[depth - 1];
+  (void)ctx;
+  NdecFrame *top       = &frames[sp];
   return slice_writeval_null(top, ud);
 }
 
-INLINE int32_t ndec_bind_arr_scalar_bool(void *ud_v, NdecFrame *frames, uint32_t depth, int v) {
+INLINE int32_t ndec_bind_arr_scalar_bool(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp, int v) {
   NdecBindUserData *ud = (NdecBindUserData *)ud_v;
-  NdecFrame *top       = &frames[depth - 1];
+  (void)ctx;
+  NdecFrame *top       = &frames[sp];
   return slice_writeval_bool(top, ud, v);
 }
 
-INLINE int32_t ndec_bind_arr_scalar_number(void *ud_v, NdecFrame *frames, uint32_t depth, NdecRawStr raw) {
+INLINE int32_t ndec_bind_arr_scalar_number(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp, NdecRawStr raw) {
   NdecBindUserData *ud = (NdecBindUserData *)ud_v;
-  NdecFrame *top       = &frames[depth - 1];
+  (void)ctx;
+  NdecFrame *top       = &frames[sp];
   return slice_writeval_number(top, ud, raw.ptr, raw.len);
 }
 
-INLINE int32_t ndec_bind_arr_scalar_string(void *ud_v, NdecFrame *frames, uint32_t depth, NdecStrInfo str) {
+INLINE int32_t ndec_bind_arr_scalar_string(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp, NdecStrInfo str) {
   NdecBindUserData *ud = (NdecBindUserData *)ud_v;
-  NdecFrame *top       = &frames[depth - 1];
+  (void)ctx;
+  NdecFrame *top       = &frames[sp];
 
   const uint8_t *eff_ptr = str.raw.ptr;
   uint32_t eff_len       = str.raw.len;
@@ -687,23 +746,23 @@ INLINE int32_t ndec_bind_arr_scalar_string(void *ud_v, NdecFrame *frames, uint32
 /*
  * ROOT scalar hooks (static, not INLINE; root scalar is a cold path)
  */
-static int32_t ndec_bind_root_scalar_null(void *ud_v, NdecFrame *frames, uint32_t depth) {
-  (void)depth;
-  return root_writeval_null(&frames[1], (NdecBindUserData *)ud_v);
+static int32_t ndec_bind_root_scalar_null(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp) {
+  (void)ctx;(void)sp;
+  return root_writeval_null(&frames[0], (NdecBindUserData *)ud_v);
 }
 
-static int32_t ndec_bind_root_scalar_bool(void *ud_v, NdecFrame *frames, uint32_t depth, int v) {
-  (void)depth;
-  return root_writeval_bool(&frames[1], (NdecBindUserData *)ud_v, v);
+static int32_t ndec_bind_root_scalar_bool(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp, int v) {
+  (void)ctx;(void)sp;
+  return root_writeval_bool(&frames[0], (NdecBindUserData *)ud_v, v);
 }
 
-static int32_t ndec_bind_root_scalar_number(void *ud_v, NdecFrame *frames, uint32_t depth, NdecRawStr raw) {
-  (void)depth;
-  return root_writeval_number(&frames[1], (NdecBindUserData *)ud_v, raw.ptr, raw.len);
+static int32_t ndec_bind_root_scalar_number(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp, NdecRawStr raw) {
+  (void)ctx;(void)sp;
+  return root_writeval_number(&frames[0], (NdecBindUserData *)ud_v, raw.ptr, raw.len);
 }
 
-static int32_t ndec_bind_root_scalar_string(void *ud_v, NdecFrame *frames, uint32_t depth, NdecStrInfo str) {
-  (void)depth;
+static int32_t ndec_bind_root_scalar_string(NdecCtx *ctx, void *ud_v, NdecFrame *frames, int32_t sp, NdecStrInfo str) {
+  (void)ctx;(void)sp;
   NdecBindUserData *ud   = (NdecBindUserData *)ud_v;
   const uint8_t *eff_ptr = str.raw.ptr;
   uint32_t eff_len       = str.raw.len;
@@ -715,7 +774,7 @@ static int32_t ndec_bind_root_scalar_string(void *ud_v, NdecFrame *frames, uint3
     eff_ptr = p;
     eff_len = written;
   }
-  return root_writeval_string(&frames[1], ud, eff_ptr, eff_len);
+  return root_writeval_string(&frames[0], ud, eff_ptr, eff_len);
 }
 
 #endif /* NDEC_BIND_HOOKS_H */

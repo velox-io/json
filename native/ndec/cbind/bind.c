@@ -542,8 +542,8 @@ static int write_string(NdecBindState *bs, NdecBindSlot *slot, NdecRawStr raw) {
   return bs_fail(bs, NDEC_ERR_BIND_TYPE_MISMATCH, "expected string kind");
 }
 
-static int32_t r_begin_object(void *ud) {
-  NdecBindState *bs = (NdecBindState *)ud;
+static int32_t r_begin_object(NdecCtx *ctx, void *ud_v, uint32_t child_phase) {
+  NdecBindState *bs = (NdecBindState *)ud_v;
   NdecBindSlot slot;
   if (slot_for_value(bs, &slot) < 0)
     return bs_fail(bs, NDEC_ERR_BIND_TYPE_MISMATCH, "unexpected object");
@@ -575,11 +575,16 @@ static int32_t r_begin_object(void *ud) {
   }
 
   bs_advance(bs);
+  {
+    int32_t pst = ndec_stack_push(ctx, child_phase);
+    if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
+  }
   return bs_push_struct(bs, obj, type) == 0 ? NDEC_PROCEED : -2;
 }
 
-static int32_t r_end_object(void *ud) {
-  NdecBindState *bs = (NdecBindState *)ud;
+static int32_t r_end_object(NdecCtx *ctx, void *ud_v) {
+  (void)ctx;
+  NdecBindState *bs = (NdecBindState *)ud_v;
   NdecBindFrame *f  = BS_TOP(bs);
   if (f->kind != FR_STRUCT)
     return bs_fail(bs, NDEC_ERR_BIND_TYPE_MISMATCH, "unexpected end_object");
@@ -600,6 +605,7 @@ static int32_t r_end_object(void *ud) {
   }
 
   bs_pop(bs);
+  ndec_stack_pop(ctx);
   return NDEC_PROCEED;
 }
 
@@ -630,8 +636,9 @@ static NdecFieldLookup *type_lookup(NdecBindState *bs, const NdecTypeInfo *type)
   return expected;
 }
 
-static int32_t r_object_field(void *ud, NdecStrInfo key) {
-  NdecBindState *bs = (NdecBindState *)ud;
+static int32_t r_object_field(NdecCtx *ctx, void *ud_v, NdecStrInfo key) {
+  (void)ctx;
+  NdecBindState *bs = (NdecBindState *)ud_v;
   NdecBindFrame *f  = BS_TOP(bs);
   if (f->kind != FR_STRUCT)
     return bs_fail(bs, NDEC_ERR_BIND_TYPE_MISMATCH, "field outside struct");
@@ -699,38 +706,33 @@ static int32_t r_object_field(void *ud, NdecStrInfo key) {
   return NDEC_SKIP;
 }
 
-static int32_t r_begin_array(void *ud) {
-  NdecBindState *bs = (NdecBindState *)ud;
+static int32_t r_begin_array(NdecCtx *ctx, void *ud_v, uint32_t child_phase) {
+  NdecBindState *bs = (NdecBindState *)ud_v;
   NdecBindFrame *f  = BS_TOP(bs);
   if (f->kind != FR_STRUCT || !f->s.pending)
     return bs_fail(bs, NDEC_ERR_BIND_TYPE_MISMATCH, "unexpected array");
 
   const NdecField *fld = f->s.pending;
   if (fld->kind == NDEC_KIND_ARRAY) {
-    /* Dynamic slice {ptr, len}. Resolve writeback target via the
-     * parent's pre-computed absolute offsets so arm-field arrays land
-     * at the right union-relative address. */
     void **dst_items = (void **)((uint8_t *)f->s.obj + f->s.pending_offset);
     size_t *dst_len  = (size_t *)((uint8_t *)f->s.obj + f->s.pending_len_offset);
     f->s.pending     = NULL;
+    {
+      int32_t pst = ndec_stack_push(ctx, child_phase);
+      if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
+    }
     return bs_push_array(bs, fld, dst_items, dst_len, NULL, 0) == 0 ? NDEC_PROCEED : -2;
   }
   if (fld->kind == NDEC_KIND_FIXED_ARRAY) {
-    /* Fixed T[N] inlined in the parent struct; write directly into it. */
     void *inline_buf = (uint8_t *)f->s.obj + f->s.pending_offset;
     f->s.pending     = NULL;
+    {
+      int32_t pst = ndec_stack_push(ctx, child_phase);
+      if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
+    }
     return bs_push_array(bs, fld, NULL, NULL, inline_buf, fld->fixed_count) == 0 ? NDEC_PROCEED : -2;
   }
   if (fld->kind == NDEC_KIND_HEAP_ARRAY) {
-    /* HEAP_ARRAY writes directly into caller-owned storage. We read the
-     * items pointer and capacity from the struct now, then end_array
-     * writes the final element count back through dst_len.
-     *
-     * pending_offset and pending_len_offset were already rewritten to
-     * absolute addresses, including the selected union arm case.
-     * aux_offset still names the original struct-relative len field.
-     * Until aux_offset is relocated too, HEAP_ARRAY cannot live inside
-     * a union arm because len would be written back to the wrong slot. */
     uint8_t *base      = (uint8_t *)f->s.obj;
     void   **items_slot = (void **)(base + f->s.pending_offset);
     size_t  *cap_slot   = (size_t *)(base + f->s.pending_len_offset);
@@ -740,13 +742,18 @@ static int32_t r_begin_array(void *ud) {
     if (!items_ptr && cap > 0)
       return bs_fail(bs, NDEC_ERR_BIND_TYPE_MISMATCH, "heap array items pointer NULL");
     f->s.pending = NULL;
+    {
+      int32_t pst = ndec_stack_push(ctx, child_phase);
+      if (UNLIKELY(pst != NDEC_PROCEED)) return pst;
+    }
     return bs_push_array(bs, fld, NULL, dst_len, items_ptr, cap) == 0 ? NDEC_PROCEED : -2;
   }
   return bs_fail(bs, NDEC_ERR_BIND_TYPE_MISMATCH, "expected array");
 }
 
-static int32_t r_end_array(void *ud) {
-  NdecBindState *bs = (NdecBindState *)ud;
+static int32_t r_end_array(NdecCtx *ctx, void *ud_v) {
+  (void)ctx;
+  NdecBindState *bs = (NdecBindState *)ud_v;
   NdecBindFrame *f  = BS_TOP(bs);
   if (f->kind != FR_ARRAY)
     return bs_fail(bs, NDEC_ERR_BIND_TYPE_MISMATCH, "unexpected end_array");
@@ -759,6 +766,7 @@ static int32_t r_end_array(void *ud) {
     if (a->dst_len)
       *a->dst_len = a->count;
     bs_pop(bs);
+    ndec_stack_pop(ctx);
     return NDEC_PROCEED;
   }
 
@@ -777,11 +785,13 @@ static int32_t r_end_array(void *ud) {
   free(a->scratch);
   a->scratch = NULL;
   bs_pop(bs);
+  ndec_stack_pop(ctx);
   return NDEC_PROCEED;
 }
 
-static int32_t r_scalar_null(void *ud) {
-  NdecBindState *bs = (NdecBindState *)ud;
+static int32_t r_scalar_null(NdecCtx *ctx, void *ud_v) {
+  (void)ctx;
+  NdecBindState *bs = (NdecBindState *)ud_v;
   NdecBindSlot slot;
   if (slot_for_value(bs, &slot) < 0)
     return bs_fail(bs, NDEC_ERR_BIND_TYPE_MISMATCH, "unexpected null");
@@ -837,8 +847,9 @@ static int32_t r_scalar_null(void *ud) {
   return NDEC_PROCEED;
 }
 
-static int32_t r_scalar_bool(void *ud, int value) {
-  NdecBindState *bs = (NdecBindState *)ud;
+static int32_t r_scalar_bool(NdecCtx *ctx, void *ud_v, int value) {
+  (void)ctx;
+  NdecBindState *bs = (NdecBindState *)ud_v;
   NdecBindSlot slot;
   if (slot_for_value(bs, &slot) < 0)
     return bs_fail(bs, NDEC_ERR_BIND_TYPE_MISMATCH, "unexpected bool");
@@ -849,8 +860,9 @@ static int32_t r_scalar_bool(void *ud, int value) {
   return NDEC_PROCEED;
 }
 
-static int32_t r_scalar_number(void *ud, NdecRawStr raw) {
-  NdecBindState *bs = (NdecBindState *)ud;
+static int32_t r_scalar_number(NdecCtx *ctx, void *ud_v, NdecRawStr raw) {
+  (void)ctx;
+  NdecBindState *bs = (NdecBindState *)ud_v;
   NdecBindSlot slot;
   if (slot_for_value(bs, &slot) < 0)
     return bs_fail(bs, NDEC_ERR_BIND_TYPE_MISMATCH, "unexpected number");
@@ -882,8 +894,9 @@ static int32_t r_scalar_number(void *ud, NdecRawStr raw) {
   return NDEC_PROCEED;
 }
 
-static int32_t r_scalar_string(void *ud, NdecStrInfo str) {
-  NdecBindState *bs = (NdecBindState *)ud;
+static int32_t r_scalar_string(NdecCtx *ctx, void *ud_v, NdecStrInfo str) {
+  (void)ctx;
+  NdecBindState *bs = (NdecBindState *)ud_v;
 
   /* Intercept the discriminator string of a tagged union before the
    * generic write_string path. The pending field is the parent's
@@ -932,15 +945,15 @@ static int32_t r_scalar_string(void *ud, NdecStrInfo str) {
  * symbol; only ndec_unmarshal_ex below references it.
  */
 
-#define NDEC_R_BEGIN_OBJECT(ud)       r_begin_object(ud)
-#define NDEC_R_END_OBJECT(ud)         r_end_object(ud)
-#define NDEC_R_OBJECT_FIELD(ud, key)  r_object_field((ud), (key))
-#define NDEC_R_BEGIN_ARRAY(ud)        r_begin_array(ud)
-#define NDEC_R_END_ARRAY(ud)          r_end_array(ud)
-#define NDEC_R_SCALAR_NULL(ud)        r_scalar_null(ud)
-#define NDEC_R_SCALAR_BOOL(ud, v)     r_scalar_bool((ud), (v))
-#define NDEC_R_SCALAR_NUMBER(ud, raw) r_scalar_number((ud), (raw))
-#define NDEC_R_SCALAR_STRING(ud, raw) r_scalar_string((ud), (raw))
+#define NDEC_R_BEGIN_OBJECT(ctx, ud, child_phase)       r_begin_object((ctx), (ud), (child_phase))
+#define NDEC_R_END_OBJECT(ctx, ud)         r_end_object((ctx), (ud))
+#define NDEC_R_OBJECT_FIELD(ctx, ud, key)  r_object_field((ctx), (ud), (key))
+#define NDEC_R_BEGIN_ARRAY(ctx, ud, child_phase)        r_begin_array((ctx), (ud), (child_phase))
+#define NDEC_R_END_ARRAY(ctx, ud)          r_end_array((ctx), (ud))
+#define NDEC_R_SCALAR_NULL(ctx, ud)        r_scalar_null((ctx), (ud))
+#define NDEC_R_SCALAR_BOOL(ctx, ud, v)     r_scalar_bool((ctx), (ud), (v))
+#define NDEC_R_SCALAR_NUMBER(ctx, ud, raw) r_scalar_number((ctx), (ud), (raw))
+#define NDEC_R_SCALAR_STRING(ctx, ud, raw) r_scalar_string((ctx), (ud), (raw))
 
 #define NDEC_FN_DECL static
 #define NDEC_FN_NAME bind_parse
@@ -1087,6 +1100,7 @@ int ndec_unmarshal_ex(const NdecTypeInfo *type, void *out, const uint8_t *data, 
    * pinned to bind's callbacks at compile time). */
   ndec_ctx_init(&ctx, NULL, &bs);
   ndec_ctx_set_input(&ctx, data, (uint32_t)len, 1);
+  ndec_ctx_arm_root(&ctx);
   bind_parse(&ctx);
 
   return bs_finalize(&bs, ctx.exit_code, ctx.error_pos, err);

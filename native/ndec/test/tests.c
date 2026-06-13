@@ -52,6 +52,7 @@ static uint32_t parse_exit(const char *json) {
   NdecCtx ctx;
   ndec_ctx_init(&ctx, NULL, NULL);
   ndec_ctx_set_input(&ctx, (const uint8_t *)json, (uint32_t)strlen(json), 1);
+  ndec_ctx_arm_root(&ctx);
   NDEC_PARSE(&ctx);
   return ctx.exit_code;
 }
@@ -86,6 +87,8 @@ static int parse_chunked(const char *json, uint32_t chunk_size) {
     ctx.scan_state.prev_structural_or_ws = 1;
 
     ndec_ctx_set_input(&ctx, buf, buf_len, is_final);
+    /* arm root on first call */
+    if (ctx.sp < 0) ndec_ctx_arm_root(&ctx);
     NDEC_PARSE(&ctx);
 
     iterations++;
@@ -121,23 +124,25 @@ typedef struct SkipState {
   int field_count;
 } SkipState;
 
-static int32_t skip_begin_object(void *ud) {
+static int32_t skip_begin_object(NdecCtx *ctx, void *ud, uint32_t child_phase) {
   ((SkipState *)ud)->object_count++;
-  return NDEC_PROCEED;
+  return ndec_stack_push(ctx, child_phase);
 }
-static int32_t skip_end_object(void *ud) {
+static int32_t skip_end_object(NdecCtx *ctx, void *ud) {
   ((SkipState *)ud)->object_count--;
+  ndec_stack_pop(ctx);
   return NDEC_PROCEED;
 }
-static int32_t skip_begin_array(void *ud) {
+static int32_t skip_begin_array(NdecCtx *ctx, void *ud, uint32_t child_phase) {
   ((SkipState *)ud)->array_count++;
-  return NDEC_PROCEED;
+  return ndec_stack_push(ctx, child_phase);
 }
-static int32_t skip_end_array(void *ud) {
+static int32_t skip_end_array(NdecCtx *ctx, void *ud) {
   ((SkipState *)ud)->array_count--;
+  ndec_stack_pop(ctx);
   return NDEC_PROCEED;
 }
-static int32_t skip_object_field(void *ud, NdecStrInfo key) {
+static int32_t skip_object_field(NdecCtx *ctx, void *ud, NdecStrInfo key) { (void)ctx;
   (void)key;
   ((SkipState *)ud)->field_count++;
   return NDEC_SKIP;
@@ -156,6 +161,7 @@ static int parse_skip(const char *json, int expected_fields) {
   SkipState st = {0, 0, 0};
   ndec_ctx_init(&ctx, &skip_reactor, &st);
   ndec_ctx_set_input(&ctx, (const uint8_t *)json, (uint32_t)strlen(json), 1);
+  ndec_ctx_arm_root(&ctx);
   NDEC_PARSE(&ctx);
   if (ctx.exit_code != NDEC_OK)
     return 0;
@@ -443,7 +449,7 @@ typedef struct NumLenState {
   uint32_t len;
   int calls;
 } NumLenState;
-static int32_t num_len_cb(void *ud, NdecRawStr raw) {
+static int32_t num_len_cb(NdecCtx *ctx, void *ud, NdecRawStr raw) { (void)ctx;
   NumLenState *s = (NumLenState *)ud;
   s->calls++;
   s->len = raw.len;
@@ -480,6 +486,8 @@ static int parse_chunked_number(const char *json, uint32_t chunk_size, uint32_t 
     ctx.scan_state.prev_structural_or_ws = 1;
 
     ndec_ctx_set_input(&ctx, buf, buf_len, is_final);
+    /* arm root on first call */
+    if (ctx.sp < 0) ndec_ctx_arm_root(&ctx);
     NDEC_PARSE(&ctx);
 
     iterations++;
@@ -919,25 +927,29 @@ typedef struct YieldState {
   int cnt_scalar_bool;
 } YieldState;
 
-static int32_t y_begin_object(void *ud) {
+static int32_t y_begin_object(NdecCtx *ctx, void *ud, uint32_t child_phase) {
   YieldState *s = ud;
   s->cnt_begin_object++;
+  /* push before yield so resume dispatches to child phase */
+  int32_t pst = ndec_stack_push(ctx, child_phase);
+  if (pst != NDEC_PROCEED) return pst;
   if (s->yield_begin_object) {
     s->yield_begin_object = 0;
     return NDEC_YIELD;
   }
   return NDEC_PROCEED;
 }
-static int32_t y_end_object(void *ud) {
+static int32_t y_end_object(NdecCtx *ctx, void *ud) {
   YieldState *s = ud;
   s->cnt_end_object++;
+  ndec_stack_pop(ctx);
   if (s->yield_end_object) {
     s->yield_end_object = 0;
     return NDEC_YIELD;
   }
   return NDEC_PROCEED;
 }
-static int32_t y_object_field(void *ud, NdecStrInfo key) {
+static int32_t y_object_field(NdecCtx *ctx, void *ud, NdecStrInfo key) { (void)ctx;
   (void)key;
   YieldState *s = ud;
   s->cnt_object_field++;
@@ -947,25 +959,29 @@ static int32_t y_object_field(void *ud, NdecStrInfo key) {
   }
   return NDEC_PROCEED;
 }
-static int32_t y_begin_array(void *ud) {
+static int32_t y_begin_array(NdecCtx *ctx, void *ud, uint32_t child_phase) {
   YieldState *s = ud;
   s->cnt_begin_array++;
+  /* push before yield so resume dispatches to child phase */
+  int32_t pst = ndec_stack_push(ctx, child_phase);
+  if (pst != NDEC_PROCEED) return pst;
   if (s->yield_begin_array) {
     s->yield_begin_array = 0;
     return NDEC_YIELD;
   }
   return NDEC_PROCEED;
 }
-static int32_t y_end_array(void *ud) {
+static int32_t y_end_array(NdecCtx *ctx, void *ud) {
   YieldState *s = ud;
   s->cnt_end_array++;
+  ndec_stack_pop(ctx);
   if (s->yield_end_array) {
     s->yield_end_array = 0;
     return NDEC_YIELD;
   }
   return NDEC_PROCEED;
 }
-static int32_t y_scalar_string(void *ud, NdecStrInfo str) {
+static int32_t y_scalar_string(NdecCtx *ctx, void *ud, NdecStrInfo str) { (void)ctx;
   (void)str;
   YieldState *s = ud;
   s->cnt_scalar_string++;
@@ -975,7 +991,7 @@ static int32_t y_scalar_string(void *ud, NdecStrInfo str) {
   }
   return NDEC_PROCEED;
 }
-static int32_t y_scalar_number(void *ud, NdecRawStr raw) {
+static int32_t y_scalar_number(NdecCtx *ctx, void *ud, NdecRawStr raw) { (void)ctx;
   (void)raw;
   YieldState *s = ud;
   s->cnt_scalar_number++;
@@ -985,7 +1001,7 @@ static int32_t y_scalar_number(void *ud, NdecRawStr raw) {
   }
   return NDEC_PROCEED;
 }
-static int32_t y_scalar_null(void *ud) {
+static int32_t y_scalar_null(NdecCtx *ctx, void *ud) { (void)ctx;
   YieldState *s = ud;
   s->cnt_scalar_null++;
   if (s->yield_scalar_null) {
@@ -994,7 +1010,7 @@ static int32_t y_scalar_null(void *ud) {
   }
   return NDEC_PROCEED;
 }
-static int32_t y_scalar_bool(void *ud, int value) {
+static int32_t y_scalar_bool(NdecCtx *ctx, void *ud, int value) { (void)ctx;
   (void)value;
   YieldState *s = ud;
   s->cnt_scalar_bool++;
@@ -1024,6 +1040,7 @@ static uint32_t parse_with_yields(const NdecReactor *reactor, void *ud, const ch
   NdecCtx ctx;
   ndec_ctx_init(&ctx, reactor, ud);
   ndec_ctx_set_input(&ctx, (const uint8_t *)json, (uint32_t)strlen(json), 1);
+  ndec_ctx_arm_root(&ctx);
 
   int yields = 0;
   for (;;) {
@@ -1166,7 +1183,7 @@ Test(yield, root_scalar_yield) {
   cr_assert_eq(st.cnt_scalar_number, 1);
 }
 
-static int32_t reactor_err_begin_object(void *ud) {
+static int32_t reactor_err_begin_object(NdecCtx *ctx, void *ud, uint32_t child_phase) { (void)ctx;(void)child_phase;
   (void)ud;
   return -2; /* user error, not NDEC_YIELD which is -1 */
 }
@@ -1178,6 +1195,7 @@ Test(yield, reactor_error_still_reports_error) {
   NdecCtx ctx;
   ndec_ctx_init(&ctx, &r, &unused);
   ndec_ctx_set_input(&ctx, (const uint8_t *)"{}", 2, 1);
+  ndec_ctx_arm_root(&ctx);
   NDEC_PARSE(&ctx);
   cr_assert_eq(ctx.exit_code, (uint32_t)(int32_t)-2);
 }
@@ -1191,7 +1209,7 @@ typedef struct {
   uint8_t key_has_escape[64];
 } EscapeState;
 
-static int32_t esc_object_field(void *ud, NdecStrInfo key) {
+static int32_t esc_object_field(NdecCtx *ctx, void *ud, NdecStrInfo key) { (void)ctx;
   EscapeState *s = ud;
   if (s->field_count < 64)
     s->key_has_escape[s->field_count] = key.has_escape;
@@ -1199,7 +1217,7 @@ static int32_t esc_object_field(void *ud, NdecStrInfo key) {
   return NDEC_PROCEED;
 }
 
-static int32_t esc_scalar_string(void *ud, NdecStrInfo str) {
+static int32_t esc_scalar_string(NdecCtx *ctx, void *ud, NdecStrInfo str) { (void)ctx;
   EscapeState *s = ud;
   if (s->string_count < 64)
     s->str_has_escape[s->string_count] = str.has_escape;
@@ -1217,6 +1235,7 @@ static EscapeState parse_escape(const char *json) {
   NdecCtx ctx;
   ndec_ctx_init(&ctx, &escape_reactor, &s);
   ndec_ctx_set_input(&ctx, (const uint8_t *)json, (uint32_t)strlen(json), 1);
+  ndec_ctx_arm_root(&ctx);
   NDEC_PARSE(&ctx);
   return s;
 }

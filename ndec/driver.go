@@ -10,7 +10,7 @@
 // runtime.KeepAlive across native calls.
 //
 // Stack merging: all frame state lives on ctx.Frames[].Bind*, sharing
-// ctx.Depth with the parser.
+// ctx.Sp with the parser.
 //
 // Scratch protocol: the driver pre-allocates scratch (cap = len(input)) and
 // writes its base pointer + cap into userData. The C reactor maintains
@@ -30,8 +30,14 @@ import (
 
 // phaseRootValue / phaseRootDone mirror NdecPhase enum from native types.h.
 const (
-	phaseRootValue uint32 = 0
-	phaseRootDone  uint32 = 7
+	phaseRootValue             uint32 = 0
+	phaseObjectFieldOrEnd      uint32 = 1
+	phaseObjectFieldValue      uint32 = 2
+	phaseObjectContinueOrEnd   uint32 = 3
+	phaseArrayElemOrEnd        uint32 = 4
+	phaseArrayElemValue        uint32 = 5
+	phaseArrayContinueOrEnd    uint32 = 6
+	phaseRootDone              uint32 = 7
 )
 const atofCtxSize = 1976
 
@@ -185,7 +191,7 @@ func init() {
 // PrevStructuralOrWs, YieldFlags, and ScratchLen are overwritten before any
 // subsequent read, so clearing them would only add churn.
 func (d *driverState) reset() {
-	d.ctx.Depth = 0
+	d.ctx.Sp = -1
 	d.ctx.ScanState.PrevInString = 0
 	d.ctx.ScanState.PrevEscape = 0
 	d.userData.PendingAction = 0
@@ -270,28 +276,19 @@ func (d *driverState) runUnmarshal(bt *typeInfo, dst unsafe.Pointer, input []byt
 	// Store root type info for error path field name / type resolution.
 	d.rootBT = bt
 
-	// Sentinel frame convention (parser state machine symmetry):
-	//   frames[0]: owned by the parser. Driver writes phase=ROOT_VALUE +
-	//              BindContainerKind=INVALID so begin_object/end_object/etc
-	//              hooks default-fall-through to root_done on the parent
-	//              path. Bootstrap pushes depth from 0 to 1; this frame
-	//              exists from then on. BindType/BindDst are not read.
-	//   frames[1]: root binding's child slot, pre-filled by the driver.
-	//              root_value sees '{'/'[' then STACK_PUSH to depth==2;
-	//              begin_object/begin_array hook sees child = frames[1].
-	//              Root scalars do not STACK_PUSH; at depth==1 the root
-	//              scalar hook reads frames[1]'s binding directly.
-	sentinel := &d.ctx.Frames[0]
-	sentinel.Phase = uint32(phaseRootValue)
-	sentinel.Data = 0
-	sentinel.BindContainerKind = uint8(bkInvalid)
-	sentinel.BindPendingFieldIdx = -1
-
-	root := &d.ctx.Frames[1]
+	// Root frame: frames[0] is the root frame.
+	//   - phase and data are written by ndec_ctx_arm_root (C side).
+	//   - bind_type, bind_dst, bind_container_kind are written here.
+	//   - root_value sees '{'/'[' and calls begin_object/begin_array
+	//     which pushes to frames[1] for nested containers.
+	//   - root scalars read frames[0] directly (no STACK_PUSH).
+	root := &d.ctx.Frames[0]
 	root.BindType = unsafe.Pointer(&bt.base)
 	root.BindDst = dst
 	root.BindContainerKind = uint8(bt.kind())
 	root.BindPendingFieldIdx = -1
+	root.Phase = uint32(phaseRootValue)
+	root.Data = 0
 
 	if cap(d.scratch) > 0 {
 		d.userData.ScratchPtr = unsafe.Pointer(unsafe.SliceData(d.scratch[:cap(d.scratch)]))

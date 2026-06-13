@@ -82,12 +82,12 @@ func mapBuiltTypeOfFrame(frame *ndecFrame) (*typeInfo, error) {
 // slice headers in live structs, not inside kvBuf. SLICE frame BindDst is
 // the backing array base, also not in kvBuf.
 func (d *driverState) rebaseLiveMapFrameBases(oldStart unsafe.Pointer, oldLen int, newStart unsafe.Pointer) {
-	if oldStart == nil || newStart == nil || oldLen == 0 || d.ctx.Depth < 2 {
+	if oldStart == nil || newStart == nil || oldLen == 0 || d.ctx.Sp < 0 {
 		return
 	}
 	oldBase := uintptr(oldStart)
 	oldEnd := oldBase + uintptr(oldLen)
-	for i := uint32(0); i+1 < d.ctx.Depth; i++ {
+	for i := int32(0); i <= d.ctx.Sp; i++ {
 		frame := &d.ctx.Frames[i]
 		switch frame.BindContainerKind {
 		case uint8(bkMap):
@@ -143,6 +143,8 @@ func initMapFrame(child *ndecFrame, mapBT *typeInfo, mapHeader, base unsafe.Poin
 	child.BindContainerKind = uint8(bkMap)
 	child.ParentFieldIdx = parentFieldIdx
 	child.BindSliceHdr = base
+	child.Phase = uint32(phaseObjectFieldOrEnd)
+	child.Data = 0
 }
 
 // bootstrapRootMap rewrites frames[0] as a MAP frame after map header
@@ -156,19 +158,16 @@ func (d *driverState) bootstrapRootMap(mapBT *typeInfo, mapHeader unsafe.Pointer
 	root.setBindKvCount(0)
 	root.BindArrayCap = uint32(mapKVBufCount)
 	root.BindContainerKind = uint8(bkMap)
-	// Root MAP has no parent frame; errCtx does not read/write ParentFieldIdx
-	// here. Stale data is harmless.
 	root.BindSliceHdr = base
 	return nil
 }
 
 func (d *driverState) handleBeginMapYield() error {
-	// Root MAP: depth==2 under sentinel convention. frames[1] is the root
-	// binding (pre-filled by driver), parent frames[0] is the sentinel
-	// (BK_INVALID). Allocate the map header + kvBuf sub-region, then
-	// rewrite frames[1] as a MAP frame.
-	if d.ctx.Depth == 2 && d.ctx.Frames[1].BindContainerKind == uint8(bkMap) {
-		root := &d.ctx.Frames[1]
+	// Root MAP: sp==1 (reactor pushed child), frames[0] is the root
+	// binding (pre-filled by driver). Allocate the map header + kvBuf
+	// sub-region, then rewrite frames[1] as a MAP frame.
+	if d.ctx.Sp == 1 && d.ctx.Frames[0].BindContainerKind == uint8(bkMap) {
+		root := &d.ctx.Frames[0]
 		mapBT := (*typeInfo)(root.BindType)
 		if mapBT == nil || mapBT.rtypePtr() == nil {
 			return errMapBindTypeNil
@@ -178,13 +177,15 @@ func (d *driverState) handleBeginMapYield() error {
 		}
 		mapHeader := gort.MakeMap(mapBT.rtypePtr(), 0, nil)
 		*(*unsafe.Pointer)(root.BindDst) = mapHeader
-		return d.bootstrapRootMap(mapBT, mapHeader, root)
+		// Child frame at frames[1] was already pushed by reactor.
+		child := &d.ctx.Frames[1]
+		return d.bootstrapRootMap(mapBT, mapHeader, child)
 	}
 
-	if d.ctx.Depth < 2 {
+	if d.ctx.Sp < 1 {
 		return errBeginMapNoParent
 	}
-	parent := &d.ctx.Frames[d.ctx.Depth-2]
+	parent := &d.ctx.Frames[d.ctx.Sp-1]
 	var mapBT *typeInfo
 	parentFieldIdx := int32(-1)
 	switch parent.BindContainerKind {
@@ -244,8 +245,9 @@ func (d *driverState) handleBeginMapYield() error {
 	kvBufCount := mapKVBufCount
 	need := int(mapBT.kvSlotSize()) * kvBufCount
 	base := d.reserveMapKVBuf(need)
-	child := &d.ctx.Frames[d.ctx.Depth-1]
+	child := &d.ctx.Frames[d.ctx.Sp]
 	initMapFrame(child, mapBT, nil, base, kvBufCount, parentFieldIdx)
+	// Stack already pushed by reactor; no Sp increment needed.
 	return nil
 }
 
@@ -258,9 +260,8 @@ func mapValueSlotPtr(frame *ndecFrame, mapBT *typeInfo, idx uint32) unsafe.Point
 }
 
 // parentMapFrame returns the MAP frame's physical predecessor in ctx.Frames.
-// No BEGIN_MAP path places a child MAP frame at frames[0] (that slot is the
-// driver-pre-filled INVALID sentinel), so frame-1 is always a valid real
-// parent (STRUCT or outer MAP).
+// frames[0] is the root frame, so frame-1 is always a valid real parent
+// (STRUCT or outer MAP) unless frame itself is the root frame.
 func parentMapFrame(frame *ndecFrame) *ndecFrame {
 	return (*ndecFrame)(unsafe.Add(unsafe.Pointer(frame), -int(unsafe.Sizeof(ndecFrame{}))))
 }
@@ -392,8 +393,10 @@ func (d *driverState) flushMapFrame(frame *ndecFrame, closing bool) error {
 	}
 	if closing {
 		d.shrinkKvBufTo(frame.BindSliceHdr)
-		if d.ctx.Depth >= 1 {
-			parent := &d.ctx.Frames[d.ctx.Depth-1]
+		// Pop: reactor delegated pop to driver. Parent is at Sp-1.
+		d.ctx.Sp--
+		if d.ctx.Sp >= 0 {
+			parent := &d.ctx.Frames[d.ctx.Sp]
 			switch parent.BindContainerKind {
 			case uint8(bkStruct):
 				parent.BindPendingFieldIdx = -1
@@ -418,18 +421,17 @@ func (d *driverState) handleFlushMapYield() error {
 	closing := d.userData.YieldFlags == yfMapClosing
 	var frame *ndecFrame
 	if closing {
-		// Parser has already POP'd; the popped frame is at frames[depth]
-		// (POP does not clear data). depth==0 means root map (P4 phase A
-		// does not support top-level map; fallback).
-		if d.ctx.Depth >= ndecMaxDepth {
+		// Parser hasn't POP'd yet in the new model; the closing MAP frame
+		// is at frames[sp]. The reactor yields before pop.
+		if d.ctx.Sp >= ndecMaxDepth {
 			return errFlushMapClosingDepth
 		}
-		frame = &d.ctx.Frames[d.ctx.Depth]
+		frame = &d.ctx.Frames[d.ctx.Sp]
 	} else {
-		if d.ctx.Depth == 0 {
+		if d.ctx.Sp < 0 {
 			return errFlushMapNoActiveFrame
 		}
-		frame = &d.ctx.Frames[d.ctx.Depth-1]
+		frame = &d.ctx.Frames[d.ctx.Sp]
 	}
 	if frame.BindContainerKind != uint8(bkMap) {
 		return errFlushMapNonMapFrame

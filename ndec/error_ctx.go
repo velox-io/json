@@ -401,7 +401,7 @@ func (ec *errCtx) renderFieldPath() (structName, fieldPath string) {
 
 func (d *driverState) makeTypeError() error {
 	ec := &errCtx{
-		depth:  int(d.ctx.Depth),
+		depth:  int(d.ctx.Sp + 1),
 		offset: int64(d.ctx.ErrorPos),
 		rootBT: d.rootBT,
 	}
@@ -433,7 +433,7 @@ func (d *driverState) makeTypeError() error {
 // makeUnknownFieldError captures error context for unknown field errors.
 func (d *driverState) makeUnknownFieldError() error {
 	ec := &errCtx{
-		depth:  int(d.ctx.Depth),
+		depth:  int(d.ctx.Sp + 1),
 		offset: int64(d.ctx.ErrorPos),
 		rootBT: d.rootBT,
 	}
