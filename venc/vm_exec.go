@@ -113,19 +113,30 @@ func (es *encodeState) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(uns
 
 		es.flushVMTrace()
 
-		written := int(ctx.BufCur - bufStart)
+		produced := int(ctx.BufCur - bufStart)
 
 		switch vmstateGetExit(ctx.VMState) {
 		case vjExitOK:
-			es.buf = es.buf[:len(es.buf)+written]
+			es.buf = es.buf[:len(es.buf)+produced]
 			return nil
 
 		case vjExitBufFull:
-			es.buf = es.buf[:len(es.buf)+written]
+			es.buf = es.buf[:len(es.buf)+produced]
 
 			if es.flushFn != nil {
 				if err := es.flush(); err != nil {
 					return err
+				}
+				// produced == 0 means flush freed no space for the VM's next
+				// atomic write (its up-front reservation exceeds the workBuf
+				// cap, e.g. INTERFACE's 330 bytes), so it would loop forever
+				// emitting empty writes. Grow to break the deadlock, copying
+				// any short-write residual flush() left at the base.
+				if produced == 0 {
+					newCap := max(cap(es.buf)*2, max(len(es.buf), 4096))
+					newBuf := gort.MakeDirtyBytes(len(es.buf), newCap)
+					copy(newBuf, es.buf)
+					es.buf = newBuf
 				}
 			} else {
 				newCap := max(cap(es.buf)*2, len(es.buf)+4096)
@@ -135,7 +146,7 @@ func (es *encodeState) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(uns
 			}
 
 		case vjExitYieldToGo:
-			es.buf = es.buf[:len(es.buf)+written]
+			es.buf = es.buf[:len(es.buf)+produced]
 
 			// Go-side fallback paths must see the VM's current indent depth.
 			if ctx.IndentStep > 0 {

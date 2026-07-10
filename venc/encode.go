@@ -10,6 +10,13 @@ import (
 
 const (
 	encBufInitSize = 32 * 1024
+	// streamBufCapMax bounds es.streamBuf across encodes. The streaming path
+	// grows the buffer on demand (e.g. a large string whose 2+len*6 escape
+	// reservation exceeds encBufInitSize); we tolerate that overgrowth for
+	// the rest of the in-flight encode, then cap it back down on the next
+	// acquire so a single oversized value cannot ratchet the pooled buffer
+	// toward unbounded memory.
+	streamBufCapMax = 4 * encBufInitSize
 )
 
 type encodeState struct {
@@ -19,6 +26,14 @@ type encodeState struct {
 	inVM  bool
 	buf   []byte
 
+	// streamBuf is a buffer dedicated to the streaming Encoder path, kept
+	// isolated from Marshal's zero-copy erosion. marshalWith returns
+	// es.buf[:n:n] and advances es.buf's base via es.buf[n:], shrinking cap
+	// on the pooled object; the streaming path never lends its buffer to a
+	// caller, so it must not inherit that eroded cap. Lazy-allocated on first
+	// streaming use; reused thereafter.
+	streamBuf []byte
+
 	indentString string
 	indentPrefix string
 	indentDepth  int
@@ -26,7 +41,7 @@ type encodeState struct {
 	nativeIndent bool                              // simple indent pattern (C VM can handle)
 	tplKey       string                            // L1 cache key for indentTpl (survives pool recycle)
 
-	flushFn func([]byte) error
+	flushFn func([]byte) (int, error)
 	bufSize int
 }
 
@@ -71,13 +86,45 @@ func releaseEncodeState(es *encodeState) {
 	// indentTpl and tplKey are intentionally kept: they point into the
 	// global immutable cache and serve as an L1 fast-path on reuse.
 
+	// Cap the streaming buffer back to the floor if a previous streaming
+	// encode grew it past streamBufCapMax, so a single oversized value cannot
+	// ratchet the pooled buffer toward unbounded memory. Done at release so
+	// the bound holds regardless of which pool consumer acquires next.
+	es.streamBuf = es.cappedStreamBuf()
+
 	encodeStatePool.Put(es)
 }
 
+// cappedStreamBuf returns es.streamBuf reduced to encBufInitSize when its cap
+// exceeds streamBufCapMax, otherwise the existing (reused) buffer. Shared by
+// releaseEncodeState and acquireStreamBuf so the bound is enforced both at
+// pool-out and at acquire time.
+func (es *encodeState) cappedStreamBuf() []byte {
+	if cap(es.streamBuf) > streamBufCapMax {
+		return gort.MakeDirtyBytes(0, encBufInitSize)
+	}
+	return es.streamBuf
+}
+
+// flush writes the buffered bytes to the underlying writer via flushFn. An
+// io.Writer may legally short-write (return n < len(buf), err == nil); flush
+// preserves the unwritten tail in es.buf so the next iteration re-attempts it,
+// rather than discarding data. Only a fully-consumed flush (n == len(es.buf))
+// clears es.buf. A non-nil err stops encoding immediately; in that case the
+// tail is dropped because the caller is about to bail out.
 func (es *encodeState) flush() error {
-	err := es.flushFn(es.buf)
-	es.buf = es.buf[:0]
-	return err
+	n, err := es.flushFn(es.buf)
+	if err != nil {
+		return err
+	}
+	if n >= len(es.buf) {
+		es.buf = es.buf[:0]
+	} else if n > 0 {
+		// Keep the unwritten tail at the buffer's base so the VM loop's
+		// workBuf slice and any subsequent grow/copy see the residual bytes.
+		es.buf = es.buf[n:]
+	}
+	return nil
 }
 
 func (es *encodeState) exec(bp *Blueprint, base unsafe.Pointer) error {
@@ -147,4 +194,16 @@ func (es *encodeState) growBuf(hint int) {
 	if hint > cap(es.buf) {
 		es.buf = gort.MakeDirtyBytes(0, max((encBufInitSize/hint)*hint, hint*2))
 	}
+}
+
+// acquireStreamBuf returns a streaming buffer of at least encBufInitSize,
+// reusing es.streamBuf across pool recycles. Lazily allocated on first use.
+// The streamBufCapMax bound is enforced at releaseEncodeState (pool-out), so
+// by acquire time it is already within range; this only tops up the floor.
+func (es *encodeState) acquireStreamBuf() []byte {
+	sb := es.cappedStreamBuf()
+	if cap(sb) >= encBufInitSize {
+		return sb[:0]
+	}
+	return gort.MakeDirtyBytes(0, encBufInitSize)
 }

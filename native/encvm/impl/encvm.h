@@ -1507,6 +1507,13 @@ vj_op_interface: {
     VM_DISPATCH();
   }
   case VJ_IFACE_BUF_FULL:
+    /* Undo the speculative key write. On re-entry the VM re-checks space
+     * and re-writes the key, so leaving it in place duplicates the key.
+     * Rolling back also makes the Go-side BUF_FULL handler observe
+     * written == 0, so it grows the workBuf for the next atomic write
+     * (e.g. a large string whose 2+len*6 reservation exceeds the buf). */
+    buf = iface_saved_buf;
+    vmstate = iface_saved_vmstate;
     VM_SAVE_AND_RETURN(VJ_EXIT_BUF_FULL);
   case VJ_IFACE_NAN_INF:
     /* Undo key write on error — the error will be reported to Go */

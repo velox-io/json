@@ -168,16 +168,34 @@ func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	}
 
 	hint := encodingSizeHint(ti, ptr)
-	es.growBuf(hint)
 
-	// Stream out completed chunks to keep memory bounded.
-	es.flushFn = func(p []byte) error {
-		_, err := enc.w.Write(p)
+	// flushFn returns the writer's n so flush() can retain the unwritten
+	// tail on a short write (io.Writer may legally return n < len(p),
+	// err == nil).
+	es.flushFn = func(p []byte) (int, error) {
+		n, err := enc.w.Write(p)
 		if err != nil {
 			enc.err = err
 		}
-		return err
+		return n, err
 	}
+
+	// Use a dedicated streaming buffer, isolated from Marshal's zero-copy
+	// erosion. marshalWith returns es.buf[:n:n] and advances the base via
+	// es.buf[n:], shrinking cap on the pooled object; the streaming path
+	// never lends its buffer to a caller, so it must not inherit that eroded
+	// cap (a too-small cap is what triggered the BUF_FULL storm). Swap
+	// es.buf onto streamBuf for the duration of the encode, capturing the
+	// (possibly grown) buffer back into es.streamBuf on exit and restoring
+	// es.buf so releaseEncodeState returns the marshal buffer untouched.
+	marshalBuf := es.buf
+	es.buf = es.acquireStreamBuf()
+	defer func() {
+		es.streamBuf = es.buf
+		es.buf = marshalBuf
+	}()
+
+	es.growBuf(hint)
 
 	if err := es.encodeTop(ti, ptr); err != nil {
 		return enc.stickyErr(err)
@@ -185,10 +203,28 @@ func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 
 	es.buf = append(es.buf, '\n')
 
-	if _, err := enc.w.Write(es.buf); err != nil {
+	// Write out the trailing bytes in full, accounting for short writes
+	// (io.Writer may legally return n < len(p), err == nil).
+	if err := writeAll(enc.w, es.buf); err != nil {
 		return enc.stickyErr(err)
 	}
 
+	return nil
+}
+
+// writeAll writes p to w, retrying the unwritten tail on short writes until
+// all bytes are consumed or an error occurs.
+func writeAll(w io.Writer, p []byte) error {
+	for len(p) > 0 {
+		n, err := w.Write(p)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+		p = p[n:]
+	}
 	return nil
 }
 
