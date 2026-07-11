@@ -3,6 +3,7 @@ package venc
 import (
 	"bytes"
 	"errors"
+	"io"
 	"sync"
 	"testing"
 )
@@ -88,3 +89,60 @@ func TestStreamingEncoder_WriteErrorPropagates(t *testing.T) {
 type errWriter struct{ err error }
 
 func (w *errWriter) Write(p []byte) (int, error) { return 0, w.err }
+
+// zeroWriter returns (0, nil) for every Write. The io.Writer contract
+// permits short writes (n < len(p), err == nil), and returning n == 0
+// with err == nil is technically legal ("accepted nothing, nothing
+// wrong"). A misbehaving writer like this must not cause the encoder to
+// infinite-loop, silently buffer unbounded data, or return nil as if
+// the data was written. The encoder should surface a real error.
+type zeroWriter struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (w *zeroWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	w.calls++
+	w.mu.Unlock()
+	return 0, nil
+}
+
+// TestStreamingEncoder_ZeroWriteReturnsError drives Encoder.Encode with a
+// writer that always returns (0, nil). Encode must not return nil (which
+// would mean it believed the data was written) and must not loop forever;
+// it should surface io.ErrShortWrite so the caller knows the writer made
+// no progress.
+func TestStreamingEncoder_ZeroWriteReturnsError(t *testing.T) {
+	w := &zeroWriter{}
+	enc := NewEncoder(w)
+	err := enc.Encode(map[string]any{"k": "v"})
+	if err == nil {
+		t.Fatalf("zero-write writer: Encode returned nil error; data silently lost")
+	}
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("zero-write writer: expected io.ErrShortWrite, got %v", err)
+	}
+	if w.calls == 0 {
+		t.Fatalf("zero-write writer: Write was never called")
+	}
+}
+
+// TestStreamingEncoder_ZeroWriteLargePayloadTerminates exercises the
+// intermediate flush path with a payload large enough to trigger BUF_FULL
+// cycles. With a zero-write writer, every flush() is a no-op (n == 0,
+// err == nil), so flush() makes no progress. The encoder must still
+// terminate (no infinite loop) and return an error rather than buffering
+// unbounded data forever.
+func TestStreamingEncoder_ZeroWriteLargePayloadTerminates(t *testing.T) {
+	big := bytes.Repeat([]byte("ab"), 100*1024) // 200 KiB of string content
+	w := &zeroWriter{}
+	enc := NewEncoder(w)
+	err := enc.Encode(map[string]any{"data": string(big)})
+	if err == nil {
+		t.Fatalf("zero-write writer: Encode returned nil error; data silently lost")
+	}
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("zero-write writer: expected io.ErrShortWrite, got %v", err)
+	}
+}

@@ -1,6 +1,7 @@
 package venc
 
 import (
+	"io"
 	"sync"
 	"unsafe"
 
@@ -112,6 +113,12 @@ func (es *encodeState) cappedStreamBuf() []byte {
 // rather than discarding data. Only a fully-consumed flush (n == len(es.buf))
 // clears es.buf. A non-nil err stops encoding immediately; in that case the
 // tail is dropped because the caller is about to bail out.
+//
+// A zero write (n == 0, err == nil) on a non-empty buffer is treated as a
+// short write: the writer made no progress, and re-entering the VM would
+// grow es.buf unboundedly on each BUF_FULL cycle (flush() no-ops, the workBuf
+// cap doubles until the whole payload fits, then the final writeAll catches
+// it anyway). Fail fast instead of buffering the entire output in memory.
 func (es *encodeState) flush() error {
 	n, err := es.flushFn(es.buf)
 	if err != nil {
@@ -123,6 +130,8 @@ func (es *encodeState) flush() error {
 		// Keep the unwritten tail at the buffer's base so the VM loop's
 		// workBuf slice and any subsequent grow/copy see the residual bytes.
 		es.buf = es.buf[n:]
+	} else if len(es.buf) > 0 {
+		return io.ErrShortWrite
 	}
 	return nil
 }
