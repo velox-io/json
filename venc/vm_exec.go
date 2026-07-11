@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"unsafe"
 
-	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/native/encvm"
 	"github.com/velox-io/json/typ"
 )
@@ -56,12 +55,18 @@ func (es *encodeState) execVM(bp *Blueprint, base unsafe.Pointer) error {
 
 	// Indent mode uses the full VM; compact mode selects compact vs fast escaping.
 	var vmExec func(unsafe.Pointer)
-	if es.nativeIndent && es.indentString != "" {
+	if es.indentString != "" {
 		es.buildIndentTpl(es.indentPrefix, es.indentString)
 		ctx.IndentTpl = unsafe.Pointer(&es.indentTpl[0])
 		ctx.IndentStep = uint8(len(es.indentString))
 		ctx.IndentPrefixLen = uint8(len(es.indentPrefix))
 		ctx.IndentDepth = 0
+		defer func() {
+			ctx.IndentTpl = nil
+			ctx.IndentStep = 0
+			ctx.IndentPrefixLen = 0
+			ctx.IndentDepth = 0
+		}()
 
 		vmExec = encvm.VMExec
 	} else {
@@ -77,31 +82,21 @@ func (es *encodeState) execVM(bp *Blueprint, base unsafe.Pointer) error {
 	es.inVM = false
 	ctx.OpsPtr = nil
 	ctx.CurBase = nil
-	if es.nativeIndent && es.indentString != "" {
-		ctx.IndentTpl = nil
-		ctx.IndentStep = 0
-		ctx.IndentPrefixLen = 0
-		ctx.IndentDepth = 0
-	}
 	return err
 }
 
 func (es *encodeState) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(unsafe.Pointer)) error {
+	bufFull := false
+	produced := 0
 	for {
-		if es.flushFn != nil && len(es.buf) > 0 {
-			if err := es.flush(); err != nil {
+		// The write window is es.buf[len:cap]. The previous iteration's
+		// bottom-of-loop reclaim guarantees it is non-empty, so reclaim is not
+		// polled here on the hot path. Only an already-full buffer at entry
+		// (AppendMarshal into a full dst) needs a pre-run reclaim.
+		if len(es.buf) == cap(es.buf) {
+			if err := es.reclaim(bufFull, produced); err != nil {
 				return err
 			}
-		}
-
-		// Ensure workBuf is non-empty. Besides vjExitBufFull, the YieldToGo
-		// handlers also append to m.buf and may fill it to cap exactly,
-		// so we must check on every iteration, not just after BufFull.
-		if len(es.buf) == cap(es.buf) {
-			newCap := max(cap(es.buf)*2, 4096)
-			newBuf := gort.MakeDirtyBytes(len(es.buf), newCap)
-			copy(newBuf, es.buf)
-			es.buf = newBuf
 		}
 
 		workBuf := es.buf[len(es.buf):cap(es.buf)]
@@ -113,40 +108,22 @@ func (es *encodeState) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(uns
 
 		es.flushVMTrace()
 
-		produced := int(ctx.BufCur - bufStart)
+		produced = int(ctx.BufCur - bufStart)
+		// Single commit point for VM output, regardless of exit reason.
+		es.buf = es.buf[:len(es.buf)+produced]
 
 		switch vmstateGetExit(ctx.VMState) {
 		case vjExitOK:
-			es.buf = es.buf[:len(es.buf)+produced]
 			return nil
 
 		case vjExitBufFull:
-			es.buf = es.buf[:len(es.buf)+produced]
-
-			if es.flushFn != nil {
-				if err := es.flush(); err != nil {
-					return err
-				}
-				// produced == 0 means flush freed no space for the VM's next
-				// atomic write (its up-front reservation exceeds the workBuf
-				// cap, e.g. INTERFACE's 330 bytes), so it would loop forever
-				// emitting empty writes. Grow to break the deadlock, copying
-				// any short-write residual flush() left at the base.
-				if produced == 0 {
-					newCap := max(cap(es.buf)*2, max(len(es.buf), 4096))
-					newBuf := gort.MakeDirtyBytes(len(es.buf), newCap)
-					copy(newBuf, es.buf)
-					es.buf = newBuf
-				}
-			} else {
-				newCap := max(cap(es.buf)*2, len(es.buf)+4096)
-				newBuf := gort.MakeDirtyBytes(len(es.buf), newCap)
-				copy(newBuf, es.buf)
-				es.buf = newBuf
-			}
+			// Window exhausted; the bottom-of-loop reclaim reopens it. produced
+			// distinguishes partial progress (grow only the tail) from a
+			// reservation larger than the whole window (produced == 0).
+			bufFull = true
 
 		case vjExitYieldToGo:
-			es.buf = es.buf[:len(es.buf)+produced]
+			bufFull = false
 
 			// Go-side fallback paths must see the VM's current indent depth.
 			if ctx.IndentStep > 0 {
@@ -205,6 +182,15 @@ func (es *encodeState) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(uns
 
 		default:
 			return fmt.Errorf("venc: native encoder exit code %d", vmstateGetExit(ctx.VMState))
+		}
+
+		// Loop-back edge: the window was exhausted (BUF_FULL) or a yield
+		// handler appended to es.buf. Reclaim space for the next VM entry:
+		// buffer mode grows, stream mode flushes committed bytes (and grows only
+		// on an oversized reservation). Runs once per loop-back, never on the
+		// single-iteration fast path above.
+		if err := es.reclaim(bufFull, produced); err != nil {
+			return err
 		}
 	}
 }

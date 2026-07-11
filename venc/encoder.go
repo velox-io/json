@@ -161,18 +161,21 @@ func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 	defer releaseEncodeState(es)
 
 	es.flags = enc.flags
-	es.indentPrefix = enc.indentPrefix
 	es.indentString = enc.indentString
-	if enc.indentString != "" {
-		es.nativeIndent = encvm.Available && isSimpleIndent(enc.indentPrefix, enc.indentString) > 0
+	if es.indentString != "" {
+		es.indentDepth = 0
+		es.indentPrefix = enc.indentPrefix
+		es.useNativeVM = encvm.Available && isSimpleIndent(enc.indentPrefix, enc.indentString)
 	}
 
-	hint := encodingSizeHint(ti, ptr)
-
-	// flushFn returns the writer's n so flush() can retain the unwritten
-	// tail on a short write (io.Writer may legally return n < len(p),
-	// err == nil).
-	es.flushFn = func(p []byte) (int, error) {
+	// Flip to stream mode for this encode, and undo it on the way out so stream
+	// mode is fully self-contained here: acquire/release and the Marshal path
+	// never touch mode/stream. The write callback returns the writer's n so
+	// flush can retain the unwritten tail on a short write (io.Writer may
+	// legally return n < len(p), err == nil). Dropping write here also unpins
+	// the io.Writer before the object returns to the pool.
+	es.mode = modeStream
+	es.stream.write = func(p []byte) (int, error) {
 		n, err := enc.w.Write(p)
 		if err != nil {
 			enc.err = err
@@ -180,22 +183,20 @@ func (enc *Encoder) encodePtr(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 		return n, err
 	}
 
-	// Use a dedicated streaming buffer, isolated from Marshal's zero-copy
-	// erosion. marshalWith returns es.buf[:n:n] and advances the base via
-	// es.buf[n:], shrinking cap on the pooled object; the streaming path
-	// never lends its buffer to a caller, so it must not inherit that eroded
-	// cap (a too-small cap is what triggered the BUF_FULL storm). Swap
-	// es.buf onto streamBuf for the duration of the encode, capturing the
-	// (possibly grown) buffer back into es.streamBuf on exit and restoring
-	// es.buf so releaseEncodeState returns the marshal buffer untouched.
+	// Swap in the parked streaming buffer, isolated from Marshal's zero-copy
+	// arena erosion; park the (possibly grown) buffer back on the way out.
 	marshalBuf := es.buf
-	es.buf = es.acquireStreamBuf()
+	es.buf = es.stream.acquireBuf()
 	defer func() {
-		es.streamBuf = es.buf
+		es.stream.park(es.buf)
 		es.buf = marshalBuf
+		// Bound the parked buffer if this encode grew it past streamBufCapMax,
+		// so a single oversized value cannot ratchet the pooled buffer toward
+		// unbounded memory. Must run after park, which stores the grown buffer.
+		es.stream.capBack()
+		es.mode = modeBuffer
+		es.stream.write = nil
 	}()
-
-	es.growBuf(hint)
 
 	if err := es.encodeTop(ti, ptr); err != nil {
 		return enc.stickyErr(err)

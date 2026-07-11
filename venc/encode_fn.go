@@ -117,7 +117,7 @@ func bindEncodeFn(ti *EncTypeInfo) {
 	case typ.KindMap:
 		mi := ti.ResolveMap()
 		ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
-			if mi.IsStringKey && !es.inVM && es.nativeIndent {
+			if mi.IsStringKey && !es.inVM && es.useNativeVM {
 				return es.exec(ti.getBlueprint(), ptr)
 			}
 			if mi.MapKind == typ.MapVariantStrStr {

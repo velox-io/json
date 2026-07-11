@@ -5,6 +5,7 @@ import (
 	"unsafe"
 
 	"github.com/velox-io/json/gort"
+	"github.com/velox-io/json/native/encvm"
 )
 
 type MarshalOption func(*encodeState)
@@ -48,11 +49,12 @@ func WithFastEscape() MarshalOption {
 	return func(es *encodeState) { es.flags &^= uint32(escapeHTML | escapeLineTerms | escapeInvalidUTF8) }
 }
 
-// WithBufSize sets a fixed working buffer size for encoding. If es.buf's
-// capacity is less than n, a new buffer of size n is allocated; otherwise the
-// existing buffer is kept. After encoding, the result is copied into a
-// tight-fit allocation (exactly len(output) bytes) and returned, so es.buf
-// retains its full capacity for pool reuse.
+// WithBufSize sets a fixed starting size for the working buffer. If the pooled
+// buffer's capacity is less than n, a fresh buffer of size n is allocated;
+// otherwise the existing one is kept. After encoding, the result is copied into
+// a tight-fit allocation (exactly len(output) bytes) and returned, so the
+// pooled buffer retains its full capacity for reuse (this opts out of the
+// default zero-copy return).
 func WithBufSize(n int) MarshalOption {
 	return func(es *encodeState) {
 		if n > 0 {
@@ -105,15 +107,21 @@ func marshalSlowPtr[T any](v *T, rt reflect.Type, opts []MarshalOption) ([]byte,
 }
 
 func (es *encodeState) marshalWith(ti *EncTypeInfo, ptr unsafe.Pointer) ([]byte, error) {
+	// Drain the WithBufSize hand-off into a local: it is a per-call directive,
+	// not encode state, so it lives on es only long enough to cross from the
+	// MarshalOption closure to here. Zeroing it now means release needs no reset.
+	bufSize := es.bufSize
+	es.bufSize = 0
+
 	hint := int(ti.AdaptiveHint.Load())
 	if hint == 0 {
 		hint = encodingSizeHint(ti, ptr)
 		ti.AdaptiveHint.Store(int64(hint))
 	}
 
-	if es.bufSize > 0 {
-		if cap(es.buf) < es.bufSize {
-			es.buf = gort.MakeDirtyBytes(0, es.bufSize)
+	if bufSize > 0 {
+		if cap(es.buf) < bufSize {
+			es.buf = gort.MakeDirtyBytes(0, bufSize)
 		}
 	} else {
 		es.growBuf(hint)
@@ -129,7 +137,7 @@ func (es *encodeState) marshalWith(ti *EncTypeInfo, ptr unsafe.Pointer) ([]byte,
 		ti.AdaptiveHint.Store(int64(adapted))
 	}
 
-	if es.bufSize > 0 {
+	if bufSize > 0 {
 		// Tight copy: allocate exactly n bytes for the caller;
 		// es.buf keeps its full capacity for pool reuse.
 		result := make([]byte, n)
@@ -150,9 +158,10 @@ func MarshalIndent[T any](v T, prefix, indent string, opts ...MarshalOption) ([]
 // withIndent returns an internal MarshalOption that configures indentation.
 func withIndent(prefix, indent string) MarshalOption {
 	return func(es *encodeState) {
-		es.indentPrefix = prefix
 		es.indentString = indent
-		es.nativeIndent = es.nativeIndent && isSimpleIndent(prefix, indent) > 0
+		es.indentPrefix = prefix
+		es.indentDepth = 0
+		es.useNativeVM = encvm.Available && isSimpleIndent(prefix, indent)
 	}
 }
 
