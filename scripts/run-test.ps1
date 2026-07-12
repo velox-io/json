@@ -29,6 +29,8 @@ Invoke-GoTest -tags vj_noencvm ./venc -count=1
 Invoke-GoTest -race -tags vj_noencvm ./venc -count=1
 Invoke-GoTest -tags vjgcstress ./venc -count=1
 Invoke-GoTest -race -tags vjgcstress ./venc -count=1
+Invoke-GoTest -tags vjstress ./venc -count=1
+Invoke-GoTest -race -tags vjstress ./venc -count=1
 
 Invoke-GoTest ./tests/ -count=1
 Invoke-GoTest -race ./tests/ -count=1

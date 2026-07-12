@@ -79,13 +79,29 @@ gen:
 		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
 # Generate native artifacts for debugging:
-# - enable encvm trace (VJ_ENCVM_DEBUG)
+# - enable encvm trace (VJ_DEBUG)
 # - keep richer syso symbols for native debugging
 # Use with: go test -tags vjdebug -run TestFoo -v
 gen-debug:
-	@EXTRA_CFLAGS="-DVJ_ENCVM_DEBUG" DEBUG_SYMBOLS=1 TOOLCHAIN="$(TOOLCHAIN)" LINUX_SYSROOT="$(LINUX_SYSROOT)" \
+	@EXTRA_CFLAGS="-DVJ_DEBUG" DEBUG_SYMBOLS=1 NO_NDEBUG=1 TOOLCHAIN="$(TOOLCHAIN)" LINUX_SYSROOT="$(LINUX_SYSROOT)" \
 	bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
 		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
+
+# Rebuild native artifacts with instrumentation PGO (exact block counts).
+# Requires .local/pgo-data/instr.profdata (produce it with `make pgo-instr-collect`).
+gen-pgo-instr-use:
+	@TOOLCHAIN="$(TOOLCHAIN)" LINUX_SYSROOT="$(LINUX_SYSROOT)" \
+	bash scripts/gen-natives.sh --pgo-instr-use $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
+		native/encvm/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
+
+# End-to-end instrumentation PGO collection: build an instrumented syso, run the
+# encode workload (counters flushed via the vjpgoinstr TestMain hook), merge the
+# profile, then rebuild the production syso with --pgo-instr-use. Records EXACT
+# per-block counts (no perf needed), so it does not misjudge cold-but-important
+# paths the way sampling can. Tunable via PGO_* env vars (see script header).
+# Usage: make pgo-instr-collect TARGET_OS=linux TARGET_ARCH=amd64 MODES=fast
+pgo-instr-collect:
+	@MODES="$(MODES)" bash scripts/pgo-collect-instr.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
 # Build encvm syso for all 4 supported platforms
 GEN_ALL_PLATFORMS := darwin/arm64 linux/amd64 linux/arm64 windows/amd64
@@ -97,6 +113,11 @@ gen-all:
 		$(MAKE) gen TARGET_OS=$$os TARGET_ARCH=$$arch || exit 1; \
 		echo ""; \
 	done
+
+vlib:
+	@TOOLCHAIN="$(TOOLCHAIN)" LINUX_SYSROOT="$(LINUX_SYSROOT)" \
+	bash scripts/gen-natives.sh $(if $(_AUTO_ZIG),--zig) $(if $(ASM),--asm) $(GEN_NATIVE_PRELINK_FLAG) \
+		native/vlib/sources.sh "$(TARGET_OS)" "$(TARGET_ARCH)"
 
 BENCH_FILTER ?= .
 BENCH_TITLE ?= Benchmark Results
@@ -135,4 +156,4 @@ bench-pack: bench-build
 	tar czf $(BENCH_PACK) -C $(CURDIR) Makefile scripts/bench.sh scripts/benchcmp.sh scripts/bench-run.sh $(BENCH_BIN)
 	@echo "Packed: $(BENCH_PACK)"
 
-.PHONY: lint lint-ci fmt test test-coverage bclean fuzz fuzz-parallel fuzz-concurrent gen gen-all gen-debug gen-pgo-use bench-build bench-pack benchviz benchcmp
+.PHONY: lint lint-ci fmt test test-coverage bclean fuzz fuzz-parallel fuzz-concurrent gen gen-all gen-debug gen-pgo-instr-use pgo-instr-collect bench-build bench-pack benchviz benchcmp

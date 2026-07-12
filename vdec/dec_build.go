@@ -2,21 +2,22 @@ package vdec
 
 import (
 	"reflect"
-	"sync"
 	"unsafe"
 
 	"github.com/velox-io/json/gort"
+	"github.com/velox-io/json/rtcache"
 	"github.com/velox-io/json/typ"
 )
 
-var decTypeCache sync.Map
+var decTypeCache rtcache.Cache[*DecTypeInfo]
 
 // DecTypeInfoOf returns the cached decode descriptor.
 func DecTypeInfoOf(t reflect.Type) *DecTypeInfo {
-	if v, ok := decTypeCache.Load(t); ok {
-		return v.(*DecTypeInfo)
-	}
-	return buildDecTypeInfo(t)
+	rtp := uintptr(gort.TypePtr(t))
+	dti, _ := decTypeCache.GetOrBuild(rtp, func() (*DecTypeInfo, error) {
+		return buildDecTypeInfo(t), nil
+	})
+	return dti
 }
 
 func buildDecTypeInfo(t reflect.Type) *DecTypeInfo {
@@ -25,18 +26,15 @@ func buildDecTypeInfo(t reflect.Type) *DecTypeInfo {
 
 	if ut.Kind == typ.KindStruct {
 		// Struct shells stay goroutine-local until recursive fields are wired.
-		building := map[reflect.Type]*DecTypeInfo{t: dti}
+		building := map[uintptr]*DecTypeInfo{uintptr(gort.TypePtr(t)): dti}
 		fillStructExt(dti, ut.Ext.(*typ.StructTypeInfo), building)
 	} else {
 		fillContainerExt(dti, ut)
 	}
-	if actual, loaded := decTypeCache.LoadOrStore(t, dti); loaded {
-		return actual.(*DecTypeInfo)
-	}
 	return dti
 }
 
-func fillStructExt(dti *DecTypeInfo, info *typ.StructTypeInfo, building map[reflect.Type]*DecTypeInfo) {
+func fillStructExt(dti *DecTypeInfo, info *typ.StructTypeInfo, building map[uintptr]*DecTypeInfo) {
 	dti.Ext = unsafe.Pointer(compileStructInfo(info, building))
 }
 
@@ -79,7 +77,7 @@ func fillContainerExt(dti *DecTypeInfo, ut *typ.UniType) {
 	}
 }
 
-func compileStructInfo(info *typ.StructTypeInfo, building map[reflect.Type]*DecTypeInfo) *DecStructInfo {
+func compileStructInfo(info *typ.StructTypeInfo, building map[uintptr]*DecTypeInfo) *DecStructInfo {
 	si := &DecStructInfo{}
 	si.Fields = make([]DecFieldInfo, len(info.Fields))
 
@@ -96,10 +94,11 @@ func compileStructInfo(info *typ.StructTypeInfo, building map[reflect.Type]*DecT
 	return si
 }
 
-func resolveFieldType(fieldUT *typ.UniType, building map[reflect.Type]*DecTypeInfo) *DecTypeInfo {
+func resolveFieldType(fieldUT *typ.UniType, building map[uintptr]*DecTypeInfo) *DecTypeInfo {
 	t := fieldUT.Type
-	if v, ok := decTypeCache.Load(t); ok {
-		return v.(*DecTypeInfo)
+	rtp := uintptr(gort.TypePtr(t))
+	if v, ok := decTypeCache.Get(rtp); ok {
+		return v
 	}
 	// Cyclic struct fields can arrive as partial shells (Ext == nil) from
 	// the in-flight UniType build chain. UniTypeOf blocks until complete.
@@ -107,11 +106,11 @@ func resolveFieldType(fieldUT *typ.UniType, building map[reflect.Type]*DecTypeIn
 		fieldUT = typ.UniTypeOf(t)
 	}
 	if fieldUT.Kind == typ.KindStruct {
-		if dti, ok := building[t]; ok {
+		if dti, ok := building[rtp]; ok {
 			return dti
 		}
 		dti := newDecTypeInfoFromUT(fieldUT)
-		building[t] = dti
+		building[rtp] = dti
 		fillStructExt(dti, fieldUT.Ext.(*typ.StructTypeInfo), building)
 		return dti
 	}
@@ -120,7 +119,7 @@ func resolveFieldType(fieldUT *typ.UniType, building map[reflect.Type]*DecTypeIn
 	return dti
 }
 
-func fillContainerExtRec(dti *DecTypeInfo, ut *typ.UniType, building map[reflect.Type]*DecTypeInfo) {
+func fillContainerExtRec(dti *DecTypeInfo, ut *typ.UniType, building map[uintptr]*DecTypeInfo) {
 	switch info := ut.Ext.(type) {
 	case *typ.SliceTypeInfo:
 		elemDTI := resolveFieldType(info.ElemType, building)

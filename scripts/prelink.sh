@@ -16,6 +16,8 @@
 #   -t <triple>   Target triple: x86_64-linux, aarch64-linux, aarch64-macos, etc. (required)
 #   -i <isa>      ISA variant: sse42, avx512, neon (optional)
 #   -e <file>     Export symbol list file (darwin only; one symbol per line, with _ prefix)
+#   -r <map>      Rename symbol map: old=new. Repeat for multiple renames. Forwarded
+#                 to prelink-obj's -rename flag.
 #   -l            Enable Link Time Optimization (LTO)
 #   -q            Quiet mode (suppress progress messages)
 #   -h            Show this help
@@ -64,6 +66,7 @@ OUTPUT=""
 TARGET=""
 ISA=""
 EXPORT_LIST=""
+RENAME_ARGS=()
 LTO=false
 QUIET=false
 
@@ -80,13 +83,14 @@ log() {
 }
 
 # Parse arguments
-while getopts "s:o:t:i:e:lqh" opt; do
+while getopts "s:o:t:i:e:r:lqh" opt; do
     case $opt in
         s) SOURCE="$OPTARG" ;;
         o) OUTPUT="$OPTARG" ;;
         t) TARGET="$OPTARG" ;;
         i) ISA="$OPTARG" ;;
         e) EXPORT_LIST="$OPTARG" ;;
+        r) RENAME_ARGS+=(-rename "$OPTARG") ;;
         l) LTO=true ;;
         q) QUIET=true ;;
         h) usage ;;
@@ -277,8 +281,13 @@ compile_asm() {
 #    link → (optional export filtering) → prelink-obj conversion
 # ============================================================
 
-# Derive export prefix from EXPORT_LIST (shared by ELF and Windows)
+# Derive export prefix from EXPORT_LIST (shared by ELF and Windows).
+# If the caller has set EXPORT_PREFIX env var, honor that verbatim.
 get_export_prefix() {
+    if [ -n "${EXPORT_PREFIX:-}" ]; then
+        printf '%s' "$EXPORT_PREFIX"
+        return
+    fi
     if [ -n "$EXPORT_LIST" ] && [ -f "$EXPORT_LIST" ]; then
         local first_sym=$(grep -m1 . "$EXPORT_LIST")
         if [ -n "$first_sym" ]; then
@@ -295,11 +304,14 @@ run_prelink_obj() {
     local input="$2"
     local prefix="$3"
 
-    local flags=""
-    [ -n "$prefix" ] && flags="-export-prefix $prefix"
-    [ "$QUIET" = true ] && flags="-q $flags"
+    local flags=()
+    [ -n "$prefix" ] && flags+=(-export-prefix "$prefix")
+    [ "$QUIET" = true ] && flags+=(-q)
+    if [ ${#RENAME_ARGS[@]} -gt 0 ]; then
+        flags+=("${RENAME_ARGS[@]}")
+    fi
 
-    "$PRELINK_OBJ" $flags -o "$output" "$input"
+    "$PRELINK_OBJ" "${flags[@]}" -o "$output" "$input"
 }
 
 # ELF (Linux, etc.): -shared + linker script → prelink-obj
@@ -442,6 +454,9 @@ prelink_windows_lld() {
     prefix="$(get_export_prefix)"
     if [ -n "$prefix" ]; then
         coff_args+=(-e "$prefix")
+    fi
+    if [ ${#RENAME_ARGS[@]} -gt 0 ]; then
+        coff_args+=("${RENAME_ARGS[@]}")
     fi
     coff_args+=("$dll_tmp" "$output")
     "${coff_args[@]}"

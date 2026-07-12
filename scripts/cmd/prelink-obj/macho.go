@@ -384,8 +384,14 @@ func extractFromMachO(path string) (*ExtractResult, error) {
 	// Convert symbols to SymInfo
 	var syms []SymInfo
 	for _, sym := range symbols {
+		// Strip leading '_' so the abstract Name matches the ELF/COFF
+		// convention (no underscore prefix). Re-added in writeMachOObject.
+		name := sym.Name
+		if len(name) > 0 && name[0] == '_' {
+			name = name[1:]
+		}
 		syms = append(syms, SymInfo{
-			Name:   sym.Name,
+			Name:   name,
 			Offset: sym.Value,
 			Size:   0, // Mach-O nlist_64 doesn't carry size
 			Local:  false,
@@ -404,11 +410,15 @@ func extractFromMachO(path string) (*ExtractResult, error) {
 
 // writeMachOObject builds a Mach-O MH_OBJECT with zero relocations.
 func writeMachOObject(path string, blob []byte, syms []SymInfo, buildVer *BuildVersion) error {
-	// Build string table: null byte + symbol names
+	// Build string table: null byte + symbol names.
+	// Mach-O names take a leading '_' that we strip on extract; re-add
+	// here so the output dylib/.o is link-compatible with the rest of
+	// the toolchain.
 	strtab := []byte{0}
 	symStrx := make([]uint32, len(syms))
 	for i, sym := range syms {
 		symStrx[i] = uint32(len(strtab))
+		strtab = append(strtab, '_')
 		strtab = append(strtab, []byte(sym.Name)...)
 		strtab = append(strtab, 0)
 	}

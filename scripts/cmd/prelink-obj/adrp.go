@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
-	"strings"
 )
 
 const arm64NOP = 0xD503201F
@@ -39,15 +38,24 @@ func encodeADR(rd uint32, offset int64) uint32 {
 // lie within the blob. Since Go's linker does not guarantee page-aligned
 // placement, ADRP (which uses page(PC) + page_offset) would break.
 //
-// Three patterns are handled:
-//  1. ADRP+ADD (consecutive) -> ADR+NOP
-//  2. ADRP+LDR (consecutive, unsigned offset) -> ADR+LDR[offset=0]
-//  3. ADRP (split -- non-adjacent consumer) -> ADR to page base
+// Every in-blob ADRP is rewritten to ADR pointing at the ORIGINAL page
+// base, and the consuming instruction (ADD #imm / LDR [rd,#imm]) is left
+// untouched. This is semantically identical to the original ADRP: it
+// loaded the page base into rd, and every consumer added its own offset.
+//
+// An earlier design tried to fold the consumer's offset into the ADR and
+// zero the consumer immediate. That is unsafe: clang routinely emits a
+// single ADRP whose page-base result is shared by SEVERAL consumers (e.g.
+// the CMP_64 SIMD compare loads two constants via [x16] and [x16,#0xf80]
+// off the same ADRP). Folding the offset for the first consumer and zeroing
+// its immediate leaves the other consumers reading rd+their_own_offset from
+// the wrong base. Pointing the ADR at the page base keeps every consumer,
+// adjacent or not, correct.
 func patchADRPtoADR(textData []byte, codeExtent, blobExtent uint64, quiet bool) ([]byte, error) {
 	blob := make([]byte, len(textData))
 	copy(blob, textData)
 
-	var patchesADD, patchesLDR, patchesSplit int
+	var patches int
 
 	for off := uint64(0); off+4 <= codeExtent; off += 4 {
 		inst := binary.LittleEndian.Uint32(blob[off:])
@@ -65,123 +73,22 @@ func patchADRPtoADR(textData []byte, codeExtent, blobExtent uint64, quiet bool) 
 			continue
 		}
 
-		if off+8 > codeExtent {
-			continue
-		}
-		nextInst := binary.LittleEndian.Uint32(blob[off+4:])
-
-		// --- Pattern 1: ADRP+ADD (consecutive) ---
-		// ADD (immediate, 64-bit): [31]=1 [30:29]=00 [28:24]=10001
-		if (nextInst>>24)&0xFF == 0x91 {
-			addRd := nextInst & 0x1F
-			addRn := (nextInst >> 5) & 0x1F
-			if addRd == rd && addRn == rd {
-				addImm12 := int64((nextInst >> 10) & 0xFFF)
-				addShift := (nextInst >> 22) & 0x3
-				if addShift == 1 {
-					addImm12 <<= 12
-				}
-
-				targetVA := targetPage + addImm12
-				adrOffset := targetVA - int64(off)
-
-				if adrOffset < -(1<<20) || adrOffset >= (1<<20) {
-					if !quiet {
-						fmt.Printf("  WARNING: ADRP+ADD at 0x%X target 0x%X out of ADR range (%d), skipping\n",
-							off, targetVA, adrOffset)
-					}
-					continue
-				}
-
-				binary.LittleEndian.PutUint32(blob[off:], encodeADR(rd, adrOffset))
-				binary.LittleEndian.PutUint32(blob[off+4:], arm64NOP)
-				patchesADD++
-				continue
-			}
-		}
-
-		// --- Pattern 2: ADRP+LDR (consecutive, unsigned offset) ---
-		ldrOpcHi := (nextInst >> 24) & 0xFF
-		isLDR := ldrOpcHi == 0xF9 || ldrOpcHi == 0xFD || ldrOpcHi == 0x3D ||
-			ldrOpcHi == 0xB9 || ldrOpcHi == 0xBD || ldrOpcHi == 0x79 || ldrOpcHi == 0x39
-		if isLDR {
-			ldrRn := (nextInst >> 5) & 0x1F
-			if ldrRn == rd {
-				var scale int64
-				switch ldrOpcHi {
-				case 0xF9:
-					scale = 8 // LDR Xt
-				case 0xFD:
-					scale = 8 // LDR Dt (64-bit SIMD)
-				case 0x3D:
-					opc := (nextInst >> 22) & 0x3
-					switch opc {
-					case 0x3:
-						scale = 16 // LDR Qt (128-bit SIMD)
-					case 0x1:
-						scale = 4 // LDR St (32-bit SIMD)
-					}
-				case 0xB9:
-					scale = 4 // LDR Wt
-				case 0xBD:
-					scale = 4 // LDR St
-				case 0x79:
-					scale = 2 // LDRH Wt
-				case 0x39:
-					scale = 1 // LDRB Wt
-				}
-
-				if scale > 0 {
-					imm12 := int64((nextInst >> 10) & 0xFFF)
-					byteOffset := imm12 * scale
-
-					targetVA := targetPage + byteOffset
-					adrOffset := targetVA - int64(off)
-
-					if adrOffset < -(1<<20) || adrOffset >= (1<<20) {
-						if !quiet {
-							fmt.Printf("  WARNING: ADRP+LDR at 0x%X target 0x%X out of ADR range (%d), skipping\n",
-								off, targetVA, adrOffset)
-						}
-						continue
-					}
-
-					// Patch ADRP -> ADR (pointing to exact target)
-					binary.LittleEndian.PutUint32(blob[off:], encodeADR(rd, adrOffset))
-					// Patch LDR: zero out the imm12 field (offset now in ADR)
-					ldrZeroed := nextInst &^ (0xFFF << 10)
-					binary.LittleEndian.PutUint32(blob[off+4:], ldrZeroed)
-					patchesLDR++
-					continue
-				}
-			}
-		}
-
-		// --- Pattern 3: ADRP with non-adjacent consumer (split pair) ---
+		// Rewrite ADRP -> ADR to the page base. The consumer instruction
+		// (ADD/LDR with its own immediate) is preserved verbatim, so any
+		// number of consumers sharing this rd stay correct.
 		adrOffset := targetPage - int64(off)
 		if adrOffset < -(1<<20) || adrOffset >= (1<<20) {
-			return nil, fmt.Errorf("split ADRP at 0x%X target page 0x%X out of ADR range (%d)",
+			return nil, fmt.Errorf("ADRP at 0x%X target page 0x%X out of ADR range (%d)",
 				off, targetPage, adrOffset)
 		}
 
 		binary.LittleEndian.PutUint32(blob[off:], encodeADR(rd, adrOffset))
-		patchesSplit++
+		patches++
 	}
 
-	total := patchesADD + patchesLDR + patchesSplit
 	if !quiet {
-		if total > 0 {
-			var parts []string
-			if patchesADD > 0 {
-				parts = append(parts, fmt.Sprintf("%d ADD", patchesADD))
-			}
-			if patchesLDR > 0 {
-				parts = append(parts, fmt.Sprintf("%d LDR", patchesLDR))
-			}
-			if patchesSplit > 0 {
-				parts = append(parts, fmt.Sprintf("%d split", patchesSplit))
-			}
-			fmt.Printf("  ADRP patches: %d (%s)\n", total, strings.Join(parts, ", "))
+		if patches > 0 {
+			fmt.Printf("  ADRP patches: %d\n", patches)
 		} else {
 			fmt.Printf("  No ADRP patches needed\n")
 		}

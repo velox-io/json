@@ -34,6 +34,9 @@ a raw COFF .o file.
 Flags:
   -o <file>           Output file (required)
   -export-prefix <s>  Demote non-matching symbols to local (ELF/PE/coff)
+  -rename old=new     Rename a global symbol in the output. Repeat to rename
+                      multiple symbols. Useful for emitting per-ISA syso names
+                      from a single fixed C entry point.
   -no-adrp-patch      Disable ADRP→ADR patching (ARM64); uses 4096 alignment instead
   -q                  Quiet mode
 `)
@@ -85,6 +88,7 @@ func main() {
 	var output string
 	var input string
 	var exportPrefix string
+	renames := map[string]string{}
 	quiet := false
 	noADRPPatch := false
 
@@ -103,6 +107,20 @@ func main() {
 				fatalf("-export-prefix requires an argument")
 			}
 			exportPrefix = args[i]
+		case "-rename":
+			i++
+			if i >= len(args) {
+				fatalf("-rename requires an argument old=new")
+			}
+			eq := strings.IndexByte(args[i], '=')
+			if eq <= 0 || eq == len(args[i])-1 {
+				fatalf("-rename argument must be old=new, got: %q", args[i])
+			}
+			old, newName := args[i][:eq], args[i][eq+1:]
+			if prev, ok := renames[old]; ok && prev != newName {
+				fatalf("-rename: conflicting targets for %q: %q vs %q", old, prev, newName)
+			}
+			renames[old] = newName
 		case "-q":
 			quiet = true
 		case "-no-adrp-patch":
@@ -179,6 +197,23 @@ func main() {
 		}
 	}
 
+	// Step 4b: rename symbols. Applied after export-prefix demote so the
+	// rename targets (new names) don't need to match exportPrefix.
+	if len(renames) > 0 {
+		applied := make(map[string]bool, len(renames))
+		for i := range result.Syms {
+			if newName, ok := renames[result.Syms[i].Name]; ok {
+				result.Syms[i].Name = newName
+				applied[result.Syms[i].Name] = true
+			}
+		}
+		for old, newName := range renames {
+			if !applied[newName] {
+				fatalf("-rename %s=%s: source symbol %q not found", old, newName, old)
+			}
+		}
+	}
+
 	// Verify at least one global symbol exists
 	hasGlobal := false
 	for _, s := range result.Syms {
@@ -227,12 +262,13 @@ func main() {
 
 // runCOFFCommand handles the 'coff' subcommand:
 //
-//	prelink-obj coff [-e <prefix>] <input.dll> <output.o>
+//	prelink-obj coff [-e <prefix>] [-rename old=new]... <input.dll> <output.o>
 //
 // This converts a merged PE DLL (single .text section, e.g., from lld-link /MERGE:.rdata=.text)
 // into a raw COFF .o file with zero relocations.
 func runCOFFCommand(args []string) {
 	var exportPrefix string
+	renames := map[string]string{}
 
 	remaining := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
@@ -243,13 +279,27 @@ func runCOFFCommand(args []string) {
 				fatalf("-e requires an argument")
 			}
 			exportPrefix = args[i]
+		case "-rename":
+			i++
+			if i >= len(args) {
+				fatalf("-rename requires an argument old=new")
+			}
+			eq := strings.IndexByte(args[i], '=')
+			if eq <= 0 || eq == len(args[i])-1 {
+				fatalf("-rename argument must be old=new, got: %q", args[i])
+			}
+			old, newName := args[i][:eq], args[i][eq+1:]
+			if prev, ok := renames[old]; ok && prev != newName {
+				fatalf("-rename: conflicting targets for %q: %q vs %q", old, prev, newName)
+			}
+			renames[old] = newName
 		default:
 			remaining = append(remaining, args[i])
 		}
 	}
 
 	if len(remaining) != 2 {
-		fatalf("usage: prelink-obj coff [-e <prefix>] <input.dll> <output.o>")
+		fatalf("usage: prelink-obj coff [-e <prefix>] [-rename old=new]... <input.dll> <output.o>")
 	}
 	inputPath := remaining[0]
 	outputPath := remaining[1]
@@ -258,7 +308,7 @@ func runCOFFCommand(args []string) {
 		fatalf("input file not found: %s", inputPath)
 	}
 
-	if err := ConvertPEToCOFF(inputPath, outputPath, exportPrefix); err != nil {
+	if err := ConvertPEToCOFF(inputPath, outputPath, exportPrefix, renames); err != nil {
 		fatalf("%v", err)
 	}
 

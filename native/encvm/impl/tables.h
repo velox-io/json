@@ -12,7 +12,7 @@
 
 #include <stdint.h>
 
-#include "vj_compat.h"
+#include "macros.h"
 
 // Digit pair table for fast two-digit conversion
 static const char DIGIT_PAIRS[] = "00010203040506070809"

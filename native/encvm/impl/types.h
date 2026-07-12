@@ -11,14 +11,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "vj_compat.h"
+#include "macros.h"
 
 #define VJ_MAX_STACK_DEPTH 64
 
 /* ================================================================
  *  Debug Trace Ring Buffer
  *
- *  When VJ_ENCVM_DEBUG is defined, VjExecCtx gains a pointer to
+ *  When VJ_DEBUG is defined, VjExecCtx gains a pointer to
  *  an external VjTraceBuf.  C writes trace entries via VM_TRACE();
  *  Go reads/prints them on each buffer exit.
  *  Size must be a power of 2 for fast modular indexing.
@@ -45,59 +45,59 @@ typedef struct VjTraceBuf {
 
 enum OpType {
   /* Primitives (1-14, = ElemTypeKind) */
-  OP_BOOL = 1,
-  OP_INT = 2, /* Go int  — 8 bytes on 64-bit */
-  OP_INT8 = 3,
-  OP_INT16 = 4,
-  OP_INT32 = 5,
-  OP_INT64 = 6,
-  OP_UINT = 7, /* Go uint — 8 bytes on 64-bit */
-  OP_UINT8 = 8,
-  OP_UINT16 = 9,
-  OP_UINT32 = 10,
-  OP_UINT64 = 11,
+  OP_BOOL    = 1,
+  OP_INT     = 2, /* Go int  — 8 bytes on 64-bit */
+  OP_INT8    = 3,
+  OP_INT16   = 4,
+  OP_INT32   = 5,
+  OP_INT64   = 6,
+  OP_UINT    = 7, /* Go uint — 8 bytes on 64-bit */
+  OP_UINT8   = 8,
+  OP_UINT16  = 9,
+  OP_UINT32  = 10,
+  OP_UINT64  = 11,
   OP_FLOAT32 = 12,
   OP_FLOAT64 = 13,
-  OP_STRING = 14, /* Go string {ptr, len} */
+  OP_STRING  = 14, /* Go string {ptr, len} */
 
   /* Non-primitive data ops (15-18) */
-  OP_INTERFACE = 15,   /* interface{} — noinline C encoder or yield */
+  OP_INTERFACE   = 15, /* interface{} — noinline C encoder or yield */
   OP_RAW_MESSAGE = 16, /* json.RawMessage — direct byte copy */
-  OP_NUMBER = 17,      /* json.Number — direct string copy */
-  OP_BYTE_SLICE = 18,  /* []byte — base64 encode, yield to Go */
+  OP_NUMBER      = 17, /* json.Number — direct string copy */
+  OP_BYTE_SLICE  = 18, /* []byte — base64 encode, yield to Go */
 
   /* Structural control-flow opcodes (19-31) -- */
   OP_SKIP_IF_ZERO = 19, /* conditional forward jump (omitempty) */
-  OP_CALL = 20,         /* subroutine call: push CALL frame, jump to ops[operand_a] */
-  OP_PTR_DEREF = 21,    /* deref pointer, nil→null+jump */
-  OP_PTR_END = 22,      /* pop ptr-deref frame, restore base */
-  OP_SLICE_BEGIN = 23,  /* slice loop start */
-  OP_SLICE_END = 24,    /* slice loop end / back-edge */
-  OP_MAP = 25,          /* map yield — Go handles entire map encoding */
+  OP_CALL         = 20, /* subroutine call: push CALL frame, jump to ops[operand_a] */
+  OP_PTR_DEREF    = 21, /* deref pointer, nil→null+jump */
+  OP_PTR_END      = 22, /* pop ptr-deref frame, restore base */
+  OP_SLICE_BEGIN  = 23, /* slice loop start */
+  OP_SLICE_END    = 24, /* slice loop end / back-edge */
+  OP_MAP          = 25, /* map yield — Go handles entire map encoding */
   /* 26: reserved (was OP_MAP_END) */
-  OP_OBJ_OPEN = 27,    /* write key + '{', set first=1 (no frame) */
-  OP_OBJ_CLOSE = 28,   /* write '}', set first=0 (no frame) */
+  OP_OBJ_OPEN    = 27, /* write key + '{', set first=1 (no frame) */
+  OP_OBJ_CLOSE   = 28, /* write '}', set first=0 (no frame) */
   OP_ARRAY_BEGIN = 29, /* array loop start (inline data, fixed length) */
   OP_MAP_STR_STR = 30, /* C-native Swiss Map iteration for map[string]string */
-  OP_RET = 31,         /* subroutine return: pop CALL frame, restore ops/pc/base */
+  OP_RET         = 31, /* subroutine return: pop CALL frame, restore ops/pc/base */
 
   /* Go-only fallback */
   OP_FALLBACK = 32, /* custom marshalers, ,string, complex structs */
 
   /* Keyed-field variants (33-35) */
   OP_KSTRING = 33, /* struct field string — unconditional key write */
-  OP_KINT = 34,    /* struct field int — unconditional key write */
-  OP_KINT64 = 35,  /* struct field int64 — unconditional key write */
+  OP_KINT    = 34, /* struct field int — unconditional key write */
+  OP_KINT64  = 35, /* struct field int64 — unconditional key write */
 
   /* C-native Swiss Map variants (36-37) */
-  OP_MAP_STR_INT = 36,   /* C-native Swiss Map iteration for map[string]int */
+  OP_MAP_STR_INT   = 36, /* C-native Swiss Map iteration for map[string]int */
   OP_MAP_STR_INT64 = 37, /* C-native Swiss Map iteration for map[string]int64 */
 
   /* C-native sequence iterators (38-41) */
   OP_SEQ_FLOAT64 = 38, /* []float64 / [N]float64 — single-instruction loop */
-  OP_SEQ_INT = 39,     /* []int / [N]int — single-instruction loop */
-  OP_SEQ_INT64 = 40,   /* []int64 / [N]int64 — single-instruction loop */
-  OP_SEQ_STRING = 41,  /* []string / [N]string — single-instruction loop */
+  OP_SEQ_INT     = 39, /* []int / [N]int — single-instruction loop */
+  OP_SEQ_INT64   = 40, /* []int64 / [N]int64 — single-instruction loop */
+  OP_SEQ_STRING  = 41, /* []string / [N]string — single-instruction loop */
 
   /* C-native Swiss Map key iterator (42-43) */
   OP_MAP_STR_ITER = 42,     /* Swiss Map string-key iteration: init, write first
@@ -105,7 +105,7 @@ enum OpType {
   OP_MAP_STR_ITER_END = 43, /* Swiss Map iteration back-edge: advance slot, write key or end */
 
   /* Keyed-field quoted variants (44-45) — ,string tag */
-  OP_KQINT = 44,   /* struct field int with ,string — quoted: "123" */
+  OP_KQINT   = 44, /* struct field int with ,string — quoted: "123" */
   OP_KQINT64 = 45, /* struct field int64 with ,string — quoted: "123" */
 
   /* time.Time (46) — native RFC3339Nano formatting */
@@ -123,29 +123,29 @@ enum OpType {
  * ================================================================ */
 
 enum ZeroCheckTag {
-  ZCT_BOOL = 1,
-  ZCT_INT = 2,
-  ZCT_INT8 = 3,
-  ZCT_INT16 = 4,
-  ZCT_INT32 = 5,
-  ZCT_INT64 = 6,
-  ZCT_UINT = 7,
-  ZCT_UINT8 = 8,
-  ZCT_UINT16 = 9,
-  ZCT_UINT32 = 10,
-  ZCT_UINT64 = 11,
-  ZCT_FLOAT32 = 12,
-  ZCT_FLOAT64 = 13,
-  ZCT_STRING = 14,
-  ZCT_STRUCT = 15,
-  ZCT_SLICE = 16,
-  ZCT_POINTER = 17,
-  ZCT_INTERFACE = 18,
-  ZCT_MAP = 19,
+  ZCT_BOOL        = 1,
+  ZCT_INT         = 2,
+  ZCT_INT8        = 3,
+  ZCT_INT16       = 4,
+  ZCT_INT32       = 5,
+  ZCT_INT64       = 6,
+  ZCT_UINT        = 7,
+  ZCT_UINT8       = 8,
+  ZCT_UINT16      = 9,
+  ZCT_UINT32      = 10,
+  ZCT_UINT64      = 11,
+  ZCT_FLOAT32     = 12,
+  ZCT_FLOAT64     = 13,
+  ZCT_STRING      = 14,
+  ZCT_STRUCT      = 15,
+  ZCT_SLICE       = 16,
+  ZCT_POINTER     = 17,
+  ZCT_INTERFACE   = 18,
+  ZCT_MAP         = 19,
   ZCT_RAW_MESSAGE = 20,
-  ZCT_NUMBER = 21,
-  ZCT_BYTE_SLICE = 22,
-  ZCT_FALLBACK = 23,
+  ZCT_NUMBER      = 21,
+  ZCT_BYTE_SLICE  = 22,
+  ZCT_FALLBACK    = 23,
 };
 
 /* ================================================================
@@ -253,12 +253,12 @@ static inline int vj_is_zero(const uint8_t *ptr, uint16_t zct) {
  * NOTE: includes control-flow exits (BUF_FULL) in addition to terminal errors.
  */
 enum VjExitCode {
-  VJ_EXIT_OK = 0,
-  VJ_EXIT_BUF_FULL = 1,
-  VJ_EXIT_GO_FALLBACK = 2,
+  VJ_EXIT_OK             = 0,
+  VJ_EXIT_BUF_FULL       = 1,
+  VJ_EXIT_GO_FALLBACK    = 2,
   VJ_EXIT_STACK_OVERFLOW = 3,
-  VJ_EXIT_CYCLE = 4,
-  VJ_EXIT_NAN_INF = 5,
+  VJ_EXIT_CYCLE          = 4,
+  VJ_EXIT_NAN_INF        = 5,
 };
 
 /* ================================================================
@@ -327,17 +327,17 @@ enum VjExitCode {
  * was_first receives 1 if bit was set (i.e. first element), 0 otherwise.
  */
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
-#define VJ_ST_BTR_FIRST(st, was_first)                                                                                 \
-  __asm__ volatile("btrq $16, %[state]"                                                                                \
-                   : [state] "+r"(st), "=@ccc"(was_first)                                                              \
-                   : /* no input-only */                                                                               \
+#define VJ_ST_BTR_FIRST(st, was_first)                                                                            \
+  __asm__ volatile("btrq $16, %[state]"                                                                           \
+                   : [state] "+r"(st), "=@ccc"(was_first)                                                         \
+                   : /* no input-only */                                                                          \
                    : "cc")
 #else
 /* Portable fallback: separate test + clear. */
-#define VJ_ST_BTR_FIRST(st, was_first)                                                                                 \
-  do {                                                                                                                 \
-    (was_first) = (int)(((st) & VJ_ST_FIRST_BIT) != 0);                                                                \
-    (st) &= ~VJ_ST_FIRST_BIT;                                                                                          \
+#define VJ_ST_BTR_FIRST(st, was_first)                                                                            \
+  do {                                                                                                            \
+    (was_first) = (int)(((st) & VJ_ST_FIRST_BIT) != 0);                                                           \
+    (st) &= ~VJ_ST_FIRST_BIT;                                                                                     \
   } while (0)
 #endif
 
@@ -462,8 +462,8 @@ enum {
 };
 
 enum VjYieldReason {
-  VJ_YIELD_FALLBACK = 1,    /* custom marshaler / unsupported */
-  VJ_YIELD_IFACE_MISS = 2,  /* interface cache miss */
+  VJ_YIELD_FALLBACK    = 1, /* custom marshaler / unsupported */
+  VJ_YIELD_IFACE_MISS  = 2, /* interface cache miss */
   VJ_YIELD_MAP_HANDOFF = 3, /* map encoding handoff to Go */
 };
 
@@ -533,7 +533,7 @@ typedef struct VjExecCtx {
   VjStackFrame stack[VJ_MAX_STACK_DEPTH]; /*  96: 64 x 32 = 2048 bytes */
 
   /* Debug trace (always present for layout stability; only written when
-   * VJ_ENCVM_DEBUG is defined and the pointer is non-NULL). */
+   * VJ_DEBUG is defined and the pointer is non-NULL). */
   VjTraceBuf *trace_buf; /* 2144: Go-allocated trace buffer */
 } VjExecCtx;
 

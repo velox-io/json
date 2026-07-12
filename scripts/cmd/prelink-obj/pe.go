@@ -368,7 +368,10 @@ func writeCOFFObject(path string, textData []byte, syms []SymInfo, machine uint1
 //
 // This is the standalone equivalent of the inline Python script in gen-windows-syso.sh.
 // It reuses ExtractFromPE for parsing and WriteCOFFObject for output.
-func ConvertPEToCOFF(inputPath, outputPath string, exportPrefix string) error {
+//
+// renames, when non-empty, rewrites the name of each matching exported symbol
+// to its mapped value before the COFF is written.
+func ConvertPEToCOFF(inputPath, outputPath string, exportPrefix string, renames map[string]string) error {
 	result, err := extractFromPE(inputPath)
 	if err != nil {
 		return fmt.Errorf("extracting PE: %w", err)
@@ -393,6 +396,21 @@ func ConvertPEToCOFF(inputPath, outputPath string, exportPrefix string) error {
 		}
 		if !hasGlobal {
 			return fmt.Errorf("no global symbols match prefix %q", exportPrefix)
+		}
+	}
+
+	if len(renames) > 0 {
+		applied := make(map[string]bool, len(renames))
+		for i := range result.Syms {
+			if newName, ok := renames[result.Syms[i].Name]; ok {
+				result.Syms[i].Name = newName
+				applied[newName] = true
+			}
+		}
+		for old, newName := range renames {
+			if !applied[newName] {
+				return fmt.Errorf("-rename %s=%s: source symbol %q not found", old, newName, old)
+			}
 		}
 	}
 

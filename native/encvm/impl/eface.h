@@ -10,12 +10,12 @@
 #include "types.h"
 
 enum VjIfaceAction {
-  VJ_IFACE_DONE = 0,       /* primitive encoded into buf */
-  VJ_IFACE_YIELD = 1,      /* not compilable, fallback to Go */
+  VJ_IFACE_DONE       = 0, /* primitive encoded into buf */
+  VJ_IFACE_YIELD      = 1, /* not compilable, fallback to Go */
   VJ_IFACE_CACHE_MISS = 2, /* type not in cache, yield for compilation */
   VJ_IFACE_SWITCH_OPS = 3, /* cached Blueprint, caller pushes frame */
-  VJ_IFACE_BUF_FULL = 4,   /* buffer full */
-  VJ_IFACE_NAN_INF = 5,    /* float NaN/Inf */
+  VJ_IFACE_BUF_FULL   = 4, /* buffer full */
+  VJ_IFACE_NAN_INF    = 5, /* float NaN/Inf */
 };
 
 typedef struct {

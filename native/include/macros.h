@@ -1,18 +1,20 @@
-#ifndef VJ_COMPAT_H
-#define VJ_COMPAT_H
+#ifndef __V_MACROS_H__
+#define __V_MACROS_H__
 
-/* Portable compiler-attribute macros for GCC/Clang/MSVC cross-compilation. */
-
+#ifndef INLINE
 #if defined(_MSC_VER)
 #define INLINE __forceinline inline
 #else
 #define INLINE static __attribute__((always_inline)) inline
 #endif
+#endif
 
+#ifndef NOINLINE
 #if defined(_MSC_VER)
 #define NOINLINE __declspec(noinline)
 #else
 #define NOINLINE __attribute__((noinline))
+#endif
 #endif
 
 /* Alignment: ALIGNED_DECL(n) before declarator, ALIGNED(n) after. */
@@ -34,23 +36,23 @@
 #endif
 
 #if defined(_MSC_VER)
-#define VJ_HIDDEN
+#define HIDDEN
 #else
-#define VJ_HIDDEN __attribute__((visibility("hidden")))
+#define HIDDEN __attribute__((visibility("hidden")))
 #endif
 
 #if defined(_MSC_VER)
-#define VJ_EXPORT __declspec(dllexport)
+#define EXPORT __declspec(dllexport)
 #else
-#define VJ_EXPORT
+#define EXPORT
 #endif
 
 /* force_align_arg_pointer: emit AND $-16,%rsp on x86-64 to fix
  * stack misalignment when called from Go ABI.  No-op elsewhere. */
 #if defined(__x86_64__) && !defined(_WIN32)
-#define VJ_ALIGN_STACK __attribute__((force_align_arg_pointer))
+#define ALIGN_STACK __attribute__((force_align_arg_pointer))
 #else
-#define VJ_ALIGN_STACK
+#define ALIGN_STACK
 #endif
 
 #if defined(_MSC_VER)
@@ -65,4 +67,12 @@
 #define OPTNONE __attribute__((optnone))
 #endif
 
-#endif /* VJ_COMPAT_H */
+#ifndef LIKELY
+#define LIKELY(x) __builtin_expect(!!(x), 1)
+#endif
+
+#ifndef UNLIKELY
+#define UNLIKELY(x) __builtin_expect(!!(x), 0)
+#endif
+
+#endif /* __V_MACROS_H__ */

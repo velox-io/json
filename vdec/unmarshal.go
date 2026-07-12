@@ -5,38 +5,8 @@ import (
 	"io"
 	"reflect"
 	"sync"
-	"sync/atomic"
 	"unsafe"
-
-	"github.com/velox-io/json/gort"
 )
-
-const fastCacheSize = 32 // must be power of two
-
-type fastCacheEntry struct {
-	key uintptr // rtype pointer
-	val *DecTypeInfo
-}
-
-type fastCache [fastCacheSize]atomic.Pointer[fastCacheEntry]
-
-func fastCacheIndex(rtp uintptr) uintptr {
-	const magic = 0x9e3779b97f4a7c15
-	return (rtp * magic) >> (64 - 5) // 5 = log2(32)
-}
-
-func (c *fastCache) get(t reflect.Type) *DecTypeInfo {
-	rtp := uintptr(gort.TypePtr(t))
-	idx := fastCacheIndex(rtp)
-	if p := c[idx].Load(); p != nil && p.key == rtp {
-		return p.val
-	}
-	dti := DecTypeInfoOf(t)
-	c[idx].Store(&fastCacheEntry{key: rtp, val: dti})
-	return dti
-}
-
-var decFastCache fastCache
 
 var parsers = parserPool{
 	pool: sync.Pool{
@@ -108,7 +78,7 @@ func Unmarshal[T any](data []byte, v T, opts ...UnmarshalOption) error {
 		if ptr == nil {
 			return &InvalidUnmarshalError{Type: rt}
 		}
-		dti = decFastCache.get(rt.Elem())
+		dti = DecTypeInfoOf(rt.Elem())
 	} else if rt.Kind() == reflect.Interface {
 		rv := reflect.ValueOf(v)
 		if !rv.IsValid() {
@@ -121,7 +91,7 @@ func Unmarshal[T any](data []byte, v T, opts ...UnmarshalOption) error {
 			return &InvalidUnmarshalError{Type: rv.Type()}
 		}
 		ptr = rv.UnsafePointer()
-		dti = decFastCache.get(rv.Elem().Type())
+		dti = DecTypeInfoOf(rv.Elem().Type())
 	} else {
 		return &InvalidUnmarshalError{Type: rt}
 	}

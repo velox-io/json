@@ -14,15 +14,15 @@
  * Current reference consumer: ndec. encvm does not use this file.
  */
 
-#include "vj_compat.h"
+#include "macros.h"
 
 #if defined(__APPLE__)
 /* macOS assert failure entry point: __assert_rtn(func, file, line, expr). */
-VJ_HIDDEN void
+HIDDEN void
 vj_assert_rtn_impl(const char *func, const char *file, int line,
                    const char *expr) __asm__("___assert_rtn");
 
-VJ_HIDDEN void
+HIDDEN void
 vj_assert_rtn_impl(const char *func, const char *file, int line,
                    const char *expr) {
   (void)func;
@@ -33,11 +33,11 @@ vj_assert_rtn_impl(const char *func, const char *file, int line,
 }
 #else
 /* glibc assert failure entry point: __assert_fail(expr, file, line, func). */
-VJ_HIDDEN void
+HIDDEN void
 vj_assert_fail_impl(const char *expr, const char *file, unsigned int line,
                     const char *func) __asm__("__assert_fail");
 
-VJ_HIDDEN void
+HIDDEN void
 vj_assert_fail_impl(const char *expr, const char *file, unsigned int line,
                     const char *func) {
   (void)expr;

@@ -92,8 +92,7 @@ func TestBuildLookup_SingleField(t *testing.T) {
 	fi := lookupField(dec, "id")
 	if fi == nil {
 		t.Fatal("expected to find 'id'")
-	}
-	if fi.JSONName != "id" {
+	} else if fi.JSONName != "id" {
 		t.Errorf("expected JSONName='id', got %q", fi.JSONName)
 	}
 }

@@ -383,10 +383,24 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 					ft = ft.Elem()
 				}
 				if ft.Kind() == reflect.Struct {
+					// encoding/json: if an anonymous field has a JSON tag
+					// with an explicit name (e.g. json:"addr"), treat it as
+					// a named field instead of promoting its children.
+					// Fields with json:",omitempty" (empty name) promote.
+					if tag := rf.Tag.Get("json"); tag != "" && tag != "-" {
+						name := tag
+						if before, _, ok := strings.Cut(tag, ","); ok {
+							name = before
+						}
+						if name != "" {
+							goto namedField
+						}
+					}
 					nextLevel = append(nextLevel, bfsEntry{ft, base + rf.Offset, idxPath})
 					continue
 				}
 			}
+		namedField:
 
 			if !rf.IsExported() {
 				continue

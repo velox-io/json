@@ -11,7 +11,7 @@
 #include "log.h"
 #include "types.h"
 
-#ifdef VJ_ENCVM_DEBUG
+#ifdef VJ_DEBUG
 
 /* Ring-buffer writers (static inline, inlined into noinline entries) */
 
@@ -60,7 +60,7 @@ static inline void vj_trace_indent(VjTraceBuf *tb, int32_t depth) {
 
 static inline void vj_trace_key_name(VjTraceBuf *tb, const char *key_ptr, uint16_t key_len) {
   /* Find opening quote */
-  const char *p = key_ptr;
+  const char *p   = key_ptr;
   const char *end = key_ptr + key_len;
   while (p < end && *p != '"')
     p++;
@@ -154,44 +154,44 @@ NOINLINE OPTNONE static void vj_trace_yield(VjTraceBuf *tb, uint16_t op_type, in
 /* High-level macros (guard on tbuf, delegate to noinline fn) */
 
 /* Simple label-only trace — no key, no pc, no base. */
-#define VM_TRACE(label)                                                                                                \
-  do {                                                                                                                 \
-    if (tbuf)                                                                                                          \
-      vj_trace_simple(tbuf, label, VM_TRACE_DEPTH());                                                                  \
+#define VM_TRACE(label)                                                                                           \
+  do {                                                                                                            \
+    if (tbuf)                                                                                                     \
+      vj_trace_simple(tbuf, label, VM_TRACE_DEPTH());                                                             \
   } while (0)
 
 /* Keyed opcode trace — prints field name from key pool if present. */
-#define VM_TRACE_KEY(label)                                                                                            \
-  do {                                                                                                                 \
-    if (tbuf)                                                                                                          \
-      vj_trace_opkey(tbuf, label, VM_TRACE_DEPTH(), op, key_pool);                                                     \
+#define VM_TRACE_KEY(label)                                                                                       \
+  do {                                                                                                            \
+    if (tbuf)                                                                                                     \
+      vj_trace_opkey(tbuf, label, VM_TRACE_DEPTH(), op, key_pool);                                                \
   } while (0)
 
-#define VM_TRACE_MSG(msg)                                                                                              \
-  do {                                                                                                                 \
-    if (tbuf)                                                                                                          \
-      vj_trace_msg(tbuf, msg);                                                                                         \
+#define VM_TRACE_MSG(msg)                                                                                         \
+  do {                                                                                                            \
+    if (tbuf)                                                                                                     \
+      vj_trace_msg(tbuf, msg);                                                                                    \
   } while (0)
 
-#define VM_TRACE_ELEM_IDX(idx)                                                                                         \
-  do {                                                                                                                 \
-    if (tbuf)                                                                                                          \
-      vj_trace_elem_idx(tbuf, VM_TRACE_DEPTH(), (uint64_t)(idx));                                                      \
+#define VM_TRACE_ELEM_IDX(idx)                                                                                    \
+  do {                                                                                                            \
+    if (tbuf)                                                                                                     \
+      vj_trace_elem_idx(tbuf, VM_TRACE_DEPTH(), (uint64_t)(idx));                                                 \
   } while (0)
 
-#define VM_TRACE_KEY_LEN(label, count)                                                                                 \
-  do {                                                                                                                 \
-    if (tbuf)                                                                                                          \
-      vj_trace_opkey_len(tbuf, label, VM_TRACE_DEPTH(), op, key_pool, (uint64_t)(count));                              \
+#define VM_TRACE_KEY_LEN(label, count)                                                                            \
+  do {                                                                                                            \
+    if (tbuf)                                                                                                     \
+      vj_trace_opkey_len(tbuf, label, VM_TRACE_DEPTH(), op, key_pool, (uint64_t)(count));                         \
   } while (0)
 
-#define VM_TRACE_YIELD(op_type)                                                                                        \
-  do {                                                                                                                 \
-    if (tbuf)                                                                                                          \
-      vj_trace_yield(tbuf, (uint16_t)(op_type), VM_TRACE_DEPTH(), op, key_pool);                                       \
+#define VM_TRACE_YIELD(op_type)                                                                                   \
+  do {                                                                                                            \
+    if (tbuf)                                                                                                     \
+      vj_trace_yield(tbuf, (uint16_t)(op_type), VM_TRACE_DEPTH(), op, key_pool);                                  \
   } while (0)
 
-#else /* !VJ_ENCVM_DEBUG */
+#else /* !VJ_DEBUG */
 
 #define VM_TRACE(label)                ((void)0)
 #define VM_TRACE_KEY(label)            ((void)0)
@@ -200,6 +200,6 @@ NOINLINE OPTNONE static void vj_trace_yield(VjTraceBuf *tb, uint16_t op_type, in
 #define VM_TRACE_KEY_LEN(label, count) ((void)0)
 #define VM_TRACE_YIELD(op_type)        ((void)0)
 
-#endif /* VJ_ENCVM_DEBUG */
+#endif /* VJ_DEBUG */
 
 #endif /* VJ_ENCVM_TRACE_H */

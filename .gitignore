@@ -1,5 +1,5 @@
-/build
 /.local
+build
 /benchmark/local
 
 # Profiling
@@ -16,6 +16,7 @@ mem.out
 .vscode/
 *.sublime-*
 .clangd
+compile_flags.txt
 .cache/
 *.dSYM
 

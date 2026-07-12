@@ -9,9 +9,8 @@
 #ifndef VJ_ENCVM_STR_ESCAPE_H
 #define VJ_ENCVM_STR_ESCAPE_H
 
-#include "memfn.h"
+#include "util/memfn.h"
 #include "types.h"
-#include "util.h"
 
 static const char ESCAPE_HEX_DIGITS[] = "0123456789abcdef";
 
@@ -37,14 +36,44 @@ static inline int vj_write_unicode_escape(uint8_t *buf, uint32_t cp) {
  * window) simply bulk-copies via SIMD store. */
 static inline void vj_escape_line_terms(uint8_t **out_ptr, const uint8_t *src, int64_t start, int64_t end) {
   uint8_t *out = *out_ptr;
-  int64_t i = start;
+  int64_t i    = start;
 
-#if defined(__SSE2__) || defined(__aarch64__)
+#if defined(__aarch64__)
+  /* Nibble-mask scan for 0xE2.  Each 4-bit nibble of the 64-bit
+   * packed mask covers one source byte; ctz/4 gives the offset. */
+  while (i + 16 <= end) {
+    uint8x16_t v   = vld1q_u8(&src[i]);
+    uint8x16_t cmp = vceqq_u8(v, vdupq_n_u8(0xE2));
+    uint64_t nm    = vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(cmp), 4)), 0);
+    if (nm == 0) {
+      vst1q_u8(out, v);
+      out += 16;
+      i += 16;
+      continue;
+    }
+    int safe = __builtin_ctzll(nm) >> 2;
+    if (safe > 0) {
+      copy_small(out, &src[i], safe);
+      out += safe;
+      i += safe;
+    }
+    /* Check the two continuation bytes for line terminator:
+     * U+2028 = E2 80 A8,  U+2029 = E2 80 A9. */
+    if (i + 2 < end && src[i + 1] == 0x80 && (src[i + 2] == 0xA8 || src[i + 2] == 0xA9)) {
+      uint32_t cp = (src[i + 2] == 0xA8) ? 0x2028 : 0x2029;
+      out += vj_write_unicode_escape(out, cp);
+      i += 3;
+    } else {
+      *out++ = 0xE2;
+      i += 1;
+    }
+  }
+#elif defined(__SSE2__)
   const __m128i ve2 = _mm_set1_epi8((char)0xE2);
 
   while (i + 16 <= end) {
     __m128i v = _mm_loadu_si128((const __m128i *)&src[i]);
-    int mask = _mm_movemask_epi8(_mm_cmpeq_epi8(v, ve2));
+    int mask  = _mm_movemask_epi8(_mm_cmpeq_epi8(v, ve2));
     if (mask == 0) {
       _mm_storeu_si128((__m128i *)out, v);
       out += 16;
@@ -68,7 +97,7 @@ static inline void vj_escape_line_terms(uint8_t **out_ptr, const uint8_t *src, i
       i += 1;
     }
   }
-#endif /* __SSE2__ || __aarch64__ */
+#endif
 
   /* Scalar tail: fewer than 16 bytes remaining. */
   int64_t flush_start = i;
@@ -114,8 +143,8 @@ static inline void vj_escape_line_terms(uint8_t **out_ptr, const uint8_t *src, i
  * intercepting U+2028/2029 costs just one extra byte comparison per rune. */
 static inline void vj_validate_utf8_run(uint8_t **out_ptr, const uint8_t *src, int64_t start, int64_t end,
                                         const int check_line_terms) {
-  uint8_t *out = *out_ptr;
-  int64_t i = start;
+  uint8_t *out        = *out_ptr;
+  int64_t i           = start;
   int64_t flush_start = i;
 
   while (i < end) {
@@ -161,7 +190,8 @@ static inline void vj_validate_utf8_run(uint8_t **out_ptr, const uint8_t *src, i
       }
       goto invalid_byte;
     } else if ((b0 & 0xF8) == 0xF0) {
-      if (i + 4 <= end && (src[i + 1] & 0xC0) == 0x80 && (src[i + 2] & 0xC0) == 0x80 && (src[i + 3] & 0xC0) == 0x80) {
+      if (i + 4 <= end && (src[i + 1] & 0xC0) == 0x80 && (src[i + 2] & 0xC0) == 0x80 &&
+          (src[i + 3] & 0xC0) == 0x80) {
         uint32_t cp = ((uint32_t)(b0 & 0x07) << 18) | ((uint32_t)(src[i + 1] & 0x3F) << 12) |
                       ((uint32_t)(src[i + 2] & 0x3F) << 6) | (src[i + 3] & 0x3F);
         if (cp >= 0x10000 && cp <= 0x10FFFF) {

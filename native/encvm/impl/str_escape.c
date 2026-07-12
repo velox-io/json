@@ -10,7 +10,7 @@
 /* Non-ASCII run dispatcher */
 
 int64_t vj_escape_nonascii_run(uint8_t **out_ptr, const uint8_t *src, int64_t i, int64_t src_len, uint32_t flags) {
-  const int check_utf8 = (flags & VJ_FLAGS_ESCAPE_INVALID_UTF8) != 0;
+  const int check_utf8       = (flags & VJ_FLAGS_ESCAPE_INVALID_UTF8) != 0;
   const int check_line_terms = (flags & VJ_FLAGS_ESCAPE_LINE_TERMS) != 0;
 
   /* Find end of non-ASCII run. */
@@ -22,7 +22,7 @@ int64_t vj_escape_nonascii_run(uint8_t **out_ptr, const uint8_t *src, int64_t i,
     if (check_line_terms) {
       vj_escape_line_terms(out_ptr, src, i, run_end);
     } else {
-      uint8_t *out = *out_ptr;
+      uint8_t *out    = *out_ptr;
       int64_t run_len = run_end - i;
       __builtin_memcpy(out, &src[i], run_len);
       *out_ptr = out + run_len;
@@ -61,9 +61,9 @@ int64_t vj_escape_nonascii_run(uint8_t **out_ptr, const uint8_t *src, int64_t i,
  *
  * ================================================================ */
 int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint32_t flags) {
-  int64_t esc_count = 0;
-  int64_t i = 0;
-  const int html = (flags & VJ_FLAGS_ESCAPE_HTML) != 0;
+  int64_t esc_count    = 0;
+  int64_t i            = 0;
+  const int html       = (flags & VJ_FLAGS_ESCAPE_HTML) != 0;
   const int check_utf8 = (flags & VJ_FLAGS_ESCAPE_INVALID_UTF8) != 0;
 
 #if defined(__AVX2__) || defined(__SSE2__) || defined(__aarch64__)
@@ -75,15 +75,15 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
 
     __m256i ctrl_safe = _mm256_cmpeq_epi8(_mm256_max_epu8(v, _mm256_set1_epi8(0x20)), v);
 
-    __m256i eq_q = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('"'));
+    __m256i eq_q  = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('"'));
     __m256i eq_bs = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('\\'));
-    __m256i bad = _mm256_or_si256(eq_q, eq_bs);
+    __m256i bad   = _mm256_or_si256(eq_q, eq_bs);
 
     if (html) {
-      __m256i eq_lt = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('<'));
-      __m256i eq_gt = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('>'));
+      __m256i eq_lt  = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('<'));
+      __m256i eq_gt  = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('>'));
       __m256i eq_amp = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('&'));
-      bad = _mm256_or_si256(bad, _mm256_or_si256(eq_lt, _mm256_or_si256(eq_gt, eq_amp)));
+      bad            = _mm256_or_si256(bad, _mm256_or_si256(eq_lt, _mm256_or_si256(eq_gt, eq_amp)));
     }
 
     if (check_utf8) {
@@ -92,27 +92,53 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
     }
 
     __m256i safe = _mm256_andnot_si256(bad, ctrl_safe);
-    int mask = ~_mm256_movemask_epi8(safe);
+    int mask     = ~_mm256_movemask_epi8(safe);
 
     esc_count += __builtin_popcount(mask);
   }
 #endif /* __AVX2__ */
 
-  /* SSE2/NEON: 16 bytes per iteration */
+#if defined(__aarch64__)
+  /* 16 bytes per iteration.  Byte-level popcount via vshr.7 + vaddvq_u8. */
+  for (; i + 16 <= src_len; i += 16) {
+    uint8x16_t v = vld1q_u8(&src[i]);
+
+    uint8x16_t ctrl = vcltq_u8(v, vdupq_n_u8(0x20));
+
+    uint8x16_t eq_q  = vceqq_u8(v, vdupq_n_u8('"'));
+    uint8x16_t eq_bs = vceqq_u8(v, vdupq_n_u8('\\'));
+    uint8x16_t bad   = vorrq_u8(eq_q, eq_bs);
+
+    if (html) {
+      uint8x16_t eq_lt  = vceqq_u8(v, vdupq_n_u8('<'));
+      uint8x16_t eq_gt  = vceqq_u8(v, vdupq_n_u8('>'));
+      uint8x16_t eq_amp = vceqq_u8(v, vdupq_n_u8('&'));
+      bad               = vorrq_u8(bad, vorrq_u8(eq_lt, vorrq_u8(eq_gt, eq_amp)));
+    }
+
+    if (check_utf8) {
+      esc_count += vaddvq_u8(vshrq_n_u8(v, 7));
+    }
+
+    uint8x16_t escape = vorrq_u8(ctrl, bad);
+    esc_count += vaddvq_u8(vshrq_n_u8(escape, 7));
+  }
+#else
+  /* SSE2: 16 bytes per iteration */
   for (; i + 16 <= src_len; i += 16) {
     __m128i v = _mm_loadu_si128((const __m128i *)&src[i]);
 
     __m128i ctrl_safe = _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x20)), v);
 
-    __m128i eq_q = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));
+    __m128i eq_q  = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));
     __m128i eq_bs = _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'));
-    __m128i bad = _mm_or_si128(eq_q, eq_bs);
+    __m128i bad   = _mm_or_si128(eq_q, eq_bs);
 
     if (html) {
-      __m128i eq_lt = _mm_cmpeq_epi8(v, _mm_set1_epi8('<'));
-      __m128i eq_gt = _mm_cmpeq_epi8(v, _mm_set1_epi8('>'));
+      __m128i eq_lt  = _mm_cmpeq_epi8(v, _mm_set1_epi8('<'));
+      __m128i eq_gt  = _mm_cmpeq_epi8(v, _mm_set1_epi8('>'));
       __m128i eq_amp = _mm_cmpeq_epi8(v, _mm_set1_epi8('&'));
-      bad = _mm_or_si128(bad, _mm_or_si128(eq_lt, _mm_or_si128(eq_gt, eq_amp)));
+      bad            = _mm_or_si128(bad, _mm_or_si128(eq_lt, _mm_or_si128(eq_gt, eq_amp)));
     }
 
     if (check_utf8) {
@@ -121,30 +147,67 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
     }
 
     __m128i safe = _mm_andnot_si128(bad, ctrl_safe);
-    int mask = ~_mm_movemask_epi8(safe) & 0xFFFF;
+    int mask     = ~_mm_movemask_epi8(safe) & 0xFFFF;
 
     esc_count += __builtin_popcount(mask);
   }
+#endif
 
   /* SIMD tail: < 16 bytes remaining
    * Page-crossing guard: see strfn.h simd_tail comment. */
   if (i < src_len && __builtin_expect(((uintptr_t)&src[i] & 0xFFF) <= (0x1000 - 16), 1)) {
+    int remaining = (int)(src_len - i);
+
+#if defined(__aarch64__)
+    uint8x16_t v = vld1q_u8(&src[i]);
+
+    uint8x16_t ctrl = vcltq_u8(v, vdupq_n_u8(0x20));
+
+    uint8x16_t eq_q  = vceqq_u8(v, vdupq_n_u8('"'));
+    uint8x16_t eq_bs = vceqq_u8(v, vdupq_n_u8('\\'));
+    uint8x16_t bad   = vorrq_u8(eq_q, eq_bs);
+
+    if (html) {
+      uint8x16_t eq_lt  = vceqq_u8(v, vdupq_n_u8('<'));
+      uint8x16_t eq_gt  = vceqq_u8(v, vdupq_n_u8('>'));
+      uint8x16_t eq_amp = vceqq_u8(v, vdupq_n_u8('&'));
+      bad               = vorrq_u8(bad, vorrq_u8(eq_lt, vorrq_u8(eq_gt, eq_amp)));
+    }
+
+    /* Build a per-byte 1/0 marker, mask out the over-read tail, then
+     * sum across the vector.  vshrq_n_u8(x, 7) extracts the high bit
+     * (1 for matching bytes, since vceqq/vcltq produce 0xFF for true).
+     *
+     * Branchless lane mask: lane index < remaining -> 0xFF, else 0x00.
+     * Avoids a stack array plus fill loop, which clang lowers to a
+     * per-call memset (a source of uniform marshal slowdown on the
+     * short-string tail path). */
+    static const uint8_t VJ_IOTA16[16] = {0, 1, 2,  3,  4,  5,  6,  7,
+                                          8, 9, 10, 11, 12, 13, 14, 15};
+    uint8x16_t lane_mask = vcltq_u8(vld1q_u8(VJ_IOTA16), vdupq_n_u8((uint8_t)remaining));
+
+    if (check_utf8) {
+      uint8x16_t hi = vandq_u8(vshrq_n_u8(v, 7), lane_mask);
+      esc_count += vaddvq_u8(hi);
+    }
+
+    uint8x16_t escape = vandq_u8(vshrq_n_u8(vorrq_u8(ctrl, bad), 7), lane_mask);
+    esc_count += vaddvq_u8(escape);
+#else
     __m128i v = _mm_loadu_si128((const __m128i *)&src[i]);
 
     __m128i ctrl_safe = _mm_cmpeq_epi8(_mm_max_epu8(v, _mm_set1_epi8(0x20)), v);
 
-    __m128i eq_q = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));
+    __m128i eq_q  = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));
     __m128i eq_bs = _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'));
-    __m128i bad = _mm_or_si128(eq_q, eq_bs);
+    __m128i bad   = _mm_or_si128(eq_q, eq_bs);
 
     if (html) {
-      __m128i eq_lt = _mm_cmpeq_epi8(v, _mm_set1_epi8('<'));
-      __m128i eq_gt = _mm_cmpeq_epi8(v, _mm_set1_epi8('>'));
+      __m128i eq_lt  = _mm_cmpeq_epi8(v, _mm_set1_epi8('<'));
+      __m128i eq_gt  = _mm_cmpeq_epi8(v, _mm_set1_epi8('>'));
       __m128i eq_amp = _mm_cmpeq_epi8(v, _mm_set1_epi8('&'));
-      bad = _mm_or_si128(bad, _mm_or_si128(eq_lt, _mm_or_si128(eq_gt, eq_amp)));
+      bad            = _mm_or_si128(bad, _mm_or_si128(eq_lt, _mm_or_si128(eq_gt, eq_amp)));
     }
-
-    int remaining = (int)(src_len - i);
 
     if (check_utf8) {
       int hi_mask = _mm_movemask_epi8(v) & ((1 << remaining) - 1);
@@ -152,10 +215,11 @@ int64_t vj_prescan_string_escaped_len(const uint8_t *src, int64_t src_len, uint3
     }
 
     __m128i safe = _mm_andnot_si128(bad, ctrl_safe);
-    int mask = ~_mm_movemask_epi8(safe) & 0xFFFF;
+    int mask     = ~_mm_movemask_epi8(safe) & 0xFFFF;
 
     mask &= (1 << remaining) - 1;
     esc_count += __builtin_popcount(mask);
+#endif
     i = src_len; /* consumed all remaining bytes */
   }
 

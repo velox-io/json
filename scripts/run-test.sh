@@ -19,6 +19,8 @@ go test -tags vj_noencvm ./venc -count=1
 go test -race -tags vj_noencvm ./venc -count=1
 go test -tags vjgcstress ./venc -count=1
 go test -race -tags vjgcstress ./venc -count=1
+go test -tags vjstress ./venc -count=1
+go test -race -tags vjstress ./venc -count=1
 
 go test ./tests/ -count=1
 go test -race ./tests/ -count=1

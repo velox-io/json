@@ -209,11 +209,11 @@ func ProbeSwissMapSlotSize(mapType reflect.Type, valSize uintptr) (slotSize uint
 
 	mp := MakeMap(mt, 2, nil)
 	valPtr1 := MapAssignFastStr(mt, mp, "__gort_probe_1__")
-	for i := uintptr(0); i < valSize; i++ {
+	for i := range valSize {
 		*(*byte)(unsafe.Add(valPtr1, i)) = 0
 	}
 	valPtr2 := MapAssignFastStr(mt, mp, "__gort_probe_2__")
-	for i := uintptr(0); i < valSize; i++ {
+	for i := range valSize {
 		*(*byte)(unsafe.Add(valPtr2, i)) = 0
 	}
 

@@ -35,9 +35,6 @@
 #define VJ_COMPACT_INDENT
 #endif
 
-/* Define VJ_VM_EXEC_FN_NAME before including encvm.h.
- * encvm.h uses it to emit the VM body as the public symbol. */
-
 #if defined(MODE_FAST)
 #define VJ_MODE_TAG fast
 #elif defined(MODE_COMPACT)
@@ -52,10 +49,12 @@
 #define VJ_VM_EXEC_NAME2(mode, isa) vj_vm_exec_##mode##_##isa
 #define VJ_VM_EXEC_NAME(mode, isa)  VJ_VM_EXEC_NAME2(mode, isa)
 
+#ifndef VJ_VM_EXEC_FN_NAME
 #if defined(ISA_NEON)
 #define VJ_VM_EXEC_FN_NAME VJ_VM_EXEC_NAME(VJ_MODE_TAG, neon)
 #elif defined(ISA_AVX2)
 #define VJ_VM_EXEC_FN_NAME VJ_VM_EXEC_NAME(VJ_MODE_TAG, avx2)
+#endif
 #endif
 
 #include "encvm.h"

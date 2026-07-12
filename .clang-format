@@ -1,8 +1,8 @@
 BasedOnStyle: LLVM
 IndentWidth: 2
-ColumnLimit: 120
+ColumnLimit: 115
 AlignConsecutiveMacros: Consecutive
-AlignConsecutiveAssignments: None
+AlignConsecutiveAssignments: Consecutive
 AlignTrailingComments:
   Kind: Always
   OverEmptyLines: 0

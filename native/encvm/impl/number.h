@@ -8,7 +8,7 @@
 #ifndef VJ_ENCVM_NUMBER_H
 #define VJ_ENCVM_NUMBER_H
 
-#include "itoa.h"
+#include "itoa.h" // IWYU pragma: keep
 
 /* NOINLINE wrappers — used by the VM for narrow integer opcodes
  * (int8/int16/int32/uint8/uint16/uint32) where the extra function

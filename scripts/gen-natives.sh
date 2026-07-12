@@ -3,13 +3,16 @@
 # gen-natives.sh - Compile C sources, generate Go integration files
 #
 # Usage:
-#   ./gen-natives.sh [--zig] [--asm] [--pgo-use] [--no-prelink] <sources.sh> [target_os] [target_arch]
+#   ./gen-natives.sh [--zig] [--asm] [--pgo-instr] [--pgo-instr-use] [--no-prelink] <sources.sh> [target_os] [target_arch]
 #
 # Options:
 #   --zig           - Force using zig cc even for native (non-cross) builds.
 #   --asm           - Generate assembly files for debugging.
-#   --pgo-use       - Enable AutoFDO profile-guided optimization (-fprofile-sample-use).
-#                     Uses profile data from local/pgo-data/merged.profdata
+#   --pgo-instr     - Build instrumented objects (-fprofile-instr-generate) for
+#                     instrumentation PGO. Implies --no-prelink (prf sections must
+#                     survive). The syso is a throwaway profiling artifact.
+#   --pgo-instr-use - Enable instrumentation PGO optimization (-fprofile-instr-use).
+#                     Uses profile data from .local/pgo-data/instr.profdata
 #   --no-prelink    - Disable prelink path and force relocatable link (ld -r / zig ld.lld -r).
 #
 # Arguments:
@@ -44,17 +47,26 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 FORCE_ZIG=false
 GEN_ASM=false
-PGO_USE=false
+PGO_INSTR=false
+PGO_INSTR_USE=false
 DISABLE_PRELINK=false
 while [[ "${1:-}" == --* ]]; do
     case "$1" in
         --zig) FORCE_ZIG=true; shift ;;
         --asm) GEN_ASM=true; shift ;;
-        --pgo-use) PGO_USE=true; shift ;;
+        --pgo-instr) PGO_INSTR=true; shift ;;
+        --pgo-instr-use) PGO_INSTR_USE=true; shift ;;
         --no-prelink) DISABLE_PRELINK=true; shift ;;
         *)     echo "Error: Unknown option: $1"; exit 1 ;;
     esac
 done
+
+# Instrumentation-generate builds MUST NOT be prelinked: prelink.sh's linker
+# script keeps only .text/.rodata and drops the __llvm_prf_* counter sections,
+# and its zero-relocation/self-contained output cannot carry the external
+# __llvm_profile_* references the instrumented code needs. The relocatable
+# ($CC -r) path preserves both.
+if [ "$PGO_INSTR" = true ]; then DISABLE_PRELINK=true; fi
 
 # ============================================================
 #  Load build configuration from sources.sh
@@ -65,7 +77,7 @@ shift || true
 
 if [ -z "$SOURCES_FILE" ]; then
     echo "Error: sources.sh path is required as first argument"
-    echo "Usage: gen-natives.sh [--zig] [--asm] [--pgo-use] [--no-prelink] <sources.sh> [target_os] [target_arch]"
+    echo "Usage: gen-natives.sh [--zig] [--asm] [--no-prelink] <sources.sh> [target_os] [target_arch]"
     exit 1
 fi
 
@@ -135,22 +147,31 @@ if is_true "${NO_NDEBUG:-}"; then
 fi
 
 # ============================================================
-#  AutoFDO (Profile-Guided Optimization) Configuration
+#  Profile-Guided Optimization Configuration
+#  Two mutually-exclusive modes (instrumentation-based):
+#    --pgo-instr     instrumentation generate (-fprofile-instr-generate)
+#    --pgo-instr-use instrumentation use      (-fprofile-instr-use)
 # ============================================================
 
-PGO_DATA_DIR="$REPO_ROOT/local/pgo-data"
+PGO_DATA_DIR="$REPO_ROOT/.local/pgo-data"
 PGO_CFLAGS=""
 
-if [ "$PGO_USE" = true ]; then
-    PROFDATA="$PGO_DATA_DIR/merged.profdata"
+if [ "$PGO_INSTR" = true ]; then
+    # Instrumentation generate: insert per-block counters (__llvm_prf_* sections).
+    # -fprofile-update=atomic: benchmark drives the VM from b.Loop and possibly
+    #   multiple goroutines; non-atomic counters would race and corrupt the profile.
+    PGO_CFLAGS="-fprofile-instr-generate -fprofile-update=atomic"
+    echo "PGO: instrumentation generate enabled (counters inserted; no-prelink forced)"
+elif [ "$PGO_INSTR_USE" = true ]; then
+    PROFDATA="$PGO_DATA_DIR/instr.profdata"
     if [ ! -f "$PROFDATA" ]; then
-        echo "Error: PGO profile not found: $PROFDATA"
-        echo "  Run AutoFDO collection first to generate the profile data."
+        echo "Error: instrumentation PGO profile not found: $PROFDATA"
+        echo "  Run 'make pgo-instr-collect' first to generate the profile data."
         exit 1
     fi
-    # -fprofile-sample-use: AutoFDO sample-based optimization (no instrumentation needed)
-    PGO_CFLAGS="-fprofile-sample-use=$PROFDATA"
-    echo "PGO: AutoFDO optimization enabled (profile: $PROFDATA)"
+    # -fprofile-instr-use: precise block-count guided optimization
+    PGO_CFLAGS="-fprofile-instr-use=$PROFDATA"
+    echo "PGO: instrumentation use enabled (profile: $PROFDATA)"
 fi
 
 # Derive VJ_LIB_DIR from the source file's directory
@@ -357,6 +378,34 @@ fi
 export RESOLVED_TOOLCHAIN USE_LLVM USE_ZIG USE_LLD_LINK CC
 
 # ============================================================
+#  Clang version check (always run, both LLVM and zig toolchains)
+#  encvm's computed-goto dispatch and float codegen are sensitive to the clang
+#  version. Apple clang 17 / LLVM 20 will tail-merge the dispatch and ruin
+#  branch prediction (the barrier in commit 737c23f is only a patch), and the
+#  overall codegen quality is worse than LLVM 22 (CanadaGeometry marshal +12%).
+#  LLVM clang >= 22 is required. zig ships clang 20, so we only warn instead
+#  of aborting (zig does not yet bundle clang 22, cannot upgrade).
+# ============================================================
+clang_ver_line=$(eval "$CC --version" 2>/dev/null | head -1)
+clang_major=$(eval "$CC -dumpversion" 2>/dev/null | cut -d. -f1)
+echo "Compiler: $clang_ver_line"
+if [ -n "$clang_major" ] && [ "$clang_major" -lt 22 ] 2>/dev/null; then
+    echo "WARNING: clang $clang_major < 22. encvm codegen may regress" \
+         "(dispatch tail-merge, float layout)." >&2
+    if [ "$USE_LLVM" = 1 ]; then
+        echo "         Install /opt/llvm/current or prepend" \
+             "PATH=/opt/llvm/current/bin:\$PATH." >&2
+        echo "         (set VJ_ALLOW_OLD_CLANG=1 to suppress)" >&2
+        if [ -z "${VJ_ALLOW_OLD_CLANG:-}" ]; then
+            echo "         Aborting. Set VJ_ALLOW_OLD_CLANG=1 to override." >&2
+            exit 1
+        fi
+    else
+        echo "         (zig ships clang 20; upgrade zig when 22+ is bundled)" >&2
+    fi
+fi
+
+# ============================================================
 #  Platform-ISA constraints
 #  Each platform may compile one or more ISA variants. When multiple
 #  ISAs are listed, the Go init() in encvm_<os>_<arch>.go selects
@@ -547,7 +596,7 @@ for stdlib_src in $STDLIB_SOURCES; do
         stdlib_obj="${OUTPUT_DIR}/${stdlib_base}_${TARGET_OS}_${TARGET_ARCH}.o"
         echo "  Compiling $(basename "$stdlib_obj") (stdlib)"
         $CC -O3 $PIC_FLAG $C_DEBUG_FLAGS -fno-stack-protector \
-            -fno-builtin-memcpy -fno-builtin-memset -fno-builtin-memmove -fno-builtin-bzero \
+            -fno-builtin-memcpy -fno-builtin-memset -fno-builtin-memmove -fno-builtin-bzero -fno-builtin-memcmp \
             -mllvm -disable-loop-idiom-all \
             $ARCH_FLAGS $NDEBUG_FLAG \
             -I"$(dirname "$stdlib_src")" -I"$REPO_ROOT/native/include" -I"$REPO_ROOT/native" \
@@ -621,12 +670,15 @@ for isa in $ISAS; do
             CLANGD_ADD_FLAGS="$ISA_MACRO $MODE_FLAG -DOS=${TARGET_OS} -DARCH=${TARGET_ARCH} $NDEBUG_FLAG -I$REPO_ROOT/native/include -I$REPO_ROOT/native"
         fi
 
-        # Step 2: Generate assembly for debugging (optional)
+        # Step 2: Generate assembly for debugging (optional).
+        # Force -g here even when the object build is using -g0: --asm implies
+        # "I want readable disasm", so we always emit source-line directives so
+        # the .s file can be aligned to source with addr2line / grep .file.
         if [ "$GEN_ASM" = true ]; then
             mkdir -p "$OUTPUT_DIR/asm"
             SFILE="$OUTPUT_DIR/asm/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.s"
             echo "  Generating asm: "$SFILE""
-            $CC -S -O3 $C_DEBUG_FLAGS -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS -fno-asynchronous-unwind-tables $ISA_FLAGS \
+            $CC -S -g -O3 -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS -fno-asynchronous-unwind-tables $ISA_FLAGS \
                 $COMMON_DEFS $COMMON_INCLUDES \
                 "$SOURCE_FILE" -o "$SFILE"
 
@@ -693,7 +745,11 @@ for isa in $ISAS; do
         MODE_SUFFIX="_${mode}"
         MAIN_OBJ="${OUTPUT_DIR}/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.o"
 
-        SYSO_NAME="${BASENAME}_${mode}_${isa}_${TARGET_OS}_${TARGET_ARCH}.syso"
+        if [ -n "${SYSO_PREFIX:-}" ]; then
+            SYSO_NAME="${SYSO_PREFIX}_${TARGET_OS}_${TARGET_ARCH}.syso"
+        else
+            SYSO_NAME="${BASENAME}_${mode}_${isa}_${TARGET_OS}_${TARGET_ARCH}.syso"
+        fi
         SYSO_PATH="$TARGET_DIR/$SYSO_NAME"
 
         echo "Linking $SYSO_NAME..."
@@ -713,22 +769,82 @@ for isa in $ISAS; do
                 PRELINK_FLAGS="-l $PRELINK_FLAGS"
             fi
 
-            # Export symbol list: keep only vj_vm_exec_* as global.
-            # Without this, internal helpers (e.g. vj_write_float32) remain
-            # global in every syso, causing duplicate symbol errors.
-            if [ -n "${EXPORT_SYMBOL_PREFIX:-}" ]; then
+            # Export symbol list: keep only the per-syso entry-point(s) as
+            # global. Without this, internal helpers (e.g. vj_write_float32)
+            # remain global in every syso, causing duplicate symbol errors.
+            #
+            # Three forms are supported (in priority order):
+            #
+            #   EXPORT_SYMBOL_PREFIX_PATTERN + EXPORT_SYMBOL_NAMES
+            #     A TU exporting MULTIPLE fixed-name entry points sharing a
+            #     common prefix (e.g. ndec_sax_parse, ndec_dom_parse,
+            #     ndec_bind_parse all start with "ndec_"). EXPORT_SYMBOL_NAMES
+            #     is a space-separated list written into the darwin
+            #     -exported_symbols_list; EXPORT_SYMBOL_PREFIX_PATTERN is
+            #     forwarded to prelink-obj's HasPrefix filter so every
+            #     ndec_* global stays exported on ELF/PE.
+            #
+            #   EXPORT_SYMBOL_NAME
+            #     A TU exporting a single fixed-name entry point. The
+            #     export-list contains that name; prelink-obj uses the same
+            #     name as its prefix filter (so HasPrefix is effectively an
+            #     exact match for the single global).
+            #
+            #   EXPORT_SYMBOL_PREFIX
+            #     The historical naming convention: the export name is
+            #     synthesized as "${EXPORT_SYMBOL_PREFIX}_${mode}_${isa}".
+            if [ -n "${EXPORT_SYMBOL_PREFIX_PATTERN:-}" ] \
+               || [ -n "${EXPORT_SYMBOL_PREFIX:-}" ] \
+               || [ -n "${EXPORT_SYMBOL_NAME:-}" ]; then
                 EXPORT_LIST="$OUTPUT_DIR/_exports_${mode}_${isa}.txt"
-                if [ "$TARGET_OS" = "darwin" ]; then
-                    # macOS ld: symbol names must be prefixed with '_'
-                    echo "_${EXPORT_SYMBOL_PREFIX}_${mode}_${isa}" > "$EXPORT_LIST"
+                : > "$EXPORT_LIST"
+                if [ -n "${EXPORT_SYMBOL_NAMES:-}" ]; then
+                    sym_names="$EXPORT_SYMBOL_NAMES"
+                elif [ -n "${EXPORT_SYMBOL_NAME:-}" ]; then
+                    sym_names="$EXPORT_SYMBOL_NAME"
                 else
-                    # ELF/COFF: no leading underscore
-                    echo "${EXPORT_SYMBOL_PREFIX}_${mode}_${isa}" > "$EXPORT_LIST"
+                    sym_names="${EXPORT_SYMBOL_PREFIX}_${mode}_${isa}"
                 fi
+                for sym_name in $sym_names; do
+                    if [ "$TARGET_OS" = "darwin" ]; then
+                        # macOS ld: symbol names must be prefixed with '_'
+                        echo "_${sym_name}" >> "$EXPORT_LIST"
+                    else
+                        # ELF/COFF: no leading underscore
+                        echo "${sym_name}" >> "$EXPORT_LIST"
+                    fi
+                done
                 PRELINK_FLAGS="$PRELINK_FLAGS -e $EXPORT_LIST"
             fi
 
+            # SYMBOL_RENAMES (optional, from sources.sh): a space-separated
+            # list of old=new pairs. The {isa} / {mode} placeholders are
+            # expanded per-syso. Useful when the C source uses a fixed
+            # entry-point name (e.g. ndec_parse_default) but the Go side
+            # wants per-ISA names (ndec_parse_default_neon).
+            if [ -n "${SYMBOL_RENAMES:-}" ]; then
+                for r in $SYMBOL_RENAMES; do
+                    expanded=${r//\{mode\}/$mode}
+                    expanded=${expanded//\{isa\}/$isa}
+                    PRELINK_FLAGS="$PRELINK_FLAGS -r $expanded"
+                done
+            fi
+
+            # When the export list contains fixed names, the default
+            # `_${prefix}_${mode}_${isa}` stripping logic in prelink.sh
+            # would return the wrong prefix for ELF/PE export filtering.
+            # Pass an explicit prefix through:
+            #   EXPORT_SYMBOL_PREFIX_PATTERN — common prefix matching
+            #                                  multiple entry points.
+            #   EXPORT_SYMBOL_NAME           — the single fixed name itself.
+            if [ -n "${EXPORT_SYMBOL_PREFIX_PATTERN:-}" ]; then
+                export EXPORT_PREFIX="$EXPORT_SYMBOL_PREFIX_PATTERN"
+            elif [ -n "${EXPORT_SYMBOL_NAME:-}" ]; then
+                export EXPORT_PREFIX="$EXPORT_SYMBOL_NAME"
+            fi
+
             "$REPO_ROOT/scripts/prelink.sh" $PRELINK_FLAGS $LINK_OBJS
+            unset EXPORT_PREFIX
         else
             # Relocatable link path:
             # - Include stdlib/extra objects only once to avoid duplicate symbol definitions across multiple mode×ISA .syso files.
@@ -746,32 +862,32 @@ for isa in $ISAS; do
     done
 done
 
-# ============================================================
-#  Generate .clangd for IDE support (clangd, ccls, etc.)
-#
-#  Unlike compile_commands.json (which only covers .c files),
-#  .clangd applies CompileFlags to ALL files in the directory
-#  including headers — so macros like ISA_neon are resolved
-#  when editing .h files directly.
-# ============================================================
+## ============================================================
+##  Generate .clangd for IDE support (clangd, ccls, etc.)
+##
+##  Unlike compile_commands.json (which only covers .c files),
+##  .clangd applies CompileFlags to ALL files in the directory
+##  including headers — so macros like ISA_neon are resolved
+##  when editing .h files directly.
+## ============================================================
 
-CLANGD_PATH="$VJ_LIB_DIR/.clangd"
-CLANG_TARGET=$(get_clang_target "$TARGET_OS" "$TARGET_ARCH")
-{
-    echo "# Auto-generated by gen-natives.sh — do not edit manually."
-    echo "# Target: ${TARGET_OS}/${TARGET_ARCH} ($(echo $ISAS | tr ' ' ','))"
-    echo "CompileFlags:"
-    echo "  Add:"
-    echo "    - --target=$CLANG_TARGET"
-    for flag in $CLANGD_ADD_FLAGS; do
-        echo "    - $flag"
-    done
-} > "$CLANGD_PATH"
-echo "Generated $CLANGD_PATH"
+#CLANGD_PATH="$VJ_LIB_DIR/.clangd"
+#CLANG_TARGET=$(get_clang_target "$TARGET_OS" "$TARGET_ARCH")
+#{
+#    echo "# Auto-generated by gen-natives.sh — do not edit manually."
+#    echo "# Target: ${TARGET_OS}/${TARGET_ARCH} ($(echo $ISAS | tr ' ' ','))"
+#    echo "CompileFlags:"
+#    echo "  Add:"
+#    echo "    - --target=$CLANG_TARGET"
+#    for flag in $CLANGD_ADD_FLAGS; do
+#        echo "    - $flag"
+#    done
+#} > "$CLANGD_PATH"
+#echo "Generated $CLANGD_PATH"
 
-# ============================================================
-#  Summary
-# ============================================================
+## ============================================================
+##  Summary
+## ============================================================
 
 echo ""
 echo "Generated files:"

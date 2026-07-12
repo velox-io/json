@@ -2,93 +2,68 @@ package venc
 
 import (
 	"reflect"
-	"sync"
-	"sync/atomic"
 	"unsafe"
 
 	"github.com/velox-io/json/gort"
+	"github.com/velox-io/json/rtcache"
 	"github.com/velox-io/json/typ"
 )
 
-var encTypeCache sync.Map
-
-const encFastCacheSize = 32 // must be power of two
-
-type encCacheEntry struct {
-	key uintptr // rtype pointer
-	val *EncTypeInfo
-}
-
-type encFastCache [encFastCacheSize]atomic.Pointer[encCacheEntry]
-
-func encFastCacheIndex(rtp uintptr) uintptr {
-	const magic = 0x9e3779b97f4a7c15 // Fibonacci: golden-ratio × 2^64
-	return (rtp * magic) >> (64 - 5) // 5 = log2(32)
-}
-
 var (
-	encCache    encFastCache // rtype → EncTypeInfo for the same type
-	encPtrCache encFastCache // rtype(*T) → EncTypeInfo(T) for pointer-unwrap fast path
+	encTypeCache rtcache.Cache[*EncTypeInfo] // rtype to EncTypeInfo, shared with recursive builds
+	encPtrCache  rtcache.Table[*EncTypeInfo] // rtype(*T) to EncTypeInfo(T) for pointer-unwrap fast path
 )
 
 func EncTypeInfoOf(t reflect.Type) *EncTypeInfo {
 	rtp := uintptr(gort.TypePtr(t))
-	idx := encFastCacheIndex(rtp)
-	if p := encCache[idx].Load(); p != nil && p.key == rtp {
-		return p.val
-	}
-	eti := encTypeInfoViaMap(t)
-	encCache[idx].Store(&encCacheEntry{key: rtp, val: eti})
+	eti, _ := encTypeCache.GetOrBuild(rtp, func() (*EncTypeInfo, error) {
+		return buildEncTypeInfo(t), nil
+	})
 	return eti
 }
 
 // encElemTypeInfoOf looks up EncTypeInfo for the element type of a pointer,
 // keyed by the pointer's rtype. This avoids reflect.Type.Elem() on the hot path.
 func encElemTypeInfoOf(ptrRtp uintptr, rt reflect.Type) *EncTypeInfo {
-	idx := encFastCacheIndex(ptrRtp)
-	if p := encPtrCache[idx].Load(); p != nil && p.key == ptrRtp {
-		return p.val
+	if v, ok := encPtrCache.Get(ptrRtp); ok {
+		return v
 	}
-	return encElemTypeInfoSlow(ptrRtp, idx, rt)
+	return encElemTypeInfoSlow(ptrRtp, rt)
 }
 
-func encElemTypeInfoSlow(ptrRtp uintptr, idx uintptr, rt reflect.Type) *EncTypeInfo {
+func encElemTypeInfoSlow(ptrRtp uintptr, rt reflect.Type) *EncTypeInfo {
 	eti := EncTypeInfoOf(rt.Elem())
-	encPtrCache[idx].Store(&encCacheEntry{key: ptrRtp, val: eti})
+	encPtrCache.Set(ptrRtp, eti)
 	return eti
 }
 
-func encTypeInfoViaMap(t reflect.Type) *EncTypeInfo {
-	if v, ok := encTypeCache.Load(t); ok {
-		return v.(*EncTypeInfo)
-	}
-	return buildEncTypeInfo(t)
-}
-
 func buildEncTypeInfo(t reflect.Type) *EncTypeInfo {
-	// Recursive shells stay local until every container edge is wired.
-	building := make(map[reflect.Type]*EncTypeInfo)
+	// Recursive shells stay local until every container edge is wired. The
+	// builder reads encTypeCache.Get for cross-root subtree reuse and Publishes
+	// every constructed subtree at the end so future roots share it.
+	building := make(map[uintptr]*EncTypeInfo)
 	eti := buildEncRec(t, building)
 	// All types are now fully constructed (Ext wired). Bind encode functions.
 	for _, beti := range building {
 		bindEncodeFn(beti)
 	}
-	for bt, beti := range building {
-		encTypeCache.LoadOrStore(bt, beti)
+	for rtp, beti := range building {
+		encTypeCache.Publish(rtp, beti)
 	}
 	return eti
 }
 
-func buildEncRec(t reflect.Type, building map[reflect.Type]*EncTypeInfo) *EncTypeInfo {
-	if v, ok := encTypeCache.Load(t); ok {
-		return v.(*EncTypeInfo)
+func buildEncRec(t reflect.Type, building map[uintptr]*EncTypeInfo) *EncTypeInfo {
+	rtp := uintptr(gort.TypePtr(t))
+	if v, ok := encTypeCache.Get(rtp); ok {
+		return v
 	}
-	if et, ok := building[t]; ok {
+	if et, ok := building[rtp]; ok {
 		return et
 	}
 	ut := typ.UniTypeOf(t)
 	et := newEncTypeFromUT(ut)
-	building[t] = et
+	building[rtp] = et
 	fillContainerExt(et, ut, building)
 	bindSizeFn(et)
 	et.HintBytes = computeHintBytes(et, 0)
@@ -110,7 +85,7 @@ func newEncTypeFromUT(ut *typ.UniType) *EncTypeInfo {
 	return et
 }
 
-func fillContainerExt(et *EncTypeInfo, ut *typ.UniType, building map[reflect.Type]*EncTypeInfo) {
+func fillContainerExt(et *EncTypeInfo, ut *typ.UniType, building map[uintptr]*EncTypeInfo) {
 	switch info := ut.Ext.(type) {
 	case *typ.StructTypeInfo:
 		et.Ext = unsafe.Pointer(buildStructInfo(info, building))
@@ -125,7 +100,7 @@ func fillContainerExt(et *EncTypeInfo, ut *typ.UniType, building map[reflect.Typ
 	}
 }
 
-func buildStructInfo(info *typ.StructTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncStructInfo {
+func buildStructInfo(info *typ.StructTypeInfo, building map[uintptr]*EncTypeInfo) *EncStructInfo {
 	si := &EncStructInfo{}
 	si.Fields = make([]EncFieldInfo, len(info.Fields))
 
@@ -144,7 +119,7 @@ func buildStructInfo(info *typ.StructTypeInfo, building map[reflect.Type]*EncTyp
 	return si
 }
 
-func buildSliceInfo(info *typ.SliceTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncSliceInfo {
+func buildSliceInfo(info *typ.SliceTypeInfo, building map[uintptr]*EncTypeInfo) *EncSliceInfo {
 	elemET := buildEncRec(info.ElemType.Type, building)
 	return &EncSliceInfo{
 		ElemType: elemET,
@@ -152,7 +127,7 @@ func buildSliceInfo(info *typ.SliceTypeInfo, building map[reflect.Type]*EncTypeI
 	}
 }
 
-func buildArrayInfo(info *typ.ArrayTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncArrayInfo {
+func buildArrayInfo(info *typ.ArrayTypeInfo, building map[uintptr]*EncTypeInfo) *EncArrayInfo {
 	elemET := buildEncRec(info.ElemType.Type, building)
 	return &EncArrayInfo{
 		ElemType: elemET,
@@ -161,7 +136,7 @@ func buildArrayInfo(info *typ.ArrayTypeInfo, building map[reflect.Type]*EncTypeI
 	}
 }
 
-func buildMapInfo(t reflect.Type, info *typ.MapTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncMapInfo {
+func buildMapInfo(t reflect.Type, info *typ.MapTypeInfo, building map[uintptr]*EncTypeInfo) *EncMapInfo {
 	valET := buildEncRec(info.ValType.Type, building)
 	keyET := buildEncRec(info.KeyType.Type, building)
 	mi := &EncMapInfo{
@@ -177,7 +152,7 @@ func buildMapInfo(t reflect.Type, info *typ.MapTypeInfo, building map[reflect.Ty
 	return mi
 }
 
-func buildPointerInfo(info *typ.PointerTypeInfo, building map[reflect.Type]*EncTypeInfo) *EncPointerInfo {
+func buildPointerInfo(info *typ.PointerTypeInfo, building map[uintptr]*EncTypeInfo) *EncPointerInfo {
 	elemET := buildEncRec(info.ElemType.Type, building)
 	return &EncPointerInfo{
 		ElemType: elemET,
