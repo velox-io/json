@@ -58,6 +58,7 @@ func TestJSONTestSuiteCompatibility(t *testing.T) {
 	}
 
 	want := readCompatResults(t)
+	want.GotDifferentValues = append(want.GotDifferentValues, goVersionExpectedDiff...)
 	want.normalize()
 
 	if !reflect.DeepEqual(got, want) {

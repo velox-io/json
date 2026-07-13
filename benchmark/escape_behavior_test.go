@@ -55,8 +55,8 @@ func detectInvalidUTF8(s string, err error) escapeResult {
 	if err != nil {
 		return escapeResult{Desc: "ERROR — returns error: " + err.Error()}
 	}
-	if strings.Contains(s, `\ufffd`) {
-		return escapeResult{Escaped: true, Desc: "REPLACE — invalid UTF-8 → \\ufffd"}
+	if strings.Contains(s, "\ufffd") {
+		return escapeResult{Escaped: true, Desc: "REPLACE — invalid UTF-8 → U+FFFD"}
 	}
 	if strings.Contains(s, "\xff") || strings.Contains(s, "\xfe") {
 		return escapeResult{PassThrough: true, Desc: "PASS-THROUGH — invalid bytes kept as-is"}

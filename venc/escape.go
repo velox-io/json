@@ -117,7 +117,7 @@ func appendEscapedString(buf []byte, s string, flags escapeFlags) []byte {
 					if j > start {
 						buf = append(buf, s[start:j]...)
 					}
-					buf = append(buf, '\\', 'u', 'f', 'f', 'f', 'd')
+					buf = append(buf, invalidUTF8Repl...)
 					j += size
 					if size == 0 {
 						j++
@@ -129,7 +129,7 @@ func appendEscapedString(buf []byte, s string, flags escapeFlags) []byte {
 					if j > start {
 						buf = append(buf, s[start:j]...)
 					}
-					buf = append(buf, '\\', 'u', 'f', 'f', 'f', 'd')
+					buf = append(buf, invalidUTF8Repl...)
 					j += size
 					start = j
 					continue
@@ -195,7 +195,7 @@ func appendEscapedString(buf []byte, s string, flags escapeFlags) []byte {
 				if i > start {
 					buf = append(buf, s[start:i]...)
 				}
-				buf = append(buf, '\\', 'u', 'f', 'f', 'f', 'd')
+				buf = append(buf, invalidUTF8Repl...)
 				i += size
 				if size == 0 {
 					i++
@@ -209,7 +209,7 @@ func appendEscapedString(buf []byte, s string, flags escapeFlags) []byte {
 			if i > start {
 				buf = append(buf, s[start:i]...)
 			}
-			buf = append(buf, '\\', 'u', 'f', 'f', 'f', 'd')
+			buf = append(buf, invalidUTF8Repl...)
 			i += size
 			start = i
 			continue

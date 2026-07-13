@@ -12,6 +12,7 @@
 int64_t vj_escape_nonascii_run(uint8_t **out_ptr, const uint8_t *src, int64_t i, int64_t src_len, uint32_t flags) {
   const int check_utf8       = (flags & VJ_FLAGS_ESCAPE_INVALID_UTF8) != 0;
   const int check_line_terms = (flags & VJ_FLAGS_ESCAPE_LINE_TERMS) != 0;
+  const int raw_replacement  = (flags & VJ_FLAGS_RAW_UTF8_REPLACEMENT) != 0;
 
   /* Find end of non-ASCII run. */
   int64_t run_end = i;
@@ -28,7 +29,7 @@ int64_t vj_escape_nonascii_run(uint8_t **out_ptr, const uint8_t *src, int64_t i,
       *out_ptr = out + run_len;
     }
   } else {
-    vj_validate_utf8_run(out_ptr, src, i, run_end, check_line_terms);
+    vj_validate_utf8_run(out_ptr, src, i, run_end, check_line_terms, raw_replacement);
   }
 
   return run_end - i;
@@ -54,8 +55,10 @@ int64_t vj_escape_nonascii_run(uint8_t **out_ptr, const uint8_t *src, int64_t i,
  *    - When VJ_FLAGS_ESCAPE_INVALID_UTF8 is set, non-ASCII bytes (>= 0x80)
  *      are also counted as needing escape (+5 each).  This is pessimistic
  *      for valid multi-byte UTF-8 (where continuation bytes don't expand),
- *      but necessary for correctness: each invalid byte expands to \ufffd
- *      (6 bytes), and underestimating causes buffer overflow.
+ *      but necessary for correctness: each invalid byte expands to either
+ *      \ufffd (6 bytes) or raw U+FFFD (3 bytes) depending on
+ *      VJ_FLAGS_RAW_UTF8_REPLACEMENT; +5 covers both, and
+ *      underestimating causes buffer overflow.
  *    - Without VJ_FLAGS_ESCAPE_INVALID_UTF8, non-ASCII bytes are NOT
  *      counted — they pass through as-is.
  *

@@ -341,7 +341,7 @@ enum VjExitCode {
   } while (0)
 #endif
 
-/* Encoding config flag masks (bits 0-3 of extracted flags).
+/* Encoding config flag masks (bits 0-5 of extracted flags).
  * Used by helper functions that receive a uint32_t 'flags' parameter
  * (e.g. vj_escape_string) and by VJ_ST_GET_FLAGS() extraction. */
 #define VJ_FLAGS_ESCAPE_HTML         (1 << 0)
@@ -349,6 +349,7 @@ enum VjExitCode {
 #define VJ_FLAGS_ESCAPE_INVALID_UTF8 (1 << 2)
 #define VJ_FLAGS_FLOAT_EXP_AUTO      (1 << 3)
 #define VJ_FLAGS_SPLIT_GROUP         (1 << 4) /* GOEXPERIMENT=mapsplitgroup KKKKVVVV */
+#define VJ_FLAGS_RAW_UTF8_REPLACEMENT (1 << 5) /* raw U+FFFD (ef bf bd) vs \ufffd escape */
 
 /* ================================================================
  *  Variable-Length Instruction Format

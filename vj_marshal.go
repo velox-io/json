@@ -17,7 +17,9 @@ func WithEscapeLineTerms() MarshalOption { return venc.WithEscapeLineTerms() }
 // WithoutEscapeLineTerms disables escaping of U+2028 and U+2029.
 func WithoutEscapeLineTerms() MarshalOption { return venc.WithoutEscapeLineTerms() }
 
-// WithUTF8Correction enables replacing invalid UTF-8 with \ufffd in strings.
+// WithUTF8Correction enables replacing invalid UTF-8 with U+FFFD in strings.
+// The replacement format (raw U+FFFD bytes on Go 1.27+, \ufffd escape on
+// earlier versions) is build-tag selected to match encoding/json.
 func WithUTF8Correction() MarshalOption { return venc.WithUTF8Correction() }
 
 // WithoutUTF8Correction disables replacing invalid UTF-8 in strings.

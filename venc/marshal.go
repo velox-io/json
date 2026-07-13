@@ -27,17 +27,17 @@ func WithoutEscapeLineTerms() MarshalOption {
 }
 
 func WithUTF8Correction() MarshalOption {
-	return func(es *encodeState) { es.flags |= uint32(escapeInvalidUTF8) }
+	return func(es *encodeState) { es.flags |= uint32(escapeInvalidUTF8) | EncRawUTF8Repl }
 }
 
 func WithoutUTF8Correction() MarshalOption {
-	return func(es *encodeState) { es.flags &^= uint32(escapeInvalidUTF8) }
+	return func(es *encodeState) { es.flags &^= uint32(escapeInvalidUTF8) | EncRawUTF8Repl }
 }
 
 // WithStdCompat matches encoding/json escaping and float formatting.
 func WithStdCompat() MarshalOption {
 	return func(es *encodeState) {
-		es.flags = uint32(escapeStdCompat) | EncFloatExpAuto
+		es.flags = uint32(escapeStdCompat) | EncFloatExpAuto | EncRawUTF8Repl
 	}
 }
 
@@ -46,7 +46,7 @@ func WithFloatExpAuto() MarshalOption {
 }
 
 func WithFastEscape() MarshalOption {
-	return func(es *encodeState) { es.flags &^= uint32(escapeHTML | escapeLineTerms | escapeInvalidUTF8) }
+	return func(es *encodeState) { es.flags &^= uint32(escapeHTML|escapeLineTerms|escapeInvalidUTF8) | EncRawUTF8Repl }
 }
 
 // WithBufSize sets a fixed starting size for the working buffer. If the pooled

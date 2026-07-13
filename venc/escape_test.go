@@ -2,8 +2,14 @@ package venc
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
+
+// repl is the JSON-level bytes for one invalid-UTF-8 replacement, matching
+// the running Go version's encoding/json (raw U+FFFD on 1.27+, \ufffd
+// escape on 1.26 and earlier).
+var repl = string(invalidUTF8Repl)
 
 // Low-level: appendEscapedString tests
 
@@ -56,8 +62,8 @@ func TestEscape_Default(t *testing.T) {
 		{"html_passthrough", "<>&", `"\u003c\u003e\u0026"`},
 		{"U+2028", "a\u2028b", `"a\u2028b"`},
 		{"U+2029", "a\u2029b", `"a\u2029b"`},
-		{"invalid_utf8", "a\xffb", `"a\ufffdb"`},
-		{"lone_surrogate", "\xed\xa0\x80", `"\ufffd\ufffd\ufffd"`},
+		{"invalid_utf8", "a\xffb", "\"a" + repl + "b\""},
+		{"lone_surrogate", "\xed\xa0\x80", "\"" + strings.Repeat(repl, 3) + "\""},
 		{"null", "\x00", `"\u0000"`},
 		{"backslash", `a\b`, `"a\\b"`},
 		{"quote", `a"b`, `"a\"b"`},
@@ -228,7 +234,7 @@ func TestMarshal_DefaultEscapesSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := `{"v":"abc\ufffddef"}`
+	want := `{"v":"abc` + repl + `def"}`
 	if string(got) != want {
 		t.Errorf("want: %s\n got: %s", want, got)
 	}
@@ -351,10 +357,10 @@ func TestMarshal_EscapeUTF8Only(t *testing.T) {
 		{"valid_chinese", "中文", `{"v":"中文"}`},
 		{"html_passthrough", "<>&", `{"v":"<>&"}`},
 		{"line_sep_passthrough", "a\u2028b", "{\"v\":\"a\xe2\x80\xa8b\"}"},
-		{"invalid_0xff", "a\xffb", `{"v":"a\ufffdb"}`},
+		{"invalid_0xff", "a\xffb", `{"v":"a` + repl + `b"}`},
 		// Surrogate bytes: each byte replaced individually (matching stdlib).
-		{"lone_surrogate", "\xed\xa0\x80", `{"v":"\ufffd\ufffd\ufffd"}`},
-		{"truncated_2byte", "\xc0x", `{"v":"\ufffdx"}`},
+		{"lone_surrogate", "\xed\xa0\x80", `{"v":"` + strings.Repeat(repl, 3) + `"}`},
+		{"truncated_2byte", "\xc0x", `{"v":"` + repl + `x"}`},
 	}
 
 	for _, tc := range cases {

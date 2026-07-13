@@ -135,14 +135,16 @@ static inline void vj_escape_line_terms(uint8_t **out_ptr, const uint8_t *src, i
 /* UTF-8 validation with lazy-flush
  *
  * Validates UTF-8 sequences rune-by-rune within src[start..end).
- * Invalid bytes and surrogate codepoints are replaced with \ufffd.
+ * Invalid bytes and surrogate codepoints are replaced with U+FFFD.
+ * When raw_replacement is set, U+FFFD is written as raw UTF-8 bytes
+ * (ef bf bd, 3 bytes); otherwise as the \ufffd escape (6 bytes).
  * Valid bytes are bulk-copied via lazy flush.
  *
  * Line terminator escaping (check_line_terms) is piggybacked here rather
  * than run as a separate pass: since we're already decoding rune-by-rune,
  * intercepting U+2028/2029 costs just one extra byte comparison per rune. */
 static inline void vj_validate_utf8_run(uint8_t **out_ptr, const uint8_t *src, int64_t start, int64_t end,
-                                        const int check_line_terms) {
+                                        const int check_line_terms, const int raw_replacement) {
   uint8_t *out        = *out_ptr;
   int64_t i           = start;
   int64_t flush_start = i;
@@ -210,8 +212,13 @@ static inline void vj_validate_utf8_run(uint8_t **out_ptr, const uint8_t *src, i
       __builtin_memcpy(out, &src[flush_start], n);
       out += n;
     }
-    __builtin_memcpy(out, "\\ufffd", 6);
-    out += 6;
+    if (raw_replacement) {
+      __builtin_memcpy(out, "\xef\xbf\xbd", 3);
+      out += 3;
+    } else {
+      __builtin_memcpy(out, "\\ufffd", 6);
+      out += 6;
+    }
     i += 1;
     flush_start = i;
     continue;
