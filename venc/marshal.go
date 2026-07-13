@@ -46,7 +46,9 @@ func WithFloatExpAuto() MarshalOption {
 }
 
 func WithFastEscape() MarshalOption {
-	return func(es *encodeState) { es.flags &^= uint32(escapeHTML|escapeLineTerms|escapeInvalidUTF8) | EncRawUTF8Repl }
+	return func(es *encodeState) {
+		es.flags &^= uint32(escapeHTML|escapeLineTerms|escapeInvalidUTF8) | EncRawUTF8Repl
+	}
 }
 
 // WithBufSize sets a fixed starting size for the working buffer. If the pooled
