@@ -47,7 +47,6 @@ type Parser struct {
 	arenaOff   int                               // next free offset in arenaData
 	ptrAllocs  map[unsafe.Pointer]*TypeAllocator // per-type batch allocators for pointer fields
 	useNumber  bool                              // decode numbers in interface{} as json.Number
-	copyString bool                              // copy all strings instead of zero-copy
 }
 
 // arenaAlloc hands out bytes from the parser arena.
@@ -436,18 +435,15 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *DecTypeInfo, ptr unsafe.Poi
 	}
 }
 
-func copyStringIfNeeded(raw []byte, copyStr bool) string {
+func copyStringIfNeeded(raw []byte) string {
 	if len(raw) == 0 {
 		return ""
-	}
-	if copyStr {
-		return string(raw)
 	}
 	return unsafe.String(slicePtrT(raw), len(raw))
 }
 
 // scanStringValue decodes a JSON string into a typed destination.
-// The no-escape path aliases src unless copyString is set.
+// The no-escape path aliases src.
 func (sc *Parser) scanStringValue(src []byte, idx int, ti *DecTypeInfo, ptr unsafe.Pointer) (int, error) {
 	start := idx + 1
 	n := len(src)
@@ -477,8 +473,7 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *DecTypeInfo, ptr unsa
 
 		if foundChar == '"' {
 			raw := sliceRangeT(src, start, foundPos)
-			needCopy := sc.copyString
-			s := copyStringIfNeeded(raw, needCopy)
+			s := copyStringIfNeeded(raw)
 			switch ti.Kind {
 			case typ.KindString:
 				*(*string)(ptr) = s
@@ -501,8 +496,7 @@ func (sc *Parser) scanStringValue(src []byte, idx int, ti *DecTypeInfo, ptr unsa
 		c := sliceAt(src, pos)
 		if c == '"' {
 			raw := sliceRangeT(src, start, pos)
-			needCopy := sc.copyString
-			s := copyStringIfNeeded(raw, needCopy)
+			s := copyStringIfNeeded(raw)
 			switch ti.Kind {
 			case typ.KindString:
 				*(*string)(ptr) = s
@@ -570,12 +564,10 @@ func (sc *Parser) scanStringKey(src []byte, idx int) (int, []byte, error) {
 	return n, nil, errUnexpectedEOF
 }
 
-// scanString returns a decoded string.
-// It copies only when sc.copyString is set.
+// scanString returns a decoded string. It aliases src on the no-escape path.
 func (sc *Parser) scanString(src []byte, idx int) (int, string, error) {
 	start := idx + 1
 	n := len(src)
-	needCopy := sc.copyString
 
 	pos := start
 	for pos+8 <= n {
@@ -589,15 +581,12 @@ func (sc *Parser) scanString(src []byte, idx int) (int, string, error) {
 			foundIdx := pos + off
 			c := sliceAt(src, foundIdx)
 			if c == '"' {
-				return foundIdx + 1, copyStringIfNeeded(sliceRangeT(src, start, foundIdx), needCopy), nil
+				return foundIdx + 1, copyStringIfNeeded(sliceRangeT(src, start, foundIdx)), nil
 			}
 			if c == '\\' {
 				endIdx, result, err := sc.unescapeSinglePass(src, start, foundIdx)
 				if err != nil {
 					return endIdx, "", err
-				}
-				if needCopy {
-					return endIdx, string(result), nil
 				}
 				return endIdx, unsafe.String(unsafe.SliceData(result), len(result)), nil
 			}
@@ -609,15 +598,12 @@ func (sc *Parser) scanString(src []byte, idx int) (int, string, error) {
 	for pos < n {
 		c := sliceAt(src, pos)
 		if c == '"' {
-			return pos + 1, copyStringIfNeeded(sliceRangeT(src, start, pos), needCopy), nil
+			return pos + 1, copyStringIfNeeded(sliceRangeT(src, start, pos)), nil
 		}
 		if c == '\\' {
 			endIdx, result, err := sc.unescapeSinglePass(src, start, pos)
 			if err != nil {
 				return endIdx, "", err
-			}
-			if needCopy {
-				return endIdx, string(result), nil
 			}
 			return endIdx, unsafe.String(unsafe.SliceData(result), len(result)), nil
 		}

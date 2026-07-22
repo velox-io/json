@@ -23,9 +23,6 @@ func WithBufferSize(size int) DecoderOption { return vdec.WithBufferSize(size) }
 // WithSkipErrors enables skip-on-error recovery for NDJSON streams.
 func WithSkipErrors(fn func(err error) bool) DecoderOption { return vdec.WithSkipErrors(fn) }
 
-// DecoderCopyString causes all decoded strings to be heap-copied.
-func DecoderCopyString() DecoderOption { return vdec.DecoderCopyString() }
-
 // WithExpectedSize hints the total input size (e.g. HTTP Content-Length).
 func WithExpectedSize(size int) DecoderOption { return vdec.WithExpectedSize(size) }
 

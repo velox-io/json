@@ -415,7 +415,6 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 			jsonName := rf.Name
 			omitEmpty := false
 			quoted := false
-			copyStr := false
 			if tag := rf.Tag.Get("json"); tag != "" {
 				if tag == "-" {
 					continue
@@ -424,7 +423,6 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 					jsonName = before
 					omitEmpty = strings.Contains(opts, "omitempty")
 					quoted = strings.Contains(opts, "string")
-					copyStr = strings.Contains(opts, "copy")
 				} else {
 					jsonName = tag
 				}
@@ -456,9 +454,6 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 			}
 			if quoted {
 				tagFlags |= TagFlagQuoted
-			}
-			if copyStr && fieldUT.Kind == KindString {
-				tagFlags |= TagFlagCopyString
 			}
 
 			sf := StructField{

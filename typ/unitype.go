@@ -61,9 +61,8 @@ const (
 type TagFlag uint8
 
 const (
-	TagFlagQuoted     TagFlag = 1 << iota // `,string` tag
-	TagFlagOmitEmpty                      // `omitempty` tag
-	TagFlagCopyString                     // `,copy` tag
+	TagFlagQuoted    TagFlag = 1 << iota // `,string` tag
+	TagFlagOmitEmpty                     // `omitempty` tag
 )
 
 // UniType is the shared type descriptor for encode and decode.

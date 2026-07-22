@@ -12,7 +12,7 @@ import (
 const DecTypeFlagSpecial = typ.TypeFlagHasUnmarshalFn | typ.TypeFlagHasTextUnmarshalFn | typ.TypeFlagRawMessage | typ.TypeFlagNumber
 
 // DecTagFlagSpecial marks field tags handled before scanValue.
-const DecTagFlagSpecial = typ.TagFlagQuoted | typ.TagFlagCopyString
+const DecTagFlagSpecial = typ.TagFlagQuoted
 
 type DecTypeInfo struct {
 	Kind      typ.ElemTypeKind

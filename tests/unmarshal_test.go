@@ -3,6 +3,7 @@ package tests
 import (
 	"strings"
 	"testing"
+	"unsafe"
 
 	vjson "github.com/velox-io/json"
 )
@@ -230,5 +231,35 @@ func TestEscapes(t *testing.T) {
 		if err == nil {
 			t.Errorf("accepted invalid json string: %+v", input)
 		}
+	}
+}
+
+// isZeroCopy returns true if the string data pointer lies within the given buffer.
+func isZeroCopy(s string, buf []byte) bool {
+	if len(s) == 0 || len(buf) == 0 {
+		return false
+	}
+	sp := uintptr(unsafe.Pointer(unsafe.StringData(s)))
+	lo := uintptr(unsafe.Pointer(&buf[0]))
+	hi := lo + uintptr(len(buf))
+	return sp >= lo && sp < hi
+}
+
+// TestDefault_ZeroCopy verifies the public zero-copy contract: plain strings
+// (no escapes) alias the input buffer rather than copying. Unmarshal's doc
+// states "Strings may reference data (zero-copy); the caller must not modify
+// data after this call."
+func TestDefault_ZeroCopy(t *testing.T) {
+	type S struct {
+		Name string `json:"name"`
+	}
+	input := []byte(`{"name":"hello"}`)
+
+	var v S
+	if err := vjson.Unmarshal(input, &v); err != nil {
+		t.Fatal(err)
+	}
+	if !isZeroCopy(v.Name, input) {
+		t.Fatal("default mode: string should be zero-copy")
 	}
 }

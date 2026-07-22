@@ -203,13 +203,7 @@ func (sc *Parser) processEscapedString(src []byte, start, firstEscIdx int, ti *D
 	if err != nil {
 		return endIdx, err
 	}
-	needCopy := sc.copyString
-	var s string
-	if needCopy {
-		s = string(result)
-	} else {
-		s = unsafe.String(unsafe.SliceData(result), len(result))
-	}
+	s := unsafe.String(unsafe.SliceData(result), len(result))
 	switch ti.Kind {
 	case typ.KindString:
 		*(*string)(ptr) = s

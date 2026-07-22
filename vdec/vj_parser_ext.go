@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
-	"strings"
 	"unsafe"
 
 	"github.com/velox-io/json/typ"
@@ -143,8 +142,6 @@ func (sc *Parser) scanValueSpecial(src []byte, idx int, ti *DecTypeInfo, ptr uns
 }
 
 func (sc *Parser) scanFieldTagged(src []byte, idx int, fi *DecFieldInfo, ti *DecTypeInfo, ptr unsafe.Pointer) (int, error) {
-	copyStr := fi.TagFlags&typ.TagFlagCopyString != 0
-
 	if fi.TagFlags&typ.TagFlagQuoted != 0 {
 		// `,string` still preserves encoding/json's null handling.
 		idx = skipWS(src, idx)
@@ -169,19 +166,14 @@ func (sc *Parser) scanFieldTagged(src []byte, idx int, fi *DecFieldInfo, ti *Dec
 			return idx + 4, nil
 		}
 		if fi.Kind == typ.KindPointer {
-			return sc.scanPointerQuoted(src, idx, ti, copyStr, ptr)
+			return sc.scanPointerQuoted(src, idx, ti, ptr)
 		}
-		return sc.scanQuotedValue(src, idx, ti, copyStr, ptr)
+		return sc.scanQuotedValue(src, idx, ti, ptr)
 	}
-	// `,copy` forces every nested string path to allocate.
-	prev := sc.copyString
-	sc.copyString = true
-	newIdx, err := sc.scanValue(src, idx, ti, ptr)
-	sc.copyString = prev
-	return newIdx, err
+	return sc.scanValue(src, idx, ti, ptr)
 }
 
-func (sc *Parser) scanQuotedValue(src []byte, idx int, ti *DecTypeInfo, copyStr bool, ptr unsafe.Pointer) (int, error) {
+func (sc *Parser) scanQuotedValue(src []byte, idx int, ti *DecTypeInfo, ptr unsafe.Pointer) (int, error) {
 	newIdx, inner, err := sc.scanString(src, idx)
 	if err != nil {
 		return newIdx, err
@@ -243,14 +235,8 @@ func (sc *Parser) scanQuotedValue(src []byte, idx int, ti *DecTypeInfo, copyStr 
 			if scanErr != nil {
 				return newIdx, newSyntaxErrorWrap(fmt.Sprintf("vjson: cannot unmarshal quoted string: %v", scanErr), newIdx, scanErr)
 			}
-			if copyStr {
-				innerStr = strings.Clone(innerStr)
-			}
 			*(*string)(ptr) = innerStr
 		} else {
-			if sc.copyString || copyStr {
-				inner = strings.Clone(inner)
-			}
 			*(*string)(ptr) = inner
 		}
 
@@ -261,7 +247,7 @@ func (sc *Parser) scanQuotedValue(src []byte, idx int, ti *DecTypeInfo, copyStr 
 	return newIdx, nil
 }
 
-func (sc *Parser) scanPointerQuoted(src []byte, idx int, ti *DecTypeInfo, copyStr bool, ptr unsafe.Pointer) (int, error) {
+func (sc *Parser) scanPointerQuoted(src []byte, idx int, ti *DecTypeInfo, ptr unsafe.Pointer) (int, error) {
 	pDec := ti.ResolvePointer()
 
 	idx = skipWS(src, idx)
@@ -290,7 +276,7 @@ func (sc *Parser) scanPointerQuoted(src []byte, idx int, ti *DecTypeInfo, copySt
 		}
 	}
 
-	newIdx, err := sc.scanQuotedValue(src, idx, pDec.ElemTI, copyStr, elemPtr)
+	newIdx, err := sc.scanQuotedValue(src, idx, pDec.ElemTI, elemPtr)
 	if err != nil {
 		return newIdx, err
 	}

@@ -33,13 +33,6 @@ func WithSkipErrors(fn func(err error) bool) DecoderOption {
 	}
 }
 
-// DecoderCopyString causes all decoded strings to be heap-copied.
-func DecoderCopyString() DecoderOption {
-	return func(d *Decoder) {
-		d.copyString = true
-	}
-}
-
 // WithExpectedSize hints the total input size (e.g. HTTP Content-Length).
 func WithExpectedSize(size int) DecoderOption {
 	return func(d *Decoder) {
@@ -76,7 +69,6 @@ type Decoder struct {
 
 	skipErrors func(err error) bool
 	useNumber  bool
-	copyString bool
 
 	sc       *Parser
 	lastType reflect.Type
@@ -103,19 +95,10 @@ func (d *Decoder) UseNumber() {
 	}
 }
 
-// CopyString causes all decoded strings to be heap-copied.
-func (d *Decoder) CopyString() {
-	d.copyString = true
-	if d.sc != nil {
-		d.sc.copyString = true
-	}
-}
-
 func (d *Decoder) parser() *Parser {
 	if d.sc == nil {
 		d.sc = parsers.Get()
 		d.sc.useNumber = d.useNumber
-		d.sc.copyString = d.copyString
 		return d.sc
 	}
 	sc := d.sc

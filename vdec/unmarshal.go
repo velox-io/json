@@ -38,7 +38,6 @@ func (p *parserPool) Put(sc *Parser) {
 	}
 
 	sc.useNumber = false
-	sc.copyString = false
 	p.pool.Put(sc)
 }
 
@@ -56,12 +55,6 @@ type UnmarshalOption func(*Parser)
 // json.Number instead of float64.
 func WithUseNumber() UnmarshalOption {
 	return func(sc *Parser) { sc.useNumber = true }
-}
-
-// WithCopyString causes all decoded strings to be heap-copied instead of
-// zero-copy referencing the input buffer.
-func WithCopyString() UnmarshalOption {
-	return func(sc *Parser) { sc.copyString = true }
 }
 
 // Unmarshal parses JSON data into v.
