@@ -383,11 +383,14 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 					ft = ft.Elem()
 				}
 				if ft.Kind() == reflect.Struct {
-					// encoding/json: if an anonymous field has a JSON tag
-					// with an explicit name (e.g. json:"addr"), treat it as
-					// a named field instead of promoting its children.
+					// if an anonymous field has a JSON tag with an explicit name (e.g. json:"addr"),
+					// treat it as a named field instead of promoting its children.
 					// Fields with json:",omitempty" (empty name) promote.
-					if tag := rf.Tag.Get("json"); tag != "" && tag != "-" {
+					// json:"-" excludes the entire embedded field (no promotion of its children either).
+					if tag := rf.Tag.Get("json"); tag != "" {
+						if tag == "-" {
+							continue
+						}
 						name := tag
 						if before, _, ok := strings.Cut(tag, ","); ok {
 							name = before
@@ -402,7 +405,10 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 			}
 		namedField:
 
-			if !rf.IsExported() {
+			// anonymous (embedded) fields bypass the IsExported gate: their type name need not be exported
+			// because the JSON key is either the explicit tag name or a promoted exported child.
+			// Only non-anonymous fields require an exported Go name to be serialized.
+			if !rf.Anonymous && !rf.IsExported() {
 				continue
 			}
 
