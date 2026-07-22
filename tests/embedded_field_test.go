@@ -621,7 +621,10 @@ func TestEmbedded_NestedStructure(t *testing.T) {
 	stdRaw, vjRaw := encodeWithBoth(t, &obj)
 	t.Logf("stdlib: %s", stdRaw)
 	t.Logf("vjson:  %s", vjRaw)
-	assertJSONEqual(t, "nested K8s-like structure", stdRaw, vjRaw)
+	if !mapsEqual([]byte(vjRaw), []byte(stdRaw)) {
+		t.Errorf("nested K8s-like structure: vjson diverges from encoding/json\n  stdlib: %s\n  vjson:  %s",
+			stdRaw, vjRaw)
+	}
 }
 
 // TestEmbedded_RoundTripUnmarshal marshals then unmarshals to confirm the
