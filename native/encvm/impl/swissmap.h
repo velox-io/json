@@ -11,7 +11,7 @@
 #ifndef VJ_ENCVM_SWISSMAP_H
 #define VJ_ENCVM_SWISSMAP_H
 
-#include "number.h"
+#include "itoa.h"
 #include "strfn.h"
 #include "types.h"
 
@@ -130,8 +130,8 @@ static inline int vj_swiss_indent_pad(const VjSwissIndent *ind) {
 /* Encode-one helpers and need calculators */
 
 /* map[string]string */
-static inline uint8_t *vj_swiss_encode_one_str_str(uint8_t *buf, const GoString *k, const uint8_t *val_ptr,
-                                                   int *entry_first, uint32_t flags, const VjSwissIndent *ind) {
+INLINE uint8_t *vj_swiss_encode_one_str_str(uint8_t *buf, const GoString *k, const uint8_t *val_ptr,
+                                            int *entry_first, uint32_t flags, const VjSwissIndent *ind) {
   if (!*entry_first) {
     *buf++ = ',';
     buf    = vj_swiss_write_indent(buf, ind);
@@ -157,8 +157,8 @@ static inline uint8_t *vj_swiss_encode_one_str_str(uint8_t *buf, const GoString 
 }
 
 /* map[string]int / map[string]int64 */
-static inline uint8_t *vj_swiss_encode_one_str_int(uint8_t *buf, const GoString *k, const uint8_t *val_ptr,
-                                                   int *entry_first, uint32_t flags, const VjSwissIndent *ind) {
+INLINE uint8_t *vj_swiss_encode_one_str_int(uint8_t *buf, const GoString *k, const uint8_t *val_ptr,
+                                            int *entry_first, uint32_t flags, const VjSwissIndent *ind) {
   if (!*entry_first) {
     *buf++ = ',';
     buf    = vj_swiss_write_indent(buf, ind);
@@ -179,18 +179,18 @@ static inline uint8_t *vj_swiss_encode_one_str_int(uint8_t *buf, const GoString 
 }
 
 /* Backward-compatible encode_one. */
-static inline uint8_t *vj_swiss_encode_one(uint8_t *buf, const GoString *k, const GoString *v, int *entry_first,
-                                           uint32_t flags, const VjSwissIndent *ind) {
+INLINE uint8_t *vj_swiss_encode_one(uint8_t *buf, const GoString *k, const GoString *v, int *entry_first,
+                                    uint32_t flags, const VjSwissIndent *ind) {
   return vj_swiss_encode_one_str_str(buf, k, (const uint8_t *)v, entry_first, flags, ind);
 }
 
 /* Need calculators */
-static inline int64_t vj_swiss_need_str_str(const GoString *k, const uint8_t *val_ptr, int ipad, int key_space) {
+INLINE int64_t vj_swiss_need_str_str(const GoString *k, const uint8_t *val_ptr, int ipad, int key_space) {
   const GoString *v = (const GoString *)val_ptr;
   return 1 + ipad + key_space + 2 + (k->len * 6) + 1 + 2 + (v->len * 6);
 }
 
-static inline int64_t vj_swiss_need_str_int(const GoString *k, const uint8_t *val_ptr, int ipad, int key_space) {
+INLINE int64_t vj_swiss_need_str_int(const GoString *k, const uint8_t *val_ptr, int ipad, int key_space) {
   (void)val_ptr;
   return 1 + ipad + key_space + 2 + (k->len * 6) + 1 + 21;
 }
@@ -208,8 +208,8 @@ INLINE VjSwissMapResult vj_swiss_iterate_impl(uint8_t *buf, const uint8_t *bend,
                                               int32_t si, int entry_first, uint32_t flags,
                                               const VjSwissIndent *ind, const int32_t key_stride,
                                               const int32_t elems_off, const int32_t elem_stride,
-                                              const int32_t group_size, vj_swiss_encode_fn encode_one,
-                                              vj_swiss_need_fn calc_need) {
+                                              const int32_t group_size, const vj_swiss_encode_fn encode_one,
+                                              const vj_swiss_need_fn calc_need) {
   int ipad      = vj_swiss_indent_pad(ind);
   int key_space = ind->indent_step ? 1 : 0;
 
@@ -295,10 +295,10 @@ INLINE VjSwissMapResult vj_swiss_iterate_impl(uint8_t *buf, const uint8_t *bend,
 /* Specialized noinline wrappers */
 
 /* map[string]string */
-NOINLINE static VjSwissMapResult vj_swiss_iterate_str_str(uint8_t *buf, const uint8_t *bend, VjStackFrame *frame,
-                                                          const GoSwissMap *m, int32_t remaining, int32_t di,
-                                                          int32_t gi, int32_t si, int entry_first, uint32_t flags,
-                                                          const VjSwissIndent *ind) {
+INLINE VjSwissMapResult vj_swiss_iterate_str_str(uint8_t *buf, const uint8_t *bend, VjStackFrame *frame,
+                                                 const GoSwissMap *m, int32_t remaining, int32_t di, int32_t gi,
+                                                 int32_t si, int entry_first, uint32_t flags,
+                                                 const VjSwissIndent *ind) {
   if (flags & VJ_FLAGS_SPLIT_GROUP) {
     return vj_swiss_iterate_impl(buf, bend, frame, m, remaining, di, gi, si, entry_first, flags, ind,
                                  SWISS_SPLIT_KEY_STRIDE, SWISS_SPLIT_ELEMS_OFF, SWISS_STR_STR_SPLIT_ELEM_STRIDE,
@@ -311,10 +311,10 @@ NOINLINE static VjSwissMapResult vj_swiss_iterate_str_str(uint8_t *buf, const ui
 }
 
 /* map[string]int / map[string]int64 */
-NOINLINE static VjSwissMapResult vj_swiss_iterate_str_int(uint8_t *buf, const uint8_t *bend, VjStackFrame *frame,
-                                                          const GoSwissMap *m, int32_t remaining, int32_t di,
-                                                          int32_t gi, int32_t si, int entry_first, uint32_t flags,
-                                                          const VjSwissIndent *ind) {
+INLINE VjSwissMapResult vj_swiss_iterate_str_int(uint8_t *buf, const uint8_t *bend, VjStackFrame *frame,
+                                                 const GoSwissMap *m, int32_t remaining, int32_t di, int32_t gi,
+                                                 int32_t si, int entry_first, uint32_t flags,
+                                                 const VjSwissIndent *ind) {
   if (flags & VJ_FLAGS_SPLIT_GROUP) {
     return vj_swiss_iterate_impl(buf, bend, frame, m, remaining, di, gi, si, entry_first, flags, ind,
                                  SWISS_SPLIT_KEY_STRIDE, SWISS_SPLIT_ELEMS_OFF, SWISS_STR_INT_SPLIT_ELEM_STRIDE,
@@ -326,38 +326,38 @@ NOINLINE static VjSwissMapResult vj_swiss_iterate_str_int(uint8_t *buf, const ui
                                vj_swiss_need_str_int);
 }
 
-/* Backward-compatible wrapper. */
-NOINLINE static VjSwissMapResult vj_swiss_map_iterate(uint8_t *buf, const uint8_t *bend, VjStackFrame *frame,
-                                                      const GoSwissMap *m, int32_t remaining, int32_t di,
-                                                      int32_t gi, int32_t si, int entry_first, uint32_t flags,
-                                                      const VjSwissIndent *ind) {
-  return vj_swiss_iterate_str_str(buf, bend, frame, m, remaining, di, gi, si, entry_first, flags, ind);
-}
+/* Result of next-full-slot scan.
+ * 16B by-value POD (2 pointers). Iterator state {dir_idx, group_idx, slot_idx} is
+ * read from and written back to `frame->map` directly, so callers never need locals
+ * for it: avoiding the call-site dominated the VM's frame size before. */
+typedef struct {
+  const uint8_t *key_ptr; /* NULL if scan exhausted */
+  const uint8_t *group;   /* group base of the returned slot */
+} VjSwissSlot;
 
-/* Scan forward to the next full slot. Returns key pointer or NULL.
- * Outputs group base via *group_out for elem address computation. */
-NOINLINE static const uint8_t *vj_swiss_next_full_slot(const GoSwissMap *m, int32_t key_stride, int32_t group_size,
-                                                       int32_t *di, int32_t *gi, int32_t *si,
-                                                       const uint8_t **group_out) {
+INLINE VjSwissSlot vj_swiss_next_full_slot(const GoSwissMap *m, int32_t key_stride, int32_t group_size,
+                                           VjStackFrame *frame) {
+  VjSwissSlot r = {NULL, NULL};
   if (m->dir_len == 0) {
     /* Small map: single inline group */
     const uint8_t *group = (const uint8_t *)m->dir_ptr;
     uint64_t ctrls       = *(const uint64_t *)group;
-    int32_t s            = *si;
+    int32_t s            = frame->map.slot_idx;
     while (s < SWISS_GROUP_SLOTS) {
       uint8_t ctrl = (uint8_t)(ctrls >> (s * 8));
       if (!(ctrl & SWISS_CTRL_EMPTY)) {
-        *si        = s;
-        *group_out = group;
-        return group + SWISS_CTRL_SIZE + s * key_stride;
+        frame->map.slot_idx = (uint8_t)s;
+        r.group             = group;
+        r.key_ptr           = group + SWISS_CTRL_SIZE + s * key_stride;
+        return r;
       }
       s++;
     }
-    return NULL;
+    return r;
   }
 
   /* Large map: directory -> tables -> groups -> slots */
-  int32_t d = *di, g = *gi, s = *si;
+  int32_t d = frame->map.dir_idx, g = frame->map.group_idx, s = frame->map.slot_idx;
   while (d < (int32_t)m->dir_len) {
     const GoSwissTable *tab = ((const GoSwissTable **)m->dir_ptr)[d];
     uint64_t num_groups     = tab->groups_mask + 1;
@@ -369,11 +369,12 @@ NOINLINE static const uint8_t *vj_swiss_next_full_slot(const GoSwissMap *m, int3
       while (s < SWISS_GROUP_SLOTS) {
         uint8_t ctrl = (uint8_t)(ctrls >> (s * 8));
         if (!(ctrl & SWISS_CTRL_EMPTY)) {
-          *di        = d;
-          *gi        = g;
-          *si        = s;
-          *group_out = group;
-          return group + SWISS_CTRL_SIZE + s * key_stride;
+          frame->map.dir_idx   = d;
+          frame->map.group_idx = (uint8_t)g;
+          frame->map.slot_idx  = (uint8_t)s;
+          r.group              = group;
+          r.key_ptr            = group + SWISS_CTRL_SIZE + s * key_stride;
+          return r;
         }
         s++;
       }
@@ -386,7 +387,7 @@ NOINLINE static const uint8_t *vj_swiss_next_full_slot(const GoSwissMap *m, int3
       d += skip;
     }
   }
-  return NULL;
+  return r;
 }
 
 #endif /* VJ_ENCVM_SWISSMAP_H */

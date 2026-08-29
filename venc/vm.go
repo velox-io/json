@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/velox-io/json/typ"
+	"github.com/velox-io/json/value"
 )
 
 const (
@@ -67,6 +68,12 @@ const (
 	opKQInt64 uint16 = 45
 
 	opTime uint16 = 46
+
+	opValue uint16 = 47
+
+	opValueSpread uint16 = 48
+
+	opUnfold uint16 = 49
 )
 
 func kindToOpcode(k typ.ElemTypeKind) uint16 {
@@ -77,6 +84,8 @@ func kindToOpcode(k typ.ElemTypeKind) uint16 {
 		return opInterface
 	case k == typ.KindRawMessage:
 		return opRawMessage
+	case k == typ.KindValue:
+		return opValue
 	case k == typ.KindNumber:
 		return opNumber
 	default:
@@ -98,17 +107,25 @@ const (
 	yieldMapHandoff uint32 = 3
 )
 
-// fbInfo.Reason values — Go-side only diagnostic codes for trace output.
+// fbInfo.Reason values: Go-side only diagnostic codes for trace output.
 // Describes why the compiler yielded a field to Go-side encoding.
 const (
 	fbReasonUnknown       int32 = iota // catch-all for unrecognized kinds
 	fbReasonMarshaler                  // implements json.Marshaler
 	fbReasonTextMarshaler              // implements encoding.TextMarshaler
 	fbReasonQuoted                     // field has `,string` struct tag
-	fbReasonByteArray                  // [N]byte — base64 encoding
+	fbReasonByteArray                  // [N]byte, base64 encoding
 	fbReasonIface                      // non-empty interface
 	fbReasonOverflow                   // field offset or key exceeds native encoding limits
+	fbReasonViaPtr                     // promoted across an embedded pointer; needs a hop walk
+	fbReasonValue                      // value.Value deeper than the walk's native bounds
+	fbReasonSpread                     // reserve-unknown spread beyond native bounds or via pointer hops
+	fbReasonUnfold                     // inline variant unfold via pointer hops or over the offset limit
 )
+
+// opFlagIfaceField mirrors native VJ_OP_FLAG_IFACE_FIELD: the unfold field's
+// word 0 is an itab rather than an rtype.
+const opFlagIfaceField uint8 = 0x01
 
 const (
 	vjStStackDepthMask = uint64(0x000000FF)
@@ -145,7 +162,7 @@ func vmstateBuildInitial(flags uint32) uint64 {
 type VjOpHdr struct {
 	OpType   uint16
 	KeyLen   uint8
-	_pad0    uint8
+	Flags    uint8 // VJ_OP_FLAG_* bits (native mirror)
 	FieldOff uint16
 	KeyOff   uint16
 }
@@ -174,6 +191,28 @@ type fbInfo struct {
 	TagFlags typ.TagFlag                   // field-level tag flags (omitempty, quoted)
 	KeyBytes []byte                        // precomputed `"name":` bytes
 	IsZeroFn func(ptr unsafe.Pointer) bool // omitempty zero check
+
+	// PtrPath is non-empty for a field promoted across an embedded pointer.
+	// Offset is then relative to the base the hops reach rather than to the
+	// struct, so the hops must be walked before it is applied.
+	PtrPath []typ.PtrHop
+}
+
+// resolveFieldBase walks a promoted field's embedded-pointer hops and reports
+// false if any hop is nil, meaning the field has no storage and is omitted.
+// encoding/json behaves the same way: there is nothing to read.
+//
+// Unlike the decode side this never allocates. Encoding must not mutate the
+// value it is encoding.
+func resolveFieldBase(base unsafe.Pointer, path []typ.PtrHop) (unsafe.Pointer, bool) {
+	for i := range path {
+		p := *(*unsafe.Pointer)(unsafe.Add(base, path[i].SlotOffset))
+		if p == nil {
+			return nil, false
+		}
+		base = p
+	}
+	return base, true
 }
 
 func opHdrAt(ops []byte, pc int32) *VjOpHdr {
@@ -242,27 +281,39 @@ type VjExecCtx struct {
 var _ [2152]byte = [unsafe.Sizeof(VjExecCtx{})]byte{}
 
 type VjIfaceCacheEntry struct {
-	TypePtr unsafe.Pointer
-	OpsPtr  unsafe.Pointer
-	Tag     uint8
-	Flags   uint8
-	_pad    [6]byte
+	TypePtr unsafe.Pointer //  0
+	OpsPtr  unsafe.Pointer //  8
+	// BodyOpsPtr addresses a body-only Blueprint (struct fields without the
+	// OBJ_OPEN/OBJ_CLOSE pair) for OP_UNFOLD dispatch; nil when not compiled.
+	BodyOpsPtr unsafe.Pointer // 16
+	Tag        uint8          // 24
+	Flags      uint8          // 25
+	_pad       [6]byte        // 26
 }
 
-var _ [24]byte = [unsafe.Sizeof(VjIfaceCacheEntry{})]byte{}
+var _ [32]byte = [unsafe.Sizeof(VjIfaceCacheEntry{})]byte{}
+var _ [0]byte = [unsafe.Offsetof(VjIfaceCacheEntry{}.BodyOpsPtr) - 16]byte{}
 
 type ifaceCacheSnapshot struct {
 	entries []VjIfaceCacheEntry
 }
 
 func (s *ifaceCacheSnapshot) lookup(typePtr unsafe.Pointer) *VjIfaceCacheEntry {
+	idx := s.lookupIndex(typePtr)
+	if idx < 0 {
+		return nil
+	}
+	return &s.entries[idx]
+}
+
+func (s *ifaceCacheSnapshot) lookupIndex(typePtr unsafe.Pointer) int {
 	tp := uintptr(typePtr)
 	lo, hi := 0, len(s.entries)-1
 	for lo <= hi {
 		mid := (lo + hi) >> 1
 		midTP := uintptr(s.entries[mid].TypePtr)
 		if midTP == tp {
-			return &s.entries[mid]
+			return mid
 		}
 		if midTP < tp {
 			lo = mid + 1
@@ -270,7 +321,7 @@ func (s *ifaceCacheSnapshot) lookup(typePtr unsafe.Pointer) *VjIfaceCacheEntry {
 			hi = mid - 1
 		}
 	}
-	return nil
+	return -1
 }
 
 var globalIfaceCache struct {
@@ -408,6 +459,43 @@ func insertIfaceCache(typePtr unsafe.Pointer, bp *Blueprint, tag uint8, flags ui
 	globalIfaceCache.current.Store(&ifaceCacheSnapshot{entries: newEntries})
 }
 
+// insertIfaceCacheBody attaches a body-only Blueprint to an existing entry
+// (or inserts a new one carrying only the body). The snapshot is
+// copy-on-write: in-flight VMs keep reading the array they were handed.
+func insertIfaceCacheBody(typePtr unsafe.Pointer, bodyBP *Blueprint) {
+	globalIfaceCache.mu.Lock()
+	defer globalIfaceCache.mu.Unlock()
+
+	bodyPtr := unsafe.Pointer(&bodyBP.Ops[0])
+
+	cur := globalIfaceCache.current.Load()
+	if idx := cur.lookupIndex(typePtr); idx >= 0 {
+		if cur.entries[idx].BodyOpsPtr == bodyPtr {
+			return
+		}
+		newEntries := make([]VjIfaceCacheEntry, len(cur.entries))
+		copy(newEntries, cur.entries)
+		newEntries[idx].BodyOpsPtr = bodyPtr
+		registerBlueprintOps(bodyBP)
+		globalIfaceCache.current.Store(&ifaceCacheSnapshot{entries: newEntries})
+		return
+	}
+
+	entry := VjIfaceCacheEntry{TypePtr: typePtr, BodyOpsPtr: bodyPtr}
+	newEntries := make([]VjIfaceCacheEntry, len(cur.entries)+1)
+	copy(newEntries, cur.entries)
+	newEntries[len(cur.entries)] = entry
+	sort.Slice(newEntries, func(i, j int) bool {
+		return uintptr(newEntries[i].TypePtr) < uintptr(newEntries[j].TypePtr)
+	})
+	registerBlueprintOps(bodyBP)
+	globalIfaceCache.current.Store(&ifaceCacheSnapshot{entries: newEntries})
+}
+
+// bodyBlueprintCache holds body-only Blueprints keyed by rtype pointer, so
+// the interp path and the miss handler share one compilation per type.
+var bodyBlueprintCache sync.Map
+
 func initPrimitiveIfaceCache() {
 	primitives := []struct {
 		t   reflect.Type
@@ -436,6 +524,14 @@ func initPrimitiveIfaceCache() {
 			Tag:     e.tag,
 		})
 	}
+
+	// A boxed value.Value encodes through the native tape walk: the tag
+	// routes OP_INTERFACE into the walk instead of the fail-closed
+	// primitive encoder.
+	table = append(table, VjIfaceCacheEntry{
+		TypePtr: rtypePtr(reflect.TypeFor[value.Value]()),
+		Tag:     uint8(opValue),
+	})
 
 	// Pre-warm the common composite types that show up in interface{} payloads.
 	compositeSlices := []reflect.Type{

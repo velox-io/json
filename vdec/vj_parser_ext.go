@@ -361,6 +361,11 @@ func (sc *Parser) scanNumberToString(src []byte, idx int, ptr unsafe.Pointer) (i
 }
 
 func (sc *Parser) scanStruct(src []byte, idx int, dec *DecStructInfo, base unsafe.Pointer) (int, error) {
+	// Refused shapes carry promoted offsets that do not address their fields;
+	// bail before the first store rather than write through unrelated memory.
+	if len(dec.Rejects) > 0 {
+		return idx, fmt.Errorf("vjson: %s", dec.Rejects[0])
+	}
 	idx++
 	idx = skipWSLong(src, idx)
 	if idx >= len(src) {
@@ -404,7 +409,14 @@ func (sc *Parser) scanStruct(src []byte, idx int, dec *DecStructInfo, base unsaf
 			}
 		} else {
 			savedIdx := idx
-			fieldPtr := unsafe.Add(base, fi.Offset)
+			fieldBase := base
+			if len(fi.PtrPath) > 0 {
+				// Promoted across an embedded pointer: the field's offset is
+				// relative to the pointee its hops reach, which is allocated here
+				// if it does not exist yet.
+				fieldBase = resolveFieldHops(base, fi.PtrPath)
+			}
+			fieldPtr := unsafe.Add(fieldBase, fi.Offset)
 			ti := fi.TypeInfo
 			if fi.TagFlags&DecTagFlagSpecial != 0 {
 				idx, err = sc.scanFieldTagged(src, idx, fi, ti, fieldPtr)

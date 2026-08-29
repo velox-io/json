@@ -9,11 +9,14 @@
  *
  * Supported format specifiers:
  *   %s            NUL-terminated string
+ *   %S            pointer-length string: (const char*, int) pair, no NUL needed
+ *   %c            single ASCII character (int arg, promoted by vararg)
  *   %d %u %x      32-bit signed/unsigned int (decimal/hex-lowercase)
  *   %ld %lu %lx   long
  *   %lld %llu %llx long long
  *   %zd %zu %zx   ssize_t / size_t
  *   %p            pointer (0x prefix + hex)
+ *   %b8 %b32 %b64 fixed-width binary bitmap (0b prefix, MSB-first, 8-bit groups)
  *   %%            literal '%'
  *
  * Length modifiers l, ll, z all promote to 64-bit on every supported
@@ -28,7 +31,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "macros.h"
+#include "macros.h" // IWYU pragma: keep
 
 /* Trigger on VJ_DEBUG, the generic debug flag shared by all native
  * components (encvm, ndec bindings, etc). Build with -DVJ_DEBUG to enable. */
@@ -107,8 +110,7 @@ static inline char *vj_fmt_i64(char *end, int64_t v) {
     u = (uint64_t)v;
   }
   end = vj_fmt_u64(end, u);
-  if (v < 0)
-    *--end = '-';
+  if (v < 0) *--end = '-';
   return end;
 }
 

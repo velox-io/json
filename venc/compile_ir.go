@@ -16,6 +16,7 @@ type IRInst struct {
 	KeyLen   uint8
 	KeyOff   uint16
 	FieldOff uint16
+	Flags    uint8 // VjOpHdr.flags mirror (VJ_OP_FLAG_* bits)
 
 	OperandA int32 // semantics depend on opcode
 	OperandB int32

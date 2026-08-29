@@ -407,10 +407,13 @@ func TestStress_LongRun_SteadyHeap(t *testing.T) {
 	}
 	payloads := stressPayloads()
 
-	const window = 5 * time.Second
+	const warmup = 3 * time.Second // let pools fill and AdaptiveHint stabilize before baseline
+	const window = 6 * time.Second
 	const sampleEvery = 1 * time.Second
 
-	ctx, cancel := context.WithTimeout(context.Background(), window)
+	// ctx is extended by half a tick past window so the final sample isn't
+	// pre-empted by ctx.Done.
+	ctx, cancel := context.WithTimeout(context.Background(), warmup+window+sampleEvery/2)
 	defer cancel()
 
 	var wg sync.WaitGroup
@@ -446,10 +449,18 @@ func TestStress_LongRun_SteadyHeap(t *testing.T) {
 		}(w)
 	}
 
+	// Warm up: let the worker pools fill, per-type AdaptiveHint settle, and
+	// indentTplCache populate, then GC so the first sample reflects steady-
+	// state live data rather than a cold-start trough.
+	time.Sleep(warmup)
+	runtime.GC()
+
 	// Sample HeapAlloc after GC every sampleEvery until the window closes.
+	// KiB granularity: MiB rounding hides the 6-vs-7 MiB band where steady-
+	// state churn lives, making a 2x ceiling brittle.
 	type sample struct {
 		t  time.Duration
-		mb uint64
+		kb uint64
 	}
 	var samples []sample
 	sampleTick := time.NewTicker(sampleEvery)
@@ -463,7 +474,7 @@ func TestStress_LongRun_SteadyHeap(t *testing.T) {
 			runtime.GC()
 			var ms runtime.MemStats
 			runtime.ReadMemStats(&ms)
-			samples = append(samples, sample{t: time.Since(start), mb: ms.HeapAlloc >> 20})
+			samples = append(samples, sample{t: time.Since(start), kb: ms.HeapAlloc >> 10})
 		}
 	}
 done:
@@ -472,17 +483,41 @@ done:
 		return
 	}
 
-	if len(samples) < 2 {
+	if len(samples) < 3 {
 		t.Fatalf("only %d samples collected", len(samples))
 	}
-	first := samples[0].mb
-	last := samples[len(samples)-1].mb
-	t.Logf("HeapAlloc samples (MiB): %v", samples)
+	t.Logf("HeapAlloc samples (KiB): %v", samples)
 
-	// Allow fluctuation, but the final GC'd sample must not be far above the
-	// first. A 2x ceiling catches steady leaks while tolerating normal churn.
-	if last > first*2 && last > first+4 {
-		t.Errorf("heap grew under sustained load: first=%d MiB last=%d MiB", first, last)
+	// Compare the min of the first and last thirds instead of single first/last
+	// points. Under steady state, pools fluctuate by ±50% due to concurrent
+	// worker activity and GC timing, so a lone last sample landing on a peak
+	// would false-positive. min captures the moment GC ran most thoroughly,
+	// reflecting true live memory: a real leak raises every sample including
+	// its min, while a transient spike leaves the min untouched.
+	third := len(samples) / 3
+	if third < 1 {
+		third = 1
+	}
+	baseline := samples[0].kb
+	for _, s := range samples[:third] {
+		if s.kb < baseline {
+			baseline = s.kb
+		}
+	}
+	tailMin := samples[len(samples)-third].kb
+	for _, s := range samples[len(samples)-third:] {
+		if s.kb < tailMin {
+			tailMin = s.kb
+		}
+	}
+	t.Logf("baseline(min of first %d)=%d KiB, tail(min of last %d)=%d KiB",
+		third, baseline, third, tailMin)
+
+	// 2x ceiling + 4 MiB floor: catches pool-not-reused (heap climbs to
+	// hundreds of MiB within seconds) while tolerating steady-state churn.
+	const floorKiB = 4 << 10
+	if tailMin > baseline*2 && tailMin > baseline+floorKiB {
+		t.Errorf("heap grew under sustained load: baseline=%d KiB tail=%d KiB", baseline, tailMin)
 	}
 }
 
@@ -683,4 +718,3 @@ func TestStress_MarshalReturnPin_PerCallPromotion(t *testing.T) {
 		t.Errorf("heap did not return to baseline after release: delta=%d KiB (expected < 1 MiB)", afterDelta>>10)
 	}
 }
-

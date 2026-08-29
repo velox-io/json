@@ -167,3 +167,19 @@ func unescapeSequence(data []byte, n int, i int, dst []byte, pos int) (int, int,
 
 	return i, pos, newSyntaxError(fmt.Sprintf("vjson: invalid escape '\\%c' in string at offset %d", next, i), i)
 }
+
+// mapAssignStrKey reserves the slot for a string key and returns where the value
+// belongs.
+//
+// The faststr variant of mapassign is valid only while Go stores the element
+// inline. Above gort.MapMaxElemBytes the slot holds a *V that the generic
+// mapassign allocates; faststr does not allocate and returns the pointer slot,
+// so writing V through it overwrites the pointer instead of filling the element.
+// The decision is per map type, taken at build time (DecMapInfo.ValIndirect).
+func mapAssignStrKey(mDec *DecMapInfo, mapRType, mp unsafe.Pointer, key string) unsafe.Pointer {
+	if mDec.ValIndirect {
+		// The generic entry point takes the key by address.
+		return mapassign(mapRType, mp, unsafe.Pointer(&key))
+	}
+	return mapassign_faststr(mapRType, mp, key)
+}

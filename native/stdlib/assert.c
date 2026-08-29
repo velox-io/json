@@ -31,6 +31,16 @@ vj_assert_rtn_impl(const char *func, const char *file, int line,
   (void)expr;
   __builtin_trap();
 }
+#elif defined(_WIN32)
+/* Windows cross builds have no MSVC assert.h on the host; sources include
+ * native/stdlib/assert.h instead, whose assert() macro calls this entry. */
+HIDDEN void
+vj_assert_fail(const char *expr, const char *file, int line) {
+  (void)expr;
+  (void)file;
+  (void)line;
+  __builtin_trap();
+}
 #else
 /* glibc assert failure entry point: __assert_fail(expr, file, line, func). */
 HIDDEN void

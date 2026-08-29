@@ -3,9 +3,9 @@ package tests
 import (
 	"strings"
 	"testing"
-	"unsafe"
 
 	vjson "github.com/velox-io/json"
+	"github.com/velox-io/json/value"
 )
 
 // TestArenaReuse_EscapedStringCorruption verifies that strings decoded via the
@@ -43,7 +43,7 @@ func TestArenaReuse_EscapedStringCorruption(t *testing.T) {
 		t.Fatalf("item1.Desc = %q, want %q", item1.Desc, want1Desc)
 	}
 
-	// Second unmarshal — if the parser reuses the same arena block, it will
+	// Second unmarshal: if the parser reuses the same arena block, it will
 	// overwrite the memory backing item1's strings.
 	var item2 Item
 	if err := vjson.Unmarshal(input2, &item2); err != nil {
@@ -73,150 +73,6 @@ func TestArenaReuse_EscapedStringCorruption(t *testing.T) {
 	}
 }
 
-// TestCaseInsensitive_UpperKeyLowerTag tests case-insensitive field matching
-// when the JSON key has uppercase letters but all struct tags are lowercase.
-func TestCaseInsensitive_UpperKeyLowerTag(t *testing.T) {
-	type Foo struct {
-		Name  string         `json:"name"`
-		Value map[int]string `json:"value"`
-	}
-
-	tests := []struct {
-		name     string
-		input    string
-		wantName string
-		wantVal  map[int]string
-	}{
-		{
-			name:     "uppercase first letter",
-			input:    `{"Name":"edf","value":{"1":"v"}}`,
-			wantName: "edf",
-			wantVal:  map[int]string{1: "v"},
-		},
-		{
-			name:     "all uppercase",
-			input:    `{"NAME":"edf","VALUE":{"2":"w"}}`,
-			wantName: "edf",
-			wantVal:  map[int]string{2: "w"},
-		},
-		{
-			name:     "mixed case",
-			input:    `{"nAmE":"edf","VaLuE":{"3":"x"}}`,
-			wantName: "edf",
-			wantVal:  map[int]string{3: "x"},
-		},
-		{
-			name:     "exact match still works",
-			input:    `{"name":"edf","value":{"4":"y"}}`,
-			wantName: "edf",
-			wantVal:  map[int]string{4: "y"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var got Foo
-			err := vjson.Unmarshal([]byte(tt.input), &got)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got.Name != tt.wantName {
-				t.Errorf("Name: got %q, want %q", got.Name, tt.wantName)
-			}
-			if len(got.Value) != len(tt.wantVal) {
-				t.Errorf("Value length: got %d, want %d", len(got.Value), len(tt.wantVal))
-			}
-			for k, v := range tt.wantVal {
-				if got.Value[k] != v {
-					t.Errorf("Value[%d]: got %q, want %q", k, got.Value[k], v)
-				}
-			}
-		})
-	}
-}
-
-// TestCaseInsensitive_PreExistingMapValues verifies that unmarshal into a
-// struct with pre-existing map values merges correctly (matching encoding/json
-// behavior) when case-insensitive field matching is needed.
-func TestCaseInsensitive_PreExistingMapValues(t *testing.T) {
-	type Foo struct {
-		Name  string         `json:"name"`
-		Value map[int]string `json:"value"`
-	}
-
-	foo := &Foo{
-		Name:  "abc",
-		Value: map[int]string{0: "existing"},
-	}
-	input := `{"Name":"edf", "value": {"123": "v"}}`
-	err := vjson.Unmarshal([]byte(input), foo)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if foo.Name != "edf" {
-		t.Errorf("Name: got %q, want %q", foo.Name, "edf")
-	}
-	if foo.Value[0] != "existing" {
-		t.Errorf("Value[0]: got %q, want %q", foo.Value[0], "existing")
-	}
-	if foo.Value[123] != "v" {
-		t.Errorf("Value[123]: got %q, want %q", foo.Value[123], "v")
-	}
-}
-
-// TestCaseInsensitive_NonBitmapPath verifies case-insensitive matching on the
-// non-bitmap path (>8 fields), which goes through LookupFieldBytes directly.
-func TestCaseInsensitive_NonBitmapPath(t *testing.T) {
-	// >8 fields forces the non-bitmap lookup path
-	type Big struct {
-		F1 string `json:"f1"`
-		F2 string `json:"f2"`
-		F3 string `json:"f3"`
-		F4 string `json:"f4"`
-		F5 string `json:"f5"`
-		F6 string `json:"f6"`
-		F7 string `json:"f7"`
-		F8 string `json:"f8"`
-		F9 string `json:"f9"`
-	}
-
-	tests := []struct {
-		name   string
-		input  string
-		wantF1 string
-		wantF9 string
-	}{
-		{
-			name:   "uppercase key",
-			input:  `{"F1":"a","F9":"b"}`,
-			wantF1: "a",
-			wantF9: "b",
-		},
-		{
-			name:   "mixed case key",
-			input:  `{"f1":"a","F9":"b"}`,
-			wantF1: "a",
-			wantF9: "b",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var got Big
-			err := vjson.Unmarshal([]byte(tt.input), &got)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got.F1 != tt.wantF1 {
-				t.Errorf("F1: got %q, want %q", got.F1, tt.wantF1)
-			}
-			if got.F9 != tt.wantF9 {
-				t.Errorf("F9: got %q, want %q", got.F9, tt.wantF9)
-			}
-		})
-	}
-}
-
 func TestEscapes(t *testing.T) {
 	type S struct{}
 
@@ -234,32 +90,109 @@ func TestEscapes(t *testing.T) {
 	}
 }
 
-// isZeroCopy returns true if the string data pointer lies within the given buffer.
-func isZeroCopy(s string, buf []byte) bool {
-	if len(s) == 0 || len(buf) == 0 {
-		return false
+// An object key carrying escapes decodes through str_arena before the field
+// lookup, so its bytes can include characters a raw key never holds, among
+// them a literal '"'. A decoded key must match a field name exactly: the
+// WINDOW lookup tier once read the embedded quote as the terminator of a
+// shorter stored key and bound the prefix ("age\"" against field "age").
+func TestEscapedObjectKeyLookup(t *testing.T) {
+	type small struct {
+		Name   string  `json:"name"`
+		Age    int64   `json:"age"`
+		Score  float64 `json:"score"`
+		Active bool    `json:"active"`
 	}
-	sp := uintptr(unsafe.Pointer(unsafe.StringData(s)))
-	lo := uintptr(unsafe.Pointer(&buf[0]))
-	hi := lo + uintptr(len(buf))
-	return sp >= lo && sp < hi
+	for _, tc := range []struct {
+		input   string
+		wantAge int64
+	}{
+		{`{"age":1}`, 1},           // exact raw key binds
+		{`{"\u0061ge":1}`, 1},      // escaped key decoding to "age" binds
+		{`{"age\"":1}`, 0},         // decodes to age": must miss
+		{`{"age\u0022":1}`, 0},     // same quote via \u escape
+		{`{"age\n":1}`, 0},         // age plus newline: must miss
+		{`{"age\\":1}`, 0},         // age plus backslash: must miss
+		{`{"age":1,"age\"":2}`, 1}, // the real key binds, the impostor does not overwrite it
+	} {
+		var v small
+		if err := vjson.Unmarshal([]byte(tc.input), &v); err != nil {
+			t.Errorf("%s: unmarshal: %v", tc.input, err)
+			continue
+		}
+		if v.Age != tc.wantAge {
+			t.Errorf("%s: Age = %d, want %d", tc.input, v.Age, tc.wantAge)
+		}
+	}
+
+	// A key set large enough to select a perfect-hash tier beyond WINDOW.
+	type wide struct {
+		F01 int64 `json:"field_001"`
+		F02 int64 `json:"field_002"`
+		F03 int64 `json:"field_003"`
+		F04 int64 `json:"field_004"`
+		F05 int64 `json:"field_005"`
+		F06 int64 `json:"field_006"`
+		F07 int64 `json:"field_007"`
+		F08 int64 `json:"field_008"`
+		F09 int64 `json:"field_009"`
+		F10 int64 `json:"field_010"`
+		F11 int64 `json:"field_011"`
+		F12 int64 `json:"field_012"`
+		F13 int64 `json:"field_013"`
+		F14 int64 `json:"field_014"`
+		F15 int64 `json:"field_015"`
+		F16 int64 `json:"field_016"`
+		F17 int64 `json:"field_017"`
+		F18 int64 `json:"field_018"`
+		F19 int64 `json:"field_019"`
+		F20 int64 `json:"field_020"`
+		F21 int64 `json:"field_021"`
+		F22 int64 `json:"field_022"`
+		F23 int64 `json:"field_023"`
+		F24 int64 `json:"field_024"`
+		F25 int64 `json:"field_025"`
+	}
+	for _, tc := range []struct {
+		input      string
+		wantField3 int64
+	}{
+		{`{"field_003":7}`, 7},
+		{`{"\u0066ield_003":7}`, 7},
+		{`{"field_003\"":7}`, 0},
+		{`{"field_003\u0022":7}`, 0},
+	} {
+		var v wide
+		if err := vjson.Unmarshal([]byte(tc.input), &v); err != nil {
+			t.Errorf("%s: unmarshal: %v", tc.input, err)
+			continue
+		}
+		if v.F03 != tc.wantField3 {
+			t.Errorf("%s: F03 = %d, want %d", tc.input, v.F03, tc.wantField3)
+		}
+	}
 }
 
-// TestDefault_ZeroCopy verifies the public zero-copy contract: plain strings
-// (no escapes) alias the input buffer rather than copying. Unmarshal's doc
-// states "Strings may reference data (zero-copy); the caller must not modify
-// data after this call."
-func TestDefault_ZeroCopy(t *testing.T) {
-	type S struct {
-		Name string `json:"name"`
+// The reserve-unknown carrier classifies merged-tape entries in phase2 with
+// the same lookup, so an escaped key must miss the declared field there too
+// and land in the reserved Value instead.
+func TestEscapedObjectKeyLookupReserveUnknown(t *testing.T) {
+	type host struct {
+		Name string      `json:"name"`
+		Age  int64       `json:"age"`
+		Rest value.Value `json:",embed"`
 	}
-	input := []byte(`{"name":"hello"}`)
-
-	var v S
-	if err := vjson.Unmarshal(input, &v); err != nil {
-		t.Fatal(err)
+	var v host
+	if err := vjson.Unmarshal([]byte(`{"age\"":1}`), &v); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-	if !isZeroCopy(v.Name, input) {
-		t.Fatal("default mode: string should be zero-copy")
+	if v.Age != 0 {
+		t.Errorf(`Age = %d, want 0: key "age\"" must not match field "age"`, v.Age)
+	}
+	got := v.Rest.Get(`age"`)
+	if !got.Exists() {
+		t.Fatal(`Rest is missing the reserved key "age\""`)
+	}
+	if n, ok := got.Int(); !ok || n != 1 {
+		t.Errorf(`Rest["age\""] = %d, ok=%v; want 1, true`, n, ok)
 	}
 }

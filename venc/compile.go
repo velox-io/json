@@ -46,6 +46,7 @@ func fieldFBInfo(fi *EncFieldInfo, fc fieldContext, reason int32) *fbInfo {
 		TagFlags: fi.TagFlags,
 		KeyBytes: fi.KeyBytes,
 		IsZeroFn: fi.IsZeroFn,
+		PtrPath:  fi.PtrPath,
 	}
 }
 
@@ -63,6 +64,10 @@ func compileBlueprint(et *EncTypeInfo) *Blueprint {
 	}
 
 	switch et.Kind {
+	case typ.KindValue:
+		// A root value.Value is a single tape-walk op: the native VM walks
+		// the tape, the interpreter mirrors it through appendTapeValue.
+		emitValue(b, fieldContext{}, typeFBInfo(et, 0, fbReasonValue))
 	case typ.KindStruct:
 		rootLabel := b.allocLabel()
 		b.visiting[et] = rootLabel
@@ -121,12 +126,118 @@ func drainCycleSubs(b *irBuilder) {
 	}
 }
 
+// compileBodyBlueprint compiles the struct's field emissions without the
+// OBJ_OPEN/OBJ_CLOSE pair: the body of an inline variant case, run by
+// OP_UNFOLD directly inside the host object. Fields keep absolute offsets
+// from the struct base, so the data word the unfold frame installs serves
+// as base unchanged.
+func compileBodyBlueprint(et *EncTypeInfo) *Blueprint {
+	if bp, ok := bodyBlueprintCache.Load(uintptr(et.Ptr)); ok {
+		return bp.(*Blueprint)
+	}
+
+	b := &irBuilder{
+		visiting: make(map[*EncTypeInfo]Label),
+	}
+	rootLabel := b.allocLabel()
+	b.visiting[et] = rootLabel
+	b.defineLabel(rootLabel)
+	emitStructBody(b, et.ResolveStruct(), 0)
+	b.emit(IRInst{Op: opRet})
+	drainCycleSubs(b)
+
+	insts := runPasses(b.insts, b.nextLabel)
+	ops, fallbacks, annotations := lower(insts)
+
+	bp := &Blueprint{
+		Name:        et.Type.String() + " (body)",
+		Ops:         alignedOps(ops),
+		Fallbacks:   fallbacks,
+		Annotations: annotations,
+	}
+
+	actual, _ := bodyBlueprintCache.LoadOrStore(uintptr(et.Ptr), bp)
+	return actual.(*Blueprint)
+}
+
 func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 	for i := range si.Fields {
 		fi := &si.Fields[i]
 		fieldOff := baseOff + fi.Offset
 
 		needsOmitempty := fi.TagFlags&EncTagFlagOmitEmpty != 0
+
+		// A reserve-unknown Value spreads its collected members inline. The
+		// op is keyless: the field has no JSON name of its own. Placement is
+		// first so no key-pool entry is interned for the sentinel name.
+		if fi.TagFlags&typ.TagFlagReserveUnknown != 0 {
+			if len(fi.PtrPath) > 0 || fieldOff > math.MaxUint16 {
+				b.emit(IRInst{
+					Op: opFallback,
+					Fallback: &fbInfo{
+						TI:       fi.Type,
+						Offset:   fi.Offset,
+						Reason:   fbReasonSpread,
+						PtrPath:  fi.PtrPath,
+						TagFlags: fi.TagFlags,
+					},
+				})
+				continue
+			}
+			b.emit(IRInst{
+				Op:       opValueSpread,
+				FieldOff: uint16(fieldOff),
+				Fallback: fieldFBInfo(fi, fieldContext{FieldOff: fieldOff}, fbReasonSpread),
+			})
+			continue
+		}
+
+		// An embedded interface field is an inline variant target: the stored
+		// concrete struct's fields unfold into the host object, with no key and
+		// no braces of their own. The op is keyless and the hdr flag records a
+		// non-empty interface (itab in word 0).
+		if fi.TagFlags&typ.TagFlagEmbed != 0 &&
+			(fi.Type.Kind == typ.KindAny || fi.Type.Kind == typ.KindIface) {
+			if len(fi.PtrPath) > 0 || fieldOff > math.MaxUint16 {
+				b.emit(IRInst{
+					Op: opFallback,
+					Fallback: &fbInfo{
+						TI:       fi.Type,
+						Offset:   fi.Offset,
+						Reason:   fbReasonUnfold,
+						PtrPath:  fi.PtrPath,
+						TagFlags: fi.TagFlags,
+					},
+				})
+				continue
+			}
+			var opFlags uint8
+			if fi.Type.Kind == typ.KindIface {
+				opFlags = opFlagIfaceField
+			}
+			b.emit(IRInst{
+				Op:       opUnfold,
+				Flags:    opFlags,
+				FieldOff: uint16(fieldOff),
+			})
+			continue
+		}
+
+		// A field promoted across an embedded pointer is not reachable by adding
+		// offsets: its bytes are in a pointee that may not exist. The blueprint
+		// has no way to express "walk a pointer, and skip this key entirely if it
+		// is nil", so the whole field goes to the Go fallback, which does both.
+		//
+		// baseOff is deliberately not folded in. The hops start from the struct
+		// this field was promoted into, and the fallback receives that struct's
+		// base, so adding an outer base here would double-count.
+		if len(fi.PtrPath) > 0 {
+			b.emit(IRInst{
+				Op:       opFallback,
+				Fallback: fieldFBInfo(fi, fieldContext{FieldOff: fi.Offset}, fbReasonViaPtr),
+			})
+			continue
+		}
 
 		if fieldOff > math.MaxUint16 || len(fi.KeyBytes) > 255 {
 			emitFieldFallbackOverflow(b, fi, fieldOff)
@@ -136,6 +247,17 @@ func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 		fc, ok := addKeyForField(b, fi, fieldOff)
 		if !ok {
 			emitFieldFallbackOverflow(b, fi, fieldOff)
+			continue
+		}
+
+		// value.Value walks its tape natively. The check precedes the
+		// marshal-hook branch: Value implements json.Marshaler, and the hook
+		// path would route it through MarshalJSON's intermediate allocation.
+		if fi.Type.Kind == typ.KindValue {
+			if needsOmitempty {
+				emitSkipIfZero(b, fieldOff, 16+8, fi.Type.Kind)
+			}
+			emitValue(b, fc, fieldFBInfo(fi, fc, fbReasonValue))
 			continue
 		}
 
@@ -185,6 +307,13 @@ func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 			emitPrimitive(b, fi.Type.Kind, fc)
 
 		case typ.KindStruct:
+			// A nested struct is inlined into this blueprint, so it never reaches
+			// its own bound Encode. Route a refused shape through the fallback,
+			// whose Encode is the error-returning closure bindEncodeFn installed.
+			if nsi := fi.Type.ResolveStruct(); nsi != nil && len(nsi.Rejects) > 0 {
+				emitFieldFallback(b, fc, fieldFBInfo(fi, fc, fbReasonUnknown))
+				continue
+			}
 			if needsOmitempty {
 				afterLabel := b.allocLabel()
 				b.emit(IRInst{
@@ -561,6 +690,20 @@ func emitTime(b *irBuilder, ti *EncTypeInfo, fc fieldContext, fb *fbInfo) {
 	})
 }
 
+// emitValue emits the native tape-walk op for a value.Value field. The
+// fallback serves the depth-guard yield: nesting beyond the walk's kind
+// stack (or the indent template) re-enters Go, whose recursive walk has no
+// depth bound.
+func emitValue(b *irBuilder, fc fieldContext, fb *fbInfo) {
+	b.emit(IRInst{
+		Op:       opValue,
+		KeyLen:   fc.KeyLen,
+		KeyOff:   fc.KeyOff,
+		FieldOff: uint16(fc.FieldOff),
+		Fallback: fb,
+	})
+}
+
 func emitSkipIfZero(b *irBuilder, fieldOff uintptr, skipBytes int, kind typ.ElemTypeKind) {
 	b.emit(IRInst{
 		Op:       opSkipIfZero,
@@ -571,6 +714,13 @@ func emitSkipIfZero(b *irBuilder, fieldOff uintptr, skipBytes int, kind typ.Elem
 }
 
 func emitTypeBody(b *irBuilder, elemTI *EncTypeInfo) {
+	// value.Value precedes the marshal-hook branch for the same reason as in
+	// emitStructBody: the hook path would allocate through MarshalJSON.
+	if elemTI.Kind == typ.KindValue {
+		emitValue(b, fieldContext{}, typeFBInfo(elemTI, 0, fbReasonValue))
+		return
+	}
+
 	if elemTI.TypeFlags&(EncTypeFlagHasMarshalFn|EncTypeFlagHasTextMarshalFn) != 0 {
 		if isTimeType(elemTI) {
 			emitTime(b, elemTI, fieldContext{}, typeFBInfo(elemTI, 0, fbReasonMarshaler))
@@ -596,6 +746,16 @@ func emitTypeBody(b *irBuilder, elemTI *EncTypeInfo) {
 		})
 
 	case typ.KindStruct:
+		// As in emitStructBody: a refused shape must not be inlined. Here the
+		// element has no key or offset of its own, so hand it to the generic
+		// fallback, which calls the type's error-returning Encode.
+		if nsi := elemTI.ResolveStruct(); nsi != nil && len(nsi.Rejects) > 0 {
+			b.emit(IRInst{
+				Op:       opFallback,
+				Fallback: typeFBInfo(elemTI, 0, fbReasonUnknown),
+			})
+			return
+		}
 		if _, visiting := b.visiting[elemTI]; visiting {
 			emitCall(b, elemTI, 0)
 			return
@@ -739,6 +899,10 @@ func canSwissMapInC(variant typ.MapVariant) bool {
 	return false
 }
 
+// canSwissMapIterInC reports whether MAP_STR_ITER can walk this map. That opcode
+// addresses each value by stride, so it needs an element Go stores inline; a
+// SlotSize of zero is how the layout probe reports that no such stride exists,
+// which includes an element large enough that Go keeps it behind a pointer.
 func canSwissMapIterInC(mi *EncMapInfo) bool {
 	return mi.IsStringKey && mi.SlotSize != 0
 }

@@ -33,7 +33,7 @@ func buildSizeFn(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 		return sizeString
 	case typ.KindNumber:
 		return sizeNumber
-	case typ.KindRawMessage:
+	case typ.KindRawMessage, typ.KindValue:
 		return sizeRawMessage
 	case typ.KindAny, typ.KindIface:
 		return sizeAny // conservative constant for interface{} fields
@@ -336,7 +336,7 @@ func computeHintBytes(ti *EncTypeInfo, depth int) int {
 		return computeHintBytes(pi.ElemType, depth+1)
 	case typ.KindMap:
 		return 128
-	case typ.KindRawMessage:
+	case typ.KindRawMessage, typ.KindValue:
 		return 64
 	case typ.KindNumber:
 		return 12

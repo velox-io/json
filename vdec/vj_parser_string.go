@@ -25,7 +25,7 @@ func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, [
 	// Copy the prefix before the first escape (no escapes, verbatim copy)
 	prefixLen := firstEscIdx - start
 	if prefixLen > len(buf) {
-		// Prefix alone exceeds buffer — grow
+		// Prefix alone exceeds the buffer; grow.
 		newSize := len(buf) * 2
 		for newSize < prefixLen {
 			newSize *= 2
@@ -70,7 +70,7 @@ func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, [
 		combined := mq | mb | mc
 
 		if combined == 0 {
-			// No special char — copy 8 bytes directly.
+			// All 8 bytes are plain; copy them directly.
 			// Unaligned store is safe on amd64/arm64 (all SWAR accesses in this
 			// codebase assume unaligned read/write support from the target arch).
 			*(*uint64)(unsafe.Pointer(&buf[pos])) = w
@@ -79,7 +79,7 @@ func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, [
 			continue
 		}
 
-		// Found quote, backslash, or control char — determine which and where
+		// Found a quote, backslash, or control char; determine which and where
 		off := firstMarkedByteIndex(combined)
 		c := src[i+off]
 
@@ -116,10 +116,10 @@ func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, [
 					i += 2
 					continue
 				}
-				// Unknown escape — RFC 8259 only allows " \\ / b f n r t uXXXX
+				// Unknown escape: RFC 8259 only allows " \\ / b f n r t uXXXX
 				return i, nil, newSyntaxError(fmt.Sprintf("vjson: invalid escape '\\%c' in string at offset %d", next, i), i)
 			}
-			// \uXXXX path — may write up to 4 bytes
+			// \uXXXX path: may write up to 4 bytes
 			grow(4)
 			var unescErr error
 			i, pos, unescErr = unescapeSequence(src, n, i, buf, pos)
@@ -148,7 +148,7 @@ func (sc *Parser) unescapeSinglePass(src []byte, start, firstEscIdx int) (int, [
 						i += 2
 						continue
 					}
-					// Unknown escape — RFC 8259 only allows " \\ / b f n r t uXXXX
+					// Unknown escape: RFC 8259 only allows " \\ / b f n r t uXXXX
 					return i, nil, newSyntaxError(fmt.Sprintf("vjson: invalid escape '\\%c' in string at offset %d", next, i), i)
 				}
 				grow(4)
@@ -177,11 +177,11 @@ done:
 	// Finalize the decoded result
 	var result []byte
 	if decodingInArena {
-		// Case 1: decoded directly into arena — zero copy
+		// Case 1: decoded directly into arena: zero copy
 		result = sc.arenaData[sc.arenaOff : sc.arenaOff+pos]
 		sc.arenaOff += pos
 	} else if !overflowed {
-		// Case 2: decoded into scratch buf — must copy to persistent storage
+		// Case 2: decoded into scratch buf; must copy to persistent storage
 		if pos <= arenaInlineMax {
 			dst := sc.arenaAlloc(pos)
 			copy(dst, buf[:pos])
@@ -192,7 +192,7 @@ done:
 			result = dst
 		}
 	} else {
-		// Case 3: overflowed into heap buffer — use directly
+		// Case 3: overflowed into heap buffer; use directly
 		result = buf[:pos]
 	}
 	return i + 1, result, nil

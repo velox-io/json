@@ -10,7 +10,7 @@ import (
 	vjson "github.com/velox-io/json"
 )
 
-// Test types — cover strings (zero-copy + arena), pointer fields (batch alloc),
+// Test types cover strings (zero-copy + arena), pointer fields (batch alloc),
 // slices, maps, and nested structs.
 
 type SafetyItem struct {
@@ -45,7 +45,7 @@ func safetyInput(i int) ([]byte, SafetyItem) {
 	return []byte(j), want
 }
 
-// 1. TestConcurrentUnmarshal — pool data race detection
+// 1. TestConcurrentUnmarshal: pool data race detection
 
 func TestConcurrentUnmarshal(t *testing.T) {
 	procs := runtime.GOMAXPROCS(0)
@@ -86,7 +86,7 @@ func TestConcurrentUnmarshal(t *testing.T) {
 	}
 }
 
-// 2. TestConcurrentUnmarshal_GCStress — GC during concurrent parsing
+// 2. TestConcurrentUnmarshal_GCStress: GC during concurrent parsing
 
 func TestConcurrentUnmarshal_GCStress(t *testing.T) {
 	procs := runtime.GOMAXPROCS(0)
@@ -121,7 +121,7 @@ func TestConcurrentUnmarshal_GCStress(t *testing.T) {
 					errs <- fmt.Errorf("g%d/i%d: %w", gid, i, err)
 					return
 				}
-				// Verify after parse — GC may have run between parse and check.
+				// Verify after parse; GC may have run between parse and check.
 				if got.Name != want.Name {
 					errs <- fmt.Errorf("g%d/i%d: Name=%q want=%q", gid, i, got.Name, want.Name)
 					return
@@ -142,7 +142,7 @@ func TestConcurrentUnmarshal_GCStress(t *testing.T) {
 	}
 }
 
-// 3. TestArenaStringsSurviveGC — arena-backed strings must survive GC
+// 3. TestArenaStringsSurviveGC: arena-backed strings must survive GC
 
 func TestArenaStringsSurviveGC(t *testing.T) {
 	// Escaped strings force arena allocation in unescapeSinglePass.
@@ -168,7 +168,7 @@ func TestArenaStringsSurviveGC(t *testing.T) {
 		}
 	}
 
-	// Hammer GC — if arena memory is incorrectly collected, strings will corrupt.
+	// Hammer GC; if arena memory is incorrectly collected, strings will corrupt.
 	for range 10 {
 		runtime.GC()
 	}
@@ -180,7 +180,7 @@ func TestArenaStringsSurviveGC(t *testing.T) {
 	}
 }
 
-// 4. TestZeroCopyStringsSurviveGC — zero-copy strings reference input buffer
+// 4. TestZeroCopyStringsSurviveGC: zero-copy strings reference input buffer
 
 func TestZeroCopyStringsSurviveGC(t *testing.T) {
 	type S struct {
@@ -196,7 +196,7 @@ func TestZeroCopyStringsSurviveGC(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Keep input alive (don't zero it) — verify string survives GC.
+	// Keep input alive (don't zero it); verify string survives GC.
 	for range 10 {
 		runtime.GC()
 	}
@@ -207,7 +207,7 @@ func TestZeroCopyStringsSurviveGC(t *testing.T) {
 	runtime.KeepAlive(input)
 }
 
-// 5. TestPointerFieldAllocation_GCStress — batch allocator under GC
+// 5. TestPointerFieldAllocation_GCStress: batch allocator under GC
 
 func TestPointerFieldAllocation_GCStress(t *testing.T) {
 	const N = 1000
@@ -246,7 +246,7 @@ func TestPointerFieldAllocation_GCStress(t *testing.T) {
 	}
 }
 
-// 6. TestConcurrentUnmarshal_DiverseTypes — pool reuse across type paths
+// 6. TestConcurrentUnmarshal_DiverseTypes: pool reuse across type paths
 
 func TestConcurrentUnmarshal_DiverseTypes(t *testing.T) {
 	const iters = 200
@@ -358,7 +358,7 @@ func TestConcurrentUnmarshal_DiverseTypes(t *testing.T) {
 	}
 }
 
-// 7. TestPoolReuse_ArenaIntegrity — sequential arena reuse stress
+// 7. TestPoolReuse_ArenaIntegrity: sequential arena reuse stress
 
 func TestPoolReuse_ArenaIntegrity(t *testing.T) {
 	type S struct {
@@ -393,7 +393,7 @@ func TestPoolReuse_ArenaIntegrity(t *testing.T) {
 	}
 }
 
-// 8. TestPointer_PreExistingValue — pointer field already has a value
+// 8. TestPointer_PreExistingValue: pointer field already has a value
 
 // TestPointer_PreExistingValue verifies behavior when a pointer field already
 // points to an existing allocation. Unmarshal should reuse the existing
@@ -435,7 +435,7 @@ func TestPointer_PreExistingValue(t *testing.T) {
 }
 
 // TestPointer_PreExistingValue_PointerFree tests pointer-free types (e.g., *int)
-// with pre-existing allocations — Unmarshal should reuse.
+// with pre-existing allocations; Unmarshal should reuse.
 func TestPointer_PreExistingValue_PointerFree(t *testing.T) {
 	type S struct {
 		V *int `json:"v"`
@@ -536,7 +536,7 @@ func TestPointer_PreExistingValue_GCStress(t *testing.T) {
 	}
 }
 
-// 9. TestPointer_StdlibCompat — compare behavior with encoding/json
+// 9. TestPointer_StdlibCompat: compare behavior with encoding/json
 
 // TestPointer_StdlibCompat_NewAllocation verifies that when pointer is nil,
 // both vjson and encoding/json allocate new memory and produce same result.
@@ -740,7 +740,7 @@ func TestPointer_NestedPointers_GCStress(t *testing.T) {
 	}
 }
 
-// 12. TestPointer_PointerFreeElem_GCStress — GC stress for the make([]byte)
+// 12. TestPointer_PointerFreeElem_GCStress: GC stress for the make([]byte)
 //     allocation path used by pointer-free element types (*int, *float64, etc.)
 //
 // The concern: when ElemHasPtr==false, scanPointer allocates via
@@ -771,7 +771,7 @@ func TestPointer_PointerFreeElem_GCStress(t *testing.T) {
 			t.Fatalf("iter %d: %v", i, err)
 		}
 
-		// Aggressive GC — force collection between parses
+		// Aggressive GC: force collection between parses
 		if i%50 == 0 {
 			runtime.GC()
 		}
@@ -801,7 +801,7 @@ func TestPointer_PointerFreeElem_GCStress(t *testing.T) {
 	}
 }
 
-// 13. TestPointer_PreExistingStackLikeValue — test that Unmarshal handles
+// 13. TestPointer_PreExistingStackLikeValue: test that Unmarshal handles
 //     a pointer field whose existing value was filled in-place.
 //
 // In normal Go code, &localVar escapes to the heap if stored in a struct
@@ -845,7 +845,7 @@ func TestPointer_PreExistingStackLikeValue(t *testing.T) {
 	runtime.GC()
 }
 
-// 14. TestPointer_PreExistingReuse_StdlibCompat — verify pointer reuse
+// 14. TestPointer_PreExistingReuse_StdlibCompat: verify pointer reuse
 //     matches encoding/json for all common pointer-free types.
 
 func TestPointer_PreExistingReuse_StdlibCompat(t *testing.T) {

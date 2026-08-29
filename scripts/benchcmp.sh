@@ -15,9 +15,9 @@
 #   -o, --output FILE      Save benchstat output to file
 #
 # Examples:
-#   scripts/benchcmp.sh Velox StdJSON
-#   scripts/benchcmp.sh -f Marshal -c 5 -w Velox Sonic StdJSON
-#   scripts/benchcmp.sh Velox Sonic GoJSON EasyJSON StdJSON
+#   scripts/benchcmp.sh Velox Sonic
+#   scripts/benchcmp.sh -f Marshal -c 5 -w Velox Sonic GoJSON
+#   scripts/benchcmp.sh Velox Sonic GoJSON JSONv2
 
 set -euo pipefail
 
@@ -74,10 +74,12 @@ TMPDIR_CMP=$(mktemp -d)
 trap "rm -rf $TMPDIR_CMP" EXIT
 
 # Strip library suffix from benchmark names so benchstat can match them.
-# e.g. "Benchmark_Marshal_Tiny_Velox" -> "Benchmark_Marshal_Tiny"
+# e.g. "Benchmark_Marshal_Tiny_Velox" -> "Benchmark_Marshal_Tiny".
+# The suffix must be followed by a non-alphanumeric or end of line, so
+# "_Velox" never strips from "_VeloxGo".
 strip_lib_suffix() {
     local lib="$1"
-    sed "s/_${lib}\b//"
+    sed -E "s/_${lib}([^[:alnum:]]|\$)/\1/"
 }
 
 # Run each library and collect results

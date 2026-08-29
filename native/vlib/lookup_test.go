@@ -8,9 +8,8 @@ import (
 )
 
 // makeKeys pins Go strings and returns a []Key slice + retention slice.
-// Go strings on the heap have inaccessible NUL termination, but the C
-// build path treats key.str as a (ptr, len) tuple and copies out; no
-// simdjson-style padding is required at build time.
+// The C build path treats key.str as a (ptr, len) tuple and copies the bytes
+// out during Init.
 func makeKeys(strs []string) ([]vlib.Key, []string) {
 	keys := make([]vlib.Key, len(strs))
 	for i, s := range strs {
@@ -63,7 +62,7 @@ func TestErrorPaths(t *testing.T) {
 		t.Fatalf("empty keys should return 0 size, got %d", got)
 	}
 
-	// Duplicate keys — SizeFor returns 0 (config invalid), Init reports the
+	// Duplicate keys: SizeFor returns 0 (config invalid), Init reports the
 	// specific error even given a small non-empty buffer.
 	keys, _ := makeKeys([]string{"a", "a"})
 	cfg = vlib.Config{Keys: &keys[0], N: 2, Tiers: vlib.TiersAll}

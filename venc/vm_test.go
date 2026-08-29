@@ -761,8 +761,8 @@ func TestNativePointerConsistencyWithStdlib(t *testing.T) {
 }
 
 func TestNativePointerToCustomMarshaler(t *testing.T) {
-	// *big.Int has MarshalJSON on the element type — must fall back to Go,
-	// not be treated as native *Struct.
+	// *big.Int has MarshalJSON on the element type, so it must fall back to Go
+	// rather than be treated as native *Struct.
 	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
@@ -815,7 +815,7 @@ func TestHotResumeMultipleFallbacks(t *testing.T) {
 }
 
 func TestHotResumeAllFallbackFields(t *testing.T) {
-	// All fields are fallback — still uses hot resume path.
+	// All fields are fallback; still uses hot resume path.
 	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
@@ -1166,7 +1166,7 @@ func TestNativeSliceOfStructLarge(t *testing.T) {
 }
 
 func TestNativeSliceOfStructNested(t *testing.T) {
-	// Struct with nested struct — still fully native.
+	// Struct with nested struct; still fully native.
 	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
@@ -1196,7 +1196,7 @@ func TestNativeSliceOfStructNested(t *testing.T) {
 }
 
 func TestNativeSliceOfStructWithPointers(t *testing.T) {
-	// Struct with pointer fields — should be fully native.
+	// Struct with pointer fields; should be fully native.
 	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
@@ -1252,7 +1252,7 @@ func TestNativeSliceOfStructWithOmitempty(t *testing.T) {
 }
 
 func TestSliceOfNonNativeStructFallsBack(t *testing.T) {
-	// Struct with map field is not nativeFull — should use Go loop.
+	// Struct with map field is not nativeFull; should use Go loop.
 	if !encvm.Available {
 		t.Skip("native encoder not available")
 	}
@@ -1312,7 +1312,7 @@ func TestNativeSliceOfStructConsistencyWithStdlib(t *testing.T) {
 }
 
 func TestNativeSliceInStructField(t *testing.T) {
-	// []NativeStruct as a field of another struct — triggers hot resume
+	// []NativeStruct as a field of another struct: triggers hot resume
 	// for the outer struct, but the slice itself should be batch-encoded.
 	if !encvm.Available {
 		t.Skip("native encoder not available")

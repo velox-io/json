@@ -1,13 +1,11 @@
 package jsonbench
 
 import (
-	"bytes"
-	"compress/gzip"
-	_ "embed"
 	"encoding/json"
 	"fmt"
-	"io"
-	"sync"
+	"slices"
+
+	"dev.local/benchmark/corpus"
 )
 
 const (
@@ -28,40 +26,6 @@ var allDatasetNames = []string{
 	DatasetTwitterStatus,
 }
 
-//go:embed testdata/canada_geometry.json.gz
-var canadaGeometryJSONGZ []byte
-
-//go:embed testdata/citm_catalog.json.gz
-var citmCatalogJSONGZ []byte
-
-//go:embed testdata/golang_source.json.gz
-var golangSourceJSONGZ []byte
-
-//go:embed testdata/string_unicode.json.gz
-var stringUnicodeJSONGZ []byte
-
-//go:embed testdata/synthea_fhir.json.gz
-var syntheaFHIRJSONGZ []byte
-
-//go:embed testdata/twitter_status.json.gz
-var twitterStatusJSONGZ []byte
-
-type rawDataset struct {
-	gz   []byte
-	once sync.Once
-	raw  []byte
-	err  error
-}
-
-var datasetByName = map[string]*rawDataset{
-	DatasetCanadaGeometry: {gz: canadaGeometryJSONGZ},
-	DatasetCITMCatalog:    {gz: citmCatalogJSONGZ},
-	DatasetGolangSource:   {gz: golangSourceJSONGZ},
-	DatasetStringUnicode:  {gz: stringUnicodeJSONGZ},
-	DatasetSyntheaFHIR:    {gz: syntheaFHIRJSONGZ},
-	DatasetTwitterStatus:  {gz: twitterStatusJSONGZ},
-}
-
 // DatasetNames returns all supported dataset names.
 func DatasetNames() []string {
 	out := make([]string, len(allDatasetNames))
@@ -69,22 +33,14 @@ func DatasetNames() []string {
 	return out
 }
 
-// LoadDatasetJSON returns the decompressed JSON payload for a dataset.
-//
-// The returned bytes are cached and should be treated as read-only.
+// LoadDatasetJSON returns the decompressed JSON payload for a benchmark
+// dataset, served from the shared corpus. The returned bytes are cached
+// and should be treated as read-only.
 func LoadDatasetJSON(name string) ([]byte, error) {
-	ds, ok := datasetByName[name]
-	if !ok {
-		return nil, fmt.Errorf("unknown dataset %q", name)
+	if slices.Contains(allDatasetNames, name) {
+		return corpus.Load(name)
 	}
-
-	ds.once.Do(func() {
-		ds.raw, ds.err = gunzip(ds.gz)
-	})
-	if ds.err != nil {
-		return nil, fmt.Errorf("load dataset %q: %w", name, ds.err)
-	}
-	return ds.raw, nil
+	return nil, fmt.Errorf("unknown dataset %q", name)
 }
 
 // UnmarshalDataset unmarshals a dataset into dst.
@@ -121,12 +77,3 @@ func LoadGolangSource() (*GolangRoot, error)   { return LoadDataset[GolangRoot](
 func LoadStringUnicode() (*StringRoot, error)  { return LoadDataset[StringRoot](DatasetStringUnicode) }
 func LoadSyntheaFHIR() (*SyntheaRoot, error)   { return LoadDataset[SyntheaRoot](DatasetSyntheaFHIR) }
 func LoadTwitterStatus() (*TwitterRoot, error) { return LoadDataset[TwitterRoot](DatasetTwitterStatus) }
-
-func gunzip(src []byte) ([]byte, error) {
-	zr, err := gzip.NewReader(bytes.NewReader(src))
-	if err != nil {
-		return nil, err
-	}
-	defer zr.Close()
-	return io.ReadAll(zr)
-}

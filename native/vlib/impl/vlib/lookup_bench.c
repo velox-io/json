@@ -256,39 +256,38 @@ static const char *ds_k8s_container[] = {"args",
 // object level: the SAX walker dispatches on the field set of the struct
 // it is currently filling. Structs with fewer than 3 fields are skipped:
 // WINDOW trivially discriminates 1 or 2 keys, so they add no signal.
-static const char *ds_kube_pod_list[] = {"apiVersion", "kind", "items", "metadata"};
-static const char *ds_kube_pod[] = {"apiVersion", "kind", "metadata", "spec", "status"};
-static const char *ds_kube_pod_meta[] = {
-    "annotations", "creationTimestamp", "generateName", "labels",
-    "name",        "namespace",         "ownerReferences", "resourceVersion",
-    "uid"};
-static const char *ds_kube_owner_ref[] = {
-    "apiVersion", "blockOwnerDeletion", "controller", "kind", "name", "uid"};
-static const char *ds_kube_pod_spec[] = {
-    "affinity",     "containers",   "dnsPolicy",          "enableServiceLinks",
-    "hostNetwork",   "nodeName",     "preemptionPolicy",   "priority",
-    "priorityClassName", "restartPolicy", "schedulerName", "securityContext",
-    "serviceAccount", "serviceAccountName", "terminationGracePeriodSeconds",
+static const char *ds_kube_pod_list[]  = {"apiVersion", "kind", "items", "metadata"};
+static const char *ds_kube_pod[]       = {"apiVersion", "kind", "metadata", "spec", "status"};
+static const char *ds_kube_pod_meta[]  = {"annotations", "creationTimestamp", "generateName",    "labels", "name",
+                                          "namespace",   "ownerReferences",   "resourceVersion", "uid"};
+static const char *ds_kube_owner_ref[] = {"apiVersion", "blockOwnerDeletion", "controller", "kind", "name", "uid"};
+static const char *ds_kube_pod_spec[]  = {
+    "affinity",      "containers",       "dnsPolicy",      "enableServiceLinks", "hostNetwork",
+    "nodeName",      "preemptionPolicy", "priority",       "priorityClassName",  "restartPolicy",
+    "schedulerName", "securityContext",  "serviceAccount", "serviceAccountName", "terminationGracePeriodSeconds",
     "tolerations",   "volumes"};
-static const char *ds_kube_node_sel_req[] = {"key", "operator", "values"};
-static const char *ds_kube_container[] = {
-    "args", "command", "env", "image", "imagePullPolicy", "name",
-    "resources", "securityContext", "terminationMessagePath",
-    "terminationMessagePolicy", "volumeMounts"};
-static const char *ds_kube_volume_mount[] = {"mountPath", "name", "readOnly"};
-static const char *ds_kube_toleration[] = {"effect", "key", "operator"};
-static const char *ds_kube_volume[] = {"name", "hostPath", "configMap", "projected"};
-static const char *ds_kube_config_map_vol[] = {"defaultMode", "name", "items"};
-static const char *ds_kube_vol_projection[] = {
-    "serviceAccountToken", "configMap", "downwardAPI"};
-static const char *ds_kube_pod_status[] = {
-    "conditions", "containerStatuses", "hostIP", "phase", "podIP",
-    "podIPs", "qosClass", "startTime"};
-static const char *ds_kube_pod_condition[] = {
-    "lastProbeTime", "lastTransitionTime", "status", "type"};
-static const char *ds_kube_container_status[] = {
-    "containerID", "image", "imageID", "lastState", "name", "ready",
-    "restartCount", "started", "state"};
+static const char *ds_kube_node_sel_req[]     = {"key", "operator", "values"};
+static const char *ds_kube_container[]        = {"args",
+                                                 "command",
+                                                 "env",
+                                                 "image",
+                                                 "imagePullPolicy",
+                                                 "name",
+                                                 "resources",
+                                                 "securityContext",
+                                                 "terminationMessagePath",
+                                                 "terminationMessagePolicy",
+                                                 "volumeMounts"};
+static const char *ds_kube_volume_mount[]     = {"mountPath", "name", "readOnly"};
+static const char *ds_kube_toleration[]       = {"effect", "key", "operator"};
+static const char *ds_kube_volume[]           = {"name", "hostPath", "configMap", "projected"};
+static const char *ds_kube_config_map_vol[]   = {"defaultMode", "name", "items"};
+static const char *ds_kube_vol_projection[]   = {"serviceAccountToken", "configMap", "downwardAPI"};
+static const char *ds_kube_pod_status[]       = {"conditions", "containerStatuses", "hostIP",   "phase", "podIP",
+                                                 "podIPs",     "qosClass",          "startTime"};
+static const char *ds_kube_pod_condition[]    = {"lastProbeTime", "lastTransitionTime", "status", "type"};
+static const char *ds_kube_container_status[] = {"containerID", "image",        "imageID", "lastState", "name",
+                                                 "ready",       "restartCount", "started", "state"};
 
 static const dataset datasets[] = {
     {"short-api", ds_short_api, 8},
@@ -357,10 +356,10 @@ int main(void) {
     }
 
     static char bench_scratch[80 * 1024];
-    ndec_lookup_config cfg = {.keys        = keys,
-                              .n           = ds->n,
-                              .tiers       = NDEC_LOOKUP_TIERS_ALL,
-                              .scratch     = bench_scratch,
+    ndec_lookup_config cfg = {.keys         = keys,
+                              .n            = ds->n,
+                              .tiers        = NDEC_LOOKUP_TIERS_ALL,
+                              .scratch      = bench_scratch,
                               .scratch_size = sizeof(bench_scratch)};
     size_t storage_size    = ndec_lookup_size_for(&cfg);
     ndec_lookup *storage   = malloc(storage_size);
@@ -409,8 +408,8 @@ int main(void) {
       samples[j] = x;
     }
 
-    printf("%-22s %5zu | %-12s | %10.2f %10.2f\n", ds->label, ds->n,
-           ndec_lookup_tier_name_ex(storage), samples[0], samples[TRIALS / 2]);
+    printf("%-22s %5zu | %-12s | %10.2f %10.2f\n", ds->label, ds->n, ndec_lookup_tier_name(ndec_lookup_get_tier(storage)), samples[0],
+           samples[TRIALS / 2]);
 
     free(bufs);
     free(storage);

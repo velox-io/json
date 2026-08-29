@@ -54,6 +54,7 @@ func lower(insts []IRInst) (ops []byte, fallbacks map[int]*fbInfo, annotations m
 		hdr := VjOpHdr{
 			OpType:   inst.Op,
 			KeyLen:   inst.KeyLen,
+			Flags:    inst.Flags,
 			KeyOff:   inst.KeyOff,
 			FieldOff: inst.FieldOff,
 		}

@@ -18,7 +18,9 @@ STDLIB_SOURCES="
 
 EXTRA_SOURCES=""
 
-EXTRA_CFLAGS="-I$REPO_ROOT/native/vlib/impl -I$REPO_ROOT/native"
+# Append include paths to any caller-supplied EXTRA_CFLAGS (e.g. -DVJ_DEBUG
+# from make gen-debug) instead of overwriting them.
+EXTRA_CFLAGS="${EXTRA_CFLAGS:-} -I$REPO_ROOT/native/vlib/impl -I$REPO_ROOT/native"
 
 TARGET_DIR="native/vlib"
 
@@ -38,4 +40,4 @@ MODE_FLAGS_default=""
 # HasPrefix filter keeps every global symbol that starts with this prefix
 # and demotes everything else to local.
 EXPORT_SYMBOL_PREFIX_PATTERN="ndec_lookup_"
-EXPORT_SYMBOL_NAMES="ndec_lookup_size_for ndec_lookup_scratch_size ndec_lookup_init ndec_lookup_get_tier ndec_lookup_tier_name ndec_lookup_tier_name_ex ndec_lookup_footprint"
+EXPORT_SYMBOL_NAMES="ndec_lookup_size_for ndec_lookup_scratch_size ndec_lookup_init ndec_lookup_get_tier ndec_lookup_tier_name ndec_lookup_footprint"

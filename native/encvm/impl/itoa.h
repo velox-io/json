@@ -110,7 +110,7 @@ INLINE int vj_u64toa_xlarge_neon(uint8_t *out, uint64_t val) {
     n += 2;
   }
 
-  /* Remaining 16 digits — always exactly 16 (zero-padded) */
+  /* Remaining 16 digits, always exactly 16 (zero-padded) */
   uint16x8_t d0     = vj_itoa8_neon((uint32_t)(lo / 100000000));
   uint16x8_t d1     = vj_itoa8_neon((uint32_t)(lo % 100000000));
   uint8x16_t packed = vcombine_u8(vqmovn_u16(d0), vqmovn_u16(d1));
@@ -206,7 +206,7 @@ INLINE int vj_u64toa_xlarge_sse2(uint8_t *out, uint64_t val) {
     n += 2;
   }
 
-  /* Remaining 16 digits — always exactly 16 (zero-padded) */
+  /* Remaining 16 digits, always exactly 16 (zero-padded) */
   __m128i d0     = vj_itoa8_sse2((uint32_t)(lo / 100000000));
   __m128i d1     = vj_itoa8_sse2((uint32_t)(lo % 100000000));
   __m128i packed = _mm_packus_epi16(d0, d1);
@@ -219,23 +219,20 @@ INLINE int vj_u64toa_xlarge_sse2(uint8_t *out, uint64_t val) {
 
 /* Scalar paths (used for all ISAs, and as fallback) */
 
-/* Small: 0..9999 — forward-write with conditional digit skipping. */
+/* Small: 0..9999, forward-write with conditional digit skipping. */
 INLINE int vj_u32toa_small(uint8_t *out, uint32_t val) {
   int n       = 0;
   uint32_t d1 = (val / 100) * 2;
   uint32_t d2 = (val % 100) * 2;
 
-  if (val >= 1000)
-    out[n++] = DIGIT_PAIRS[d1];
-  if (val >= 100)
-    out[n++] = DIGIT_PAIRS[d1 + 1];
-  if (val >= 10)
-    out[n++] = DIGIT_PAIRS[d2];
+  if (val >= 1000) out[n++] = DIGIT_PAIRS[d1];
+  if (val >= 100) out[n++] = DIGIT_PAIRS[d1 + 1];
+  if (val >= 10) out[n++] = DIGIT_PAIRS[d2];
   out[n++] = DIGIT_PAIRS[d2 + 1];
   return n;
 }
 
-/* Medium: 10000..99999999 — divide by 10000, then digit-pair lookups. */
+/* Medium: 10000..99999999, divide by 10000, then digit-pair lookups. */
 INLINE int vj_u32toa_medium(uint8_t *out, uint32_t val) {
   int n       = 0;
   uint32_t hi = val / 10000;
@@ -245,12 +242,9 @@ INLINE int vj_u32toa_medium(uint8_t *out, uint32_t val) {
   uint32_t d3 = (lo / 100) * 2;
   uint32_t d4 = (lo % 100) * 2;
 
-  if (val >= 10000000)
-    out[n++] = DIGIT_PAIRS[d1];
-  if (val >= 1000000)
-    out[n++] = DIGIT_PAIRS[d1 + 1];
-  if (val >= 100000)
-    out[n++] = DIGIT_PAIRS[d2];
+  if (val >= 10000000) out[n++] = DIGIT_PAIRS[d1];
+  if (val >= 1000000) out[n++] = DIGIT_PAIRS[d1 + 1];
+  if (val >= 100000) out[n++] = DIGIT_PAIRS[d2];
   out[n++] = DIGIT_PAIRS[d2 + 1];
   out[n++] = DIGIT_PAIRS[d3];
   out[n++] = DIGIT_PAIRS[d3 + 1];

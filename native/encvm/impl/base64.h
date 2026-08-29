@@ -14,8 +14,8 @@
 #ifndef VJ_ENCVM_BASE64_H
 #define VJ_ENCVM_BASE64_H
 
-#include "types.h"
-#include "util/memfn.h"
+#include "types.h"      // IWYU pragma: keep
+#include "util/memfn.h" // IWYU pragma: keep
 
 static const char VJ_B64_CHARS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -24,8 +24,9 @@ static inline int64_t vj_base64_encoded_len(int64_t len) {
   return ((len + 2) / 3) * 4;
 }
 
-/* Scalar base64 — used for tail bytes (< 12 remaining) */
-static inline uint8_t *vj_base64_encode_scalar(uint8_t *buf, const uint8_t *data, int64_t len) {
+/* Scalar base64, used for tail bytes (< 12 remaining)
+   Common body: encode len bytes of `data` into `buf`. Not called directly. */
+static inline uint8_t *vj_base64_encode_scalar_body(uint8_t *buf, const uint8_t *data, int64_t len) {
   int64_t i           = 0;
   int64_t full_groups = len - (len % 3);
   for (; i < full_groups; i += 3) {
@@ -56,7 +57,24 @@ static inline uint8_t *vj_base64_encode_scalar(uint8_t *buf, const uint8_t *data
   return buf;
 }
 
-/* SIMD base64 (Muła–Lemire) — 12 input bytes → 16 output bytes */
+/* SIMD-path tail: at most 11 bytes remain after the 12-byte SIMD main loop.
+ * The unreachable() gate is a hard hint to the optimizer: any len >= 12 is a
+ * caller bug, and clang can drop the auto-vectorized fast path it would
+ * otherwise synthesize for large `len`. That fast path (unused at runtime,
+ * but present in the object) is what inflated the frame past 400B on amd64:
+ * ymm spill slots for an SSE/AVX2 branch that no caller ever reaches. */
+INLINE uint8_t *vj_base64_encode_scalar_tail(uint8_t *buf, const uint8_t *data, int64_t len) {
+  if (len < 0 || len >= 12) __builtin_unreachable();
+  return vj_base64_encode_scalar_body(buf, data, len);
+}
+
+/* Whole-input scalar encoder used when no SIMD path is available. INLINE
+ * to fold the body into the caller's frame (rare path, no extra cost). */
+INLINE uint8_t *vj_base64_encode_scalar(uint8_t *buf, const uint8_t *data, int64_t len) {
+  return vj_base64_encode_scalar_body(buf, data, len);
+}
+
+/* SIMD base64 (Muła–Lemire): 12 input bytes → 16 output bytes */
 #if defined(__aarch64__)
 
 /* Muła–Lemire base64 encoder: 12 input bytes → 16 output bytes
@@ -130,7 +148,51 @@ static inline __m128i vj_base64_encode_simd_12(__m128i input) {
 #endif /* base64 SIMD */
 
 /* Encode a byte slice as a base64-encoded JSON string (with quotes).
- * Returns advanced buffer pointer on success, NULL on buffer full. */
-uint8_t *vj_encode_base64(uint8_t *buf, const uint8_t *bend, const uint8_t *data, int64_t len);
+ * Returns advanced buffer pointer on success, NULL on buffer full.
+ * INLINE: as a standalone callee the SIMD body needs a 664B frame on
+ * windows/amd64 (callee-saved xmm6-15), blowing the nosplit chain budget;
+ * folded into the VM tail label block its spills share slots with the
+ * other mutually exclusive handlers. */
+INLINE uint8_t *vj_encode_base64(uint8_t *buf, const uint8_t *bend, const uint8_t *data, int64_t len) {
+
+  int64_t b64_len = vj_base64_encoded_len(len);
+  int64_t total   = 2 + b64_len;
+
+  if (__builtin_expect(buf + total > bend, 0)) {
+    return (uint8_t *)0;
+  }
+
+  *buf++ = '"';
+
+#if defined(__aarch64__)
+  /* SIMD main loop: 12 input bytes → 16 output bytes. */
+  int64_t i = 0;
+  for (; i + 12 <= len; i += 12) {
+    uint8x16_t input   = vld1q_u8(data + i);
+    uint8x16_t encoded = vj_base64_encode_simd_12(input);
+    vst1q_u8(buf, encoded);
+    buf += 16;
+  }
+  /* Scalar tail for remaining < 12 bytes */
+  buf = vj_base64_encode_scalar_tail(buf, data + i, len - i);
+#elif defined(__SSE2__)
+  /* SIMD main loop: 12 input bytes → 16 output bytes */
+  int64_t i = 0;
+  for (; i + 12 <= len; i += 12) {
+    __m128i input   = _mm_loadu_si128((const __m128i *)(data + i));
+    __m128i encoded = vj_base64_encode_simd_12(input);
+    _mm_storeu_si128((__m128i *)buf, encoded);
+    buf += 16;
+  }
+  /* Scalar tail for remaining < 12 bytes */
+  buf = vj_base64_encode_scalar_tail(buf, data + i, len - i);
+#else
+  /* Pure scalar fallback */
+  buf = vj_base64_encode_scalar(buf, data, len);
+#endif
+
+  *buf++ = '"';
+  return buf;
+}
 
 #endif /* VJ_ENCVM_BASE64_H */

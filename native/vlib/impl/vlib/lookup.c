@@ -8,22 +8,16 @@
 // ---- Layout helpers ----
 
 static ndec_lookup_cmp_kind cmp_kind_for(size_t max_key_len) {
-  if (max_key_len <= 16)
-    return NDEC_LOOKUP_CMP_16;
-  if (max_key_len <= 32)
-    return NDEC_LOOKUP_CMP_32;
-  if (max_key_len <= 48)
-    return NDEC_LOOKUP_CMP_48;
+  if (max_key_len <= 16) return NDEC_LOOKUP_CMP_16;
+  if (max_key_len <= 32) return NDEC_LOOKUP_CMP_32;
+  if (max_key_len <= 48) return NDEC_LOOKUP_CMP_48;
   return NDEC_LOOKUP_CMP_64;
 }
 
 static size_t stride_for(size_t max_key_len) {
-  if (max_key_len <= 16)
-    return 16;
-  if (max_key_len <= 32)
-    return 32;
-  if (max_key_len <= 48)
-    return 48;
+  if (max_key_len <= 16) return 16;
+  if (max_key_len <= 32) return 32;
+  if (max_key_len <= 48) return 48;
   return 64;
 }
 
@@ -54,8 +48,7 @@ static unsigned window_byte_fwd(const ndec_lookup_key *keys, size_t i, size_t id
 static int window_init_forward(ndec_lookup_window *w, const ndec_lookup_key *keys, size_t n, size_t min_len) {
   for (size_t off = 0; off <= min_len; off++) {
     for (size_t shift = 0; shift < 8; shift++) {
-      if (shift != 0 && off + 1 > min_len)
-        continue;
+      if (shift != 0 && off + 1 > min_len) continue;
 
       int distinct = 1;
       for (size_t i = 0; i < n && distinct; i++) {
@@ -72,10 +65,8 @@ static int window_init_forward(ndec_lookup_window *w, const ndec_lookup_key *key
           }
         }
       }
-      if (!distinct)
-        continue;
+      if (!distinct) continue;
 
-      w->direction   = 0;
       w->byte_offset = (uint8_t)off;
       w->shift       = (uint8_t)shift;
       for (size_t b = 0; b < 256; b++)
@@ -92,70 +83,22 @@ static int window_init_forward(ndec_lookup_window *w, const ndec_lookup_key *key
   return 0;
 }
 
-static int window_init_backward(ndec_lookup_window *w, const ndec_lookup_key *keys, size_t n, size_t min_len) {
-  for (size_t k = 1; k <= min_len; k++) {
-    for (size_t shift = 0; shift < 8; shift++) {
-      int distinct = 1;
-      for (size_t i = 0; i < n && distinct; i++) {
-        for (size_t j = i + 1; j < n; j++) {
-          size_t li     = keys[i].len;
-          size_t lj     = keys[j].len;
-          unsigned lo_i = (unsigned char)keys[i].str[li - k];
-          unsigned hi_i = (k == 1) ? (unsigned)'"' : (unsigned char)keys[i].str[li - k + 1];
-          unsigned lo_j = (unsigned char)keys[j].str[lj - k];
-          unsigned hi_j = (k == 1) ? (unsigned)'"' : (unsigned char)keys[j].str[lj - k + 1];
-          unsigned vi   = (((lo_i | (hi_i << 8)) >> shift) & 0xFFu);
-          unsigned vj   = (((lo_j | (hi_j << 8)) >> shift) & 0xFFu);
-          if (vi == vj) {
-            distinct = 0;
-            break;
-          }
-        }
-      }
-      if (!distinct)
-        continue;
-
-      w->direction   = 1;
-      w->byte_offset = (uint8_t)k;
-      w->shift       = (uint8_t)shift;
-      for (size_t b = 0; b < 256; b++)
-        w->window_to_key[b] = (uint8_t)n;
-      for (size_t i = 0; i < n; i++) {
-        size_t li             = keys[i].len;
-        unsigned lo           = (unsigned char)keys[i].str[li - k];
-        unsigned hi           = (k == 1) ? (unsigned)'"' : (unsigned char)keys[i].str[li - k + 1];
-        unsigned val          = (((lo | (hi << 8)) >> shift) & 0xFFu);
-        w->window_to_key[val] = (uint8_t)i;
-      }
-      return 1;
-    }
-  }
-  return 0;
-}
-
 static int window_build(ndec_lookup_window *w, const ndec_lookup_key *keys, size_t n) {
-  if (n == 0 || n > NDEC_LOOKUP_MAX_KEYS)
-    return 0;
+  if (n == 0 || n > NDEC_LOOKUP_MAX_KEYS) return 0;
   w->n = n;
 
   size_t min_len = keys[0].len;
   size_t max_len = min_len;
   for (size_t i = 1; i < n; i++) {
     size_t L = keys[i].len;
-    if (L < min_len)
-      min_len = L;
-    if (L > max_len)
-      max_len = L;
+    if (L < min_len) min_len = L;
+    if (L > max_len) max_len = L;
   }
-  if (max_len >= NDEC_LOOKUP_KEY_STRIDE_MAX)
-    return 0;
+  if (max_len >= NDEC_LOOKUP_KEY_STRIDE_MAX) return 0;
   w->max_key_len = max_len;
 
   int ok = window_init_forward(w, keys, n, min_len);
-  if (!ok)
-    ok = window_init_backward(w, keys, n, min_len);
-  if (!ok)
-    return 0;
+  if (!ok) return 0;
 
   w->cmp           = cmp_kind_for(max_len);
   w->stride        = stride_for(max_len);
@@ -183,10 +126,8 @@ static size_t gperf_size_for(size_t n, size_t max_key_len) {
 }
 
 static unsigned gperf_char_at(const char *key, size_t len, uint8_t pos) {
-  if (pos == NDEC_LOOKUP_GPERF_LAST_CH)
-    return (unsigned char)key[len - 1];
-  if ((size_t)pos >= len)
-    return 256;
+  if (pos == NDEC_LOOKUP_GPERF_LAST_CH) return (unsigned char)key[len - 1];
+  if ((size_t)pos >= len) return 256;
   return (unsigned char)key[pos];
 }
 
@@ -197,8 +138,7 @@ static size_t gperf_undistinguished_pairs(const ndec_lookup_key *keys, size_t n,
     size_t li = keys[i].len;
     for (size_t j = i + 1; j < n; j++) {
       size_t lj = keys[j].len;
-      if (li % modulus != lj % modulus)
-        continue;
+      if (li % modulus != lj % modulus) continue;
       int distinguished = 0;
       for (size_t p = 0; p < num_positions; p++) {
         if (gperf_char_at(keys[i].str, li, positions[p]) != gperf_char_at(keys[j].str, lj, positions[p])) {
@@ -206,8 +146,7 @@ static size_t gperf_undistinguished_pairs(const ndec_lookup_key *keys, size_t n,
           break;
         }
       }
-      if (!distinguished)
-        count++;
+      if (!distinguished) count++;
     }
   }
   return count;
@@ -222,8 +161,7 @@ static size_t gperf_select_positions(const ndec_lookup_key *keys, size_t n, size
   candidates[n_cand++] = NDEC_LOOKUP_GPERF_LAST_CH;
 
   size_t num_pos = 0;
-  if (gperf_undistinguished_pairs(keys, n, out_positions, 0, modulus) == 0)
-    return 0;
+  if (gperf_undistinguished_pairs(keys, n, out_positions, 0, modulus) == 0) return 0;
 
   while (num_pos < NDEC_LOOKUP_GPERF_MAX_POS) {
     size_t best_reduction = 0;
@@ -236,8 +174,7 @@ static size_t gperf_select_positions(const ndec_lookup_key *keys, size_t n, size
           already = 1;
           break;
         }
-      if (already)
-        continue;
+      if (already) continue;
       out_positions[num_pos] = candidates[ci];
       size_t after           = gperf_undistinguished_pairs(keys, n, out_positions, num_pos + 1, modulus);
       size_t reduction       = before - after;
@@ -246,15 +183,12 @@ static size_t gperf_select_positions(const ndec_lookup_key *keys, size_t n, size
         best_ci        = (int)ci;
       }
     }
-    if (best_ci < 0)
-      break;
+    if (best_ci < 0) break;
     out_positions[num_pos] = candidates[best_ci];
     num_pos++;
-    if (gperf_undistinguished_pairs(keys, n, out_positions, num_pos, modulus) == 0)
-      return num_pos;
+    if (gperf_undistinguished_pairs(keys, n, out_positions, num_pos, modulus) == 0) return num_pos;
   }
-  if (gperf_undistinguished_pairs(keys, n, out_positions, num_pos, modulus) != 0)
-    return SIZE_MAX;
+  if (gperf_undistinguished_pairs(keys, n, out_positions, num_pos, modulus) != 0) return SIZE_MAX;
   return num_pos;
 }
 
@@ -304,16 +238,15 @@ typedef union {
   hand_workspace hand;
 } ndec_lookup_build_scratch;
 
-size_t ndec_lookup_scratch_size(void) {
+EXPORT size_t ndec_lookup_scratch_size(void) {
   return sizeof(ndec_lookup_build_scratch);
 }
 
 static int gperf_try(gperf_workspace *ws, size_t max_key_len, const ndec_lookup_key *keys, size_t n,
                      size_t modulus) {
   gperf_scratch *gs = &ws->out;
-  size_t np = gperf_select_positions(keys, n, max_key_len, modulus, gs->positions);
-  if (np == SIZE_MAX)
-    return 0;
+  size_t np         = gperf_select_positions(keys, n, max_key_len, modulus, gs->positions);
+  if (np == SIZE_MAX) return 0;
   gs->num_positions = (uint8_t)np;
   __builtin_memset(gs->asso_values, 0, sizeof(gs->asso_values));
 
@@ -322,14 +255,13 @@ static int gperf_try(gperf_workspace *ws, size_t max_key_len, const ndec_lookup_
       gs->slot_to_key[s] = (uint8_t)n;
     for (size_t i = 0; i < n; i++) {
       size_t slot = keys[i].len % modulus;
-      if (gs->slot_to_key[slot] != n)
-        return 0;
+      if (gs->slot_to_key[slot] != n) return 0;
       gs->slot_to_key[slot] = (uint8_t)i;
     }
     return 1;
   }
 
-  unsigned(*kchars)[NDEC_LOOKUP_GPERF_MAX_POS] = ws->kchars;
+  unsigned (*kchars)[NDEC_LOOKUP_GPERF_MAX_POS] = ws->kchars;
   for (size_t k = 0; k < n; k++) {
     size_t L = keys[k].len;
     for (size_t p = 0; p < np; p++)
@@ -343,8 +275,7 @@ static int gperf_try(gperf_workspace *ws, size_t max_key_len, const ndec_lookup_
     __builtin_memset(freq, 0, 257 * sizeof(freq[0]));
     for (size_t k = 0; k < n; k++) {
       unsigned c = kchars[k][p];
-      if (c < 256)
-        freq[c]++;
+      if (c < 256) freq[c]++;
     }
     for (size_t c = 0; c < 256; c++) {
       if (freq[c] > 0) {
@@ -365,7 +296,7 @@ static int gperf_try(gperf_workspace *ws, size_t max_key_len, const ndec_lookup_
     syms[j] = x;
   }
 
-  uint64_t(*salt)[256] = ws->salt;
+  uint64_t (*salt)[256] = ws->salt;
   {
     uint64_t s = 0x9e3779b97f4a7c15ULL;
     for (size_t p = 0; p < np; p++) {
@@ -380,8 +311,7 @@ static int gperf_try(gperf_workspace *ws, size_t max_key_len, const ndec_lookup_
     uint64_t s = 0;
     for (size_t p = 0; p < np; p++) {
       unsigned c = kchars[k][p];
-      if (c < 256)
-        s ^= salt[p][c];
+      if (c < 256) s ^= salt[p][c];
     }
     sig[k] = s;
   }
@@ -406,8 +336,7 @@ static int gperf_try(gperf_workspace *ws, size_t max_key_len, const ndec_lookup_
     uint64_t sp_salt = salt[sp][sc];
 
     for (size_t k = 0; k < n; k++)
-      if (kchars[k][sp] == sc)
-        sig[k] ^= sp_salt;
+      if (kchars[k][sp] == sc) sig[k] ^= sp_salt;
 
     for (size_t i = 1; i < n; i++) {
       size_t x    = order[i];
@@ -434,8 +363,7 @@ static int gperf_try(gperf_workspace *ws, size_t max_key_len, const ndec_lookup_
           for (size_t x = ci; x < cj; x++) {
             size_t k = order[x];
             size_t h = phash[k];
-            if (kchars[k][sp] == sc)
-              h += v;
+            if (kchars[k][sp] == sc) h += v;
             h &= (modulus - 1);
             if (slot_gen[h] == gen) {
               collision = 1;
@@ -449,37 +377,31 @@ static int gperf_try(gperf_workspace *ws, size_t max_key_len, const ndec_lookup_
       if (!collision) {
         gs->asso_values[sp][sc] = (uint8_t)v;
         for (size_t k = 0; k < n; k++)
-          if (kchars[k][sp] == sc)
-            phash[k] += v;
+          if (kchars[k][sp] == sc) phash[k] += v;
         found = 1;
       }
     }
-    if (!found)
-      return 0;
+    if (!found) return 0;
   }
 
   for (size_t s = 0; s < modulus; s++)
     gs->slot_to_key[s] = (uint8_t)n;
   for (size_t i = 0; i < n; i++) {
     size_t slot = phash[i] & (modulus - 1);
-    if (gs->slot_to_key[slot] != n)
-      return 0;
+    if (gs->slot_to_key[slot] != n) return 0;
     gs->slot_to_key[slot] = (uint8_t)i;
   }
   return 1;
 }
 
 static int gperf_build(ndec_lookup_gperf *gp, const ndec_lookup_key *keys, size_t n, gperf_workspace *ws) {
-  if (n == 0 || n > NDEC_LOOKUP_MAX_KEYS)
-    return 0;
+  if (n == 0 || n > NDEC_LOOKUP_MAX_KEYS) return 0;
   size_t max_len = 0;
   for (size_t i = 0; i < n; i++) {
     size_t L = keys[i].len;
-    if (L > max_len)
-      max_len = L;
+    if (L > max_len) max_len = L;
   }
-  if (max_len >= NDEC_LOOKUP_KEY_STRIDE_MAX)
-    return 0;
+  if (max_len >= NDEC_LOOKUP_KEY_STRIDE_MAX) return 0;
   gp->n           = n;
   gp->max_key_len = max_len;
 
@@ -502,8 +424,7 @@ static int gperf_build(ndec_lookup_gperf *gp, const ndec_lookup_key *keys, size_
       off               = round_up16(off + n);
       gp->key_bytes_off = off;
 
-      if (np > 0)
-        __builtin_memcpy((uint8_t *)gp + gp->asso_off, scratch->asso_values, np * 256u);
+      if (np > 0) __builtin_memcpy((uint8_t *)gp + gp->asso_off, scratch->asso_values, np * 256u);
       __builtin_memcpy((uint8_t *)gp + gp->slots_off, scratch->slot_to_key, m);
 
       uint8_t *klen = (uint8_t *)gp + gp->key_len_off;
@@ -569,8 +490,7 @@ static int hand_try_placement(ndec_lookup_hand *hd, const ndec_lookup_key *keys,
     size_t ch       = buckets_ordered[b];
     size_t bk_count = 0;
     for (size_t i = 0; i < n; i++)
-      if (bucket_of[i] == ch)
-        bucket_keys[bk_count++] = i;
+      if (bucket_of[i] == ch) bucket_keys[bk_count++] = i;
     int placed   = 0;
     size_t max_d = M < 255 ? M : 255;
     for (size_t d = 0; d < max_d && !placed; d++) {
@@ -596,16 +516,14 @@ static int hand_try_placement(ndec_lookup_hand *hd, const ndec_lookup_key *keys,
         placed = 1;
       }
     }
-    if (!placed)
-      return 0;
+    if (!placed) return 0;
   }
   return 1;
 }
 
 static int hand_try_size(ndec_lookup_hand *hd, const ndec_lookup_key *keys, size_t n, size_t M,
                          hand_workspace *ws) {
-  if (M > NDEC_LOOKUP_HD_MAX_TABLE)
-    return 0;
+  if (M > NDEC_LOOKUP_HD_MAX_TABLE) return 0;
   hd->table_size = M;
   hd->mask       = M - 1;
   hd->n          = n;
@@ -655,16 +573,13 @@ static int hand_try_size(ndec_lookup_hand *hd, const ndec_lookup_key *keys, size
 }
 
 static int hand_build(ndec_lookup_hand *hd, const ndec_lookup_key *keys, size_t n, hand_workspace *ws) {
-  if (n == 0 || n > NDEC_LOOKUP_MAX_KEYS)
-    return 0;
+  if (n == 0 || n > NDEC_LOOKUP_MAX_KEYS) return 0;
   size_t max_len = 0;
   for (size_t i = 0; i < n; i++) {
     size_t L = keys[i].len;
-    if (L > max_len)
-      max_len = L;
+    if (L > max_len) max_len = L;
   }
-  if (max_len >= NDEC_LOOKUP_KEY_STRIDE_MAX)
-    return 0;
+  if (max_len >= NDEC_LOOKUP_KEY_STRIDE_MAX) return 0;
   hd->max_key_len = max_len;
 
   for (size_t M = next_pow2(n); M <= NDEC_LOOKUP_HD_MAX_TABLE; M <<= 1) {
@@ -692,8 +607,7 @@ static size_t table_size_for(size_t n, size_t total_key_bytes) {
   size_t cap = 16;
   while (cap < n * 2)
     cap <<= 1;
-  if (cap > 65536)
-    return 0;
+  if (cap > 65536) return 0;
   size_t off = offsetof(ndec_lookup_table, slots) + cap * sizeof(ndec_lookup_fb_slot);
   return off + total_key_bytes;
 }
@@ -711,14 +625,12 @@ static uint64_t table_hash(const char *p, size_t len) {
 }
 
 static int table_build(ndec_lookup_table *fb, const ndec_lookup_key *keys, size_t n, size_t storage_size) {
-  if (n == 0 || n > NDEC_LOOKUP_MAX_KEYS)
-    return 0;
+  if (n == 0 || n > NDEC_LOOKUP_MAX_KEYS) return 0;
   size_t total_key_bytes = 0;
   for (size_t i = 0; i < n; i++)
     total_key_bytes += keys[i].len;
   size_t needed = table_size_for(n, total_key_bytes);
-  if (needed == 0 || needed > storage_size)
-    return 0;
+  if (needed == 0 || needed > storage_size) return 0;
 
   size_t cap = 16;
   while (cap < n * 2)
@@ -757,10 +669,8 @@ static int table_build(ndec_lookup_table *fb, const ndec_lookup_key *keys, size_
 
 static int validate_keys(const ndec_lookup_key *keys, size_t n, ndec_lookup_tier_mask tiers,
                          size_t *max_seen_len) {
-  if (n == 0)
-    return NDEC_LOOKUP_ERR_KEYS_EMPTY;
-  if (n > NDEC_LOOKUP_MAX_KEYS)
-    return NDEC_LOOKUP_ERR_KEYS_TOO_MANY;
+  if (n == 0) return NDEC_LOOKUP_ERR_KEYS_EMPTY;
+  if (n > NDEC_LOOKUP_MAX_KEYS) return NDEC_LOOKUP_ERR_KEYS_TOO_MANY;
   if (!keys) {
     *max_seen_len = NDEC_LOOKUP_KEY_STRIDE_MAX - 1;
     return 0;
@@ -769,17 +679,13 @@ static int validate_keys(const ndec_lookup_key *keys, size_t n, ndec_lookup_tier
   int allow_over_63 = (tiers & NDEC_LOOKUP_TIER_TABLE) != 0;
   for (size_t i = 0; i < n; i++) {
     size_t L = keys[i].len;
-    if (L == 0)
-      return NDEC_LOOKUP_ERR_KEY_EMPTY;
-    if (L >= NDEC_LOOKUP_KEY_STRIDE_MAX && !allow_over_63)
-      return NDEC_LOOKUP_ERR_KEY_TOO_LONG;
+    if (L == 0) return NDEC_LOOKUP_ERR_KEY_EMPTY;
+    if (L >= NDEC_LOOKUP_KEY_STRIDE_MAX && !allow_over_63) return NDEC_LOOKUP_ERR_KEY_TOO_LONG;
     for (size_t j = 0; j < L; j++) {
       unsigned char c = (unsigned char)keys[i].str[j];
-      if (c == 0x00 || c == 0x22 || c == 0x5C)
-        return NDEC_LOOKUP_ERR_KEY_INVALID_BYTE;
+      if (c == 0x00 || c == 0x22 || c == 0x5C) return NDEC_LOOKUP_ERR_KEY_INVALID_BYTE;
     }
-    if (L > max_len)
-      max_len = L;
+    if (L > max_len) max_len = L;
   }
   for (size_t i = 0; i < n; i++)
     for (size_t j = i + 1; j < n; j++)
@@ -804,14 +710,12 @@ static size_t size_for_tier(ndec_lookup_tier tier, size_t n, size_t max_len, siz
   }
 }
 
-size_t ndec_lookup_size_for(const ndec_lookup_config *cfg) {
-  if (!cfg)
-    return 0;
+EXPORT size_t ndec_lookup_size_for(const ndec_lookup_config *cfg) {
+  if (!cfg) return 0;
   ndec_lookup_tier_mask tiers = cfg->tiers ? cfg->tiers : NDEC_LOOKUP_TIERS_ALL;
   size_t max_len              = 0;
   int err                     = validate_keys(cfg->keys, cfg->n, tiers, &max_len);
-  if (err < 0)
-    return 0;
+  if (err < 0) return 0;
   size_t total_key_bytes = 0;
   if (cfg->keys) {
     for (size_t i = 0; i < cfg->n; i++)
@@ -820,14 +724,12 @@ size_t ndec_lookup_size_for(const ndec_lookup_config *cfg) {
     total_key_bytes = (size_t)cfg->n * (NDEC_LOOKUP_KEY_STRIDE_MAX - 1);
   }
   size_t max_needed                     = 0;
-  static const ndec_lookup_tier order[] = {NDEC_LOOKUP_TIER_WINDOW, NDEC_LOOKUP_TIER_GPERF,
-                                           NDEC_LOOKUP_TIER_HAND, NDEC_LOOKUP_TIER_TABLE};
+  static const ndec_lookup_tier order[] = {NDEC_LOOKUP_TIER_WINDOW, NDEC_LOOKUP_TIER_GPERF, NDEC_LOOKUP_TIER_HAND,
+                                           NDEC_LOOKUP_TIER_TABLE};
   for (size_t i = 0; i < sizeof(order) / sizeof(order[0]); i++) {
-    if (!(tiers & order[i]))
-      continue;
+    if (!(tiers & order[i])) continue;
     size_t s = size_for_tier(order[i], cfg->n, max_len, total_key_bytes);
-    if (s > max_needed)
-      max_needed = s;
+    if (s > max_needed) max_needed = s;
   }
   return max_needed;
 }
@@ -836,8 +738,7 @@ static ndec_lookup_tier try_tier(ndec_lookup_tier tier, void *storage, size_t st
                                  const ndec_lookup_key *keys, size_t n, size_t max_len, size_t total_key_bytes,
                                  ndec_lookup_build_scratch *scratch) {
   size_t needed = size_for_tier(tier, n, max_len, total_key_bytes);
-  if (needed == 0 || storage_size < needed)
-    return NDEC_LOOKUP_TIER_NONE;
+  if (needed == 0 || storage_size < needed) return NDEC_LOOKUP_TIER_NONE;
   int ok = 0;
   switch (tier) {
   case NDEC_LOOKUP_TIER_WINDOW: {
@@ -870,14 +771,12 @@ static ndec_lookup_tier try_tier(ndec_lookup_tier tier, void *storage, size_t st
   return ok ? tier : NDEC_LOOKUP_TIER_NONE;
 }
 
-int ndec_lookup_init(ndec_lookup *storage, size_t storage_size, const ndec_lookup_config *cfg) {
-  if (!storage || !cfg || !cfg->keys)
-    return NDEC_LOOKUP_ERR_NULL_ARG;
+EXPORT int ndec_lookup_init(ndec_lookup *storage, size_t storage_size, const ndec_lookup_config *cfg) {
+  if (!storage || !cfg || !cfg->keys) return NDEC_LOOKUP_ERR_NULL_ARG;
   ndec_lookup_tier_mask tiers = cfg->tiers ? cfg->tiers : NDEC_LOOKUP_TIERS_ALL;
   size_t max_len              = 0;
   int err                     = validate_keys(cfg->keys, cfg->n, tiers, &max_len);
-  if (err < 0)
-    return err;
+  if (err < 0) return err;
   size_t total_key_bytes = 0;
   for (size_t i = 0; i < cfg->n; i++)
     total_key_bytes += cfg->keys[i].len;
@@ -889,32 +788,29 @@ int ndec_lookup_init(ndec_lookup *storage, size_t storage_size, const ndec_looku
     return NDEC_LOOKUP_ERR_SCRATCH_TOO_SMALL;
   ndec_lookup_build_scratch *scratch = (ndec_lookup_build_scratch *)cfg->scratch;
 
-  static const ndec_lookup_tier order[] = {NDEC_LOOKUP_TIER_WINDOW, NDEC_LOOKUP_TIER_GPERF,
-                                           NDEC_LOOKUP_TIER_HAND, NDEC_LOOKUP_TIER_TABLE};
+  static const ndec_lookup_tier order[] = {NDEC_LOOKUP_TIER_WINDOW, NDEC_LOOKUP_TIER_GPERF, NDEC_LOOKUP_TIER_HAND,
+                                           NDEC_LOOKUP_TIER_TABLE};
   int saw_size_error                    = 0;
   for (size_t i = 0; i < sizeof(order) / sizeof(order[0]); i++) {
-    if (!(tiers & order[i]))
-      continue;
+    if (!(tiers & order[i])) continue;
     size_t needed = size_for_tier(order[i], cfg->n, max_len, total_key_bytes);
-    if (needed == 0)
-      continue;
+    if (needed == 0) continue;
     if (storage_size < needed) {
       saw_size_error = 1;
       continue;
     }
     ndec_lookup_tier picked =
         try_tier(order[i], storage, storage_size, cfg->keys, cfg->n, max_len, total_key_bytes, scratch);
-    if (picked != NDEC_LOOKUP_TIER_NONE)
-      return (int)picked;
+    if (picked != NDEC_LOOKUP_TIER_NONE) return (int)picked;
   }
   return saw_size_error ? NDEC_LOOKUP_ERR_STORAGE_TOO_SMALL : NDEC_LOOKUP_ERR_NO_TIER_MATCHES;
 }
 
-ndec_lookup_tier ndec_lookup_get_tier(const ndec_lookup *l) {
+EXPORT ndec_lookup_tier ndec_lookup_get_tier(const ndec_lookup *l) {
   return *(const ndec_lookup_tier *)l;
 }
 
-const char *ndec_lookup_tier_name(ndec_lookup_tier t) {
+EXPORT const char *ndec_lookup_tier_name(ndec_lookup_tier t) {
   switch (t) {
   case NDEC_LOOKUP_TIER_WINDOW:
     return "window";
@@ -930,15 +826,7 @@ const char *ndec_lookup_tier_name(ndec_lookup_tier t) {
   return "unknown";
 }
 
-const char *ndec_lookup_tier_name_ex(const ndec_lookup *l) {
-  ndec_lookup_tier t = ndec_lookup_get_tier(l);
-  if (t != NDEC_LOOKUP_TIER_WINDOW)
-    return ndec_lookup_tier_name(t);
-  const ndec_lookup_window *w = (const ndec_lookup_window *)l;
-  return w->direction ? "window_rev" : "window_fwd";
-}
-
-size_t ndec_lookup_footprint(const ndec_lookup *l) {
+EXPORT size_t ndec_lookup_footprint(const ndec_lookup *l) {
   switch (ndec_lookup_get_tier(l)) {
   case NDEC_LOOKUP_TIER_WINDOW: {
     const ndec_lookup_window *w = (const ndec_lookup_window *)l;

@@ -78,7 +78,7 @@ func fillContainerExt(dti *DecTypeInfo, ut *typ.UniType) {
 }
 
 func compileStructInfo(info *typ.StructTypeInfo, building map[uintptr]*DecTypeInfo) *DecStructInfo {
-	si := &DecStructInfo{}
+	si := &DecStructInfo{Rejects: info.Rejects}
 	si.Fields = make([]DecFieldInfo, len(info.Fields))
 
 	for i, sf := range info.Fields {
@@ -89,6 +89,7 @@ func compileStructInfo(info *typ.StructTypeInfo, building map[uintptr]*DecTypeIn
 		fi.Offset = sf.Offset
 		fi.JSONName = sf.JSONName
 		fi.TypeInfo = elemDTI
+		fi.PtrPath = sf.PtrPath
 	}
 	buildDecLookup(si)
 	return si
@@ -200,6 +201,7 @@ func buildDecMapInfo(info *typ.MapTypeInfo, valDTI, keyDTI *DecTypeInfo) *DecMap
 		ValRType:    gort.TypePtr(info.ValType.Type),
 		IsStringKey: info.IsStringKey,
 		ValHasPtr:   info.ValHasPtr,
+		ValIndirect: gort.MapValueIsIndirect(info.ValType.Size),
 		SlotSize:    info.SlotSize,
 	}
 	if info.IsStringKey {
@@ -242,4 +244,22 @@ func bindScanArrayFn(ai *DecArrayInfo, elemDTI *DecTypeInfo) {
 	case typ.KindFloat64:
 		ai.ScanArrayFn = scanArrayFloat64
 	}
+}
+
+// resolveFieldHops walks a promoted field's embedded-pointer hops, allocating any
+// pointee that is nil, and returns the base its last hop establishes. Such a
+// field's Offset is relative to that base rather than to the struct.
+//
+// Allocating even when the incoming value is null matches encoding/json: the null
+// is stored inside the pointee, so the pointee has to exist. An existing pointee
+// is reused, so several fields promoted through one pointer share it.
+func resolveFieldHops(base unsafe.Pointer, path []typ.PtrHop) unsafe.Pointer {
+	for i := range path {
+		slot := (*unsafe.Pointer)(unsafe.Add(base, path[i].SlotOffset))
+		if *slot == nil {
+			*slot = gort.UnsafeNew(path[i].PointeeType.Ptr)
+		}
+		base = *slot
+	}
+	return base
 }

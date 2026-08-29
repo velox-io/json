@@ -81,7 +81,7 @@ func TestTruncatedValueAfterColon_UnknownField(t *testing.T) {
 
 // TestTruncatedMapValueAfterColon verifies truncation handling in map paths.
 // These call sites delegate to scanString/scanValue/scanValueAny which have
-// their own entry bounds checks — these tests verify the callee contract.
+// their own entry bounds checks; these tests verify the callee contract.
 func TestTruncatedMapValueAfterColon(t *testing.T) {
 	t.Run("map[string]string", func(t *testing.T) {
 		type M struct {

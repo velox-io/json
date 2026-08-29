@@ -10,7 +10,7 @@ import (
 // Benchmark structs: all fields are native-encoder eligible
 // (no floats, slices, maps, pointers, interfaces, omitempty).
 
-// benchFlat5 — small flat struct, 5 fields.
+// benchFlat5 is a small flat struct with 5 fields.
 type benchFlat5 struct {
 	ID     int64  `json:"id"`
 	Name   string `json:"name"`
@@ -19,7 +19,7 @@ type benchFlat5 struct {
 	Score  uint64 `json:"score"`
 }
 
-// benchFlat10 — medium flat struct, 10 fields.
+// benchFlat10 is a medium flat struct with 10 fields.
 type benchFlat10 struct {
 	ID       int64  `json:"id"`
 	Name     string `json:"name"`
@@ -33,7 +33,7 @@ type benchFlat10 struct {
 	Verified bool   `json:"verified"`
 }
 
-// benchNested — two-level nesting.
+// benchNested has two-level nesting.
 type benchInner struct {
 	X int64  `json:"x"`
 	Y string `json:"y"`
@@ -47,7 +47,7 @@ type benchNested struct {
 	Code  int32      `json:"code"`
 }
 
-// benchDeep — three-level nesting.
+// benchDeep has three-level nesting.
 type benchL3 struct {
 	Val  int64  `json:"val"`
 	Tag  string `json:"tag"`
@@ -65,7 +65,7 @@ type benchL1 struct {
 	L2 benchL2 `json:"l2"`
 }
 
-// benchDeep5 — five-level nesting, stresses stack frame overhead.
+// benchDeep5 has five-level nesting; stresses stack frame overhead.
 type benchD5 struct {
 	V int64 `json:"v"`
 }
@@ -90,7 +90,7 @@ type benchD1 struct {
 	D2 benchD2 `json:"d2"`
 }
 
-// benchMultiNest — struct with multiple nested struct siblings.
+// benchMultiNest is a struct with multiple nested struct siblings.
 type benchMNInner struct {
 	A int64  `json:"a"`
 	B string `json:"b"`
@@ -104,7 +104,7 @@ type benchMultiNest struct {
 	OK bool         `json:"ok"`
 }
 
-// benchWide — 15 fields, all basic types.
+// benchWide has 15 fields, all basic types.
 type benchWide struct {
 	F1  string `json:"f1"`
 	F2  int64  `json:"f2"`
@@ -444,7 +444,7 @@ func BenchmarkMarshal_Omitempty_GoOnly(b *testing.B) {
 
 // Slice of struct benchmarks
 
-// benchSliceItem — small struct for slice benchmarks.
+// benchSliceItem is a small struct for slice benchmarks.
 type benchSliceItem struct {
 	ID    int    `json:"id"`
 	Name  string `json:"name"`

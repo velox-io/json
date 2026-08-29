@@ -11,9 +11,11 @@ import (
 
 	"github.com/velox-io/json/jerr"
 	"github.com/velox-io/json/typ"
+	"github.com/velox-io/json/value"
 )
 
 type UnsupportedTypeError = jerr.UnsupportedTypeError
+type UnsupportedShapeError = jerr.UnsupportedShapeError
 type UnsupportedValueError = jerr.UnsupportedValueError
 
 var smallInts [1000]string
@@ -428,6 +430,8 @@ func (es *encodeState) encodeAny(v any) error {
 		} else {
 			es.buf = append(es.buf, s...)
 		}
+	case value.Value:
+		return es.appendTapeValue(&val)
 	default:
 		return es.encodeAnyReflect(v)
 	}

@@ -126,7 +126,7 @@ The parser doesn't know what the next byte will be and must make decisions byte 
 
 The output structure is entirely determined by the Go type, known at compile time. This lets us precompile "type tree traversal" into compact bytecode and execute it with a simple, efficient VM. C's advantages here are tangible: better instruction dispatch, direct memory access, and SIMD-accelerated string encoding.
 
-Benchmark results show both paths performing well. On Linux AMD EPYC, unmarshal is 7–9× faster than `encoding/json`, marshal is 2.5–5.5× faster; numbers are higher on Apple M4 Pro. Allocation-wise, most scenarios need just 1 allocation versus 12+ for the standard library. Compared to other excellent JSON libraries in the community (sonic, go-json, easyjson, etc.), Velox shows an edge on most test datasets — detailed numbers are in the `docs/benchmarks/` directory.
+Benchmark results show both paths performing well. On Linux AMD EPYC, unmarshal is 7–9× faster than `encoding/json`, marshal is 2.5–5.5× faster; numbers are higher on Apple M4 Pro. Allocation-wise, most scenarios need just 1 allocation versus 12+ for the standard library. Compared to other excellent JSON libraries in the community (sonic, go-json, jsonv2), Velox shows an edge on most test datasets — detailed numbers are in the `docs/benchmarks/` directory.
 
 Velox is still evolving. The pure Go unmarshal path can naturally benefit from Go compiler and runtime improvements; the marshal VM architecture also has plenty of room to explore — more specialized instructions, more aggressive SIMD utilization.
 

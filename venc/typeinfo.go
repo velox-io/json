@@ -88,8 +88,14 @@ type EncFieldInfo struct {
 	Type *EncTypeInfo // field's type descriptor
 
 	TagFlags typ.TagFlag // omitempty, quoted, etc.
-	Offset   uintptr     // field offset in struct
+	Offset   uintptr     // field offset, relative to the base PtrPath establishes
 	JSONName string
+
+	// PtrPath is non-empty for a field promoted across an embedded pointer. Such
+	// a field cannot be emitted by the blueprint's offset arithmetic, so it is
+	// routed to the Go fallback, which walks the hops. A nil pointer at any hop
+	// omits the field, matching encoding/json.
+	PtrPath []typ.PtrHop
 
 	KeyBytes       []byte // compact `"name":`
 	KeyBytesIndent []byte // indented `"name": `
@@ -98,6 +104,12 @@ type EncFieldInfo struct {
 
 type EncStructInfo struct {
 	Fields []EncFieldInfo
+
+	// Rejects mirrors typ.StructTypeInfo.Rejects: shapes the typ layer could
+	// not represent. Encoding one would read promoted fields from offsets that
+	// do not address them, so both the blueprint compiler and bindEncodeFn
+	// refuse the type instead of emitting wrong output.
+	Rejects []string
 }
 
 type EncSliceInfo struct {

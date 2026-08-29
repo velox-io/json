@@ -66,17 +66,33 @@ linters:
     - linters:
       - errcheck
       text: type assertion
+    # `,embed` is a vjson extension; staticcheck only knows encoding/json options.
     - linters:
       - staticcheck
-      text: 'SA5008:.*(unknown JSON option "copy"|unknown `copy` tag option)'
+      text: 'SA5008:.*unknown `embed` tag option'
+    # The invalid `,string` shapes in this file are the subject under test.
+    - linters:
+      - staticcheck
+      path: decode/bind/string_tag_test\.go
+      text: 'SA5008:.*`string` tag option'
+    # The explicit embedded-field selector is the promotion path under test.
+    - linters:
+      - staticcheck
+      path: tests/embed_option_test\.go
+      text: 'QF1008'
+    # Fields in these files pin ABI/runtime-mirror layouts, not Go-level state.
     - linters:
       - unused
-      text: 'field _'
-      path: ndec/ndec\.go
+      text: 'field '
+      path: ^(gort/mapalloc|vbind/typetree|native/ndec/abi|ndec/ndec)\.go$
+    # Tag-gated stubs; their call sites compile only under -tags vbindstats.
+    - linters:
+      - unused
+      path: vbind/stats_off\.go
     paths:
     - third_party$
     - builtin$
-    - examples$
+    - examples/
     - local
 issues:
   max-issues-per-linter: 0
@@ -91,4 +107,4 @@ formatters:
     paths:
     - third_party$
     - builtin$
-    - examples$
+    - examples/

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate z_uscale_table.h - C implementation of the Unrounded Scaling algorithm
+Generate z_uscale_table.h: C implementation of the Unrounded Scaling algorithm
 from Russ Cox's paper: https://research.swtch.com/fp
 
 The pow10Tab entries are taken directly from the rsc.io/fpfmt Go package
@@ -139,14 +139,11 @@ def main():
     # --- Header preamble ---
     out.write(
         """/*
- * z_uscale_table.h - Unrounded Scaling float-to-string conversion table
+ * Unrounded Scaling float-to-string conversion table
  *
  * C implementation of the algorithm described in:
  *   "Floating-Point to Decimal, in One Multiply" by Russ Cox
  *   https://research.swtch.com/fp
- *
- * pow10Tab data from rsc.io/fpfmt (BSD-3-Clause, Copyright 2025 The Go Authors)
- *
  */
 
 #ifndef VJ_USCALE_TABLE_H

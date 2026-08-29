@@ -13,21 +13,23 @@ import (
 
 // BenchResult holds a single benchmark measurement.
 type BenchResult struct {
-	Name     string  // full benchmark name (e.g. "Benchmark_Marshal_Tiny_StdJSON-16")
-	Group    string  // dataset group (e.g. "Marshal_Tiny")
-	Library  string  // library name (e.g. "StdJSON", "Sonic", "Velox")
-	NsOp     float64 // nanoseconds per operation
-	BOp      float64 // bytes allocated per operation
-	AllocsOp float64 // allocations per operation
+	Name         string  // full benchmark name (e.g. "Benchmark_Marshal_Tiny_Sonic-16")
+	Group        string  // dataset group (e.g. "Marshal_Tiny")
+	Library      string  // library name (e.g. "Sonic", "GoJSON", "Velox")
+	NsOp         float64 // nanoseconds per operation
+	BOp          float64 // bytes allocated per operation
+	AllocsOp     float64 // allocations per operation
+	PayloadBytes float64 // input size in bytes, derived from MB/s × ns/op
 }
 
 // GroupResult holds the aggregated (median) result for a library within a group.
 type GroupResult struct {
-	Group    string
-	Library  string
-	NsOp     float64
-	BOp      float64
-	AllocsOp float64
+	Group        string
+	Library      string
+	NsOp         float64
+	BOp          float64
+	AllocsOp     float64
+	PayloadBytes float64
 }
 
 // Section represents a top-level benchmark category (e.g. "Marshal", "Parallel Unmarshal").
@@ -94,11 +96,12 @@ func formatActionName(action string) string {
 }
 
 // benchLineRe matches a standard Go benchmark output line.
-// The optional MB/s field can appear between ns/op and B/op.
+// The MB/s field (present when the benchmark calls b.SetBytes) is captured
+// so the input payload size can be reconstructed.
 var benchLineRe = regexp.MustCompile(
 	`^(Benchmark\S+)-\d+\s+\d+\s+` +
 		`([\d.]+)\s+ns/op` +
-		`(?:\s+[\d.]+\s+MB/s)?` +
+		`(?:\s+([\d.]+)\s+MB/s)?` +
 		`(?:\s+([\d.]+)\s+B/op)?` +
 		`(?:\s+(\d+)\s+allocs/op)?`,
 )
@@ -106,7 +109,7 @@ var benchLineRe = regexp.MustCompile(
 // metaLineRe matches goos/goarch/cpu lines.
 var metaLineRe = regexp.MustCompile(`^(goos|goarch|cpu|pkg):\s+(.+)`)
 
-// splitBenchName splits "Benchmark_Marshal_Tiny_StdJSON" into ("Marshal_Tiny", "StdJSON").
+// splitBenchName splits "Benchmark_Marshal_Tiny_Sonic" into ("Marshal_Tiny", "Sonic").
 // It tries known library suffixes first, then falls back to the last "_"-separated segment.
 func splitBenchName(name string) (group, library string) {
 	// Strip "Benchmark_" prefix
@@ -157,22 +160,28 @@ func ParseBenchOutput(r io.Reader) (*BenchData, error) {
 			continue
 		}
 
-		var bOp, allocsOp float64
+		var bOp, allocsOp, payload float64
 		if m[3] != "" {
-			bOp, _ = strconv.ParseFloat(m[3], 64)
+			mbps, _ := strconv.ParseFloat(m[3], 64)
+			// MB/s × ns/op = bytes × 1e6 × 1e-9 = bytes / 1e3
+			payload = mbps * nsOp / 1000
 		}
 		if m[4] != "" {
-			allocsOp, _ = strconv.ParseFloat(m[4], 64)
+			bOp, _ = strconv.ParseFloat(m[4], 64)
+		}
+		if m[5] != "" {
+			allocsOp, _ = strconv.ParseFloat(m[5], 64)
 		}
 
 		group, library := splitBenchName(fullName)
 		results = append(results, BenchResult{
-			Name:     fullName,
-			Group:    group,
-			Library:  library,
-			NsOp:     nsOp,
-			BOp:      bOp,
-			AllocsOp: allocsOp,
+			Name:         fullName,
+			Group:        group,
+			Library:      library,
+			NsOp:         nsOp,
+			BOp:          bOp,
+			AllocsOp:     allocsOp,
+			PayloadBytes: payload,
 		})
 	}
 
@@ -235,11 +244,12 @@ func aggregateResults(results []BenchResult, meta map[string]string) *BenchData 
 			aggResults[k.group] = make(map[string]*GroupResult)
 		}
 		aggResults[k.group][k.library] = &GroupResult{
-			Group:    k.group,
-			Library:  k.library,
-			NsOp:     medianFloat(ms, func(r BenchResult) float64 { return r.NsOp }),
-			BOp:      medianFloat(ms, func(r BenchResult) float64 { return r.BOp }),
-			AllocsOp: medianFloat(ms, func(r BenchResult) float64 { return r.AllocsOp }),
+			Group:        k.group,
+			Library:      k.library,
+			NsOp:         medianFloat(ms, func(r BenchResult) float64 { return r.NsOp }),
+			BOp:          medianFloat(ms, func(r BenchResult) float64 { return r.BOp }),
+			AllocsOp:     medianFloat(ms, func(r BenchResult) float64 { return r.AllocsOp }),
+			PayloadBytes: medianFloat(ms, func(r BenchResult) float64 { return r.PayloadBytes }),
 		}
 	}
 
@@ -327,8 +337,5 @@ func FormatBytes(b float64) string {
 
 // FormatAllocs formats allocation count.
 func FormatAllocs(a float64) string {
-	if a == math.Trunc(a) {
-		return fmt.Sprintf("%d", int64(a))
-	}
-	return fmt.Sprintf("%.1f", a)
+	return fmt.Sprintf("%d", int64(math.Round(a)))
 }

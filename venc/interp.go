@@ -8,6 +8,7 @@ import (
 
 	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/typ"
+	"github.com/velox-io/json/value"
 )
 
 func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
@@ -250,6 +251,22 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			}
 			pc += 8
 
+		case opValue:
+			es.interpWriteKey(hdr, first, indent)
+			first = false
+			v := (*value.Value)(unsafe.Add(base, uintptr(hdr.FieldOff)))
+			if err := es.appendTapeValue(v); err != nil {
+				return err
+			}
+			pc += 8
+
+		case opValueSpread:
+			v := (*value.Value)(unsafe.Add(base, uintptr(hdr.FieldOff)))
+			if err := es.appendTapeSpread(v, &first); err != nil {
+				return err
+			}
+			pc += 8
+
 		case opSkipIfZero:
 			ext := opExtAt(ops, pc)
 			fieldPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
@@ -268,7 +285,11 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			frame := &es.vmCtx.Stack[depth]
 			frame.RetBase = base
 			*(*int32)(unsafe.Pointer(&frame.Payload[0])) = pc + 16
-			*(*int32)(unsafe.Pointer(&frame.Payload[4])) = boolToInt32(first)
+			// Payload[4] is the preserve-first flag consumed by opRet; a call
+			// frame always wants the plain first=false on return.
+			*(*int32)(unsafe.Pointer(&frame.Payload[4])) = 0
+			*(*unsafe.Pointer)(unsafe.Pointer(&frame.Payload[8])) = nil
+			*(*int32)(unsafe.Pointer(&frame.Payload[16])) = 0
 			depth++
 
 			base = unsafe.Add(base, uintptr(hdr.FieldOff))
@@ -288,11 +309,55 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			base = frame.RetBase
 			frame.RetBase = nil
 			pc = *(*int32)(unsafe.Pointer(&frame.Payload[0]))
-			// Clear Payload[0..8] so the next push sees nil as the wb
+			// An unfold return resumes a different ops stream (the body-only
+			// Blueprint), restored from the frame payload.
+			if opsPtr := *(*unsafe.Pointer)(unsafe.Pointer(&frame.Payload[8])); opsPtr != nil {
+				ops = unsafe.Slice((*byte)(opsPtr), int(*(*int32)(unsafe.Pointer(&frame.Payload[16]))))
+				opsLen = int32(len(ops))
+			}
+			preserveFirst := *(*int32)(unsafe.Pointer(&frame.Payload[4])) != 0
+			// Clear Payload[0..16] so the next push sees nil as the wb
 			// "old value", preventing stale interp/iter pointers from
 			// reaching wbBuf via the unsafe.Pointer write barrier.
 			*(*uintptr)(unsafe.Pointer(&frame.Payload[0])) = 0
-			first = false
+			*(*uintptr)(unsafe.Pointer(&frame.Payload[8])) = 0
+			if !preserveFirst {
+				first = false
+			}
+
+		case opUnfold:
+			ifacePtr := unsafe.Add(base, uintptr(hdr.FieldOff))
+			typePtr := *(*unsafe.Pointer)(ifacePtr)
+			if typePtr == nil {
+				pc += 8
+				continue
+			}
+			if hdr.Flags&opFlagIfaceField != 0 {
+				// Non-empty interface: word 0 is an itab; the concrete type
+				// is its second word.
+				typePtr = *(*unsafe.Pointer)(unsafe.Add(typePtr, 8))
+			}
+			ti, err := unfoldStructTI(typeFromRTypePtr(typePtr))
+			if err != nil {
+				return err
+			}
+			bodyBP := compileBodyBlueprint(ti)
+			if depth >= VJ_MAX_STACK_DEPTH {
+				return fmt.Errorf("venc: nesting depth exceeds limit (%d)", depth)
+			}
+			frame := &es.vmCtx.Stack[depth]
+			frame.RetBase = base
+			*(*int32)(unsafe.Pointer(&frame.Payload[0])) = pc + 8
+			*(*int32)(unsafe.Pointer(&frame.Payload[4])) = 1 // preserve first on ret
+			*(*unsafe.Pointer)(unsafe.Pointer(&frame.Payload[8])) = unsafe.Pointer(&ops[0])
+			*(*int32)(unsafe.Pointer(&frame.Payload[16])) = int32(len(ops))
+			depth++
+
+			ops = bodyBP.Ops
+			pc = 0
+			base = *(*unsafe.Pointer)(unsafe.Add(ifacePtr, 8))
+			// first stays as-is: the body's first field continues the host's
+			// comma state, and an empty body leaves it untouched.
 
 		case opPtrDeref:
 			ext := opExtAt(ops, pc)
@@ -528,6 +593,17 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 				return fmt.Errorf("venc: interp: opFallback at PC=%d with no fallback info", pc)
 			}
 			fieldPtr := unsafe.Add(base, fb.Offset)
+			if len(fb.PtrPath) > 0 {
+				// Promoted across an embedded pointer: the field lives inside a
+				// pointee. A nil hop means it has no storage at all, so the key
+				// is omitted entirely rather than written as null.
+				fieldBase, ok := resolveFieldBase(base, fb.PtrPath)
+				if !ok {
+					pc += 8
+					continue
+				}
+				fieldPtr = unsafe.Add(fieldBase, fb.Offset)
+			}
 
 			if fb.TagFlags&EncTagFlagOmitEmpty != 0 && fb.IsZeroFn != nil {
 				if fb.IsZeroFn(fieldPtr) {
@@ -539,10 +615,23 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			if !first {
 				es.buf = append(es.buf, ',')
 			}
+			// Key protocol must match interpWriteKey: in indent mode every key
+			// (first or not) is preceded by newline+indent and followed by a
+			// space. The pool key and fb.KeyBytes are alternative sources;
+			// both take the same indent decoration.
+			if indent {
+				es.appendNewlineIndent()
+			}
 			if hdr.KeyLen > 0 {
 				es.buf = append(es.buf, keyPoolBytes(hdr.KeyOff, hdr.KeyLen)...)
+				if indent {
+					es.buf = append(es.buf, ' ')
+				}
 			} else if len(fb.KeyBytes) > 0 {
 				es.buf = append(es.buf, fb.KeyBytes...)
+				if indent {
+					es.buf = append(es.buf, ' ')
+				}
 			}
 
 			if fb.TagFlags&EncTagFlagQuoted != 0 {
@@ -627,11 +716,16 @@ func interpIsZero(ptr unsafe.Pointer, tag int32) bool {
 			// nil interface = zero value (eface/iface type ptr == NULL).
 			return *(*unsafe.Pointer)(ptr) == nil
 		case typ.KindNumber:
-			// json.Number is a string — zero means empty string.
+			// json.Number is a string; zero means empty string.
 			return *(*string)(ptr) == ""
 		case typ.KindRawMessage:
-			// json.RawMessage is []byte — zero means nil or len==0.
+			// json.RawMessage is []byte; zero means nil or len==0.
 			return (*gort.SliceHeader)(ptr).Len == 0
+		case typ.KindValue:
+			// value.Value is a struct (tape-backed). Like all structs,
+			// encoding/json omitempty never elides it; a zero Value marshals
+			// as null (Value.MarshalJSON returns "null" when Tape is nil).
+			return false
 		}
 		return false
 	}

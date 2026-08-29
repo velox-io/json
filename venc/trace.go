@@ -39,6 +39,7 @@ var fbReasonLabels = [...]string{
 	fbReasonByteArray:     "byte_array",
 	fbReasonIface:         "iface",
 	fbReasonOverflow:      "overflow",
+	fbReasonViaPtr:        "via_ptr",
 }
 
 func expandFallbackReasons(data []byte) []byte {
@@ -54,7 +55,7 @@ func expandFallbackReasons(data []byte) []byte {
 			numEnd++
 		}
 		if numEnd >= len(data) || data[numEnd] != ')' {
-			// Malformed — skip past this occurrence to avoid infinite loop.
+			// Malformed; skip past this occurrence to avoid infinite loop.
 			data = data[numEnd:]
 			continue
 		}
@@ -234,6 +235,9 @@ var opcodeName = map[uint16]string{
 	opMapStrIter:    "MAP_STR_ITER",
 	opMapStrIterEnd: "MAP_STR_ITER_END",
 	opTime:          "TIME",
+	opValue:         "VALUE",
+	opValueSpread:   "VALUE_SPREAD",
+	opUnfold:        "UNFOLD",
 }
 
 func dumpBlueprint(bp *Blueprint) {

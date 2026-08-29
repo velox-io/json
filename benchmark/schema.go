@@ -36,7 +36,7 @@ type Author struct {
 	Male bool   `json:"male"`
 }
 
-// --- pods: matches testdata/pods.json structure ---
+// --- pods: matches the corpus kubepods dataset structure ---
 
 type KubePodList struct {
 	APIVersion string       `json:"apiVersion"`
@@ -258,7 +258,7 @@ type PodIP struct {
 	IP string `json:"ip"`
 }
 
-// --- EscapeHeavy payload: matches testdata/escape_heavy.json structure ---
+// --- EscapeHeavy payload: matches the corpus escape_heavy dataset structure ---
 
 type NetAddr struct {
 	IP   string `json:"ip"`
@@ -326,7 +326,7 @@ type SpikyPayload struct {
 	Items []SpikyItem `json:"items"`
 }
 
-// --- LogRecord: matches testdata/log.json.zst structure (OTEL-style log lines) ---
+// --- LogRecord: matches the corpus log.json.zst stream (OTEL-style log lines) ---
 
 type LogResource struct {
 	Name   string `json:"name"`
@@ -342,3 +342,133 @@ type LogRecord struct {
 	SeverityNumber int               `json:"SeverityNumber"`
 	Attributes     map[string]string `json:"Attributes"`
 }
+
+// --- MediumPayload: matches the corpus medium dataset structure ---
+// FullContact-style person-enrichment record. Fields observed as null in the
+// sample use pointer types so JSON null survives a round-trip distinctly
+// from the zero value.
+
+type MediumPayload struct {
+	Person  *MediumPerson  `json:"person"`
+	Company *MediumCompany `json:"company"`
+}
+
+type MediumPerson struct {
+	ID         string           `json:"id"`
+	Name       MediumPersonName `json:"name"`
+	Email      string           `json:"email"`
+	Gender     string           `json:"gender"`
+	Location   string           `json:"location"`
+	Geo        MediumGeo        `json:"geo"`
+	Bio        string           `json:"bio"`
+	Site       string           `json:"site"`
+	Avatar     string           `json:"avatar"`
+	Employment MediumEmployment `json:"employment"`
+	Facebook   MediumFacebook   `json:"facebook"`
+	GitHub     MediumGitHub     `json:"github"`
+	Twitter    MediumTwitter    `json:"twitter"`
+	LinkedIn   MediumLinkedIn   `json:"linkedin"`
+	GooglePlus MediumGooglePlus `json:"googleplus"`
+	AngelList  MediumAngelList  `json:"angellist"`
+	Klout      MediumKlout      `json:"klout"`
+	Foursquare MediumFoursquare `json:"foursquare"`
+	AboutMe    MediumAboutMe    `json:"aboutme"`
+	Gravatar   MediumGravatar   `json:"gravatar"`
+	Fuzzy      bool             `json:"fuzzy"`
+}
+
+type MediumPersonName struct {
+	FullName   string `json:"fullName"`
+	GivenName  string `json:"givenName"`
+	FamilyName string `json:"familyName"`
+}
+
+type MediumGeo struct {
+	City    string  `json:"city"`
+	State   string  `json:"state"`
+	Country string  `json:"country"`
+	Lat     float64 `json:"lat"`
+	Lng     float64 `json:"lng"`
+}
+
+type MediumEmployment struct {
+	Name   string `json:"name"`
+	Title  string `json:"title"`
+	Domain string `json:"domain"`
+}
+
+type MediumFacebook struct {
+	Handle string `json:"handle"`
+}
+
+type MediumGitHub struct {
+	Handle    string `json:"handle"`
+	ID        int64  `json:"id"`
+	Avatar    string `json:"avatar"`
+	Company   string `json:"company"`
+	Blog      string `json:"blog"`
+	Followers int    `json:"followers"`
+	Following int    `json:"following"`
+}
+
+type MediumTwitter struct {
+	Handle    string  `json:"handle"`
+	ID        int64   `json:"id"`
+	Bio       *string `json:"bio"`
+	Followers int     `json:"followers"`
+	Following int     `json:"following"`
+	Statuses  int     `json:"statuses"`
+	Favorites int     `json:"favorites"`
+	Location  string  `json:"location"`
+	Site      string  `json:"site"`
+	Avatar    *string `json:"avatar"`
+}
+
+type MediumLinkedIn struct {
+	Handle string `json:"handle"`
+}
+
+type MediumGooglePlus struct {
+	Handle *string `json:"handle"`
+}
+
+type MediumAngelList struct {
+	Handle    string `json:"handle"`
+	ID        int64  `json:"id"`
+	Bio       string `json:"bio"`
+	Blog      string `json:"blog"`
+	Site      string `json:"site"`
+	Followers int    `json:"followers"`
+	Avatar    string `json:"avatar"`
+}
+
+type MediumKlout struct {
+	Handle *string  `json:"handle"`
+	Score  *float64 `json:"score"`
+}
+
+type MediumFoursquare struct {
+	Handle *string `json:"handle"`
+}
+
+type MediumAboutMe struct {
+	Handle string  `json:"handle"`
+	Bio    *string `json:"bio"`
+	Avatar *string `json:"avatar"`
+}
+
+type MediumGravatar struct {
+	Handle  string                 `json:"handle"`
+	URLs    []string               `json:"urls"`
+	Avatar  string                 `json:"avatar"`
+	Avatars []MediumGravatarAvatar `json:"avatars"`
+}
+
+type MediumGravatarAvatar struct {
+	URL  string `json:"url"`
+	Type string `json:"type"`
+}
+
+// MediumCompany is a placeholder: the sample payload has company=null, so the
+// concrete fields are not yet known. Add them when a non-null sample appears.
+type MediumCompany struct{}

@@ -1,81 +1,157 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
+	"log"
 
 	vjson "github.com/velox-io/json"
+	"github.com/velox-io/json/value"
+	"github.com/velox-io/json/vbind"
 )
 
-type Foo struct {
-	Name    string         `json:"name"`
-	Value   map[int]string `json:"value"`
-	Dynamic any            `json:"dynamic"`
+// inlHost: inline variant only. Data is virtual (,inline); case fields
+// (name/role, title/price, level) unfold into the host JSON object.
+type inlHost struct {
+	Type string `json:"type"`
+	Data any    `json:",embed" vjson:"variant=type"`
 }
 
-type Bar struct {
-	Key1 string `json:"key1"`
-	Key2 string `json:"key2"`
+type inlUser struct {
+	Name string `json:"name"`
+	Role string `json:"role"`
 }
 
-//nolint:unused
+type inlProduct struct {
+	Title string `json:"title"`
+	Price int    `json:"price"`
+}
+
+type inlAdmin struct {
+	Level int `json:"level"`
+}
+
+type inlineCaseWithNestedInlineField struct {
+	Label string  `json:"label"`
+	Inner inlHost `json:"inner"`
+}
+
+type hostWithNestedInlineCase struct {
+	Type string `json:"type"`
+	Data any    `json:",embed" vjson:"variant=type"`
+}
+
+func init() {
+	vbind.DefineVariantCases[hostWithNestedInlineCase, struct {
+		_ inlineCaseWithNestedInlineField `case:"nested"`
+	}]()
+	vbind.DefineVariantCases[inlHost, struct {
+		_ inlUser    `case:"user"`
+		_ inlProduct `case:"product"`
+		_ inlAdmin   `case:"admin"`
+	}]()
+}
+
 func demo1() {
-	var v = make(map[int]string)
-	v[0] = "djlajfdlajf"
-	foo := &Foo{
-		Name:  "abc",
-		Value: v,
+	src := `{"type":"nested","label":"x","inner":{"type":"user","name":"Alice","role":"admin"}}`
+	var u hostWithNestedInlineCase
+	if err := vjson.Unmarshal([]byte(src), &u); err != nil {
+		log.Fatalf("Unmarshal: %v", err)
 	}
-	data := `{"Name":"edf", "value": {"123": "v"}}`
-	err := vjson.Unmarshal([]byte(data), foo)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("%+v\n", foo)
-
-	var v2 = make(map[int]string)
-	v2[0] = "djlajfdlajf"
-	foo2 := &Foo{
-		Name:  "abc",
-		Value: v2,
-	}
-	err = json.Unmarshal([]byte(data), foo2)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("%+v\n", foo2)
 }
 
-func unmarshalDynamicField() {
-	data := `{"Name":"edf", "value": {"123": "v"}, "dynamic": {"key2": "key2 value from json"}}`
+type nestedValueOuter struct {
+	Inner coldCaseInlineValue `json:"inner"`
+}
 
-	newFoo := func() *Foo {
-		return &Foo{
-			Name:  "abc",
-			Value: map[int]string{0: "djlajfdlajf"},
-			Dynamic: Bar{
-				Key1: "pre defined key1 value",
-			},
+type coldCaseInlineValue struct {
+	Type string `json:"type"`
+	Data any    `json:",embed" vjson:"variant=type"`
+}
+
+func init() {
+	vbind.DefineVariantCases[coldCaseInlineValue, struct {
+		_ vjson.Value `case:"raw"`
+	}]()
+}
+
+func demo2() {
+	src := `{"inner":{"type":"raw","extra":{"a":1}}}`
+	val, _ := vjson.Parse([]byte(src))
+	var uv nestedValueOuter
+	if err := vjson.UnmarshalValue(val, &uv); err != nil {
+		log.Fatalf("UnmarshalValue: %v", err)
+	}
+	for _, h := range []nestedValueOuter{uv} {
+		vv, ok := h.Inner.Data.(value.Value)
+		if !ok {
+			log.Fatalf("Inner.Data = %T, want value.Value", h.Inner.Data)
+		}
+		typ := vv.Get("type")
+		if s, ok := typ.Str(); !ok || s != "raw" {
+			log.Fatalf("Inner.Data.type = %q, want %q", s, "raw")
+		}
+		extra := vv.Get("extra")
+		a := extra.Get("a")
+		if n, ok := a.Int(); !ok || n != 1 {
+			log.Fatalf("Inner.Data.extra.a = %d, want 1", n)
 		}
 	}
+}
 
-	// vjson
-	vj := newFoo()
-	if err := vjson.Unmarshal([]byte(data), vj); err != nil {
-		panic(err)
+type Item struct {
+	Type    string `json:"type"`
+	Data    any    `json:",embed" vjson:"variant=type"`
+	Num     value.Value
+	Remains vjson.Value `json:",embed"`
+}
+
+type User struct {
+	Name string      `json:"name"`
+	Role string      `json:"role"`
+	Ext  value.Value `json:"ext"`
+}
+
+type Product struct {
+	Title string `json:"title"`
+	Price int    `json:"price"`
+}
+
+func init() {
+	vbind.DefineVariantCases[Item, struct {
+		user    User
+		product Product
+	}]()
+}
+
+func demo3() {
+	jsonText := `[
+		{"a": 1111, "type": "user", "name":"Alice", "Num":1234567, "role":"admin", "x": "AAAA" },
+		{"title": "Widget","price":99,"type":"product", "b": 2222, "c": 333 } ]
+	`
+
+	fmt.Printf("src length:%d\n", len(jsonText))
+	// Dump the whole-document tape so the merged A/B jump structure is visible
+	// before the typed bind carves sub-Values out of it.
+	_, err := vjson.Parse([]byte(jsonText))
+	if err != nil {
+		log.Fatalf("parse failed: %+v", err)
 	}
 
-	// encoding/json
-	std := newFoo()
-	if err := json.Unmarshal([]byte(data), std); err != nil {
-		panic(err)
+	var results []Item
+	err = vjson.Unmarshal([]byte(jsonText), &results)
+	if err != nil {
+		log.Fatalf("demo3 fail:%+v", err)
 	}
 
-	fmt.Println("--- demo2: unmarshal into struct with pre-populated Dynamic (Bar) ---")
-	fmt.Printf("  vjson: Name=%q Value=%v Dynamic=%+v\n", vj.Name, vj.Value, vj.Dynamic)
-	fmt.Printf("  std:   Name=%q Value=%v Dynamic=%+v\n", std.Name, std.Value, std.Dynamic)
+	for _, item := range results {
+		fmt.Printf("%s\n", item.Remains.String())
+		fmt.Print(item.Remains.TapeDiagram())
+	}
+
 }
 
 func main() {
-	unmarshalDynamicField()
+	// demo1()
+	// demo2()
+	demo3()
 }

@@ -1,0 +1,63 @@
+name: PGO
+
+# Triggers: push to the pgo-inst branch, or manual workflow_dispatch.
+# Output: PGO sysoes + per-mode profdata for encvm (fast/full/compact) and
+# ndec (default) on every supported platform, one artifact per module x
+# platform. Downloaded artifacts are manually committed back to the main
+# branch (the workflow does not auto-modify the repo).
+#
+# Workflow files must sit directly in .github/workflows/ (GitHub Actions
+# does not scan subdirectories), so the shared per-platform steps live in
+# the composite action .github/actions/pgo-collect/.
+
+on:
+  push:
+    branches: [pgo-inst]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pgo-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.27'
+  LLVM_VERSION: '22.1.8'
+
+jobs:
+  pgo:
+    name: PGO ${{ matrix.module }} ${{ matrix.target_os }}/${{ matrix.target_arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        # Instrumentation profiles are built and consumed on the same host,
+        # so each platform maps to its native runner.
+        - { module: encvm, modes: 'fast full compact', target_os: windows, target_arch: amd64, runner: windows-latest }
+        - { module: ndec,  modes: default,             target_os: windows, target_arch: amd64, runner: windows-latest }
+        - { module: encvm, modes: 'fast full compact', target_os: linux,   target_arch: amd64, runner: ubuntu-latest }
+        - { module: ndec,  modes: default,             target_os: linux,   target_arch: amd64, runner: ubuntu-latest }
+        - { module: encvm, modes: 'fast full compact', target_os: linux,   target_arch: arm64, runner: ubuntu-24.04-arm }
+        - { module: ndec,  modes: default,             target_os: linux,   target_arch: arm64, runner: ubuntu-24.04-arm }
+        - { module: encvm, modes: 'fast full compact', target_os: darwin,  target_arch: arm64, runner: macos-latest }
+        - { module: ndec,  modes: default,             target_os: darwin,  target_arch: arm64, runner: macos-latest }
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Setup Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Collect PGO profiles and build sysoes
+      uses: ./.github/actions/pgo-collect
+      with:
+        module: ${{ matrix.module }}
+        modes: ${{ matrix.modes }}
+        target_os: ${{ matrix.target_os }}
+        target_arch: ${{ matrix.target_arch }}
+        llvm_version: ${{ env.LLVM_VERSION }}

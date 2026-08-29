@@ -156,7 +156,7 @@ type testStringer struct {
 
 func (s testStringer) String() string { return s.Val }
 
-// Plain non-empty interface — not Stringer, not marshaler.
+// Plain non-empty interface: neither Stringer nor marshaler.
 // encoding/json ignores Speak() and serializes struct fields normally.
 type Animal interface {
 	Speak() string

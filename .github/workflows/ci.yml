@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go-version: ['1.24', '1.25', 'stable']
+        go-version: ['1.24', '1.25', '1.26', 'stable']
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
@@ -84,7 +84,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go-version: ['1.24', '1.25', 'stable']
+        go-version: ['1.24', '1.25', '1.26', 'stable']
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
@@ -102,6 +102,100 @@ jobs:
 
     - name: Run unit tests
       run: .\scripts\run-test.ps1
+
+  # Two halves of the same GC-safety gate, split so their budgets do not add up
+  # on one runner. gc-soak buys attempts of the reproduction window; gc-stress
+  # buys a collector that checks itself.
+  gc-soak:
+    name: GC Soak (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    # Budget is mostly soak runtime; the rest is build plus drain.
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: Linux AMD64
+          runner: ubuntu-latest
+        - name: Linux ARM64
+          runner: ubuntu-24.04-arm
+        - name: macOS ARM64
+          runner: macos-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Setup Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: stable
+
+    - name: Download dependencies
+      run: go mod download
+
+    # Replays the concurrent unmarshal reproducer from
+    # .local/issues/crash-reproduce-1.sh under GOGC=1, cold parser, race, in
+    # oversubscribed parallel processes until the budget runs out. Reproduction
+    # probability scales with cores and wall clock, so a runner with 4 cores
+    # needs the full 12 minutes to approach one round on a 14-core dev box.
+    - name: Run GC soak
+      run: ./scripts/gc-stress.sh
+      env:
+        GC_STRESS_LEGS: soak
+        GC_STRESS_SOAK_MINUTES: 12
+
+    - name: Upload GC soak logs
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: gc-soak-logs-${{ matrix.runner }}
+        path: build/gc-stress/*.log
+        retention-days: 30
+
+  gc-stress:
+    name: GC Stress (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    # One pass over the suite legs is ~6min on a fast local box; CI cores are
+    # fewer and the race legs scale with them. The real hang guard is the
+    # per-process -test.timeout inside the script.
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: Linux AMD64
+          runner: ubuntu-latest
+        - name: Linux ARM64
+          runner: ubuntu-24.04-arm
+        - name: macOS ARM64
+          runner: macos-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Setup Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: stable
+
+    - name: Download dependencies
+      run: go mod download
+
+    # Runs the GC-sensitive suites under GOGC=1 + gccheckmark + clobberfree, so a
+    # pointer the binder publishes without keeping it scannable fails here rather
+    # than as a rare crash in a user's process.
+    - name: Run GC stress
+      run: ./scripts/gc-stress.sh
+      env:
+        GC_STRESS_LEGS: cold pooled encode
+
+    - name: Upload GC stress logs
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: gc-stress-logs-${{ matrix.runner }}
+        path: build/gc-stress/*.log
+        retention-days: 30
 
   lint:
     name: Lint
@@ -156,7 +250,7 @@ jobs:
 
     - name: Upload crash artifacts
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: fuzz-crash-${{ matrix.target }}
         path: testdata/fuzz/${{ matrix.target }}/
@@ -165,7 +259,7 @@ jobs:
   pr-check:
     name: PR Check
     runs-on: ubuntu-latest
-    needs: [test-linux-amd64, test-linux-arm64, test-macos, test-windows, lint, fuzz]
+    needs: [test-linux-amd64, test-linux-arm64, test-macos, test-windows, gc-soak, gc-stress, lint, fuzz]
     if: always() && github.event_name == 'pull_request'
     steps:
     - name: Check all jobs passed
@@ -174,9 +268,11 @@ jobs:
               "${{ needs.test-linux-arm64.result }}" != "success" || \
               "${{ needs.test-macos.result }}" != "success" || \
               "${{ needs.test-windows.result }}" != "success" || \
+              "${{ needs.gc-soak.result }}" != "success" || \
+              "${{ needs.gc-stress.result }}" != "success" || \
               "${{ needs.lint.result }}" != "success" || \
               "${{ needs.fuzz.result }}" != "success" ]]; then
-          echo "::error::PR checks failed. All tests, lint, and fuzz must pass before merging."
+          echo "::error::PR checks failed. All tests, GC stress, lint, and fuzz must pass before merging."
           exit 1
         fi
         echo "All PR checks passed!"

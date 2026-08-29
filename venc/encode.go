@@ -14,7 +14,7 @@ const (
 	// streamBufInitSize is the initial (and post-capBack) capacity of the
 	// streaming Encoder's working buffer. Larger than encBufInitSize so that
 	// interface-heavy payloads (e.g. Twitter's 17 interface{} fields) hit
-	// VJ_IFACE_BUF_FULL less often — each BUF_FULL on an interface field
+	// VJ_IFACE_BUF_FULL less often; each BUF_FULL on an interface field
 	// rolls back the speculative key write and forces a VM retry.
 	streamBufInitSize = 128 * 1024
 	// streamBufCapMax bounds the parked streaming buffer across encodes. The
@@ -66,7 +66,7 @@ type encodeState struct {
 
 	// stream holds the Encoder-only writer callback and parked buffer. It is
 	// untouched (all-zero) outside the streaming path, so buffer mode carries no
-	// dead state it must reset — only encodePtr writes it, and undoes it.
+	// dead state it must reset; only encodePtr writes it, and undoes it.
 	stream streamState
 
 	// bufSize carries WithBufSize across the MarshalOption boundary (whose
@@ -91,7 +91,7 @@ var encodeStatePool = sync.Pool{
 }
 
 // indentTplCache caches pre-built indent templates keyed by "prefix\x00indent".
-// Entries are immutable after insertion — safe for concurrent read without copying.
+// Entries are immutable after insertion, safe for concurrent read without copying.
 var indentTplCache sync.Map
 
 func init() {
@@ -142,7 +142,7 @@ func (es *encodeState) reclaim(bufFull bool, produced int) error {
 	}
 
 	// Stream: flush committed bytes to reopen the window, then grow only when
-	// flushing cannot help — the window is still full after flushing, or the VM
+	// flushing cannot help: the window is still full after flushing, or the VM
 	// stalled on a reservation larger than the whole (empty) window.
 	if len(es.buf) > 0 {
 		if err := es.stream.flush(es); err != nil {

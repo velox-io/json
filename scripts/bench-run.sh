@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Two-phase benchmark runner.
 #
-# Phase 1 — Collect: run benchmarks, save raw data (no extra dependencies).
-# Phase 2 — Analyze: run benchstat/benchviz on collected data (needs Go toolchain).
+# Phase 1, Collect: run benchmarks, save raw data (no extra dependencies).
+# Phase 2, Analyze: run benchstat/benchviz on collected data (needs Go toolchain).
 #
 # Automatically selects local/bin/vjson-benchmark_${os}_${arch}.
 # Each run creates a timestamped directory: local/benchdata/YYYYMMDD-HHMM/
@@ -117,8 +117,7 @@ do_analyze() {
     if [[ -f "$datadir/benchmark.txt" ]]; then
         local benchviz_dir="$PROJECT_ROOT/benchmark/benchviz"
         echo "--- benchviz ---" >&2
-        (cd "$PROJECT_ROOT/benchmark" && go run ./benchviz/ -title 'Benchmark Results' -format html < "$datadir/benchmark.txt" > "$datadir/benchmark.html")
-        (cd "$PROJECT_ROOT/benchmark" && go run ./benchviz/ -title 'Benchmark Results' -format svg  < "$datadir/benchmark.txt" > "$datadir/benchmark.svg")
+        (cd "$PROJECT_ROOT/benchmark" && go run ./benchviz/ -format svg < "$datadir/benchmark.txt" > "$datadir/benchmark.svg")
     fi
 
     # Ensure benchstat is available

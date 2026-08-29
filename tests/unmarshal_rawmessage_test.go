@@ -376,7 +376,7 @@ func TestRawMessage_DeeplyNested(t *testing.T) {
 // RawMessage with whitespace in original JSON
 
 func TestRawMessage_PreservesCompactForm(t *testing.T) {
-	// Note: skipValue does not preserve whitespace — it captures the
+	// Note: skipValue does not preserve whitespace; it captures the
 	// exact bytes from the source. If the source has whitespace, the
 	// RawMessage will contain whitespace too.
 	type Msg struct {

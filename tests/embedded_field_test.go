@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 
 	vjson "github.com/velox-io/json"
 )
@@ -72,10 +73,10 @@ type depth2Outer struct {
 // Rule 2: Same-depth same-name fields cancel each other.
 
 type cancelA struct {
-	X string // JSON key "X" — no tag, relies on field name
+	X string // JSON key "X" (no tag, relies on field name)
 }
 type cancelB struct {
-	X string // JSON key "X" — same key as cancelA.X to trigger cancellation
+	X string // JSON key "X", same key as cancelA.X to trigger cancellation
 }
 type cancelOuter struct {
 	cancelA
@@ -665,4 +666,287 @@ func TestEmbedded_RoundTripUnmarshal(t *testing.T) {
 		t.Errorf("round-trip diverges from stdlib\n  vjson:  %+v\n  stdlib: %+v",
 			decoded, stdDecoded)
 	}
+}
+
+// -----------------------------------------------------------------------------
+// Promotion across an embedded pointer
+//
+// Promotion is normally offset arithmetic: a promoted child is reached as
+// host+embedOffset+childOffset. An embedded pointer breaks that identity, since
+// the promoted bytes are not inside the host at all. Such a field carries a hop
+// list instead: read the pointer, allocate the pointee if it is nil, then apply
+// the remaining offset from there.
+//
+// encoding/json is the baseline for every case, including a nil pointee (its
+// keys are simply absent) and a partially built one (the existing pointee is
+// written through, never replaced).
+// -----------------------------------------------------------------------------
+
+type PtrEmbedInner struct {
+	Name string `json:"name"`
+	Age  int    `json:"age"`
+}
+
+type ptrEmbedHost struct {
+	*PtrEmbedInner
+	Greet string `json:"greet"`
+}
+
+// TestPtrEmbed_Decode pins that decoding allocates the pointee and lands the
+// promoted keys inside it without touching memory past the host. The canary is
+// load-bearing: before hop support this decode reported success and wrote the
+// promoted fields over whatever followed the host.
+func TestPtrEmbed_Decode(t *testing.T) {
+	var pad struct {
+		Host   ptrEmbedHost
+		Canary [4]uint64
+	}
+	for i := range pad.Canary {
+		pad.Canary[i] = 0xD15EA5E
+	}
+
+	raw := []byte(`{"name":"bob","age":3,"greet":"hi"}`)
+	if err := vjson.Unmarshal(raw, &pad.Host); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for i, c := range pad.Canary {
+		if c != 0xD15EA5E {
+			t.Errorf("canary[%d] = %#x; decode wrote past the host", i, c)
+		}
+	}
+
+	var std ptrEmbedHost
+	if err := json.Unmarshal(raw, &std); err != nil {
+		t.Fatalf("stdlib unmarshal: %v", err)
+	}
+	if pad.Host.PtrEmbedInner == nil {
+		t.Fatal("pointee not allocated; want it created to hold the promoted keys")
+	}
+	if *pad.Host.PtrEmbedInner != *std.PtrEmbedInner || pad.Host.Greet != std.Greet {
+		t.Errorf("decode diverges from stdlib\n  vjson:  %+v greet=%q\n  stdlib: %+v greet=%q",
+			*pad.Host.PtrEmbedInner, pad.Host.Greet, *std.PtrEmbedInner, std.Greet)
+	}
+}
+
+// TestPtrEmbed_Encode pins encode parity across the states the pointer can be
+// in. A nil pointee has no storage to read, so its keys are omitted rather than
+// written as null, matching encoding/json.
+func TestPtrEmbed_Encode(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		obj  ptrEmbedHost
+	}{
+		{"nil pointee", ptrEmbedHost{Greet: "hi"}},
+		{"filled", ptrEmbedHost{PtrEmbedInner: &PtrEmbedInner{Name: "bob", Age: 3}, Greet: "hi"}},
+		{"zero pointee", ptrEmbedHost{PtrEmbedInner: &PtrEmbedInner{}, Greet: "hi"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stdRaw, vjRaw := encodeWithBoth(t, tc.obj)
+			assertJSONEqual(t, "promoted across pointer", stdRaw, vjRaw)
+		})
+	}
+}
+
+// TestPtrEmbed_Nested covers the shape reached as a nested field. A nested
+// struct is inlined into its parent's blueprint, so its promoted fields resolve
+// through a different code path than the root case above.
+func TestPtrEmbed_Nested(t *testing.T) {
+	type outer struct {
+		Inner ptrEmbedHost `json:"inner"`
+		Tail  string       `json:"tail"`
+	}
+	obj := outer{Inner: ptrEmbedHost{PtrEmbedInner: &PtrEmbedInner{Name: "bob"}}, Tail: "t"}
+	stdRaw, vjRaw := encodeWithBoth(t, obj)
+	assertJSONEqual(t, "nested promoted across pointer", stdRaw, vjRaw)
+
+	raw := []byte(`{"inner":{"name":"bob","age":2},"tail":"t"}`)
+	var std, vj outer
+	if err := json.Unmarshal(raw, &std); err != nil {
+		t.Fatalf("stdlib unmarshal: %v", err)
+	}
+	if err := vjson.Unmarshal(raw, &vj); err != nil {
+		t.Fatalf("vjson unmarshal: %v", err)
+	}
+	if vj.Tail != std.Tail || *vj.Inner.PtrEmbedInner != *std.Inner.PtrEmbedInner {
+		t.Errorf("nested decode diverges from stdlib\n  vjson:  %+v\n  stdlib: %+v", vj, std)
+	}
+}
+
+// TestPtrEmbed_ReusesExistingPointee pins that a pointee the caller supplied is
+// written through rather than replaced, so fields the input does not mention keep
+// their values. encoding/json behaves the same way.
+func TestPtrEmbed_ReusesExistingPointee(t *testing.T) {
+	pre := &PtrEmbedInner{Name: "keep", Age: 7}
+	host := ptrEmbedHost{PtrEmbedInner: pre}
+	if err := vjson.Unmarshal([]byte(`{"age":9}`), &host); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if host.PtrEmbedInner != pre {
+		t.Error("pointee was replaced; want the existing allocation written through")
+	}
+	if host.Name != "keep" {
+		t.Errorf("Name = %q; want the untouched field preserved", host.Name)
+	}
+	if host.Age != 9 {
+		t.Errorf("Age = %d; want 9", host.Age)
+	}
+}
+
+// PtrEmbedExported is exported because stdlib cannot allocate an embedded
+// pointer to an unexported type, which would make the named-field comparison
+// below panic inside encoding/json rather than test anything.
+type PtrEmbedExported struct {
+	Name string `json:"name"`
+	Age  int    `json:"age"`
+}
+
+// TestPtrEmbed_NamedPointerStillWorks pins that giving the embedded pointer an
+// explicit JSON name keeps it an ordinary named field, addressed through the
+// pointer rather than promoted, and byte-identical to encoding/json.
+func TestPtrEmbed_NamedPointerStillWorks(t *testing.T) {
+	type named struct {
+		*PtrEmbedExported `json:"inner"`
+		Greet             string `json:"greet"`
+	}
+	obj := named{PtrEmbedExported: &PtrEmbedExported{Name: "bob", Age: 3}, Greet: "hi"}
+	stdRaw, vjRaw := encodeWithBoth(t, &obj)
+	assertJSONEqual(t, "named embedded pointer", stdRaw, vjRaw)
+
+	var std, vj named
+	if err := json.Unmarshal([]byte(vjRaw), &std); err != nil {
+		t.Fatalf("stdlib unmarshal: %v", err)
+	}
+	if err := vjson.Unmarshal([]byte(vjRaw), &vj); err != nil {
+		t.Fatalf("vjson unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(std, vj) {
+		t.Errorf("decode diverges from stdlib\n  vjson:  %+v\n  stdlib: %+v", vj, std)
+	}
+}
+
+// TestPtrEmbed_HookPointerStillWorks pins that an embedded pointer whose pointee
+// carries JSON hooks is unaffected. Such a type promotes no field at all (the
+// hook consumes the whole value and its own fields are unexported), so no hop
+// list is built for it.
+func TestPtrEmbed_HookPointerStillWorks(t *testing.T) {
+	type hostTime struct {
+		*time.Time
+		Name string `json:"name"`
+	}
+	tm := time.Unix(0, 0).UTC()
+	obj := hostTime{Time: &tm, Name: "bob"}
+	stdRaw, vjRaw := encodeWithBoth(t, &obj)
+	assertJSONEqual(t, "embedded *time.Time", stdRaw, vjRaw)
+}
+
+// PtrEmbedDeepLeaf is promoted two levels up, crossing a pointer on the way.
+type PtrEmbedDeepLeaf struct {
+	Deep string `json:"deep"`
+}
+
+// PtrEmbedDeepMid embeds the leaf by pointer, putting the hop one level below
+// the outer host rather than at its own level.
+type PtrEmbedDeepMid struct {
+	*PtrEmbedDeepLeaf
+}
+
+// ptrEmbedDeepHost reaches the pointer hop through a value embed, pinning that
+// hops accumulate along the whole promotion path.
+type ptrEmbedDeepHost struct {
+	PtrEmbedDeepMid
+	Top string `json:"top"`
+}
+
+// ptrEmbedSubtreeLeaf sits below a pointer hop, embedded by value.
+type ptrEmbedSubtreeLeaf struct {
+	Leaf string `json:"leaf"`
+}
+
+type PtrEmbedSubtreeMid struct {
+	ptrEmbedSubtreeLeaf
+}
+
+// ptrEmbedSubtreeHost crosses the pointer first and then keeps promoting by
+// value, so the offset following the hop spans more than one embed level.
+type ptrEmbedSubtreeHost struct {
+	*PtrEmbedSubtreeMid
+	Top string `json:"top"`
+}
+
+// PtrEmbedChainMid and ptrEmbedChainHost form a two-hop chain: reaching Deep
+// crosses two pointers, either of which may need allocating.
+type PtrEmbedChainMid struct {
+	*PtrEmbedDeepLeaf
+	Mid int `json:"mid"`
+}
+
+type ptrEmbedChainHost struct {
+	*PtrEmbedChainMid
+	Top string `json:"top"`
+}
+
+// TestPtrEmbed_Transitive pins that hops accumulate along the promotion path: a
+// hop below the host's own level, a value embed under a hop, and a chain of two
+// hops all resolve to the bytes encoding/json produces.
+func TestPtrEmbed_Transitive(t *testing.T) {
+	t.Run("hop one level down", func(t *testing.T) {
+		raw := []byte(`{"deep":"x","top":"t"}`)
+		var std, vj ptrEmbedDeepHost
+		if err := json.Unmarshal(raw, &std); err != nil {
+			t.Fatalf("stdlib unmarshal: %v", err)
+		}
+		if err := vjson.Unmarshal(raw, &vj); err != nil {
+			t.Fatalf("vjson unmarshal: %v", err)
+		}
+		if vj.Top != std.Top || vj.Deep != std.Deep {
+			t.Errorf("decode diverges: vjson deep=%q top=%q, stdlib deep=%q top=%q",
+				vj.Deep, vj.Top, std.Deep, std.Top)
+		}
+	})
+
+	t.Run("value embed under hop", func(t *testing.T) {
+		raw := []byte(`{"leaf":"x","top":"t"}`)
+		var std, vj ptrEmbedSubtreeHost
+		if err := json.Unmarshal(raw, &std); err != nil {
+			t.Fatalf("stdlib unmarshal: %v", err)
+		}
+		if err := vjson.Unmarshal(raw, &vj); err != nil {
+			t.Fatalf("vjson unmarshal: %v", err)
+		}
+		if vj.Top != std.Top || vj.Leaf != std.Leaf {
+			t.Errorf("decode diverges: vjson leaf=%q top=%q, stdlib leaf=%q top=%q",
+				vj.Leaf, vj.Top, std.Leaf, std.Top)
+		}
+	})
+
+	t.Run("two-hop chain", func(t *testing.T) {
+		raw := []byte(`{"deep":"d","mid":5,"top":"t"}`)
+		var std, vj ptrEmbedChainHost
+		if err := json.Unmarshal(raw, &std); err != nil {
+			t.Fatalf("stdlib unmarshal: %v", err)
+		}
+		if err := vjson.Unmarshal(raw, &vj); err != nil {
+			t.Fatalf("vjson unmarshal: %v", err)
+		}
+		if vj.Top != std.Top || vj.Mid != std.Mid || vj.Deep != std.Deep {
+			t.Errorf("decode diverges\n  vjson:  deep=%q mid=%d top=%q\n  stdlib: deep=%q mid=%d top=%q",
+				vj.Deep, vj.Mid, vj.Top, std.Deep, std.Mid, std.Top)
+		}
+
+		// Every partial-allocation state: a nil hop omits everything below it.
+		for _, tc := range []struct {
+			name string
+			obj  ptrEmbedChainHost
+		}{
+			{"both nil", ptrEmbedChainHost{Top: "t"}},
+			{"outer only", ptrEmbedChainHost{PtrEmbedChainMid: &PtrEmbedChainMid{Mid: 5}, Top: "t"}},
+			{"both set", ptrEmbedChainHost{
+				PtrEmbedChainMid: &PtrEmbedChainMid{PtrEmbedDeepLeaf: &PtrEmbedDeepLeaf{Deep: "d"}, Mid: 5},
+				Top:              "t",
+			}},
+		} {
+			stdRaw, vjRaw := encodeWithBoth(t, tc.obj)
+			assertJSONEqual(t, "chain encode "+tc.name, stdRaw, vjRaw)
+		}
+	})
 }

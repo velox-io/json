@@ -20,7 +20,7 @@ import (
 //
 // Go goroutines start with a small stack (~2-8KB) that grows on demand.
 // However, C code cannot trigger Go's stack growth mechanism. The real
-// danger is a fresh goroutine calling Marshal directly — the stack is at
+// danger is a fresh goroutine calling Marshal directly: the stack is at
 // its initial minimum size, and the full Go→C call chain (~912 bytes on
 // arm64) must fit within it.
 //
@@ -157,7 +157,7 @@ func verifyMarshalResult[T any](t *testing.T, v *T, got []byte, err error, label
 	}
 }
 
-// Test cases — all use depth=0 (direct Marshal on fresh goroutine stacks)
+// Test cases: all use depth=0 (direct Marshal on fresh goroutine stacks)
 
 // TestNativeEncoder_GoroutineStackStress_Simple tests the native encoder
 // with simple structs on fresh goroutine stacks.
@@ -280,7 +280,7 @@ func TestNativeEncoder_GoroutineStackStress_Complex(t *testing.T) {
 
 // TestNativeEncoder_GoroutineStackStress_Indent tests indent mode encoding
 // on fresh stacks. Indent mode uses VMExec (default) with additional local
-// state (indent_tpl, indent_depth, etc.) — the largest C stack frame (304B).
+// state (indent_tpl, indent_depth, etc.), the largest C stack frame (304B).
 func TestNativeEncoder_GoroutineStackStress_Indent(t *testing.T) {
 	v := stackTestNested{
 		Name:  "indent-test",
@@ -421,7 +421,7 @@ func TestNativeEncoder_GoroutineStackStress_TinyStack(t *testing.T) {
 			ready.Done()
 			start.Wait()
 
-			// Immediately marshal — no warm-up, no recursion.
+			// Immediately marshal: no warm-up, no recursion.
 			got, err := Marshal(v)
 			if err != nil {
 				errCh <- fmt.Sprintf("goroutine %d marshal error: %v", id, err)
@@ -500,7 +500,7 @@ func TestNativeEncoder_GoroutineStackStress_RapidSpawn(t *testing.T) {
 // TestNativeEncoder_GoroutineStackStress_LargeStrings tests encoding with
 // large string fields on fresh stacks. Large strings cause the VM to check
 // and grow the output buffer multiple times (VJ_ERR_BUF_FULL), meaning
-// multiple C→Go→C transitions per encode — each re-entry hits the
+// multiple C→Go→C transitions per encode; each re-entry hits the
 // goroutine stack.
 func TestNativeEncoder_GoroutineStackStress_LargeStrings(t *testing.T) {
 	// Build a string large enough to cause multiple buffer-full yields.

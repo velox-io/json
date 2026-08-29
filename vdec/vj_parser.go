@@ -242,7 +242,14 @@ func (sc *Parser) scanValue(src []byte, idx int, ti *DecTypeInfo, ptr unsafe.Poi
 						}
 					} else {
 						savedIdx := idx
-						fieldPtr := unsafe.Add(base, fi.Offset)
+						fieldBase := base
+						if len(fi.PtrPath) > 0 {
+							// Promoted across an embedded pointer: the offset is
+							// relative to the pointee its hops reach, allocated
+							// here if it does not exist yet.
+							fieldBase = resolveFieldHops(base, fi.PtrPath)
+						}
+						fieldPtr := unsafe.Add(fieldBase, fi.Offset)
 						fti := fi.TypeInfo
 
 						if fi.TagFlags&DecTagFlagSpecial != 0 {
@@ -710,7 +717,7 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *DecTypeInfo, ptr unsafe.Po
 			}
 			return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Type, end)
 		}
-		// typ.KindInt and typ.KindInt64 always fit — no overflow check needed.
+		// Values of KindInt/KindInt64 always fit int64.
 		if ti.Kind == typ.KindInt {
 			*(*int)(ptr) = int(v)
 		} else {
@@ -767,7 +774,7 @@ func (sc *Parser) scanNumber(src []byte, idx int, ti *DecTypeInfo, ptr unsafe.Po
 			}
 			return end, newUnmarshalTypeError("number "+string(src[idx:end]), ti.Type, end)
 		}
-		// typ.KindUint and typ.KindUint64 always fit — no overflow check needed.
+		// Values of KindUint/KindUint64 always fit uint64.
 		if ti.Kind == typ.KindUint {
 			*(*uint)(ptr) = uint(v)
 		} else {
@@ -872,7 +879,7 @@ func (sc *Parser) scanNumberAny(src []byte, idx int) (int, any, error) {
 
 func (sc *Parser) scanMap(src []byte, idx int, ti *DecTypeInfo, ptr unsafe.Pointer) (int, error) {
 	mDec := ti.ResolveMap()
-	// Fast path for map[string]V with known V — zero reflection
+	// Fast path for map[string]V with known V: zero reflection
 	if mDec.ScanMapFn != nil {
 		return mDec.ScanMapFn(sc, src, idx, ptr)
 	}
@@ -929,11 +936,11 @@ func (sc *Parser) scanMap(src []byte, idx int, ti *DecTypeInfo, ptr unsafe.Point
 				if err != nil {
 					return idx, err
 				}
-				valSlot := mapassign_faststr(mapRType, mp, key)
+				valSlot := mapAssignStrKey(mDec, mapRType, mp, key)
 				typedmemmove(mDec.ValRType, valSlot, valBuf)
 			} else {
 				// Scalar value (no pointers): safe to write directly into the slot.
-				valSlot := mapassign_faststr(mapRType, mp, key)
+				valSlot := mapAssignStrKey(mDec, mapRType, mp, key)
 				idx, err = sc.scanValue(src, idx, mDec.ValTI, valSlot)
 			}
 		} else {
@@ -1142,7 +1149,7 @@ func (sc *Parser) scanSlice(src []byte, idx int, sDec *DecSliceInfo, ptr unsafe.
 	sliceLen := 0
 
 	// Pointer-free elements (int, float64, etc.): allocate via make([]byte) which
-	// produces a noscan (GC-invisible) block — faster than runtime.mallocgc with
+	// produces a noscan (GC-invisible) block, faster than runtime.mallocgc with
 	// type metadata. Pointer-containing elements (string, *T, etc.): allocate via
 	// unsafe_NewArray with the correct rtype so GC can trace interior pointers.
 	var base unsafe.Pointer
@@ -1192,7 +1199,7 @@ func (sc *Parser) scanSlice(src []byte, idx int, sDec *DecSliceInfo, ptr unsafe.
 		}
 		if sliceAt(src, idx) == ']' {
 			// Update adaptive capacity hint using EMA.
-			// Relaxed store is fine — a stale read just means one sub-optimal alloc.
+			// Relaxed store is fine: a stale read just means one sub-optimal alloc.
 			old := int(sDec.CapHint.Load())
 			if old == 0 {
 				sDec.CapHint.Store(int32(sliceLen))
@@ -1464,7 +1471,7 @@ func skipStringEscape(src []byte, escIdx, n int) (int, error) {
 
 	next := sliceAt(src, escIdx+1)
 	if next == 'u' {
-		// \uXXXX — exactly 4 hex digits.
+		// \uXXXX: exactly 4 hex digits.
 		if escIdx+5 >= n {
 			return escIdx, errUnexpectedEOF
 		}

@@ -151,7 +151,7 @@ func equalJSON(a, b any) bool {
 	}
 }
 
-// TestNativeMapStrStr — table-driven tests for map[string]string via native VM
+// TestNativeMapStrStr covers map[string]string via the native VM (table-driven).
 
 func TestNativeMapStrStr(t *testing.T) {
 
@@ -213,7 +213,7 @@ func TestNativeMapStrStr(t *testing.T) {
 	}
 }
 
-// TestNativeMapStrStr_LargeMap — stress test with many entries
+// TestNativeMapStrStr_LargeMap is a stress test with many entries.
 
 func TestNativeMapStrStr_LargeMap(t *testing.T) {
 
@@ -248,7 +248,7 @@ func randomString(rng *rand.Rand, n int) string {
 	return string(b)
 }
 
-// TestNativeMapStrInt_LargeMap — stress test to trigger BUF_FULL resume
+// TestNativeMapStrInt_LargeMap is a stress test to trigger BUF_FULL resume.
 
 func TestNativeMapStrInt_LargeMap(t *testing.T) {
 
@@ -272,7 +272,7 @@ func TestNativeMapStrInt_LargeMap(t *testing.T) {
 	}
 }
 
-// TestNativeMapStrInt64_LargeMap — stress test to trigger BUF_FULL resume
+// TestNativeMapStrInt64_LargeMap is a stress test to trigger BUF_FULL resume.
 
 func TestNativeMapStrInt64_LargeMap(t *testing.T) {
 
@@ -296,7 +296,7 @@ func TestNativeMapStrInt64_LargeMap(t *testing.T) {
 	}
 }
 
-// TestNativeMapStrInt — map[string]int via C-native Swiss Map iteration
+// TestNativeMapStrInt covers map[string]int via C-native Swiss Map iteration.
 
 func TestNativeMapStrInt(t *testing.T) {
 
@@ -324,7 +324,7 @@ func TestNativeMapStrInt(t *testing.T) {
 	}
 }
 
-// TestNativeMapStrInt64 — map[string]int64 via C-native Swiss Map iteration
+// TestNativeMapStrInt64 covers map[string]int64 via C-native Swiss Map iteration.
 
 func TestNativeMapStrInt64(t *testing.T) {
 
@@ -362,7 +362,7 @@ func TestNativeMapStrInt64(t *testing.T) {
 	}
 }
 
-// TestNativeMapIntStr — map[int]string via native VM (non-string key)
+// TestNativeMapIntStr covers map[int]string via the native VM (non-string key).
 
 func TestNativeMapIntStr(t *testing.T) {
 
@@ -390,7 +390,7 @@ func TestNativeMapIntStr(t *testing.T) {
 	}
 }
 
-// TestNativeMap_Nested — nested maps via native VM
+// TestNativeMap_Nested covers nested maps via the native VM.
 
 func TestNativeMap_Nested(t *testing.T) {
 
@@ -462,7 +462,7 @@ func TestNativeMap_Nested(t *testing.T) {
 	})
 }
 
-// TestNativeMap_InStruct — maps as struct fields with various configurations
+// TestNativeMap_InStruct covers maps as struct fields with various configurations.
 
 func TestNativeMap_InStruct(t *testing.T) {
 
@@ -517,7 +517,7 @@ func TestNativeMap_InStruct(t *testing.T) {
 	}
 }
 
-// TestNativeMap_WithIndent — maps with indentation
+// TestNativeMap_WithIndent covers maps with indentation.
 
 func TestNativeMap_WithIndent(t *testing.T) {
 
@@ -569,7 +569,7 @@ func TestNativeMap_WithIndent(t *testing.T) {
 	})
 }
 
-// TestNativeMap_EscapeHTML — maps with HTML-escaping enabled
+// TestNativeMap_EscapeHTML covers maps with HTML-escaping enabled.
 
 func TestNativeMap_EscapeHTML(t *testing.T) {
 
@@ -623,7 +623,7 @@ func TestNativeMap_EscapeHTML(t *testing.T) {
 	})
 }
 
-// TestNativeMap_Roundtrip — verify marshal/unmarshal roundtrip
+// TestNativeMap_Roundtrip verifies marshal/unmarshal roundtrip.
 
 func TestNativeMap_Roundtrip(t *testing.T) {
 
@@ -694,7 +694,7 @@ func TestNativeMap_Roundtrip(t *testing.T) {
 	})
 }
 
-// TestNativeMap_Marshaler — map with custom MarshalJSON keys
+// TestNativeMap_Marshaler covers map with custom MarshalJSON keys.
 
 type TextKey struct {
 	Name string
@@ -729,7 +729,7 @@ func TestNativeMap_Marshaler(t *testing.T) {
 	}
 }
 
-// TestNativeMap_SliceOfMap — slice of maps
+// TestNativeMap_SliceOfMap covers slice of maps.
 
 func TestNativeMap_SliceOfMap(t *testing.T) {
 
@@ -758,7 +758,7 @@ func TestNativeMap_SliceOfMap(t *testing.T) {
 	}
 }
 
-// TestNativeMap_Random — stress test with random map contents
+// TestNativeMap_Random is a stress test with random map contents.
 
 func TestNativeMap_Random(t *testing.T) {
 

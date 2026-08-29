@@ -1,13 +1,11 @@
 libraries:
-- name: StdJSON
-  color: "#e67e22"
-- name: Sonic
-  color: "#3498db"
-- name: Segmentio
-  color: "#34495e"
+- name: JSONv2
+  color: "#79d4fd"
 - name: GoJSON
-  color: "#8e44ad"
-- name: EasyJSON
-  color: "#e74c8b"
+  color: "#6e92d9"
+- name: Sonic
+  color: "#4161a5"
 - name: Velox
-  color: "#27ae60"
+  color: "#e67e22"
+strip_dataset_prefix:
+- JSONBench

@@ -12,6 +12,19 @@ func bindEncodeFn(ti *EncTypeInfo) {
 		return
 	}
 
+	// value.Value walks its tape straight into es.buf. It implements
+	// json.Marshaler, so the hook branches below would otherwise route it
+	// through MarshalJSON and its intermediate allocation; a single-op
+	// blueprint runs the native tape walk, and the interpreter mirrors it.
+	// The Go appendTapeValue stays reachable as the yield fallback's
+	// handler (vm_exec intercepts opValue yields).
+	if ti.Kind == typ.KindValue {
+		ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
+			return es.exec(ti.getBlueprint(), ptr)
+		}
+		return
+	}
+
 	if ti.TypeFlags&EncTypeFlagHasMarshalFn != 0 {
 		hooks := ti.Hooks
 		ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
@@ -76,6 +89,18 @@ func bindEncodeFn(ti *EncTypeInfo) {
 		ti.Encode = fnEncodeNumber
 
 	case typ.KindStruct:
+		// A shape the typ layer refused to represent must not encode: its
+		// promoted field offsets do not address the values they name. This
+		// covers the root; emitStructBody rejects the same shape when it is
+		// reached as a nested field, since those are inlined into the caller's
+		// blueprint and never consult this function.
+		if si := ti.ResolveStruct(); si != nil && len(si.Rejects) > 0 {
+			msg, rtype := si.Rejects[0], ti.Type
+			ti.Encode = func(_ *encodeState, _ unsafe.Pointer) error {
+				return &UnsupportedShapeError{Type: rtype, Msg: msg}
+			}
+			return
+		}
 		ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
 			return es.exec(ti.getBlueprint(), ptr)
 		}

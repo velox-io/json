@@ -1,5 +1,5 @@
 /*
- * encvm entry point — build configuration and public symbol.
+ * encvm entry point.
  *
  * Defines VJ_VM_EXEC_FN_NAME (e.g. vj_vm_exec_full_neon), then
  * includes encvm.h which emits the VM body as that public symbol.

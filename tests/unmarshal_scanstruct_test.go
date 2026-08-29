@@ -37,7 +37,7 @@ func TestScanStructViaScanValueSpecial(t *testing.T) {
 		t.Errorf("Inner.Y = %q, want %q", out.Inner.Y, "world")
 	}
 
-	// Also test empty object — hits the '}' early-return in scanStruct.
+	// Also test empty object, which hits the '}' early-return in scanStruct.
 	input2 := []byte(`{"name":"test","inner":{}}`)
 	var out2 Outer
 	if err := vjson.Unmarshal(input2, &out2); err != nil {

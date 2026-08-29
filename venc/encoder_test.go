@@ -259,7 +259,7 @@ func TestEncoder_StdlibCompat_Map(t *testing.T) {
 }
 
 // TestEncoder_MapNonPointer exercises the Encode path for map values passed
-// directly (not as *map). Maps are "direct interface" types in Go — the eface
+// directly (not as *map). Maps are "direct interface" types in Go: the eface
 // data word IS the *hmap pointer, not a pointer to it. This previously caused
 // a "traceback did not unwind completely" crash because the encoding path
 // dereferenced one level too deep.

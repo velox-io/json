@@ -1560,7 +1560,7 @@ type customMarshalType struct {
 }
 
 func (c customMarshalType) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf(`"custom:%s"`, c.Value)), nil
+	return fmt.Appendf(nil, `"custom:%s"`, c.Value), nil
 }
 
 // customUnmarshalType implements json.Unmarshaler with a pointer receiver.

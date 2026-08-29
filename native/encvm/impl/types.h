@@ -1,9 +1,4 @@
-/*
- * Shared types, enums, and constants for the encoder VM
- *
- * Shared enums, structs, and constants used by all encoder modules.
- * Included first by encvm.h — no dependencies on other impl headers.
- */
+/* Shared types, enums, and constants for the encoder VM */
 
 #ifndef VJ_ENCVM_TYPES_H
 #define VJ_ENCVM_TYPES_H
@@ -33,25 +28,25 @@ typedef struct VjTraceBuf {
 } VjTraceBuf;
 
 /* ================================================================
- *  OpType — VM instruction opcodes (compact, contiguous numbering)
+ *  OpType: VM instruction opcodes (compact, contiguous numbering)
  *
  *  1-14:  Primitives (= ElemTypeKind, must not change)
  *  15-18: Non-primitive data ops
  *  19-31: Structural control-flow
  *  32:    Go-only fallback
  *
- *  Compact layout — no gaps; dispatch table = 47 entries.
+ *  Compact layout with no gaps; dispatch table = 47 entries.
  * ================================================================ */
 
 enum OpType {
   /* Primitives (1-14, = ElemTypeKind) */
   OP_BOOL    = 1,
-  OP_INT     = 2, /* Go int  — 8 bytes on 64-bit */
+  OP_INT     = 2, /* Go int: 8 bytes on 64-bit */
   OP_INT8    = 3,
   OP_INT16   = 4,
   OP_INT32   = 5,
   OP_INT64   = 6,
-  OP_UINT    = 7, /* Go uint — 8 bytes on 64-bit */
+  OP_UINT    = 7, /* Go uint: 8 bytes on 64-bit */
   OP_UINT8   = 8,
   OP_UINT16  = 9,
   OP_UINT32  = 10,
@@ -61,10 +56,10 @@ enum OpType {
   OP_STRING  = 14, /* Go string {ptr, len} */
 
   /* Non-primitive data ops (15-18) */
-  OP_INTERFACE   = 15, /* interface{} — noinline C encoder or yield */
-  OP_RAW_MESSAGE = 16, /* json.RawMessage — direct byte copy */
-  OP_NUMBER      = 17, /* json.Number — direct string copy */
-  OP_BYTE_SLICE  = 18, /* []byte — base64 encode, yield to Go */
+  OP_INTERFACE   = 15, /* interface{}: noinline C encoder or yield */
+  OP_RAW_MESSAGE = 16, /* json.RawMessage: direct byte copy */
+  OP_NUMBER      = 17, /* json.Number: direct string copy */
+  OP_BYTE_SLICE  = 18, /* []byte: base64 encode, yield to Go */
 
   /* Structural control-flow opcodes (19-31) -- */
   OP_SKIP_IF_ZERO = 19, /* conditional forward jump (omitempty) */
@@ -73,7 +68,7 @@ enum OpType {
   OP_PTR_END      = 22, /* pop ptr-deref frame, restore base */
   OP_SLICE_BEGIN  = 23, /* slice loop start */
   OP_SLICE_END    = 24, /* slice loop end / back-edge */
-  OP_MAP          = 25, /* map yield — Go handles entire map encoding */
+  OP_MAP          = 25, /* map yield; Go handles entire map encoding */
   /* 26: reserved (was OP_MAP_END) */
   OP_OBJ_OPEN    = 27, /* write key + '{', set first=1 (no frame) */
   OP_OBJ_CLOSE   = 28, /* write '}', set first=0 (no frame) */
@@ -85,38 +80,48 @@ enum OpType {
   OP_FALLBACK = 32, /* custom marshalers, ,string, complex structs */
 
   /* Keyed-field variants (33-35) */
-  OP_KSTRING = 33, /* struct field string — unconditional key write */
-  OP_KINT    = 34, /* struct field int — unconditional key write */
-  OP_KINT64  = 35, /* struct field int64 — unconditional key write */
+  OP_KSTRING = 33, /* struct field string: unconditional key write */
+  OP_KINT    = 34, /* struct field int: unconditional key write */
+  OP_KINT64  = 35, /* struct field int64: unconditional key write */
 
   /* C-native Swiss Map variants (36-37) */
   OP_MAP_STR_INT   = 36, /* C-native Swiss Map iteration for map[string]int */
   OP_MAP_STR_INT64 = 37, /* C-native Swiss Map iteration for map[string]int64 */
 
   /* C-native sequence iterators (38-41) */
-  OP_SEQ_FLOAT64 = 38, /* []float64 / [N]float64 — single-instruction loop */
-  OP_SEQ_INT     = 39, /* []int / [N]int — single-instruction loop */
-  OP_SEQ_INT64   = 40, /* []int64 / [N]int64 — single-instruction loop */
-  OP_SEQ_STRING  = 41, /* []string / [N]string — single-instruction loop */
+  OP_SEQ_FLOAT64 = 38, /* []float64 / [N]float64: single-instruction loop */
+  OP_SEQ_INT     = 39, /* []int / [N]int: single-instruction loop */
+  OP_SEQ_INT64   = 40, /* []int64 / [N]int64: single-instruction loop */
+  OP_SEQ_STRING  = 41, /* []string / [N]string: single-instruction loop */
 
   /* C-native Swiss Map key iterator (42-43) */
   OP_MAP_STR_ITER = 42,     /* Swiss Map string-key iteration: init, write first
                                key, dispatch body */
   OP_MAP_STR_ITER_END = 43, /* Swiss Map iteration back-edge: advance slot, write key or end */
 
-  /* Keyed-field quoted variants (44-45) — ,string tag */
-  OP_KQINT   = 44, /* struct field int with ,string — quoted: "123" */
-  OP_KQINT64 = 45, /* struct field int64 with ,string — quoted: "123" */
+  /* Keyed-field quoted variants (44-45), ,string tag */
+  OP_KQINT   = 44, /* struct field int with ,string, quoted as "123" */
+  OP_KQINT64 = 45, /* struct field int64 with ,string, quoted as "123" */
 
-  /* time.Time (46) — native RFC3339Nano formatting */
-  OP_TIME = 46, /* time.Time — native RFC3339Nano or yield */
+  /* time.Time (46): native RFC3339Nano formatting */
+  OP_TIME = 46, /* time.Time: native RFC3339Nano or yield */
+
+  /* value.Value (47): tape walk re-serialization */
+  OP_VALUE = 47, /* value.Value: walk doc.Tape straight into the buffer */
+
+  /* value.Value reserve-unknown spread (48) */
+  OP_VALUE_SPREAD = 48, /* value.Value with json:",embed": emit object members inline */
+
+  /* Inline variant unfold (49) */
+  OP_UNFOLD = 49, /* json:",embed" interface field: run the concrete struct's
+                   * body-only Blueprint inline (no braces, no key) */
 };
 
-/* Dispatch table size — compact: covers all opcodes 0..46 (47 entries). */
-#define OP_DISPATCH_COUNT 47
+/* Dispatch table size, compact: covers all opcodes 0..49 (50 entries). */
+#define OP_DISPATCH_COUNT 50
 
 /* ================================================================
- *  ZeroCheckTag — omitempty zero-value check tags
+ *  ZeroCheckTag: omitempty zero-value check tags
  *
  *  Encoded in OP_SKIP_IF_ZERO's operand_b field.
  *  Values = Go ElemTypeKind (1-based); Go casts directly.
@@ -168,7 +173,7 @@ typedef struct {
 _Static_assert(sizeof(GoSlice) == 24, "GoSlice must be 24 bytes (matching Go slice layout)");
 
 /* ================================================================
- *  vj_is_zero — omitempty zero-value check
+ *  vj_is_zero: omitempty zero-value check
  *
  *  Matches Go's semantics: float -0.0 == 0, nil pointer/interface,
  *  empty string/slice, nil map.  Struct/fallback always return false.
@@ -209,10 +214,10 @@ static inline int vj_is_zero(const uint8_t *ptr, uint16_t zct) {
   case ZCT_STRING:
     return ((const GoString *)ptr)->len == 0;
   case ZCT_NUMBER:
-    /* json.Number is a Go string — zero means empty string. */
+    /* json.Number is a Go string; zero means empty string. */
     return ((const GoString *)ptr)->len == 0;
   case ZCT_RAW_MESSAGE: {
-    /* json.RawMessage is a Go []byte — zero means nil or len==0. */
+    /* json.RawMessage is a Go []byte; zero means nil or len==0. */
     const GoSlice *s = (const GoSlice *)ptr;
     return s->data == NULL || s->len == 0;
   }
@@ -230,8 +235,7 @@ static inline int vj_is_zero(const uint8_t *ptr, uint16_t zct) {
   case ZCT_MAP: {
     /* Map is "empty" for omitempty when nil or used==0 (Swiss Map). */
     const void *mp = *(const void *const *)ptr;
-    if (mp == NULL)
-      return 1;
+    if (mp == NULL) return 1;
     /* GoSwissMap.used is at offset 0, uint64_t */
     return *(const uint64_t *)mp == 0;
   }
@@ -242,10 +246,10 @@ static inline int vj_is_zero(const uint8_t *ptr, uint16_t zct) {
   }
   case ZCT_FALLBACK:
     /* Go-only fallback: the memory layout is unknown to C.
-     * Never skip — the Go fallback handler checks omitempty. */
+     * Never skip; the Go fallback handler checks omitempty. */
     return 0;
   default:
-    return 0; /* unknown tag — never skip */
+    return 0; /* unknown tag: never skip */
   }
 }
 
@@ -262,7 +266,7 @@ enum VjExitCode {
 };
 
 /* ================================================================
- *  VMState — packed 64-bit VM state register
+ *  VMState: packed 64-bit VM state register
  *
  *  Packs depth, first flag, encoding config flags, exit code, and
  *  yield reason into a single uint64 register to reduce register
@@ -295,14 +299,14 @@ enum VjExitCode {
 #define VJ_ST_YIELD_SHIFT 40
 #define VJ_ST_YIELD_MASK  ((uint64_t)0x0000FF0000000000ULL) /* bits [40..47] */
 
-/* Access macros — extract fields from vmstate. */
+/* Access macros: extract fields from vmstate. */
 #define VJ_ST_GET_STACK_DEPTH(st) ((int32_t)((st) & VJ_ST_STACK_DEPTH_MASK))
 #define VJ_ST_GET_FIRST(st)       ((int)(((st) & VJ_ST_FIRST_BIT) != 0))
 #define VJ_ST_GET_FLAGS(st)       ((uint32_t)(((st) & VJ_ST_FLAGS_MASK) >> VJ_ST_FLAGS_SHIFT))
 #define VJ_ST_GET_EXIT(st)        ((int32_t)(((st) >> VJ_ST_EXIT_SHIFT) & 0xFF))
 #define VJ_ST_GET_YIELD(st)       ((uint32_t)(((st) >> VJ_ST_YIELD_SHIFT) & 0xFF))
 
-/* Mutate macros — modify fields within vmstate. */
+/* Mutate macros: modify fields within vmstate. */
 
 /* First-flag mutators */
 #define VJ_ST_SET_FIRST_1(st)  ((st) |= VJ_ST_FIRST_BIT)
@@ -310,12 +314,12 @@ enum VjExitCode {
 #define VJ_ST_SET_EXIT(st, v)  ((st) = ((st) & ~VJ_ST_EXIT_MASK) | (((uint64_t)(v) & 0xFF) << VJ_ST_EXIT_SHIFT))
 #define VJ_ST_SET_YIELD(st, v) ((st) = ((st) & ~VJ_ST_YIELD_MASK) | (((uint64_t)(v) & 0xFF) << VJ_ST_YIELD_SHIFT))
 
-/* Depth increment/decrement — stack_depth at bits [0..7]: +1/-1 directly.
+/* Depth increment/decrement: stack_depth at bits [0..7], so +1/-1 works directly.
  * Callers MUST check overflow BEFORE incrementing. */
 #define VJ_ST_INC_STACK_DEPTH(st) ((st) += 1)
 #define VJ_ST_DEC_STACK_DEPTH(st) ((st) -= 1)
 
-/* VJ_ST_BTR_FIRST — test-and-clear of the first flag (bit 16).
+/* VJ_ST_BTR_FIRST: test-and-clear of the first flag (bit 16).
  *
  * On x86-64 this emits a single `btrq $16, %reg` instruction which
  * copies bit 16 into CF and clears it in one shot, replacing the
@@ -344,11 +348,11 @@ enum VjExitCode {
 /* Encoding config flag masks (bits 0-5 of extracted flags).
  * Used by helper functions that receive a uint32_t 'flags' parameter
  * (e.g. vj_escape_string) and by VJ_ST_GET_FLAGS() extraction. */
-#define VJ_FLAGS_ESCAPE_HTML         (1 << 0)
-#define VJ_FLAGS_ESCAPE_LINE_TERMS   (1 << 1)
-#define VJ_FLAGS_ESCAPE_INVALID_UTF8 (1 << 2)
-#define VJ_FLAGS_FLOAT_EXP_AUTO      (1 << 3)
-#define VJ_FLAGS_SPLIT_GROUP         (1 << 4) /* GOEXPERIMENT=mapsplitgroup KKKKVVVV */
+#define VJ_FLAGS_ESCAPE_HTML          (1 << 0)
+#define VJ_FLAGS_ESCAPE_LINE_TERMS    (1 << 1)
+#define VJ_FLAGS_ESCAPE_INVALID_UTF8  (1 << 2)
+#define VJ_FLAGS_FLOAT_EXP_AUTO       (1 << 3)
+#define VJ_FLAGS_SPLIT_GROUP          (1 << 4) /* GOEXPERIMENT=mapsplitgroup KKKKVVVV */
 #define VJ_FLAGS_RAW_UTF8_REPLACEMENT (1 << 5) /* raw U+FFFD (ef bf bd) vs \ufffd escape */
 
 /* ================================================================
@@ -357,21 +361,24 @@ enum VjExitCode {
  *  Instructions are either 8 bytes (short) or 16 bytes (long).
  *  The ops stream is a packed byte array with 8-byte alignment.
  *
- *  Short (8 bytes): VjOpHdr only — primitives, OBJ_OPEN/CLOSE, etc.
- *  Long  (16 bytes): VjOpHdr + VjOpExt — SKIP_IF_ZERO, loops, etc.
+ *  Short (8 bytes): VjOpHdr only (primitives, OBJ_OPEN/CLOSE, etc.)
+ *  Long  (16 bytes): VjOpHdr + VjOpExt (SKIP_IF_ZERO, loops, etc.)
  *
  *  Each handler knows its own instruction width at compile time.
- *  No runtime size decoding is needed — op_type stores the raw opcode.
+ *  No runtime size decoding is needed; op_type stores the raw opcode.
  * ================================================================ */
 
 /* VjOpHdr: 8-byte instruction header (common to all instructions) */
 typedef struct VjOpHdr {
   uint16_t op_type;   /*  0: opcode (raw value, no flag bits) */
   uint8_t key_len;    /*  2: pre-encoded key length (max 255) */
-  uint8_t _pad0;      /*  3: alignment padding */
+  uint8_t flags;      /*  3: VJ_OP_FLAG_* bits */
   uint16_t field_off; /*  4: field offset in struct (max 65535) */
   uint16_t key_off;   /*  6: offset into global key pool */
 } VjOpHdr;
+
+/* VjOpHdr.flags bits */
+#define VJ_OP_FLAG_IFACE_FIELD 0x01 /* OP_UNFOLD: field is a non-empty interface */
 
 _Static_assert(sizeof(VjOpHdr) == 8, "VjOpHdr must be 8 bytes");
 _Static_assert(offsetof(VjOpHdr, key_len) == 2, "VjOpHdr.key_len offset");
@@ -399,12 +406,24 @@ _Static_assert(sizeof(VjOpExt) == 8, "VjOpExt must be 8 bytes");
  *  Stack depth limit:  VJ_MAX_STACK_DEPTH
  * */
 
-/* Frame type constants — documentation/debug only, not stored in vmstate. */
+/* Frame type constants, documentation/debug only, not stored in vmstate. */
 #define VJ_FRAME_CALL              0 /* subroutine call (recurse / ptr deref / iface switch-ops) */
 #define VJ_FRAME_ITER              1 /* linear iteration (slice / array) */
 #define VJ_FRAME_ITER_STR_STR_LEAF 2 /* map[string]string iteration; leaf = no sub-frame push */
+#define VJ_FRAME_TAPE_WALK         3 /* value.Value tape walk (OP_VALUE / OP_VALUE_SPREAD) */
 
-/* VjStackFrame — unified frame pushed by all stack-using ops.
+/* VjStackFrame.state bits shared between native and Go.
+ * Bit 0 is the iter-active resume flag used by the C-native loops; bit 1
+ * marks the frame as a tape-walk frame so OP_VALUE re-entry can tell its
+ * own mid-walk frame from an enclosing loop frame; bit 2 asks OP_RET to
+ * preserve the vmstate first latch, so an unfold body that wrote nothing
+ * (empty case struct, all fields omitted) leaves the host's comma state
+ * untouched. Bits 24-31 carry the debug trace depth. */
+#define VJ_FRAME_STATE_ACTIVE         0x01
+#define VJ_FRAME_STATE_WALK           0x02
+#define VJ_FRAME_STATE_PRESERVE_FIRST 0x04
+
+/* VjStackFrame: unified frame pushed by all stack-using ops.
  * 32 bytes.
  *
  * NOTE: 'first' lives in vmstate bit 16 (set on object entry,
@@ -442,6 +461,13 @@ ALIGN_TYPEDEF(8) typedef struct VjStackFrame {
       uint8_t entry_first; /* 26: 1 = no entry written yet (comma suppression) */
       uint8_t _pad;        /* 27: alignment padding */
     } map;                 /* 20 bytes */
+    struct {
+      const void *value;  /*  8: GoValue* being walked */
+      int32_t cursor;     /* 16: base-relative tape word index of the next word */
+      uint32_t kindstack; /* 20: two bits per open container (marker + kind);
+                           *     popcount = open-container depth within the walk */
+      uint32_t flags;     /* 24: VJ_WALK_* bits */
+    } walk;               /* 20 bytes */
   };
 #pragma pack(pop)
 
@@ -469,24 +495,31 @@ enum VjYieldReason {
 };
 
 /* ================================================================
- *  Interface Cache Entry — 24 bytes
+ *  Interface Cache Entry, 32 bytes
  * ================================================================ */
 
 typedef struct VjIfaceCacheEntry {
-  const void *type_ptr; /*  0: Go *abi.Type address */
-  const uint8_t *ops;   /*  8: Blueprint ops byte stream, or NULL */
-  uint8_t tag;          /* 16: opcode (= ElemTypeKind) for primitives; 0 = none */
-  uint8_t flags;        /* 17: VJ_IFACE_FLAG_* bits */
-  uint8_t _pad[6];      /* 18: alignment */
+  const void *type_ptr;    /*  0: Go *abi.Type address */
+  const uint8_t *ops;      /*  8: Blueprint ops byte stream, or NULL */
+  const uint8_t *body_ops; /* 16: body-only Blueprint ops (struct fields, no
+                            *     braces), for OP_UNFOLD; or NULL */
+  uint8_t tag;             /* 24: opcode (= ElemTypeKind) for primitives; 0 = none */
+  uint8_t flags;           /* 25: VJ_IFACE_FLAG_* bits */
+  uint8_t _pad[6];         /* 26: alignment */
 } VjIfaceCacheEntry;
 
 /* VjIfaceCacheEntry.flags bits */
 #define VJ_IFACE_FLAG_INDIRECT 0x01 /* base = &eface.data (not *eface.data) */
 
-_Static_assert(sizeof(VjIfaceCacheEntry) == 24, "VjIfaceCacheEntry must be 24 bytes");
+_Static_assert(sizeof(VjIfaceCacheEntry) == 32, "VjIfaceCacheEntry must be 32 bytes");
+_Static_assert(offsetof(VjIfaceCacheEntry, type_ptr) == 0, "VjIfaceCacheEntry.type_ptr offset");
+_Static_assert(offsetof(VjIfaceCacheEntry, ops) == 8, "VjIfaceCacheEntry.ops offset");
+_Static_assert(offsetof(VjIfaceCacheEntry, body_ops) == 16, "VjIfaceCacheEntry.body_ops offset");
+_Static_assert(offsetof(VjIfaceCacheEntry, tag) == 24, "VjIfaceCacheEntry.tag offset");
+_Static_assert(offsetof(VjIfaceCacheEntry, flags) == 25, "VjIfaceCacheEntry.flags offset");
 
 /* ================================================================
- *  ExecCtx — per-Marshal runtime context
+ *  ExecCtx: per-Marshal runtime context
  *
  *  Layout optimized for cache locality:
  *    Cache line 0 (0-63):  hot VM registers (buf, ops, pc, base, flags)
@@ -509,7 +542,7 @@ typedef struct VjExecCtx {
   /* Data source */
   const uint8_t *cur_base; /*  32: current struct/elem base */
 
-  /* Packed VM state — see VMState layout in types.h. */
+  /* Packed VM state; see VMState layout in types.h. */
   uint64_t vmstate; /*  40: packed state register */
 
   /* Interface cache (hot: checked on every interface{} field) */

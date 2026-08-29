@@ -1,0 +1,225 @@
+syntax = "proto3";
+
+package kubepods;
+
+option go_package = "dev.local/benchmark/pb/kubepods";
+
+message KubePodList {
+  string apiVersion = 1;
+  string kind = 2;
+  repeated KubePod items = 3;
+  ListMetadata metadata = 4;
+}
+
+message ListMetadata {
+  string resourceVersion = 1;
+}
+
+message KubePod {
+  string apiVersion = 1;
+  string kind = 2;
+  PodMeta metadata = 3;
+  PodSpec spec = 4;
+  PodStatus status = 5;
+}
+
+message PodMeta {
+  map<string, string> annotations = 1;
+  string creationTimestamp = 2;
+  string generateName = 3;
+  map<string, string> labels = 4;
+  string name = 5;
+  string namespace = 6;
+  repeated OwnerReference ownerReferences = 7;
+  string resourceVersion = 8;
+  string uid = 9;
+}
+
+message OwnerReference {
+  string apiVersion = 1;
+  bool blockOwnerDeletion = 2;
+  bool controller = 3;
+  string kind = 4;
+  string name = 5;
+  string uid = 6;
+}
+
+message PodSpec {
+  Affinity affinity = 1;
+  repeated Container containers = 2;
+  string dnsPolicy = 3;
+  bool enableServiceLinks = 4;
+  bool hostNetwork = 5;
+  string nodeName = 6;
+  string preemptionPolicy = 7;
+  int64 priority = 8;
+  string priorityClassName = 9;
+  string restartPolicy = 10;
+  string schedulerName = 11;
+  PodSecCtx securityContext = 12;
+  string serviceAccount = 13;
+  string serviceAccountName = 14;
+  int64 terminationGracePeriodSeconds = 15;
+  repeated Toleration tolerations = 16;
+  repeated Volume volumes = 17;
+}
+
+message Affinity {
+  NodeAffinity nodeAffinity = 1;
+}
+
+message NodeAffinity {
+  NodeSelector requiredDuringSchedulingIgnoredDuringExecution = 1;
+}
+
+message NodeSelector {
+  repeated NodeSelectorTerm nodeSelectorTerms = 1;
+}
+
+message NodeSelectorTerm {
+  repeated NodeSelectorRequirement matchFields = 1;
+}
+
+message NodeSelectorRequirement {
+  string key = 1;
+  string operator = 2;
+  repeated string values = 3;
+}
+
+message Container {
+  repeated string args = 1;
+  repeated string command = 2;
+  repeated EnvVar env = 3;
+  string image = 4;
+  string imagePullPolicy = 5;
+  string name = 6;
+  ContainerRes resources = 7;
+  ContainerSec securityContext = 8;
+  string terminationMessagePath = 9;
+  string terminationMessagePolicy = 10;
+  repeated VolumeMount volumeMounts = 11;
+}
+
+message ContainerRes {}
+
+message ContainerSec {
+  bool privileged = 1;
+}
+
+message EnvVar {
+  string name = 1;
+  EnvVarSource valueFrom = 2;
+}
+
+message EnvVarSource {
+  ObjectFieldSelector fieldRef = 1;
+}
+
+message ObjectFieldSelector {
+  string apiVersion = 1;
+  string fieldPath = 2;
+}
+
+message VolumeMount {
+  string mountPath = 1;
+  string name = 2;
+  bool readOnly = 3;
+}
+
+message PodSecCtx {}
+
+message Toleration {
+  string effect = 1;
+  string key = 2;
+  string operator = 3;
+}
+
+message Volume {
+  string name = 1;
+  HostPathVolSource hostPath = 2;
+  ConfigMapVolSource configMap = 3;
+  ProjectedVolSource projected = 4;
+}
+
+message HostPathVolSource {
+  string path = 1;
+  string type = 2;
+}
+
+message ConfigMapVolSource {
+  int32 defaultMode = 1;
+  string name = 2;
+  repeated KeyToPath items = 3;
+}
+
+message KeyToPath {
+  string key = 1;
+  string path = 2;
+}
+
+message ProjectedVolSource {
+  int32 defaultMode = 1;
+  repeated VolumeProjection sources = 2;
+}
+
+message VolumeProjection {
+  SATokenProjection serviceAccountToken = 1;
+  ConfigMapVolSource configMap = 2;
+  DownwardAPIProjection downwardAPI = 3;
+}
+
+message SATokenProjection {
+  int64 expirationSeconds = 1;
+  string path = 2;
+}
+
+message DownwardAPIProjection {
+  repeated DownwardAPIVolumeFile items = 1;
+}
+
+message DownwardAPIVolumeFile {
+  ObjectFieldSelector fieldRef = 1;
+  string path = 2;
+}
+
+message PodStatus {
+  repeated PodCondition conditions = 1;
+  repeated ContainerStatus containerStatuses = 2;
+  string hostIP = 3;
+  string phase = 4;
+  string podIP = 5;
+  repeated PodIP podIPs = 6;
+  string qosClass = 7;
+  string startTime = 8;
+}
+
+message PodCondition {
+  string lastProbeTime = 1;
+  string lastTransitionTime = 2;
+  string status = 3;
+  string type = 4;
+}
+
+message ContainerStatus {
+  string containerID = 1;
+  string image = 2;
+  string imageID = 3;
+  ContainerState lastState = 4;
+  string name = 5;
+  bool ready = 6;
+  int32 restartCount = 7;
+  bool started = 8;
+  ContainerState state = 9;
+}
+
+message ContainerState {
+  ContainerStateRunning running = 1;
+}
+
+message ContainerStateRunning {
+  string startedAt = 1;
+}
+
+message PodIP {
+  string ip = 1;
+}

@@ -625,6 +625,62 @@ func TestNumber_LargeIntegerPrecision(t *testing.T) {
 	}
 }
 
+// Fuzz regression: 5c6f49ab30068cf1
+//
+// Input was a 65-digit integer (10^64) followed by ".0". The uint64 mantissa
+// accumulator wraps to 0 at 10^64 (which is a multiple of 2^64), and the float
+// parser misclassified the zeroed accumulator as "~0" and returned 0.0 instead
+// of routing the overlong integer to the trunc/finalize path. stdlib returns
+// 1e+64. The fix guards the "d == 0" branch with nd <= 19.
+
+func TestNumber_FuzzCrash_5c6f49ab30068cf1(t *testing.T) {
+	input := []byte("10000000000000000000000000000000000000000000000000000000000000000.0")
+
+	var vjResult any
+	if err := vjson.Unmarshal(input, &vjResult); err != nil {
+		t.Fatalf("vjson error: %v", err)
+	}
+	var stdResult any
+	if err := json.Unmarshal(input, &stdResult); err != nil {
+		t.Fatalf("stdlib error: %v", err)
+	}
+	vjF, ok1 := vjResult.(float64)
+	stdF, ok2 := stdResult.(float64)
+	if !ok1 || !ok2 {
+		t.Fatalf("type mismatch: vjson=%T, stdlib=%T", vjResult, stdResult)
+	}
+	if vjF != stdF {
+		t.Errorf("mismatch for 10^64.0:\nvjson:  %.17g\nstdlib: %.17g", vjF, stdF)
+	}
+}
+
+// Fuzz regression: 2cef50110e034bfc
+//
+// Input is a JSON number with TWO decimal points and a long (38-digit)
+// fractional run between them: "100000000000000000000000.<38 zeros>.0".
+// encoding/json rejects it ("invalid character '.'"). Under vjson's lenient
+// (strict=0) float path a native SEGV was raised: the malformed token is
+// mis-handled in the native number/atof code and faults (unexpected fault
+// address, SIGSEGV). Correct behavior is to reject the malformed number, not
+// to crash. This is a native-side bug (in ndec number parsing), distinct from
+// the float-overflow bug in 5c6f49ab30068cf1. Once fixed, this test must pass
+// without faulting.
+
+func TestNumber_FuzzCrash_2cef50110e034bfc(t *testing.T) {
+	input := []byte("100000000000000000000000.00000000000000000000000000000000000000.0")
+
+	// Reference contract: encoding/json rejects the malformed number.
+	if err := json.Unmarshal(input, new(any)); err == nil {
+		t.Fatalf("stdlib unexpectedly accepted malformed number %q", input)
+	}
+
+	// vjson must reject it too, and must NOT fault (native SEGV).
+	var vjResult any
+	if err := vjson.Unmarshal(input, &vjResult); err == nil {
+		t.Errorf("vjson accepted malformed number (two decimal points) %q -> %v; it must reject it", input, vjResult)
+	}
+}
+
 // UseNumber: non-number values still correct
 
 func TestNumber_UseNumber_NonNumbers(t *testing.T) {

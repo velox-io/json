@@ -32,7 +32,11 @@ const (
 	KindRawMessage // json.RawMessage
 	KindNumber     // json.Number
 	KindArray
-	KindIface // non-empty interface (e.g. fmt.Stringer)
+	KindIface           // non-empty interface (e.g. fmt.Stringer)
+	KindUnmarshaler     // implements json.Unmarshaler
+	KindTextUnmarshaler // implements encoding.TextUnmarshaler (only when UnmarshalJSON absent)
+	KindValue           // value.Value: tape-backed navigation, native tape-emit descent in bind.h
+	KindStream          // stream.Stream[T]: slice storage + yield policy (empty-open / close / drain)
 )
 
 // MapVariant selects map fast paths.
@@ -61,8 +65,19 @@ const (
 type TagFlag uint8
 
 const (
-	TagFlagQuoted    TagFlag = 1 << iota // `,string` tag
-	TagFlagOmitEmpty                     // `omitempty` tag
+	TagFlagQuoted         TagFlag = 1 << iota // `,string` tag
+	TagFlagOmitEmpty                          // `omitempty` tag
+	TagFlagReserveUnknown                     // `json:",embed"` on a value.Value: reserve all unmatched keys
+
+	// TagFlagEmbed marks a field whose `json:",embed"` cannot be resolved by
+	// offset arithmetic here, because which fields it promotes is a run-time
+	// choice. Only an interface field reaches this: its promoted set is the
+	// variant case the discriminator selects, so vbind resolves it.
+	//
+	// A struct field's `json:",embed"` never carries this flag. That promotion
+	// is settled during collection: the field is replaced by its children and
+	// does not survive into StructTypeInfo.Fields at all.
+	TagFlagEmbed
 )
 
 // UniType is the shared type descriptor for encode and decode.
@@ -90,9 +105,37 @@ type InterfaceHooks struct {
 	TextUnmarshalFn func(ptr unsafe.Pointer, data []byte) error
 }
 
+// PtrHop is one embedded-pointer crossing on a promoted field's path.
+//
+// Promotion is normally offset arithmetic: a promoted field is addressed as
+// hostBase+Offset. An embedded pointer breaks that identity, because the bytes
+// holding the promoted field are not inside the host at all. A hop records how
+// to get across: read the pointer at SlotOffset relative to the current base,
+// allocate a PointeeType if it is nil, and continue from the pointee.
+//
+// Hops are ordered outermost first. StructField.Offset is then relative to the
+// last hop's pointee rather than to the host, so the two are read together.
+type PtrHop struct {
+	// SlotOffset locates the pointer word, relative to the base established by
+	// the previous hop (or the host base for the first hop).
+	SlotOffset uintptr
+
+	// PointeeType is what the pointer points at, needed to allocate a pointee
+	// that is nil when a promoted field is being written.
+	PointeeType *UniType
+}
+
 // StructTypeInfo describes a struct.
 type StructTypeInfo struct {
 	Fields []StructField
+
+	// Rejects records shapes collectStructFields refused to represent. Like
+	// VJSONTag.Unrecognized, the typ package cannot report them itself: field
+	// collection has no error channel and runs inside a cached type build. The
+	// consumers (vbind for decode, venc for encode) fail their build on a
+	// non-empty list, which is what keeps a refused shape from silently
+	// decoding into the wrong offsets.
+	Rejects []string
 }
 
 // StructField describes one exported JSON-visible struct field.
@@ -100,8 +143,43 @@ type StructField struct {
 	FieldType *UniType
 	TagFlags  TagFlag
 
+	// Offset locates the field relative to the base its PtrPath establishes:
+	// the host base when PtrPath is empty (the common case), otherwise the
+	// pointee of the last hop.
 	Offset   uintptr
 	JSONName string
+
+	// GoName is the Go field name as declared. It differs from JSONName whenever
+	// a tag renames the field, and it is the only name an embedded field has in
+	// JSON terms at all, since such a field occupies no member.
+	//
+	// Metadata keyed per field must key on this: JSONName is not a single
+	// namespace (it is the wire name for a named field but falls back to the Go
+	// name for an embedded one), so an API that took it would silently accept two
+	// different kinds of string.
+	GoName string
+
+	// PtrPath is non-empty only for a field promoted across one or more embedded
+	// pointers. Reaching such a field means walking the hops first, which the
+	// hot path cannot do with offset arithmetic alone, so consumers test for it
+	// explicitly.
+	PtrPath []PtrHop
+
+	// RawTag is the field's full reflect.StructTag. The typ package parses the
+	// json sub-tag into TagFlags/JSONName and the vjson sub-tag via
+	// ParseVJSONTag; consumers that need the vjson options themselves (vbind
+	// reads variant/kindof for polymorphic dispatch) re-parse them from here,
+	// and descriptor structs carry their own `case` tag read by vbind.
+	RawTag reflect.StructTag
+
+	// DeclaringType is the struct type that literally declares this field, which
+	// is the host type only when the field was not promoted. Metadata keyed by
+	// type (vbind's variant/kindof descriptor registries) must key on this: the
+	// tag lives on the declaring type, so its descriptor was registered there,
+	// and promotion must not move that association. Contrast the discriminator,
+	// which is resolved by JSON name in the flattened field set and therefore
+	// follows shadowing rather than declaration.
+	DeclaringType reflect.Type
 
 	KeyBytes       []byte                        // compact `"name":`
 	KeyBytesIndent []byte                        // indented `"name": `

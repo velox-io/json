@@ -883,7 +883,7 @@ func TestDecoder_WithExpectedSize_Overestimate(t *testing.T) {
 }
 
 func TestDecoder_WithExpectedSize_Underestimate(t *testing.T) {
-	// Expected size smaller than actual — should still work via retry.
+	// Expected size smaller than actual: should still work via retry.
 	input := `{"name":"alice","age":30,"city":"wonderland"}`
 	dec := NewDecoder(strings.NewReader(input), WithExpectedSize(10))
 

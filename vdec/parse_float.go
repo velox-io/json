@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"unsafe"
 
-	"github.com/velox-io/json/fpparse"
+	"github.com/velox-io/json/vdec/fpparse"
 )
 
 func parseEightDigits(src []byte, i int) uint32 {

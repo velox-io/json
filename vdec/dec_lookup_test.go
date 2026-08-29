@@ -282,7 +282,7 @@ func TestLookup_UnknownKeys(t *testing.T) {
 }
 
 func TestLookup_SimilarNames(t *testing.T) {
-	// Names that differ only in one character — stress-test hash quality
+	// Names that differ only in one character: stress-test hash quality
 	dec := makeTestStructInfo([]string{
 		"created_at", "created_by",
 		"updated_at", "updated_by",
@@ -300,7 +300,7 @@ func TestLookup_SimilarNames(t *testing.T) {
 }
 
 func TestLookup_DuplicateLengthNames(t *testing.T) {
-	// All same length — simpleMixer must differentiate by character content
+	// All same length: simpleMixer must differentiate by character content
 	dec := makeTestStructInfo([]string{"ab", "cd", "ef", "gh", "ij"})
 
 	for _, name := range []string{"ab", "cd", "ef", "gh", "ij"} {

@@ -1,8 +1,7 @@
 //go:build vjpgoinstr
 
 // TestMain for instrumentation-PGO collection: runs the benchmarks, then
-// flushes the LLVM instrumentation counters (see pgo_instr_flush.go for why
-// the explicit flush is required). Guarded by the `vjpgoinstr` build tag.
+// flushes the LLVM instrumentation counters.
 package benchmark
 
 import (

@@ -9,10 +9,10 @@ import (
 // iteration with VM-dispatched value body vs Go-driven opMap.
 //
 // Scenarios cover:
-//  1. map[string]struct — the primary use case for MAP_STR_ITER
-//  2. map[string][]string — nested slice values
-//  3. map[string]struct with many entries — large map iteration
-//  4. Struct with mixed fields including map — realistic struct
+//  1. map[string]struct, the primary use case for MAP_STR_ITER
+//  2. map[string][]string, nested slice values
+//  3. map[string]struct with many entries, large map iteration
+//  4. Struct with mixed fields including map, realistic struct
 
 // Scenario 1: map[string]struct{...} (small, 3 entries)
 

@@ -7,7 +7,7 @@ AlignTrailingComments:
   Kind: Always
   OverEmptyLines: 0
 AllowShortFunctionsOnASingleLine: Inline
-AllowShortIfStatementsOnASingleLine: Never
+AllowShortIfStatementsOnASingleLine: Always
 AllowShortBlocksOnASingleLine: Never
 BreakBeforeBraces: Attach
 SortIncludes: false

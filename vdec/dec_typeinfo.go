@@ -56,6 +56,11 @@ type DecFieldInfo struct {
 	Offset   uintptr
 	JSONName string
 	TypeInfo *DecTypeInfo
+
+	// PtrPath is non-empty for a field promoted across an embedded pointer, whose
+	// Offset is then relative to the pointee its hops reach rather than to the
+	// struct base. Walking it allocates any pointee that is still nil.
+	PtrPath []typ.PtrHop
 }
 
 type DecStructInfo struct {
@@ -63,6 +68,11 @@ type DecStructInfo struct {
 
 	Lookup       fieldLookup
 	HasMixedCase bool
+
+	// Rejects mirrors typ.StructTypeInfo.Rejects: a shape whose promoted field
+	// offsets do not address the fields they name. Binding into one would write
+	// through unrelated memory, so scanStruct refuses it before the first store.
+	Rejects []string
 }
 
 func (si *DecStructInfo) LookupFieldBytes(key []byte) *DecFieldInfo {
@@ -118,6 +128,10 @@ type DecMapInfo struct {
 	ValRType    unsafe.Pointer
 	IsStringKey bool
 	ValHasPtr   bool
+	// ValIndirect means Go stores this element behind a pointer (its type is
+	// larger than gort.MapMaxElemBytes), so assignment must go through the
+	// generic mapassign; mapassign_faststr would hand back the pointer slot.
+	ValIndirect bool
 	SlotSize    uintptr
 
 	ScanMapFn func(sc *Parser, src []byte, idx int, ptr unsafe.Pointer) (int, error)

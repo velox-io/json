@@ -2,13 +2,12 @@ package benchmark
 
 import (
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"sync"
 	"testing"
 
-	"dev.local/benchmark/easyjson"
 	"dev.local/benchmark/twitter"
 	"dev.local/benchmark/twitter_typed"
-
 	"github.com/bytedance/sonic"
 	gojson "github.com/goccy/go-json"
 	vjson "github.com/velox-io/json"
@@ -93,16 +92,6 @@ func marshalSize(v any) int64 {
 // Tiny: flat struct, 5 basic-type fields
 // =============================================================================
 
-func Benchmark_Marshal_Tiny_StdJSON(b *testing.B) {
-	b.SetBytes(marshalSize(loadTinyValue()))
-	b.ReportAllocs()
-	for b.Loop() {
-		if _, err := json.Marshal(loadTinyValue()); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 func Benchmark_Marshal_Tiny_Sonic(b *testing.B) {
 	b.SetBytes(marshalSize(loadTinyValue()))
 	b.ReportAllocs()
@@ -122,17 +111,15 @@ func Benchmark_Marshal_Tiny_GoJSON(b *testing.B) {
 		}
 	}
 }
-
-func Benchmark_Marshal_Tiny_EasyJSON(b *testing.B) {
-	b.SetBytes(int64(len(LoadTinyCompactJSON())))
+func Benchmark_Marshal_Tiny_JSONv2(b *testing.B) {
+	b.SetBytes(marshalSize(loadTinyValue()))
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := easyjson.MarshalTiny(LoadTinyCompactJSON()); err != nil {
+		if _, err := jsonv2.Marshal(loadTinyValue()); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
-
 func Benchmark_Marshal_Tiny_Velox(b *testing.B) {
 	b.SetBytes(marshalSize(loadTinyValue()))
 	b.ReportAllocs()
@@ -146,16 +133,6 @@ func Benchmark_Marshal_Tiny_Velox(b *testing.B) {
 // =============================================================================
 // Small: nested struct with slices (Sonic Book/Author)
 // =============================================================================
-
-func Benchmark_Marshal_Small_StdJSON(b *testing.B) {
-	b.SetBytes(marshalSize(loadSmallValue()))
-	b.ReportAllocs()
-	for b.Loop() {
-		if _, err := json.Marshal(loadSmallValue()); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
 
 func Benchmark_Marshal_Small_Sonic(b *testing.B) {
 	b.SetBytes(marshalSize(loadSmallValue()))
@@ -176,17 +153,15 @@ func Benchmark_Marshal_Small_GoJSON(b *testing.B) {
 		}
 	}
 }
-
-func Benchmark_Marshal_Small_EasyJSON(b *testing.B) {
-	b.SetBytes(int64(len(LoadSmallCompactJSON())))
+func Benchmark_Marshal_Small_JSONv2(b *testing.B) {
+	b.SetBytes(marshalSize(loadSmallValue()))
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := easyjson.MarshalSmall(LoadSmallCompactJSON()); err != nil {
+		if _, err := jsonv2.Marshal(loadSmallValue()); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
-
 func Benchmark_Marshal_Small_Velox(b *testing.B) {
 	b.SetBytes(marshalSize(loadSmallValue()))
 	b.ReportAllocs()
@@ -197,19 +172,68 @@ func Benchmark_Marshal_Small_Velox(b *testing.B) {
 	}
 }
 
+var (
+	mediumValueOnce sync.Once
+	mediumValue     MediumPayload
+)
+
+func loadMediumValue() *MediumPayload {
+	mediumValueOnce.Do(func() {
+		if err := json.Unmarshal(LoadMediumCompactJSON(), &mediumValue); err != nil {
+			panic("load medium: " + err.Error())
+		}
+	})
+	return &mediumValue
+}
+
 // =============================================================================
-// EscapeHeavy: real-world ~4KB JSON with ~40% escape density
+// Medium: 2.3 KB FullContact-style person-enrichment record. Same
+// fixture as b1_unmarshal_test.go; struct defined in benchmark/schema.go.
 // =============================================================================
 
-func Benchmark_Marshal_EscapeHeavy_StdJSON(b *testing.B) {
-	b.SetBytes(marshalSize(loadEscapeHeavyValue()))
+func Benchmark_Marshal_Medium_Sonic(b *testing.B) {
+	b.SetBytes(marshalSize(loadMediumValue()))
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := json.Marshal(loadEscapeHeavyValue()); err != nil {
+		if _, err := sonic.Marshal(loadMediumValue()); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
+
+func Benchmark_Marshal_Medium_GoJSON(b *testing.B) {
+	b.SetBytes(marshalSize(loadMediumValue()))
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := gojson.Marshal(loadMediumValue()); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Marshal_Medium_JSONv2(b *testing.B) {
+	b.SetBytes(marshalSize(loadMediumValue()))
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := jsonv2.Marshal(loadMediumValue()); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Marshal_Medium_Velox(b *testing.B) {
+	b.SetBytes(marshalSize(loadMediumValue()))
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := vjson.Marshal(loadMediumValue()); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// =============================================================================
+// EscapeHeavy: real-world ~4KB JSON with ~40% escape density
+// =============================================================================
 
 func Benchmark_Marshal_EscapeHeavy_Sonic(b *testing.B) {
 	b.SetBytes(marshalSize(loadEscapeHeavyValue()))
@@ -230,17 +254,15 @@ func Benchmark_Marshal_EscapeHeavy_GoJSON(b *testing.B) {
 		}
 	}
 }
-
-func Benchmark_Marshal_EscapeHeavy_EasyJSON(b *testing.B) {
-	b.SetBytes(int64(len(LoadEscapeHeavyCompactJSON())))
+func Benchmark_Marshal_EscapeHeavy_JSONv2(b *testing.B) {
+	b.SetBytes(marshalSize(loadEscapeHeavyValue()))
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := easyjson.MarshalEscapeHeavy(LoadEscapeHeavyCompactJSON()); err != nil {
+		if _, err := jsonv2.Marshal(loadEscapeHeavyValue()); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
-
 func Benchmark_Marshal_EscapeHeavy_Velox(b *testing.B) {
 	b.SetBytes(marshalSize(loadEscapeHeavyValue()))
 	b.ReportAllocs()
@@ -254,16 +276,6 @@ func Benchmark_Marshal_EscapeHeavy_Velox(b *testing.B) {
 // =============================================================================
 // KubePods: Kubernetes Pod List (~4.6KB, deeply nested, 3 pods)
 // =============================================================================
-
-func Benchmark_Marshal_KubePods_StdJSON(b *testing.B) {
-	b.SetBytes(marshalSize(loadPodsValue()))
-	b.ReportAllocs()
-	for b.Loop() {
-		if _, err := json.Marshal(loadPodsValue()); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
 
 func Benchmark_Marshal_KubePods_Sonic(b *testing.B) {
 	b.SetBytes(marshalSize(loadPodsValue()))
@@ -284,17 +296,15 @@ func Benchmark_Marshal_KubePods_GoJSON(b *testing.B) {
 		}
 	}
 }
-
-func Benchmark_Marshal_KubePods_EasyJSON(b *testing.B) {
-	b.SetBytes(int64(len(LoadPodsCompactJSON())))
+func Benchmark_Marshal_KubePods_JSONv2(b *testing.B) {
+	b.SetBytes(marshalSize(loadPodsValue()))
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := easyjson.MarshalKubePods(LoadPodsCompactJSON()); err != nil {
+		if _, err := jsonv2.Marshal(loadPodsValue()); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
-
 func Benchmark_Marshal_KubePods_Velox(b *testing.B) {
 	b.SetBytes(marshalSize(loadPodsValue()))
 	b.ReportAllocs()
@@ -308,16 +318,6 @@ func Benchmark_Marshal_KubePods_Velox(b *testing.B) {
 // =============================================================================
 // Twitter: Twitter search API response (~617KB, deeply nested, many fields)
 // =============================================================================
-
-func Benchmark_Marshal_Twitter_StdJSON(b *testing.B) {
-	b.SetBytes(marshalSize(loadTwitterValue()))
-	b.ReportAllocs()
-	for b.Loop() {
-		if _, err := json.Marshal(loadTwitterValue()); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
 
 func Benchmark_Marshal_Twitter_Sonic(b *testing.B) {
 	b.SetBytes(marshalSize(loadTwitterValue()))
@@ -338,17 +338,15 @@ func Benchmark_Marshal_Twitter_GoJSON(b *testing.B) {
 		}
 	}
 }
-
-func Benchmark_Marshal_Twitter_EasyJSON(b *testing.B) {
-	b.SetBytes(int64(len(LoadTwitterCompactJSON())))
+func Benchmark_Marshal_Twitter_JSONv2(b *testing.B) {
+	b.SetBytes(marshalSize(loadTwitterValue()))
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := easyjson.MarshalTwitter(LoadTwitterCompactJSON()); err != nil {
+		if _, err := jsonv2.Marshal(loadTwitterValue()); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
-
 func Benchmark_Marshal_Twitter_Velox(b *testing.B) {
 	b.SetBytes(marshalSize(loadTwitterValue()))
 	b.ReportAllocs()
@@ -361,7 +359,7 @@ func Benchmark_Marshal_Twitter_Velox(b *testing.B) {
 
 // =============================================================================
 // TwitterTyped: same data, all interface{} replaced with concrete types.
-// Zero yield benchmark — C VM runs the entire struct without yielding.
+// Zero-yield benchmark: the C VM runs the entire struct without yielding.
 // =============================================================================
 
 var (
@@ -377,17 +375,6 @@ func loadTwitterTypedValue() *twitter_typed.TwitterStruct {
 	})
 	return &twitterTypedValue
 }
-
-func Benchmark_Marshal_TwitterTyped_StdJSON(b *testing.B) {
-	b.SetBytes(marshalSize(loadTwitterTypedValue()))
-	b.ReportAllocs()
-	for b.Loop() {
-		if _, err := json.Marshal(loadTwitterTypedValue()); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 func Benchmark_Marshal_TwitterTyped_Sonic(b *testing.B) {
 	b.SetBytes(marshalSize(loadTwitterTypedValue()))
 	b.ReportAllocs()
@@ -403,6 +390,15 @@ func Benchmark_Marshal_TwitterTyped_GoJSON(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := gojson.Marshal(loadTwitterTypedValue()); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+func Benchmark_Marshal_TwitterTyped_JSONv2(b *testing.B) {
+	b.SetBytes(marshalSize(loadTwitterTypedValue()))
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := jsonv2.Marshal(loadTwitterTypedValue()); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -436,19 +432,6 @@ func loadMapAnyValue() *map[string]any {
 	})
 	return &mapAnyValue
 }
-
-func Benchmark_Marshal_MapAny_StdJSON(b *testing.B) {
-	v := loadMapAnyValue()
-	b.SetBytes(marshalSize(v))
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		if _, err := json.Marshal(v); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 func Benchmark_Marshal_MapAny_Sonic(b *testing.B) {
 	v := loadMapAnyValue()
 	b.SetBytes(marshalSize(v))
@@ -468,6 +451,17 @@ func Benchmark_Marshal_MapAny_GoJSON(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		if _, err := gojson.Marshal(v); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+func Benchmark_Marshal_MapAny_JSONv2(b *testing.B) {
+	v := loadMapAnyValue()
+	b.SetBytes(marshalSize(v))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := jsonv2.Marshal(v); err != nil {
 			b.Fatal(err)
 		}
 	}

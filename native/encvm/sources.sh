@@ -18,12 +18,7 @@ SOURCE_FILE="native/encvm/impl/encvm.c"
 STDLIB_SOURCES="native/stdlib/memory.c"
 
 EXTRA_SOURCES="
-  native/encvm/impl/eface.c
-  native/encvm/impl/str_escape.c
-  native/encvm/impl/ftoa.c
   native/util/log.c
-  native/encvm/impl/number.c
-  native/encvm/impl/base64.c
 "
 
 TARGET_DIR="native/encvm"

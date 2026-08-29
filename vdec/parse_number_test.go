@@ -361,7 +361,7 @@ func TestScanNumberSpan_Invalid(t *testing.T) {
 		{"bare frac exponent", "1.0e"},
 		{"bare frac exponent+", "1.0e+"},
 
-		// Double characters — scanNumberSpan stops at second occurrence;
+		// Double characters: scanNumberSpan stops at the second occurrence;
 		// the trailing garbage is caught by the caller.
 		// These are tested at integration level in TestRFC8259_InvalidNumbers.
 		// {"double dot", "1.2.3"},

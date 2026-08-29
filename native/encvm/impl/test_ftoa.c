@@ -9,7 +9,7 @@
 
 #define INLINE static inline
 
-#include "ftoa.c"
+#include "ftoa.h"
 
 // Helper: fabs without math.h
 static double my_fabs(double x) {

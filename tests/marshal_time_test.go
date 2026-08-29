@@ -9,7 +9,7 @@ import (
 )
 
 func TestMarshal_TimeTime_Timezones(t *testing.T) {
-	// FixedZone (positive offset) — handled natively by C VM
+	// FixedZone (positive offset): handled natively by C VM
 	tz8 := time.FixedZone("CST", 8*3600)
 	// FixedZone (negative offset)
 	tzNeg5 := time.FixedZone("EST", -5*3600)
@@ -23,7 +23,7 @@ func TestMarshal_TimeTime_Timezones(t *testing.T) {
 		time.Date(2024, 1, 1, 0, 0, 0, 0, tzNeg5),
 		time.Date(2024, 12, 31, 23, 59, 59, 999999999, tzIndia),
 		time.Date(2000, 6, 15, 12, 0, 0, 0, tzNeg930),
-		// Local timezone — should yield to Go and still produce correct output
+		// Local timezone: should yield to Go and still produce correct output
 		time.Date(2024, 3, 15, 10, 0, 0, 0, time.Local),
 	}
 	for _, ts := range times {
@@ -39,7 +39,7 @@ func TestMarshal_TimeTime_Timezones(t *testing.T) {
 }
 
 func TestMarshal_TimeTime_Nanoseconds(t *testing.T) {
-	// Various nanosecond precisions — trailing zeros should be truncated
+	// Various nanosecond precisions; trailing zeros should be truncated
 	cases := []time.Time{
 		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),         // no fractional
 		time.Date(2024, 1, 1, 0, 0, 0, 100000000, time.UTC), // .1
@@ -250,7 +250,7 @@ func TestMarshal_TimeTime_Omitempty(t *testing.T) {
 		Name string    `json:"name"`
 		T    time.Time `json:"t,omitempty"`
 	}
-	// Zero time with omitempty — stdlib omits zero time
+	// Zero time with omitempty: stdlib omits zero time
 	zero := S{Name: "test"}
 	vjData, err := vjson.Marshal(zero)
 	if err != nil {
@@ -274,7 +274,7 @@ func TestMarshal_TimeTime_Omitempty(t *testing.T) {
 }
 
 func TestMarshal_TimeTime_Now(t *testing.T) {
-	// time.Now() — local timezone, monotonic clock bit set.
+	// time.Now(): local timezone, monotonic clock bit set.
 	// The C VM should yield to Go for DST timezones and still produce correct output.
 	now := time.Now()
 	vjData, err := vjson.Marshal(now)

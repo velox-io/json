@@ -119,6 +119,28 @@ func (e *UnsupportedTypeError) As(target any) bool {
 	return false
 }
 
+// UnsupportedShapeError indicates a struct whose field layout cannot be
+// represented, as opposed to a field type that cannot be encoded. It carries a
+// message because the offending shape is a relationship between fields (for
+// instance a field promoted across an embedded pointer), which the type alone
+// does not convey.
+type UnsupportedShapeError struct {
+	Type reflect.Type
+	Msg  string
+}
+
+func (e *UnsupportedShapeError) Error() string { return "vjson: " + e.Msg }
+
+// As bridges to *json.UnsupportedTypeError so callers switching from
+// encoding/json still classify this as an unsupported-type failure.
+func (e *UnsupportedShapeError) As(target any) bool {
+	if t, ok := target.(**json.UnsupportedTypeError); ok {
+		*t = &json.UnsupportedTypeError{Type: e.Type}
+		return true
+	}
+	return false
+}
+
 // UnsupportedValueError indicates an attempt to marshal an unsupported value
 // (e.g. NaN or Inf floats).
 type UnsupportedValueError struct {

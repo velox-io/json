@@ -5,8 +5,6 @@
  *   "Floating-Point to Decimal, in One Multiply" by Russ Cox
  *   https://research.swtch.com/fp
  *
- * pow10Tab data from rsc.io/fpfmt (BSD-3-Clause, Copyright 2025 The Go Authors)
- *
  */
 
 #ifndef VJ_USCALE_TABLE_H

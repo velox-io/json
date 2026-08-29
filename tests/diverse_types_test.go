@@ -12,9 +12,10 @@ import (
 // Goroutine 0: SafetyItem (struct with *SafetyInner, map[string]string)
 // Goroutine 1: SimpleStruct (struct with string, int fields)
 // Goroutine 2: AnyMap (map[string]any)
-// Goroutine 3: AnySlice ([]any)
-// Goroutine 4: NestedStruct (struct with nested pointers)
-// Goroutine 5: MixedMap (map[string]SpecificType)
+// Goroutine 3: PtrAnyMap (*map[string]any)
+// Goroutine 4: AnySlice ([]any)
+// Goroutine 5: NestedStruct (struct with nested pointers)
+// Goroutine 6: MixedMap (map[string]SpecificType)
 // ... etc, cycling through type patterns
 //
 // This forces concurrent type building for multiple types simultaneously,
@@ -52,7 +53,7 @@ func TestBuildDiverseTypesRace(t *testing.T) {
 				idx := gid*iters + i
 
 				var err error
-				switch gid % 6 {
+				switch gid % 7 {
 				case 0: // SafetyItem (struct + *ptr + map)
 					data, _ := safetyInput(idx)
 					var s SafetyItem
@@ -71,13 +72,19 @@ func TestBuildDiverseTypesRace(t *testing.T) {
 					err = vjson.Unmarshal(data, &m)
 					results[i] = m
 
-				case 3: // []any
+				case 3: // *map[string]any
+					data := fmt.Appendf(nil, `{"name":"item-%d\n","value":%d}`, idx, idx)
+					var m *map[string]any
+					err = vjson.Unmarshal(data, &m)
+					results[i] = m
+
+				case 4: // []any
 					data := fmt.Appendf(nil, `[%d,"text%d\n",true,null]`, idx, idx)
 					var s []any
 					err = vjson.Unmarshal(data, &s)
 					results[i] = s
 
-				case 4: // []struct with pointer fields
+				case 5: // []struct with pointer fields
 					type Item struct {
 						ID    int64   `json:"id"`
 						Name  string  `json:"name"`
@@ -93,7 +100,7 @@ func TestBuildDiverseTypesRace(t *testing.T) {
 					err = vjson.Unmarshal(data, &list)
 					results[i] = list
 
-				case 5: // map[string]SafetyInner with escaped strings
+				case 6: // map[string]SafetyInner with escaped strings
 					type MapInner struct {
 						M map[string]SafetyInner `json:"m"`
 					}

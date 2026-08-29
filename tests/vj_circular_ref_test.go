@@ -345,7 +345,7 @@ func TestRoundtrip_IndirectSelfRef(t *testing.T) {
 		Tag: "ok",
 	}
 
-	// Marshal — before fix: panic (nil Codec type-asserted as *PointerCodec)
+	// Marshal; before the fix this panicked (nil Codec type-asserted as *PointerCodec)
 	data, err := vjson.Marshal(orig)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
@@ -719,7 +719,7 @@ func TestEmbed_ThreeLevelValue(t *testing.T) {
 //
 // Each test group uses unique types (not shared with other tests) so
 // that codec construction order is deterministic regardless of which
-// test runs first — the outer wrapper type is always the entry point.
+// test runs first; the outer wrapper type is always the entry point.
 
 // Scenario 1: Wrapper embeds a self-referential struct by value
 // Construction: Wrapper → Inner (via value embed) → *Inner (cycle)

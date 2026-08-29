@@ -368,7 +368,7 @@ type LargePayload struct {
 func buildLargePayload() LargePayload {
 	var p LargePayload
 
-	// Fill 64 copies of the test user — the VM iterates the full struct
+	// Fill 64 copies of the test user; the VM iterates the full struct
 	// array without yielding to Go (unless it hits interface/map fields).
 	base := NewTestUser()
 	for i := range p.Users {

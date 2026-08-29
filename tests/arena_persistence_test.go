@@ -15,7 +15,7 @@ import (
 // This test proves that the current arena implementation is NOT causing
 // data corruption in a sequential single-goroutine scenario.
 // In a concurrent scenario, the same arena block may be abandoned
-// while another goroutine's strings still reference it — that's the
+// while another goroutine's strings still reference it; that's the
 // suspected crash mechanism.
 func TestArenaPersistence_SequentialReuse(t *testing.T) {
 	type S struct {

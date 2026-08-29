@@ -5,7 +5,7 @@
 # This script produces a relocatable object (.o/.syso) with all relocations resolved.
 # The output can be linked by any linker (Go, ld, lld, etc.) without further relocation processing.
 #
-# For native builds, clang is preferred. For cross-compilation, zig cc is used.
+# For native and cross builds, clang (LLVM) is used exclusively.
 #
 # Usage:
 #   ./prelink.sh -o <output> -t <target> [-s <source>] [-i <isa>] [-e <exports>] [<object.o>...]
@@ -53,7 +53,7 @@
 #       1. Link with -shared to produce a DLL (requires DllMain stub)
 #       2. Use prelink-obj tool to extract exports and produce raw COFF .o
 #
-#   The output has zero relocations — it can be used as input to any downstream
+#   The output has zero relocations; it can be used as input to any downstream
 #   linker without needing to resolve any relocations.
 
 set -e
@@ -142,19 +142,10 @@ is_native_target() {
     [[ "$target_norm" == "$native_norm" ]]
 }
 
-# Select compiler based on native vs cross compilation
+# Select compiler: clang for both native and cross (LLVM is the only toolchain).
 select_compiler() {
-    local target="$1"
-    if is_native_target "$target"; then
-        # Native build: prefer clang
-        if command -v clang &> /dev/null; then
-            echo "clang"
-            return 0
-        fi
-    fi
-    # Cross compilation or clang not available: use zig cc
-    if command -v zig &> /dev/null; then
-        echo "zig"
+    if command -v clang &> /dev/null; then
+        echo "clang"
         return 0
     fi
     echo ""
@@ -165,29 +156,24 @@ select_compiler() {
 COMPILER=""
 if [ "${USE_LLD_LINK:-0}" = "1" ]; then
     # lld-link pipeline: no compiler needed for linking stage
-    # (Windows only — compilation was already done in gen-natives.sh)
+    # (Windows only; compilation was already done in gen-natives.sh)
     COMPILER="lld-link"
 elif [ "${USE_LLVM:-0}" = "1" ]; then
     # LLVM pipeline: use the full CC command exported by gen-natives.sh
     # (includes --target, -ffreestanding, --sysroot etc.)
     if [ -n "${CC:-}" ]; then
         COMPILER="clang"
-        # Use exported CC directly — it already has all target-specific flags
+        # Use exported CC directly; it already has all target-specific flags
         _EXPORTED_CC="$CC"
     else
         COMPILER="clang"
     fi
-elif [ "${USE_ZIG:-0}" = "1" ]; then
-    # Zig pipeline: use zig cc
-    :
 fi
 
 if [ -z "$COMPILER" ]; then
-    COMPILER=$(select_compiler "$TARGET")
+    COMPILER=$(select_compiler)
     if [ -z "$COMPILER" ]; then
-        echo "Error: No suitable compiler found."
-        echo "  - For native builds: install clang"
-        echo "  - For cross-compilation: install zig (brew install zig)"
+        echo "Error: clang not found. Install LLVM clang >= 22." >&2
         exit 1
     fi
 fi
@@ -232,7 +218,7 @@ get_isa_flags() {
 #  Compiler invocation functions
 # ============================================================
 
-# Build compiler command prefix (handles zig target)
+# Build compiler command prefix
 compiler_cmd() {
     case "$COMPILER" in
         lld-link)
@@ -252,7 +238,6 @@ compiler_cmd() {
                 echo "$cmd"
             fi
             ;;
-        zig)   echo "zig cc -target $TARGET" ;;
     esac
 }
 
@@ -324,8 +309,18 @@ prelink_elf() {
     [ "$LTO" = true ] && lto_flag="-flto"
 
     # Create linker script that merges .rodata into .text
-    # The ALIGN(64) ensures SIMD constant tables are properly aligned
-    cat > "$TMPDIR/merge.ld" << 'LDEOF'
+    # The ALIGN(64) ensures SIMD constant tables are properly aligned.
+    #
+    # PRELINK_KEEP_DEBUG=1 (set by gen-natives.sh PROFILE=1): keep .debug_* and
+    # .eh_frame in the merged .so so it can serve as a base-0 debug companion
+    # for perf/addr2line. These sections are non-ALLOC, so they never enter the
+    # PT_LOAD and do not perturb .text layout, so the extracted .syso is
+    # unchanged. Otherwise (production) they are discarded as before.
+    local discard_debug=$'    *(.debug*)\n    *(.eh_frame*)'
+    if [ "${PRELINK_KEEP_DEBUG:-0}" = "1" ]; then
+        discard_debug=""
+    fi
+    cat > "$TMPDIR/merge.ld" << LDEOF
 PHDRS {
   text PT_LOAD FLAGS(5); /* R_X = 4 | 1 = 5 */
 }
@@ -340,8 +335,7 @@ SECTIONS {
   /DISCARD/ : {
     *(.comment)
     *(.note*)
-    *(.debug*)
-    *(.eh_frame*)
+$discard_debug
   }
 }
 LDEOF
@@ -350,25 +344,43 @@ LDEOF
     #   preventing PLT indirection for internal calls. Without this, the linker
     #   creates PLT stubs for exported functions called within the same .so,
     #   which land outside .text and are lost during prelink-obj extraction.
-    #   Note: zig's LLD does not support -Bsymbolic-functions, so we skip it.
-    local symbolic_flag=""
-    case "$COMPILER" in
-        clang) symbolic_flag="-Wl,-Bsymbolic-functions" ;;
-        zig)   symbolic_flag="" ;;
-    esac
+    local symbolic_flag="-Wl,-Bsymbolic-functions"
 
-    # For cross-compiled Linux targets on macOS, force LLD as linker
-    # (Apple's ld64 doesn't understand ELF linker scripts)
+    # LLD links LLVM bitcode natively; GNU ld.bfd needs LLVMgold.so for LTO,
+    # which the LLVM prebuilt tarball doesn't ship.
     local lld_flag=""
-    if [ "${USE_LLVM:-0}" = "1" ] && [ "$(uname -s)" = "Darwin" ] && [ "$TARGET_OS" = "linux" ]; then
+    if [ "${USE_LLVM:-0}" = "1" ] && [ "$TARGET_OS" = "linux" ]; then
         lld_flag="-fuse-ld=lld"
     fi
 
+    # With LTO the input objects are LLVM bitcode; DWARF is only materialized at
+    # link time, so -g must be on the link command (not just compile) for the
+    # merged .so to carry .debug_*.
+    local debug_flag=""
+    if [ "${PRELINK_KEEP_DEBUG:-0}" = "1" ]; then
+        debug_flag="-g"
+    fi
+
+    # Promote link-time warnings to errors so LTO backend stack-size violations
+    # (see STACK_WARN_SIZE in gen-natives.sh) fail the build instead of scrolling
+    # by. Empty when the guard is disabled or the link is not driven by lld.
+    local strict_flag=""
+    if [ "${STACK_WARN_SIZE:-0}" != "0" ]; then
+        strict_flag="-Wl,--fatal-warnings"
+    fi
+
     log "  Linking..."
-    $CC_CMD $lld_flag -shared $lto_flag -nostdlib $symbolic_flag -Wl,--build-id=none -Wl,-T,"$TMPDIR/merge.ld" $objs -o "$merged_so"
+    $CC_CMD $lld_flag -shared $lto_flag $debug_flag -nostdlib $symbolic_flag $strict_flag -Wl,--build-id=none -Wl,-T,"$TMPDIR/merge.ld" $objs -o "$merged_so"
 
     log "  Creating object file..."
     run_prelink_obj "$output" "$merged_so" "$(get_export_prefix)"
+
+    # Preserve the intermediate .so as a base-0 debug companion for profiling.
+    # $merged_so lives under $WORKDIR (build/prelink) and normally survives, but
+    # make it explicit and report its path so users can point addr2line at it.
+    if [ "${PRELINK_KEEP_DEBUG:-0}" = "1" ]; then
+        log "  Debug companion (base-0 DWARF) kept: $merged_so"
+    fi
 }
 
 # Darwin (Mach-O): -dynamiclib → prelink-obj
@@ -380,19 +392,14 @@ prelink_darwin() {
     local lto_flag=""
     [ "$LTO" = true ] && lto_flag="-flto"
 
-    # Use LLD instead of Apple's ld64 — it has no "must link with
+    # Use LLD instead of Apple's ld64: it has no "must link with
     # libSystem" restriction and supports -nostdlib for dylibs.
     # This avoids needing any real system SDK or stub libraries.
     local lld_flags="-fuse-ld=lld -nostdlib"
 
     local export_flag=""
     if [ -n "$EXPORT_LIST" ] && [ -f "$EXPORT_LIST" ]; then
-        # zig's Mach-O LLD does not support -exported_symbols_list;
-        # skip the flag when cross-compiling with zig. The extra exported
-        # symbols are harmless — prelink-obj extracts all N_EXT symbols.
-        if [ "$COMPILER" != "zig" ]; then
-            export_flag="-Wl,-exported_symbols_list,$EXPORT_LIST"
-        fi
+        export_flag="-Wl,-exported_symbols_list,$EXPORT_LIST"
     fi
 
     log "  Linking dylib..."
@@ -402,28 +409,6 @@ prelink_darwin() {
 
     log "  Converting dylib to object..."
     run_prelink_obj "$output" "$dylib_tmp" ""
-}
-
-# Windows (PE/COFF): -shared DLL → prelink-obj  (zig cc path)
-prelink_windows() {
-    local output="$1"
-    shift
-    local objs="$@"
-    local dll_tmp="$WORKDIR/${BASENAME_NOEXT}.dll"
-    local lto_flag=""
-    [ "$LTO" = true ] && lto_flag="-flto"
-
-    # Compile a minimal DllMain stub (required for -shared on Windows)
-    log "  Compiling DllMain stub..."
-    echo 'int _DllMainCRTStartup(void *h, unsigned r, void *p) { (void)h; (void)r; (void)p; return 1; }' > "$TMPDIR/dllmain.c"
-    $CC_CMD -c "$TMPDIR/dllmain.c" -o "$TMPDIR/dllmain.obj"
-
-    log "  Linking DLL (zig cc -shared)..."
-    log "    $dll_tmp"
-    $CC_CMD -shared $lto_flag -nostdlib -fno-sanitize=undefined $objs "$TMPDIR/dllmain.obj" -o "$dll_tmp"
-
-    log "  Converting DLL to COFF object..."
-    run_prelink_obj "$output" "$dll_tmp" "$(get_export_prefix)"
 }
 
 # Windows (PE/COFF): lld-link /DLL /NOENTRY /MERGE → prelink-obj coff
@@ -441,12 +426,48 @@ prelink_windows_lld() {
         (cd "$REPO_ROOT/scripts/cmd/prelink-obj" && go build -o "$PRELINK_OBJ" .)
     fi
 
+    # /WX promotes lld-link warnings (including LTO backend stack-size violations
+    # from -Xclang -fwarn-stack-size) to errors; see STACK_WARN_SIZE.
+    local strict_flag=""
+    if [ "${STACK_WARN_SIZE:-0}" != "0" ]; then
+        strict_flag="/WX"
+    fi
+
+    # /MAP produces a linker map file alongside the DLL. lld-link strips the
+    # COFF symbol table for DLLs (only the export table survives), so the
+    # stackdepth tool reads this map file to recover internal function symbols
+    # for call-graph analysis.
+    local map_file="$WORKDIR/${BASENAME_NOEXT}.map"
+
+    # Under the MSYS2 runtime, arguments beginning with "/" are path-converted
+    # (lld-link's /DLL would become C:/msys64/DLL). Convert the path arguments
+    # to Windows form explicitly and disable automatic conversion for this
+    # invocation only. Git bash reports MINGW64_NT-*, so match it too.
+    local link_env=()
+    local map_arg="$map_file" out_arg="$dll_tmp"
+    local obj_args=($objs)
+    case "$(uname -s)" in
+    MSYS* | MINGW* | CYGWIN*)
+        if command -v cygpath >/dev/null 2>&1; then
+            map_arg="$(cygpath -w "$map_file")"
+            out_arg="$(cygpath -w "$dll_tmp")"
+            obj_args=()
+            local o
+            for o in $objs; do
+                obj_args+=("$(cygpath -w "$o")")
+            done
+            link_env=(MSYS2_ARG_CONV_EXCL="*")
+        fi
+        ;;
+    esac
+
     log "  Linking DLL (lld-link /MERGE)..."
     log "    $dll_tmp"
-    lld-link /DLL /NOENTRY /NODEFAULTLIB \
+    env ${link_env[@]+"${link_env[@]}"} lld-link /DLL /NOENTRY /NODEFAULTLIB $strict_flag \
         /MERGE:.rdata=.text /MERGE:.pdata=.text \
-        /OUT:"$dll_tmp" \
-        $objs
+        /MAP:"$map_arg" \
+        /OUT:"$out_arg" \
+        "${obj_args[@]}"
 
     log "  Converting to COFF object..."
     local coff_args=("$PRELINK_OBJ" coff)
@@ -525,13 +546,7 @@ fi
 
 case "$TARGET_OS" in
     darwin)  prelink_darwin       "$OUTPUT" $ALL_OBJS ;;
-    windows)
-        if [ "${USE_LLD_LINK:-0}" = "1" ]; then
-            prelink_windows_lld "$OUTPUT" $ALL_OBJS
-        else
-            prelink_windows     "$OUTPUT" $ALL_OBJS
-        fi
-        ;;
+    windows) prelink_windows_lld "$OUTPUT" $ALL_OBJS ;;
     linux)   prelink_elf         "$OUTPUT" $ALL_OBJS ;;
     *)       echo "Error: unsupported target OS: $TARGET_OS"; exit 1 ;;
 esac

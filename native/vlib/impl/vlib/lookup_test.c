@@ -26,8 +26,8 @@ int main(void) {
     ndec_lookup *l = malloc(sz);
     int r          = ndec_lookup_init(l, sz, &cfg);
     assert(r > 0);
-    printf("Short keys (3): tier = %s (footprint = %zu / alloc = %zu)\n",
-           ndec_lookup_tier_name_ex(l), ndec_lookup_footprint(l), sz);
+    printf("Short keys (3): tier = %s (footprint = %zu / alloc = %zu)\n", ndec_lookup_tier_name(ndec_lookup_get_tier(l)),
+           ndec_lookup_footprint(l), sz);
 
     char buf[128] = {0};
     strcpy(buf, "id");
@@ -44,6 +44,38 @@ int main(void) {
     buf[7] = '"';
     assert(ndec_lookup_find(l, (ndec_lookup_key){buf, 7}) == -1);
     free(l);
+  }
+
+  // ---- Case 1b: WINDOW tier, query keys with an embedded '"'. ----
+  // A decoded JSON key (e.g. "age\"") can carry '"' inside its body. The
+  // embedded quote must not masquerade as the terminator of a shorter stored
+  // key whose prefix the query extends.
+  {
+    ndec_lookup_key keys[] = {{"id", 2}, {"name", 4}, {"value", 5}};
+    ndec_lookup_config cfg = {.keys = keys, .n = 3, .tiers = NDEC_LOOKUP_TIER_WINDOW, TEST_SCRATCH};
+
+    size_t sz      = ndec_lookup_size_for(&cfg);
+    ndec_lookup *l = malloc(sz);
+    assert(ndec_lookup_init(l, sz, &cfg) > 0);
+    assert(ndec_lookup_get_tier(l) == NDEC_LOOKUP_TIER_WINDOW);
+
+    char buf[128] = {0};
+    memcpy(buf, "id\"", 3);
+    assert(ndec_lookup_find(l, (ndec_lookup_key){buf, 3}) == -1);
+    memcpy(buf, "name\"", 5);
+    assert(ndec_lookup_find(l, (ndec_lookup_key){buf, 5}) == -1);
+    memcpy(buf, "value\"", 6);
+    assert(ndec_lookup_find(l, (ndec_lookup_key){buf, 6}) == -1);
+    /* A query shorter than a stored key with padding '"' bytes must miss too. */
+    memcpy(buf, "na\"me", 5);
+    assert(ndec_lookup_find(l, (ndec_lookup_key){buf, 5}) == -1);
+    /* Exact keys still hit. */
+    memcpy(buf, "id", 2);
+    assert(ndec_lookup_find(l, (ndec_lookup_key){buf, 2}) == 0);
+    memcpy(buf, "value", 5);
+    assert(ndec_lookup_find(l, (ndec_lookup_key){buf, 5}) == 2);
+    free(l);
+    printf("\nEmbedded-quote queries OK.\n");
   }
 
   // ---- Case 2: long keys, requires TABLE tier. ----
@@ -63,7 +95,7 @@ int main(void) {
     ndec_lookup *l = malloc(sz);
     int r          = ndec_lookup_init(l, sz, &cfg);
     assert(r > 0);
-    printf("  Tier used: %s (footprint = %zu / alloc = %zu)\n", ndec_lookup_tier_name_ex(l),
+    printf("  Tier used: %s (footprint = %zu / alloc = %zu)\n", ndec_lookup_tier_name(ndec_lookup_get_tier(l)),
            ndec_lookup_footprint(l), sz);
     assert(ndec_lookup_get_tier(l) == NDEC_LOOKUP_TIER_TABLE);
 
@@ -91,7 +123,7 @@ int main(void) {
     ndec_lookup *l = malloc(sz);
     int r          = ndec_lookup_init(l, sz, &cfg);
     assert(r > 0);
-    printf("\nMany keys (25): tier = %s\n", ndec_lookup_tier_name_ex(l));
+    printf("\nMany keys (25): tier = %s\n", ndec_lookup_tier_name(ndec_lookup_get_tier(l)));
     assert(ndec_lookup_get_tier(l) != NDEC_LOOKUP_TIER_TABLE);
 
     char buf[128] = {0};

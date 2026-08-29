@@ -1,7 +1,6 @@
 package benchmark
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/bytedance/sonic"
@@ -29,26 +28,6 @@ func (w *countWriter) Write(p []byte) (int, error) {
 // =============================================================================
 
 const kubePodsEncodeCount = 50
-
-func Benchmark_Encoder_KubePodsStream_StdJSON(b *testing.B) {
-	v := loadPodsValue()
-	var cw countWriter
-	enc := json.NewEncoder(&cw)
-	for range kubePodsEncodeCount {
-		_ = enc.Encode(v)
-	}
-	b.SetBytes(cw.n)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		enc := json.NewEncoder(&countWriter{})
-		for range kubePodsEncodeCount {
-			if err := enc.Encode(v); err != nil {
-				b.Fatal(err)
-			}
-		}
-	}
-}
 
 func Benchmark_Encoder_KubePodsStream_Sonic(b *testing.B) {
 	v := loadPodsValue()
@@ -117,26 +96,6 @@ func Benchmark_Encoder_KubePodsStream_Velox(b *testing.B) {
 
 const twitterEncodeCount = 10
 
-func Benchmark_Encoder_TwitterStream_StdJSON(b *testing.B) {
-	v := loadTwitterValue()
-	var cw countWriter
-	enc := json.NewEncoder(&cw)
-	for range twitterEncodeCount {
-		_ = enc.Encode(v)
-	}
-	b.SetBytes(cw.n)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		enc := json.NewEncoder(&countWriter{})
-		for range twitterEncodeCount {
-			if err := enc.Encode(v); err != nil {
-				b.Fatal(err)
-			}
-		}
-	}
-}
-
 func Benchmark_Encoder_TwitterStream_Sonic(b *testing.B) {
 	v := loadTwitterValue()
 	var cw countWriter
@@ -201,20 +160,6 @@ func Benchmark_Encoder_TwitterStream_Velox(b *testing.B) {
 // TwitterSingle: encode one Twitter value per iteration to measure per-call
 // overhead (vs TwitterStream which encodes 10 copies reusing one Encoder).
 // =============================================================================
-
-func Benchmark_Encoder_TwitterSingle_StdJSON(b *testing.B) {
-	v := loadTwitterValue()
-	var cw countWriter
-	_ = json.NewEncoder(&cw).Encode(v)
-	b.SetBytes(cw.n)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		if err := json.NewEncoder(&countWriter{}).Encode(v); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
 
 func Benchmark_Encoder_TwitterSingle_Sonic(b *testing.B) {
 	v := loadTwitterValue()

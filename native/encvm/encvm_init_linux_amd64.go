@@ -4,21 +4,27 @@ package encvm
 
 import "unsafe"
 
-//go:noescape
-//go:nosplit
-func vjVMExecFullAVX2(ctx unsafe.Pointer)
-
-//go:noescape
-//go:nosplit
-func vjVMExecFastAVX2(ctx unsafe.Pointer)
-
-//go:noescape
-//go:nosplit
-func vjVMExecCompactAVX2(ctx unsafe.Pointer)
-
 func init() {
-	vmExec = vjVMExecFullAVX2
-	vmExecFast = vjVMExecFastAVX2
-	vmExecCompact = vjVMExecCompactAVX2
 	Available = true
 }
+
+//go:noescape
+//go:nosplit
+func vjVMExecFull(ctx unsafe.Pointer)
+
+//go:noescape
+//go:nosplit
+func vjVMExecFast(ctx unsafe.Pointer)
+
+//go:noescape
+//go:nosplit
+func vjVMExecCompact(ctx unsafe.Pointer)
+
+// VMExec calls the full-mode native encoder.
+func VMExec(ctx unsafe.Pointer) { vjVMExecFull(ctx) }
+
+// VMExecFast calls the fast-mode native encoder.
+func VMExecFast(ctx unsafe.Pointer) { vjVMExecFast(ctx) }
+
+// VMExecCompact calls the compact-mode native encoder.
+func VMExecCompact(ctx unsafe.Pointer) { vjVMExecCompact(ctx) }

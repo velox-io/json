@@ -4,13 +4,26 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
 )
 
 func main() {
 	title := flag.String("title", "", "chart title (auto-detected if empty)")
-	format := flag.String("format", "svg", "output format: svg or html")
+	format := flag.String("format", "svg", "output format: svg")
 	config := flag.String("config", "", "path to library config file (auto-discovered if empty)")
+	baseline := flag.String("baseline", "JSONv2", "baseline library for ratio normalization")
+	exclude := flag.String("exclude", "", "regexp of group names to exclude from the chart")
 	flag.Parse()
+
+	var excludeRe *regexp.Regexp
+	if *exclude != "" {
+		var err error
+		excludeRe, err = regexp.Compile(*exclude)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "benchviz: -exclude: %v\n", err)
+			os.Exit(1)
+		}
+	}
 
 	// Determine the input source: positional arg or stdin.
 	var inputFile string
@@ -41,15 +54,13 @@ func main() {
 
 	if *title != "" {
 		data.Title = *title
+	} else if len(data.Sections) == 1 && data.Sections[0].Name != "" {
+		data.Title = fmt.Sprintf("Benchmark (%s) Results", data.Sections[0].Name)
 	}
 
-	switch *format {
-	case "svg":
-		fmt.Print(RenderSVG(data))
-	case "html":
-		fmt.Print(RenderHTML(data))
-	default:
-		fmt.Fprintf(os.Stderr, "benchviz: unknown format %q (use svg or html)\n", *format)
+	if *format != "svg" {
+		fmt.Fprintf(os.Stderr, "benchviz: unknown format %q (use svg)\n", *format)
 		os.Exit(1)
 	}
+	fmt.Print(RenderSVG(data, *baseline, excludeRe))
 }

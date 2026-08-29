@@ -533,11 +533,10 @@ func TestMarshal_NonByteSlice_Empty(t *testing.T) {
 // Map HTML escape
 
 // TestMarshal_MapStringString_HTMLEscape verifies that the EscapeHTML flag
-// is correctly propagated into the Swiss Map iteration path
-// (vj_swiss_map_iterate). Because that function is noinline, a linker
-// that resolves it to the wrong translation unit could silently ignore the
-// flags parameter, making vjson.WithEscapeHTML() and default produce identical
-// output for map[string]string values.
+// is correctly propagated into the Swiss Map iteration path. Because that
+// function is noinline, a linker that resolves it to the wrong translation
+// unit could silently ignore the flags parameter, making vjson.WithEscapeHTML()
+// and default produce identical output for map[string]string values.
 func TestMarshal_MapStringString_HTMLEscape(t *testing.T) {
 	type S struct {
 		M map[string]string `json:"m"`
@@ -546,13 +545,13 @@ func TestMarshal_MapStringString_HTMLEscape(t *testing.T) {
 		"x": "<b>bold</b>",
 	}}
 
-	// Default: no HTML escaping — <, > appear literally.
+	// Default: HTML escaping off; < and > appear literally.
 	gotDefault, err := vjson.Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// With HTML escaping — <, > must become \u003c, \u003e.
+	// With HTML escaping: < and > must become \u003c, \u003e.
 	gotHTML, err := vjson.Marshal(v, vjson.WithEscapeHTML())
 	if err != nil {
 		t.Fatal(err)
@@ -657,7 +656,7 @@ func TestAppendMarshal_BufferRetainedInPool(t *testing.T) {
 	}
 
 	// Pre-allocate dst with plenty of capacity so AppendMarshal won't
-	// reallocate — the returned slice shares dst's backing array.
+	// reallocate; the returned slice shares dst's backing array.
 	prefix := []byte(`prefix:`)
 	dst := make([]byte, len(prefix), 512)
 	copy(dst, prefix)

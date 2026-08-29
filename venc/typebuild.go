@@ -101,19 +101,26 @@ func fillContainerExt(et *EncTypeInfo, ut *typ.UniType, building map[uintptr]*En
 }
 
 func buildStructInfo(info *typ.StructTypeInfo, building map[uintptr]*EncTypeInfo) *EncStructInfo {
-	si := &EncStructInfo{}
-	si.Fields = make([]EncFieldInfo, len(info.Fields))
+	si := &EncStructInfo{Rejects: info.Rejects}
+	si.Fields = make([]EncFieldInfo, 0, len(info.Fields))
 
-	for i, sf := range info.Fields {
+	for _, sf := range info.Fields {
+		// A reserve-unknown field collects keys the input had and the struct
+		// did not declare. Decode fills it from the leftover input keys;
+		// encode spreads those members back inline, completing the round
+		// trip. The field carries typ.ReserveUnknownName, which no input key
+		// can equal, and the spread op is keyless.
 		elemET := buildEncRec(sf.FieldType.Type, building)
-		fi := &si.Fields[i]
-		fi.Type = elemET
-		fi.Offset = sf.Offset
-		fi.JSONName = sf.JSONName
-		fi.KeyBytes = sf.KeyBytes
-		fi.KeyBytesIndent = sf.KeyBytesIndent
-		fi.IsZeroFn = sf.IsZeroFn
-		fi.TagFlags = sf.TagFlags
+		si.Fields = append(si.Fields, EncFieldInfo{
+			Type:           elemET,
+			Offset:         sf.Offset,
+			JSONName:       sf.JSONName,
+			PtrPath:        sf.PtrPath,
+			KeyBytes:       sf.KeyBytes,
+			KeyBytesIndent: sf.KeyBytesIndent,
+			IsZeroFn:       sf.IsZeroFn,
+			TagFlags:       sf.TagFlags,
+		})
 	}
 
 	return si

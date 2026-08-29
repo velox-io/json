@@ -13,7 +13,7 @@
 #define VJ_ENCVM_SEQITER_H
 
 #include "ftoa.h"
-#include "number.h"
+#include "itoa.h"
 #include "strfn.h"
 #include "types.h"
 
@@ -26,17 +26,20 @@ typedef struct {
   uint8_t indent_prefix_len;
 } VjSeqIndent;
 
-static inline uint8_t *vj_seq_write_indent(uint8_t *buf, const VjSeqIndent *ind) {
-  if (ind->indent_step) {
-    int n = 1 + ind->indent_prefix_len + ind->indent_depth * ind->indent_step;
-    __builtin_memcpy(buf, ind->indent_tpl, n);
+/* By-value helpers: pass VjSeqIndent through registers (12-byte POD fits in
+ * two GPRs per AAPCS64 / SysV AMD64), so &ind never escapes and clang can
+ * keep the descriptor entirely in registers instead of the caller's frame. */
+static inline uint8_t *vj_seq_write_indent(uint8_t *buf, VjSeqIndent ind) {
+  if (ind.indent_step) {
+    int n = 1 + ind.indent_prefix_len + ind.indent_depth * ind.indent_step;
+    __builtin_memcpy(buf, ind.indent_tpl, n);
     buf += n;
   }
   return buf;
 }
 
-static inline int vj_seq_indent_pad(const VjSeqIndent *ind) {
-  return ind->indent_step ? (1 + ind->indent_prefix_len + ind->indent_depth * ind->indent_step) : 0;
+static inline int vj_seq_indent_pad(VjSeqIndent ind) {
+  return ind.indent_step ? (1 + ind.indent_prefix_len + ind.indent_depth * ind.indent_step) : 0;
 }
 
 /* Result struct and action codes */
@@ -114,9 +117,9 @@ typedef int64_t (*vj_seq_need_fn)(const uint8_t *elem_ptr, int ipad);
 /* --- Core iteration logic (always_inline, parameterized).
  * Inlined into each noinline wrapper with constant params. --- */
 INLINE VjSeqResult vj_seq_iterate_impl(uint8_t *buf, const uint8_t *bend, const uint8_t *data, int64_t count,
-                                       int32_t start_idx, uint32_t flags, const VjSeqIndent *ind,
-                                       const int32_t elem_size, const int has_nan_check,
-                                       vj_seq_encode_fn encode_one, vj_seq_need_fn calc_need) {
+                                       int32_t start_idx, uint32_t flags, VjSeqIndent ind, const int32_t elem_size,
+                                       const int has_nan_check, vj_seq_encode_fn encode_one,
+                                       vj_seq_need_fn calc_need) {
   int ipad = vj_seq_indent_pad(ind);
 
   for (int32_t i = start_idx; i < (int32_t)count; i++) {
@@ -146,28 +149,27 @@ INLINE VjSeqResult vj_seq_iterate_impl(uint8_t *buf, const uint8_t *bend, const 
 
 NOINLINE static VjSeqResult vj_seq_iterate_float64(uint8_t *buf, const uint8_t *bend, const uint8_t *data,
                                                    int64_t count, int32_t start_idx, uint32_t flags,
-                                                   const VjSeqIndent *ind) {
+                                                   VjSeqIndent ind) {
   return vj_seq_iterate_impl(buf, bend, data, count, start_idx, flags, ind, 8, 1, vj_seq_encode_float64,
                              vj_seq_need_float64);
 }
 
 NOINLINE static VjSeqResult vj_seq_iterate_int(uint8_t *buf, const uint8_t *bend, const uint8_t *data,
-                                               int64_t count, int32_t start_idx, uint32_t flags,
-                                               const VjSeqIndent *ind) {
+                                               int64_t count, int32_t start_idx, uint32_t flags, VjSeqIndent ind) {
   return vj_seq_iterate_impl(buf, bend, data, count, start_idx, flags, ind, 8, 0, vj_seq_encode_int64,
                              vj_seq_need_int64);
 }
 
 NOINLINE static VjSeqResult vj_seq_iterate_int64(uint8_t *buf, const uint8_t *bend, const uint8_t *data,
                                                  int64_t count, int32_t start_idx, uint32_t flags,
-                                                 const VjSeqIndent *ind) {
+                                                 VjSeqIndent ind) {
   return vj_seq_iterate_impl(buf, bend, data, count, start_idx, flags, ind, 8, 0, vj_seq_encode_int64,
                              vj_seq_need_int64);
 }
 
 NOINLINE static VjSeqResult vj_seq_iterate_string(uint8_t *buf, const uint8_t *bend, const uint8_t *data,
                                                   int64_t count, int32_t start_idx, uint32_t flags,
-                                                  const VjSeqIndent *ind) {
+                                                  VjSeqIndent ind) {
   return vj_seq_iterate_impl(buf, bend, data, count, start_idx, flags, ind, 16, 0, vj_seq_encode_string,
                              vj_seq_need_string);
 }
@@ -248,14 +250,12 @@ NOINLINE static VjSeqResult vj_seq_iterate_string(uint8_t *buf, const uint8_t *b
       }                                                                                                           \
       VjStackFrame *f = &ctx->stack[is_resume ? (_depth - 1) : _depth];                                           \
                                                                                                                   \
-      VjSeqIndent ind = {                                                                                         \
-          (const uint8_t *)(indent_tpl),                                                                          \
-          (int16_t)(indent_depth),                                                                                \
-          (uint8_t)(indent_step),                                                                                 \
-          (uint8_t)(indent_prefix_len),                                                                           \
-      };                                                                                                          \
-                                                                                                                  \
-      VjSeqResult r = ITERATE_FN(buf, bend, seq_data, seq_count, seq_start_idx, VJ_ST_GET_FLAGS(vmstate), &ind);  \
+      /* Compound literal passed by value: 12-byte POD lands in 2 GPRs per                                        \
+       * AAPCS64, so no stack slot escapes here (unlike prior &ind form                                           \
+       * which forced clang to allocate a 16B frame slot per SEQ opcode). */                                      \
+      VjSeqResult r = ITERATE_FN(buf, bend, seq_data, seq_count, seq_start_idx, VJ_ST_GET_FLAGS(vmstate),         \
+                                 (VjSeqIndent){(const uint8_t *)(indent_tpl), (int16_t)(indent_depth),            \
+                                               (uint8_t)(indent_step), (uint8_t)(indent_prefix_len)});            \
       buf           = r.buf;                                                                                      \
                                                                                                                   \
       if (r.action == VJ_SEQ_BUF_FULL) {                                                                          \
@@ -275,17 +275,31 @@ NOINLINE static VjSeqResult vj_seq_iterate_string(uint8_t *buf, const uint8_t *b
         VM_SAVE_AND_RETURN(VJ_EXIT_NAN_INF);                                                                      \
       }                                                                                                           \
                                                                                                                   \
-      /* All elements encoded: write indent + ']' */                                                              \
+      /* All elements encoded: write indent + ']'. Before the close check,                                        \
+       * register a resume point (frame + state bit + iteration at count): a                                      \
+       * window-full exit at the check must re-enter via the resume path;                                         \
+       * the iterator then sees start_idx == count and returns immediately.                                       \
+       * Without it the re-entry would take the first-entry path and re-emit                                      \
+       * the key, '[' and every element. The check also runs before the                                           \
+       * decrement: a pre-check decrement would double-apply on resume. */                                        \
+      if (!is_resume) {                                                                                           \
+        f->seq.iter_data  = seq_data;                                                                             \
+        f->seq.iter_count = seq_count;                                                                            \
+        f->seq.iter_idx   = (int32_t)seq_count;                                                                   \
+        f->ret_base       = base;                                                                                 \
+        VM_SAVE_TRACE_DEPTH(f);                                                                                   \
+        f->state |= 1;                                                                                            \
+        VJ_ST_INC_STACK_DEPTH(vmstate);                                                                           \
+        is_resume = 1;                                                                                            \
+      }                                                                                                           \
+      VM_CHECK_CLOSE();                                                                                           \
       VM_INDENT_DEC();                                                                                            \
-      VM_CHECK(1 + VM_INDENT_PAD(indent_depth));                                                                  \
       VM_WRITE_INDENT();                                                                                          \
       *buf++ = ']';                                                                                               \
                                                                                                                   \
-      if (is_resume) {                                                                                            \
-        f->state &= ~1;                                                                                           \
-        VJ_ST_DEC_STACK_DEPTH(vmstate);                                                                           \
-        VM_RESTORE_TRACE_DEPTH(f);                                                                                \
-      }                                                                                                           \
+      f->state &= ~1;                                                                                             \
+      VJ_ST_DEC_STACK_DEPTH(vmstate);                                                                             \
+      VM_RESTORE_TRACE_DEPTH(f);                                                                                  \
       VJ_ST_SET_FIRST_0(vmstate);                                                                                 \
       if (is_long) {                                                                                              \
         VM_NEXT_LONG();                                                                                           \

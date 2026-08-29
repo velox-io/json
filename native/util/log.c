@@ -74,6 +74,29 @@ NOINLINE int vj_fprintf_stderr(const char *fmt, ...) {
       total += n;
       break;
     }
+    case 'S': {
+      /* Pointer-length string: (const char*, int). For tracing slices
+       * lifted from the parser (token spans, field names, etc.) that are
+       * not NUL-terminated. NULL pointer prints "(null)". */
+      const char *s = va_arg(ap, const char *);
+      int n         = va_arg(ap, int);
+      if (!s) {
+        s = "(null)";
+        n = 6;
+      }
+      if (n > 0) {
+        vj_raw_write_stderr(s, n);
+        total += n;
+      }
+      break;
+    }
+    case 'c': {
+      int c = va_arg(ap, int);
+      char ch = (char)(unsigned char)c;
+      vj_raw_write_stderr(&ch, 1);
+      total++;
+      break;
+    }
     case 'd': {
       int64_t v = is_long ? va_arg(ap, int64_t) : (int64_t)va_arg(ap, int32_t);
       start     = vj_fmt_i64(end, v);
@@ -102,6 +125,40 @@ NOINLINE int vj_fprintf_stderr(const char *fmt, ...) {
       start = vj_fmt_hex64(end, (uint64_t)(uintptr_t)v);
       vj_raw_write_stderr(start, (int)(end - start));
       total += (int)(end - start);
+      break;
+    }
+    case 'b': {
+      /* Fixed-width binary bitmap with 0b prefix. Width comes from the
+       * decimal digits trailing the directive (%b8/%b32/%b64); widths
+       * above 64 are clamped. Without digits, fall through to the
+       * verbatim-default path so misspellings remain visible. */
+      const char *q = p + 1;
+      int width      = 0;
+      while (*q >= '0' && *q <= '9') {
+        width = width * 10 + (*q - '0');
+        q++;
+      }
+      if (q == p + 1) {
+        int n = (int)(p - spec_start + 1);
+        vj_raw_write_stderr(spec_start, n);
+        total += n;
+        break;
+      }
+      p = q - 1;
+      if (width > 64)
+        width = 64;
+      uint64_t v = va_arg(ap, uint64_t);
+      vj_raw_write_stderr("0b", 2);
+      total += 2;
+      char buf[80]; /* 64 bits + up to 15 group separators */
+      int pos = 0;
+      for (int i = width - 1; i >= 0; i--) {
+        if (i != width - 1 && (i + 1) % 8 == 0)
+          buf[pos++] = ' ';
+        buf[pos++] = '0' + (char)((v >> i) & 1);
+      }
+      vj_raw_write_stderr(buf, pos);
+      total += pos;
       break;
     }
     case '%':

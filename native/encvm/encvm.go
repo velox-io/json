@@ -1,25 +1,7 @@
-// Package encvm provides the Go ↔ C bridge for the native JSON encoder VM.
-//
-// The package owns the compiled .syso objects and Plan9 assembly trampolines
-// that translate Go calling convention to C ABI.
 package encvm
 
-import "unsafe"
-
-// Available reports whether the native C encoder is linked on this platform.
+// Available reports whether the native encoder VM is linked for this
+// platform. The VMExec entries live in the per-platform init files:
+// windows grows the goroutine stack first (stackReserve), the other
+// platforms forward straight to the NOSPLIT trampoline.
 var Available bool
-
-var (
-	vmExec        func(ctx unsafe.Pointer)
-	vmExecFast    func(ctx unsafe.Pointer)
-	vmExecCompact func(ctx unsafe.Pointer)
-)
-
-// VMExec calls the full-mode native encoder.
-func VMExec(ctx unsafe.Pointer) { vmExec(ctx) }
-
-// VMExecFast calls the fast-mode native encoder.
-func VMExecFast(ctx unsafe.Pointer) { vmExecFast(ctx) }
-
-// VMExecCompact calls the compact-mode native encoder.
-func VMExecCompact(ctx unsafe.Pointer) { vmExecCompact(ctx) }

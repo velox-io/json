@@ -67,7 +67,7 @@ func WithBufSize(n int) MarshalOption {
 
 // Marshal serializes v to JSON.
 //
-// Pointer T: handled inline — v is 8 bytes, dereference without &v so v
+// Pointer T: handled inline; v is 8 bytes, dereference without &v so v
 // stays on the stack (zero allocs).
 // Value T:   dispatches to marshalSlow in a separate function so that its
 // &v does not poison the pointer path's escape analysis.

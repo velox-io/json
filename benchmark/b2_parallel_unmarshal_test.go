@@ -1,7 +1,6 @@
 package benchmark
 
 import (
-	stdjson "encoding/json"
 	"testing"
 
 	"dev.local/benchmark/twitter"
@@ -13,19 +12,6 @@ import (
 // =============================================================================
 // Parallel Unmarshal EscapeHeavy: real-world ~4KB JSON with ~40% escape density
 // =============================================================================
-
-func Benchmark_ParallelUnmarshal_EscapeHeavy_StdJSON(b *testing.B) {
-	b.SetBytes(int64(len(EscapeHeavyJSON)))
-	b.ReportAllocs()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			var p EscapeHeavyPayload
-			if err := stdjson.Unmarshal(EscapeHeavyJSON, &p); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-}
 
 func Benchmark_ParallelUnmarshal_EscapeHeavy_Sonic(b *testing.B) {
 	b.SetBytes(int64(len(EscapeHeavyJSON)))
@@ -57,19 +43,6 @@ func Benchmark_ParallelUnmarshal_EscapeHeavy_Velox(b *testing.B) {
 // Parallel Unmarshal KubePods: Kubernetes Pod List (~25KB, deeply nested, 3 pods)
 // =============================================================================
 
-func Benchmark_ParallelUnmarshal_KubePods_StdJSON(b *testing.B) {
-	b.SetBytes(int64(len(KubePodsJSON)))
-	b.ReportAllocs()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			var pl KubePodList
-			if err := stdjson.Unmarshal(KubePodsJSON, &pl); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-}
-
 func Benchmark_ParallelUnmarshal_KubePods_Sonic(b *testing.B) {
 	b.SetBytes(int64(len(KubePodsJSON)))
 	b.ReportAllocs()
@@ -99,19 +72,6 @@ func Benchmark_ParallelUnmarshal_KubePods_Velox(b *testing.B) {
 // =============================================================================
 // Parallel Unmarshal Twitter: Twitter search API response (~617KB, deeply nested)
 // =============================================================================
-
-func Benchmark_ParallelUnmarshal_Twitter_StdJSON(b *testing.B) {
-	b.SetBytes(int64(len(TwitterJSON)))
-	b.ReportAllocs()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			var t twitter.TwitterStruct
-			if err := stdjson.Unmarshal(TwitterJSON, &t); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-}
 
 func Benchmark_ParallelUnmarshal_Twitter_Sonic(b *testing.B) {
 	b.SetBytes(int64(len(TwitterJSON)))

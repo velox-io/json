@@ -9,20 +9,44 @@ import (
 
 // libraryDef defines a known library with its display order, bar color, etc.
 type libraryDef struct {
-	Name  string `yaml:"name"`  // benchmark suffix (e.g. "StdJSON", "Sonic")
+	Name  string `yaml:"name"`  // benchmark suffix (e.g. "Sonic", "GoJSON")
 	Color string `yaml:"color"` // bar fill color
 }
 
 type configFile struct {
-	Libraries []libraryDef `yaml:"libraries"`
+	Libraries          []libraryDef `yaml:"libraries"`
+	StripDatasetPrefix []string     `yaml:"strip_dataset_prefix"`
 }
+
+// datasetPrefixes lists corpus-family prefixes stripped from dataset
+// names for display labels (e.g. "JSONBenchStringUnicode" -> "StringUnicode").
+var datasetPrefixes []string
 
 const configFileName = ".benchviz.yaml"
 
+// findUp searches for configFileName in dir and each of its parents,
+// returning the first match or "".
+func findUp(dir string) string {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	for {
+		candidate := filepath.Join(dir, configFileName)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
 // DiscoverConfig finds the config file using the following priority:
-//  1. explicit (non-empty) path from -config flag — use as-is, error if unreadable
-//  2. .benchviz.yaml in the input file's directory (when input is a file)
-//  3. .benchviz.yaml in the current working directory
+//  1. explicit (non-empty) path from -config flag: use as-is, error if unreadable
+//  2. .benchviz.yaml in the input file's directory or any of its parents
+//  3. .benchviz.yaml in the current working directory or any of its parents
 //
 // Returns "" if no config file is found in the auto-discovery cases.
 func DiscoverConfig(explicit string, inputFile string) string {
@@ -30,15 +54,11 @@ func DiscoverConfig(explicit string, inputFile string) string {
 		return explicit
 	}
 	if inputFile != "" {
-		candidate := filepath.Join(filepath.Dir(inputFile), configFileName)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
+		if p := findUp(filepath.Dir(inputFile)); p != "" {
+			return p
 		}
 	}
-	if _, err := os.Stat(configFileName); err == nil {
-		return configFileName
-	}
-	return ""
+	return findUp(".")
 }
 
 // LoadConfig reads a YAML config file and overrides knownLibraries.
@@ -58,18 +78,17 @@ func LoadConfig(path string) error {
 	if len(cfg.Libraries) > 0 {
 		knownLibraries = cfg.Libraries
 	}
+	datasetPrefixes = cfg.StripDatasetPrefix
 	return nil
 }
 
 // knownLibraries lists the recognized library suffixes in display order.
 // This is the single source of truth for library ordering and colors.
 var knownLibraries = []libraryDef{
-	{Name: "StdJSON", Color: "#e67e22"},   // orange
-	{Name: "Sonic", Color: "#3498db"},     // blue
-	{Name: "Segmentio", Color: "#34495e"}, // slate
-	{Name: "GoJSON", Color: "#8e44ad"},    // purple
-	{Name: "EasyJSON", Color: "#e74c8b"},  // pink
-	{Name: "Velox", Color: "#27ae60"},     // green — this project (last = protagonist)
+	{Name: "Sonic", Color: "#3498db"},  // blue
+	{Name: "GoJSON", Color: "#8e44ad"}, // purple
+	{Name: "JSONv2", Color: "#e67e22"}, // orange
+	{Name: "Velox", Color: "#27ae60"},  // green, this project (last = protagonist)
 }
 
 // fallbackColors is a palette for libraries not in knownLibraries.
@@ -108,18 +127,18 @@ func LibraryColor(lib string) string {
 	return fallbackColors[h%len(fallbackColors)]
 }
 
-// SVG style constants.
+// SVG style constants. Titles and both axes share one dark ink; a
+// shared axis color cannot be mistaken for a library bar color.
 const (
-	ColorTitle    = "#2c3e50"
-	ColorSubtitle = "#7f8c8d"
-	ColorText     = "#555"
-	ColorTextBold = "#2c3e50"
-	ColorDim      = "#95a5a6"
-	ColorCardBg   = "#f8f9fa"
-	ColorCardBdr  = "#dee2e6"
-	ColorFastest  = "#27ae60"
-	ColorSlowest  = "#e74c3c"
-	ColorWarn     = "#e67e22"
+	ColorTitle     = "#2c3e50"
+	ColorSubtitle  = "#7f8c8d"
+	ColorText      = "#555"
+	ColorDim       = "#95a5a6"
+	ColorGrid      = "#dee2e6"
+	ColorPaper     = "#fdf6e3"
+	ColorDeltaUp   = "#27ae60" // improvement delta
+	ColorDeltaDown = "#e74c3c"
+	ColorAxisMem   = "#2c3e50"
 
 	FontMono = "Menlo, Consolas, 'Liberation Mono', monospace"
 	FontSans = "-apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif"

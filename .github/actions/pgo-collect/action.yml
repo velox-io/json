@@ -1,0 +1,162 @@
+name: 'PGO Collect'
+description: >
+  Install LLVM clang, run instrumentation PGO collection for one native
+  module (encvm|ndec) on the host platform, upload per-mode syso + profdata
+  as an artifact. Downloaded artifacts are manually committed back.
+
+inputs:
+  module:
+    description: Native module to PGO (encvm|ndec)
+    required: true
+  modes:
+    description: Space-separated modes (encvm 'fast full compact', ndec 'default')
+    required: true
+  target_os:
+    description: Target OS (windows|linux|darwin), must match the runner
+    required: true
+  target_arch:
+    description: Target arch (amd64|arm64), must match the runner
+    required: true
+  llvm_version:
+    description: LLVM release version
+    default: '22.1.8'
+  retention_days:
+    description: Artifact retention in days
+    default: '30'
+
+runs:
+  using: composite
+  steps:
+  - name: Cache LLVM
+    id: llvm-cache
+    uses: actions/cache@v5
+    with:
+      path: .llvm
+      key: llvm-${{ inputs.llvm_version }}-${{ inputs.target_os }}-${{ inputs.target_arch }}
+
+  - name: Install LLVM
+    shell: bash
+    if: steps.llvm-cache.outputs.cache-hit != 'true'
+    run: |
+      set -x
+      case "${{ inputs.target_os }}/${{ inputs.target_arch }}" in
+        windows/amd64) _asset="LLVM-${{ inputs.llvm_version }}-win64.exe" ;;
+        linux/amd64)   _asset="LLVM-${{ inputs.llvm_version }}-Linux-X64.tar.xz" ;;
+        linux/arm64)   _asset="LLVM-${{ inputs.llvm_version }}-Linux-ARM64.tar.xz" ;;
+        darwin/arm64)  _asset="LLVM-${{ inputs.llvm_version }}-macOS-ARM64.tar.xz" ;;
+        *) echo "::error::unsupported target ${{ inputs.target_os }}/${{ inputs.target_arch }}"; exit 1 ;;
+      esac
+      curl -fSL --retry 3 --max-time 600 -o "$RUNNER_TEMP/llvm-pkg" \
+        "https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ inputs.llvm_version }}/${_asset}"
+      _tree="$RUNNER_TEMP/llvm-tree"
+      rm -rf "$_tree"
+      mkdir -p "$_tree"
+      case "${{ inputs.target_os }}" in
+        windows)
+          # Unpack the NSIS payload with 7z instead of running the installer:
+          # its silent install hung for over an hour in the non-interactive
+          # session (likely a UAC relaunch waiting on consent), while 7z
+          # extracts the identical file tree in about a minute, no elevation
+          # and no UI. clang locates its resource dir relative to the binary,
+          # so the unpacked tree works as-is.
+          _7z="$(command -v 7z || echo '/c/Program Files/7-Zip/7z.exe')"
+          "$_7z" x -y -o"$_tree" "$RUNNER_TEMP/llvm-pkg" > /dev/null
+          ;;
+        *)
+          tar -xJf "$RUNNER_TEMP/llvm-pkg" -C "$_tree"
+          ;;
+      esac
+      rm -f "$RUNNER_TEMP/llvm-pkg"
+      # The release tarballs wrap the tree in a single top directory; the 7z
+      # payload does not. Locate the bin/ directory and adopt its parent.
+      _bin="$(find "$_tree" -maxdepth 2 -type d -name bin)"
+      _bin="${_bin%%$'\n'*}"
+      [ -n "$_bin" ] || { echo "::error::no bin/ under extracted LLVM tree"; exit 1; }
+      mv "$(dirname "$_bin")" .llvm
+
+  - name: Add LLVM to PATH
+    shell: bash
+    run: |
+      case "${{ inputs.target_os }}" in
+        windows) echo "$(cygpath -m "$PWD/.llvm/bin")" >> $GITHUB_PATH ;;
+        *)       echo "$PWD/.llvm/bin" >> $GITHUB_PATH ;;
+      esac
+
+  - name: Verify clang >= 22
+    shell: bash
+    run: |
+      # Capture first, then match: under the runner's pipefail bash, an
+      # early-exiting `head -1`/`grep -q` can SIGPIPE the upstream and
+      # fail the step spuriously.
+      _clang_ver="$(clang --version | head -1)"
+      echo "$_clang_ver"
+      echo "$_clang_ver" | grep -qE "clang version (2[2-9]|[3-9][0-9])" || {
+        echo "::error::LLVM clang >= 22 required (gen-natives.sh aborts on older clang)"
+        exit 1
+      }
+      command -v llvm-profdata >/dev/null || {
+        echo "::error::llvm-profdata not found in LLVM install"
+        exit 1
+      }
+
+  - name: Run PGO collection
+    shell: bash
+    run: |
+      # Modes are collected sequentially: mode copies share internal function
+      # names, so each mode needs its own workload run, merged profile
+      # (instr-<mode>.profdata) and syso rebuild (scripts/pgo-collect-instr.sh).
+      make pgo-instr-collect MODULE=${{ inputs.module }} MODES='${{ inputs.modes }}' \
+        TARGET_OS=${{ inputs.target_os }} TARGET_ARCH=${{ inputs.target_arch }}
+
+  - name: Collect artifact paths
+    id: paths
+    shell: bash
+    run: |
+      set -eu
+      case "${{ inputs.target_arch }}" in
+        amd64) _isa=avx2 ;;
+        arm64) _isa=neon ;;
+        *) echo "::error::unsupported arch ${{ inputs.target_arch }}"; exit 1 ;;
+      esac
+      _m=${{ inputs.module }}
+      mkdir -p .local/pgo-data
+      : > .local/pgo-data/artifact-paths.txt
+      for _mode in ${{ inputs.modes }}; do
+        _syso="native/${_m}/${_m}_${_mode}_${_isa}_${{ inputs.target_os }}_${{ inputs.target_arch }}.syso"
+        _prof=".local/pgo-data/instr-${_mode}.profdata"
+        # Log to stderr: the group's stdout feeds $GITHUB_OUTPUT.
+        ls -la "$_syso" "$_prof" >&2
+        echo "$_syso" >> .local/pgo-data/artifact-paths.txt
+        echo "$_prof" >> .local/pgo-data/artifact-paths.txt
+      done
+      {
+        echo "paths<<PGO_EOF"
+        cat .local/pgo-data/artifact-paths.txt
+        echo "PGO_EOF"
+      } >> "$GITHUB_OUTPUT"
+
+  - name: Upload PGO artifacts
+    uses: actions/upload-artifact@v6
+    with:
+      name: pgo-${{ inputs.module }}-${{ inputs.target_os }}-${{ inputs.target_arch }}
+      path: ${{ steps.paths.outputs.paths }}
+      retention-days: ${{ inputs.retention_days }}
+      if-no-files-found: error
+
+  - name: Summary
+    if: always()
+    shell: bash
+    run: |
+      echo "## PGO ${{ inputs.module }} ${{ inputs.target_os }}/${{ inputs.target_arch }}" >> $GITHUB_STEP_SUMMARY
+      echo "" >> $GITHUB_STEP_SUMMARY
+      # Read the path list from the file: the step output spans multiple
+      # lines, which cannot be interpolated into this script text.
+      if [ -s .local/pgo-data/artifact-paths.txt ]; then
+        while IFS= read -r _p; do
+          echo "- $(basename "$_p"): $(ls -la "$_p" 2>/dev/null | awk '{print $5}') bytes" >> $GITHUB_STEP_SUMMARY
+        done < .local/pgo-data/artifact-paths.txt
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "After downloading the artifact, copy the .syso files to native/${{ inputs.module }}/ and commit them back to the main branch." >> $GITHUB_STEP_SUMMARY
+      else
+        echo "- PGO collection failed, see the logs above." >> $GITHUB_STEP_SUMMARY
+      fi

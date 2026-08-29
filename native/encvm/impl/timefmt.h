@@ -10,6 +10,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "macros.h"
 
 /* Go time.Time memory layout (24 bytes)
  *
@@ -33,8 +34,7 @@ _Static_assert(sizeof(GoTime) == 24, "GoTime must be 24 bytes");
 /* Check whether this Location can be handled natively.
  * NULL=UTC, zone_len==1=FixedZone → native.  Otherwise yield. */
 static inline int vj_time_can_native(const void *loc) {
-  if (loc == NULL)
-    return 1;
+  if (loc == NULL) return 1;
   int64_t zone_len = *(const int64_t *)((const uint8_t *)loc + 24);
   return zone_len == 1;
 }
@@ -43,8 +43,7 @@ static inline int vj_time_can_native(const void *loc) {
  * Caller must ensure loc != NULL and vj_time_can_native() == 1. */
 static inline int32_t vj_time_get_offset(const void *loc) {
   const uint8_t *zone_ptr = *(const uint8_t *const *)((const uint8_t *)loc + 16);
-  if (zone_ptr == NULL)
-    return 0;
+  if (zone_ptr == NULL) return 0;
   return (int32_t)(*(const int64_t *)(zone_ptr + 16));
 }
 
@@ -83,8 +82,10 @@ static inline void vj_write_2d(uint8_t *buf, int val) {
 
 /* Format time.Time as RFC3339Nano into buf.  Returns bytes written.
  * Max output: "2006-01-02T15:04:05.999999999+00:00" = 37 bytes (with quotes).
- * year_out receives the computed year (caller checks [0, 9999]). */
-static inline int vj_write_rfc3339nano(uint8_t *buf, const GoTime *t, int32_t tz_offset, int *year_out) {
+ * year_out receives the computed year (caller checks [0, 9999]).
+ *
+ * NOINLINE: time.Time fields are rare, keeps the body out of the VM function. */
+NOINLINE static int vj_write_rfc3339nano(uint8_t *buf, const GoTime *t, int32_t tz_offset, int *year_out) {
   uint8_t *start = buf;
 
   int64_t isec;
@@ -98,7 +99,7 @@ static inline int vj_write_rfc3339nano(uint8_t *buf, const GoTime *t, int32_t tz
   uint64_t days    = abs / VJ_SECONDS_PER_DAY;
   uint32_t day_sec = (uint32_t)(abs % VJ_SECONDS_PER_DAY);
 
-  /* Neri-Schneider: days → year/month/day */
+  /* Neri-Schneider: days to year/month/day */
   uint64_t d4      = 4 * days + 3;
   uint64_t century = d4 / 146097;
   uint32_t cd      = (uint32_t)(d4 % 146097) | 3;
@@ -168,7 +169,7 @@ static inline int vj_write_rfc3339nano(uint8_t *buf, const GoTime *t, int32_t tz
     }
   }
 
-  /* Timezone: "Z" or "±HH:MM" */
+  /* Timezone: "Z" or +/-HH:MM */
   if (tz_offset == 0) {
     *buf++ = 'Z';
   } else {

@@ -1,0 +1,125 @@
+goos: darwin
+goarch: arm64
+pkg: dev.local/benchmark
+cpu: Apple M4 Pro
+
+Benchmark_Marshal_Tiny_Sonic-14                       	31503428	       188.8 ns/op	 582.53 MB/s	     128 B/op	       2 allocs/op
+Benchmark_Marshal_Tiny_Sonic-14                       	31694611	       188.9 ns/op	 582.32 MB/s	     128 B/op	       2 allocs/op
+Benchmark_Marshal_Small_Sonic-14                      	 7537130	       809.1 ns/op	 451.09 MB/s	     400 B/op	       2 allocs/op
+Benchmark_Marshal_Small_Sonic-14                      	 7497369	       810.0 ns/op	 450.61 MB/s	     400 B/op	       2 allocs/op
+Benchmark_Marshal_Medium_Sonic-14                     	 2968020	      2032 ns/op	 829.28 MB/s	    1809 B/op	       2 allocs/op
+Benchmark_Marshal_Medium_Sonic-14                     	 2962736	      2032 ns/op	 829.31 MB/s	    1808 B/op	       2 allocs/op
+Benchmark_Marshal_EscapeHeavy_Sonic-14                	 1541928	      3888 ns/op	 722.80 MB/s	    3089 B/op	       2 allocs/op
+Benchmark_Marshal_EscapeHeavy_Sonic-14                	 1552707	      3875 ns/op	 725.09 MB/s	    3089 B/op	       2 allocs/op
+Benchmark_Marshal_KubePods_Sonic-14                   	  289245	     20718 ns/op	 635.88 MB/s	   14172 B/op	       8 allocs/op
+Benchmark_Marshal_KubePods_Sonic-14                   	  288058	     20736 ns/op	 635.32 MB/s	   14166 B/op	       8 allocs/op
+Benchmark_Marshal_Twitter_Sonic-14                    	   25990	    229838 ns/op	1120.52 MB/s	  272260 B/op	     106 allocs/op
+Benchmark_Marshal_Twitter_Sonic-14                    	   25998	    229693 ns/op	1121.23 MB/s	  272217 B/op	     106 allocs/op
+Benchmark_Marshal_TwitterTyped_Sonic-14               	   32295	    184814 ns/op	1393.50 MB/s	  262244 B/op	       2 allocs/op
+Benchmark_Marshal_TwitterTyped_Sonic-14               	   32402	    184371 ns/op	1396.85 MB/s	  262217 B/op	       2 allocs/op
+Benchmark_Marshal_MapAny_Sonic-14                     	  103027	     58545 ns/op	 224.61 MB/s	   30776 B/op	     181 allocs/op
+Benchmark_Marshal_MapAny_Sonic-14                     	  105435	     58509 ns/op	 224.75 MB/s	   30779 B/op	     181 allocs/op
+Benchmark_Marshal_JSONBenchCanadaGeometry_Sonic-14    	    9079	    656326 ns/op	 411.99 MB/s	  278591 B/op	       2 allocs/op
+Benchmark_Marshal_JSONBenchCanadaGeometry_Sonic-14    	    9067	    659102 ns/op	 410.26 MB/s	  278560 B/op	       2 allocs/op
+Benchmark_Marshal_JSONBenchCITMCatalog_Sonic-14       	    9375	    628273 ns/op	 795.44 MB/s	  508763 B/op	      10 allocs/op
+Benchmark_Marshal_JSONBenchCITMCatalog_Sonic-14       	    9550	    628321 ns/op	 795.38 MB/s	  508732 B/op	      10 allocs/op
+Benchmark_Marshal_JSONBenchGolangSource_Sonic-14      	    2198	   2713714 ns/op	 715.06 MB/s	 7736010 B/op	      21 allocs/op
+Benchmark_Marshal_JSONBenchGolangSource_Sonic-14      	    2182	   2730958 ns/op	 710.55 MB/s	 7736004 B/op	      21 allocs/op
+Benchmark_Marshal_JSONBenchStringUnicode_Sonic-14     	 1703556	      3529 ns/op	5067.22 MB/s	   18466 B/op	       2 allocs/op
+Benchmark_Marshal_JSONBenchStringUnicode_Sonic-14     	 1682140	      3536 ns/op	5056.55 MB/s	   18470 B/op	       2 allocs/op
+Benchmark_Marshal_JSONBenchSyntheaFHIR_Sonic-14       	    1299	   4597568 ns/op	 693.73 MB/s	18985012 B/op	   15978 allocs/op
+Benchmark_Marshal_JSONBenchSyntheaFHIR_Sonic-14       	    1299	   4614058 ns/op	 691.25 MB/s	18985203 B/op	   15978 allocs/op
+Benchmark_Marshal_JSONBenchTwitterStatus_Sonic-14     	   16869	    354677 ns/op	1401.65 MB/s	  501729 B/op	      22 allocs/op
+Benchmark_Marshal_JSONBenchTwitterStatus_Sonic-14     	   16856	    355682 ns/op	1397.69 MB/s	  501745 B/op	      22 allocs/op
+PASS
+
+Benchmark_Marshal_Tiny_GoJSON-14                       	72513211	        79.19 ns/op	1389.11 MB/s	     112 B/op	       1 allocs/op
+Benchmark_Marshal_Tiny_GoJSON-14                       	74782623	        79.58 ns/op	1382.28 MB/s	     112 B/op	       1 allocs/op
+Benchmark_Marshal_Small_GoJSON-14                      	17262255	       352.8 ns/op	1034.68 MB/s	     384 B/op	       1 allocs/op
+Benchmark_Marshal_Small_GoJSON-14                      	17315272	       352.0 ns/op	1037.04 MB/s	     384 B/op	       1 allocs/op
+Benchmark_Marshal_Medium_GoJSON-14                     	 8551125	       697.5 ns/op	2415.89 MB/s	    1792 B/op	       1 allocs/op
+Benchmark_Marshal_Medium_GoJSON-14                     	 8554977	       702.2 ns/op	2399.59 MB/s	    1792 B/op	       1 allocs/op
+Benchmark_Marshal_EscapeHeavy_GoJSON-14                	 3537727	      1688 ns/op	1664.66 MB/s	    3072 B/op	       1 allocs/op
+Benchmark_Marshal_EscapeHeavy_GoJSON-14                	 3574473	      1673 ns/op	1679.70 MB/s	    3072 B/op	       1 allocs/op
+Benchmark_Marshal_KubePods_GoJSON-14                   	  880284	      6652 ns/op	1980.45 MB/s	   14577 B/op	      10 allocs/op
+Benchmark_Marshal_KubePods_GoJSON-14                   	  882015	      6632 ns/op	1986.54 MB/s	   14577 B/op	      10 allocs/op
+Benchmark_Marshal_Twitter_GoJSON-14                    	   31717	    188515 ns/op	1366.14 MB/s	  275555 B/op	     119 allocs/op
+Benchmark_Marshal_Twitter_GoJSON-14                    	   31623	    189084 ns/op	1362.03 MB/s	  275548 B/op	     119 allocs/op
+Benchmark_Marshal_TwitterTyped_GoJSON-14               	   44018	    134912 ns/op	1908.93 MB/s	  262183 B/op	       1 allocs/op
+Benchmark_Marshal_TwitterTyped_GoJSON-14               	   44612	    134588 ns/op	1913.53 MB/s	  262177 B/op	       1 allocs/op
+Benchmark_Marshal_MapAny_GoJSON-14                     	  124318	     48110 ns/op	 273.33 MB/s	   44381 B/op	     232 allocs/op
+Benchmark_Marshal_MapAny_GoJSON-14                     	  127359	     48200 ns/op	 272.82 MB/s	   44379 B/op	     232 allocs/op
+Benchmark_Marshal_JSONBenchCanadaGeometry_GoJSON-14    	   10000	    544716 ns/op	 496.41 MB/s	  278535 B/op	       1 allocs/op
+Benchmark_Marshal_JSONBenchCanadaGeometry_GoJSON-14    	   10000	    543624 ns/op	 497.41 MB/s	  278535 B/op	       1 allocs/op
+Benchmark_Marshal_JSONBenchCITMCatalog_GoJSON-14       	   19790	    303853 ns/op	1644.75 MB/s	  520153 B/op	      11 allocs/op
+Benchmark_Marshal_JSONBenchCITMCatalog_GoJSON-14       	   19413	    306275 ns/op	1631.74 MB/s	  520328 B/op	      11 allocs/op
+Benchmark_Marshal_JSONBenchGolangSource_GoJSON-14      	    4630	   1279894 ns/op	1516.12 MB/s	 1941554 B/op	       1 allocs/op
+Benchmark_Marshal_JSONBenchGolangSource_GoJSON-14      	    4652	   1270321 ns/op	1527.54 MB/s	 1941551 B/op	       1 allocs/op
+Benchmark_Marshal_JSONBenchStringUnicode_GoJSON-14     	  284414	     20761 ns/op	 862.76 MB/s	   18432 B/op	       1 allocs/op
+Benchmark_Marshal_JSONBenchStringUnicode_GoJSON-14     	  290055	     20680 ns/op	 866.15 MB/s	   18432 B/op	       1 allocs/op
+Benchmark_Marshal_JSONBenchSyntheaFHIR_GoJSON-14       	    2564	   2379116 ns/op	1340.86 MB/s	 4005125 B/op	   16094 allocs/op
+Benchmark_Marshal_JSONBenchSyntheaFHIR_GoJSON-14       	    2599	   2374924 ns/op	1343.22 MB/s	 4005123 B/op	   16094 allocs/op
+Benchmark_Marshal_JSONBenchTwitterStatus_GoJSON-14     	   21974	    274190 ns/op	1827.83 MB/s	  510817 B/op	      26 allocs/op
+Benchmark_Marshal_JSONBenchTwitterStatus_GoJSON-14     	   22060	    273729 ns/op	1830.91 MB/s	  511051 B/op	      26 allocs/op
+PASS
+
+Benchmark_Marshal_Tiny_JSONv2-14                       	31794241	       186.7 ns/op	 589.06 MB/s	     112 B/op	       1 allocs/op
+Benchmark_Marshal_Tiny_JSONv2-14                       	31612050	       187.1 ns/op	 587.99 MB/s	     112 B/op	       1 allocs/op
+Benchmark_Marshal_Small_JSONv2-14                      	 7244616	       823.5 ns/op	 443.25 MB/s	     384 B/op	       1 allocs/op
+Benchmark_Marshal_Small_JSONv2-14                      	 7314499	       817.2 ns/op	 446.66 MB/s	     384 B/op	       1 allocs/op
+Benchmark_Marshal_Medium_JSONv2-14                     	 2548492	      2319 ns/op	 726.48 MB/s	    1792 B/op	       1 allocs/op
+Benchmark_Marshal_Medium_JSONv2-14                     	 2547934	      2331 ns/op	 722.96 MB/s	    1792 B/op	       1 allocs/op
+Benchmark_Marshal_EscapeHeavy_JSONv2-14                	 1747575	      3435 ns/op	 817.99 MB/s	    3072 B/op	       1 allocs/op
+Benchmark_Marshal_EscapeHeavy_JSONv2-14                	 1747605	      3440 ns/op	 816.97 MB/s	    3072 B/op	       1 allocs/op
+Benchmark_Marshal_KubePods_JSONv2-14                   	  274603	     21197 ns/op	 621.52 MB/s	   13760 B/op	      13 allocs/op
+Benchmark_Marshal_KubePods_JSONv2-14                   	  276638	     21344 ns/op	 617.23 MB/s	   13760 B/op	      13 allocs/op
+Benchmark_Marshal_Twitter_JSONv2-14                    	   20054	    300852 ns/op	 856.03 MB/s	  264208 B/op	     466 allocs/op
+Benchmark_Marshal_Twitter_JSONv2-14                    	   19993	    300641 ns/op	 856.63 MB/s	  264208 B/op	     466 allocs/op
+Benchmark_Marshal_TwitterTyped_JSONv2-14               	   22076	    269771 ns/op	 954.66 MB/s	  262152 B/op	       1 allocs/op
+Benchmark_Marshal_TwitterTyped_JSONv2-14               	   22059	    272216 ns/op	 946.08 MB/s	  262152 B/op	       1 allocs/op
+Benchmark_Marshal_MapAny_JSONv2-14                     	  231844	     25918 ns/op	 507.36 MB/s	   13664 B/op	       7 allocs/op
+Benchmark_Marshal_MapAny_JSONv2-14                     	  230602	     25665 ns/op	 512.38 MB/s	   13664 B/op	       7 allocs/op
+Benchmark_Marshal_JSONBenchCanadaGeometry_JSONv2-14    	   10000	    577225 ns/op	 468.45 MB/s	  278536 B/op	       1 allocs/op
+Benchmark_Marshal_JSONBenchCanadaGeometry_JSONv2-14    	   10000	    578000 ns/op	 467.83 MB/s	  278536 B/op	       1 allocs/op
+Benchmark_Marshal_JSONBenchCITMCatalog_JSONv2-14       	    8182	    731314 ns/op	 683.36 MB/s	  509983 B/op	     125 allocs/op
+Benchmark_Marshal_JSONBenchCITMCatalog_JSONv2-14       	    8071	    723303 ns/op	 690.93 MB/s	  509982 B/op	     125 allocs/op
+Benchmark_Marshal_JSONBenchGolangSource_JSONv2-14      	    2326	   2543976 ns/op	 762.77 MB/s	 1941557 B/op	       1 allocs/op
+Benchmark_Marshal_JSONBenchGolangSource_JSONv2-14      	    2379	   2531914 ns/op	 766.41 MB/s	 1941557 B/op	       1 allocs/op
+Benchmark_Marshal_JSONBenchStringUnicode_JSONv2-14     	  343832	     17402 ns/op	1027.57 MB/s	   18432 B/op	       1 allocs/op
+Benchmark_Marshal_JSONBenchStringUnicode_JSONv2-14     	  331444	     17533 ns/op	1019.90 MB/s	   18432 B/op	       1 allocs/op
+Benchmark_Marshal_JSONBenchSyntheaFHIR_JSONv2-14       	    1195	   4939837 ns/op	 632.67 MB/s	 3133413 B/op	     276 allocs/op
+Benchmark_Marshal_JSONBenchSyntheaFHIR_JSONv2-14       	    1213	   4909230 ns/op	 636.61 MB/s	 3133405 B/op	     276 allocs/op
+Benchmark_Marshal_JSONBenchTwitterStatus_JSONv2-14     	   10000	    527238 ns/op	 938.11 MB/s	  500572 B/op	      49 allocs/op
+Benchmark_Marshal_JSONBenchTwitterStatus_JSONv2-14     	   10000	    530433 ns/op	 932.45 MB/s	  500572 B/op	      49 allocs/op
+PASS
+
+Benchmark_Marshal_Tiny_Velox-14                       	100000000	        56.56 ns/op	1944.83 MB/s	     138 B/op	       0 allocs/op
+Benchmark_Marshal_Tiny_Velox-14                       	100000000	        56.59 ns/op	1943.84 MB/s	     138 B/op	       0 allocs/op
+Benchmark_Marshal_Small_Velox-14                      	44263795	       134.4 ns/op	2715.60 MB/s	     372 B/op	       0 allocs/op
+Benchmark_Marshal_Small_Velox-14                      	44345541	       134.3 ns/op	2718.69 MB/s	     372 B/op	       0 allocs/op
+Benchmark_Marshal_Medium_Velox-14                     	23951215	       249.6 ns/op	6749.66 MB/s	    1724 B/op	       0 allocs/op
+Benchmark_Marshal_Medium_Velox-14                     	23980236	       250.6 ns/op	6724.56 MB/s	    1724 B/op	       0 allocs/op
+Benchmark_Marshal_EscapeHeavy_Velox-14                	 6793488	       880.3 ns/op	3191.93 MB/s	    2979 B/op	       0 allocs/op
+Benchmark_Marshal_EscapeHeavy_Velox-14                	 6736554	       877.6 ns/op	3202.05 MB/s	    2979 B/op	       0 allocs/op
+Benchmark_Marshal_KubePods_Velox-14                   	 2940975	      2015 ns/op	6536.43 MB/s	   13632 B/op	       0 allocs/op
+Benchmark_Marshal_KubePods_Velox-14                   	 2968140	      2019 ns/op	6524.66 MB/s	   13632 B/op	       0 allocs/op
+Benchmark_Marshal_Twitter_Velox-14                    	  177160	     33740 ns/op	7632.95 MB/s	  266255 B/op	       0 allocs/op
+Benchmark_Marshal_Twitter_Velox-14                    	  177334	     33808 ns/op	7617.78 MB/s	  266251 B/op	       0 allocs/op
+Benchmark_Marshal_TwitterTyped_Velox-14               	  220245	     27491 ns/op	9368.01 MB/s	  266252 B/op	       0 allocs/op
+Benchmark_Marshal_TwitterTyped_Velox-14               	  218502	     27542 ns/op	9350.67 MB/s	  266250 B/op	       0 allocs/op
+Benchmark_Marshal_MapAny_Velox-14                     	 1000000	      5883 ns/op	2235.33 MB/s	   13632 B/op	       0 allocs/op
+Benchmark_Marshal_MapAny_Velox-14                     	 1000000	      5877 ns/op	2237.68 MB/s	   13632 B/op	       0 allocs/op
+Benchmark_Marshal_JSONBenchCanadaGeometry_Velox-14    	   27060	    221756 ns/op	1219.37 MB/s	  282632 B/op	       0 allocs/op
+Benchmark_Marshal_JSONBenchCanadaGeometry_Velox-14    	   26986	    221969 ns/op	1218.20 MB/s	  282632 B/op	       0 allocs/op
+Benchmark_Marshal_JSONBenchCITMCatalog_Velox-14       	   35085	    170572 ns/op	2929.85 MB/s	  516125 B/op	       0 allocs/op
+Benchmark_Marshal_JSONBenchCITMCatalog_Velox-14       	   35005	    170883 ns/op	2924.51 MB/s	  516095 B/op	       0 allocs/op
+Benchmark_Marshal_JSONBenchGolangSource_Velox-14      	   12327	    486812 ns/op	3986.08 MB/s	 2003151 B/op	       0 allocs/op
+Benchmark_Marshal_JSONBenchGolangSource_Velox-14      	   12313	    487523 ns/op	3980.27 MB/s	 2002826 B/op	       0 allocs/op
+Benchmark_Marshal_JSONBenchStringUnicode_Velox-14     	 5071934	      1181 ns/op	15141.15 MB/s	   20480 B/op	       0 allocs/op
+Benchmark_Marshal_JSONBenchStringUnicode_Velox-14     	 5088622	      1182 ns/op	15132.09 MB/s	   20480 B/op	       0 allocs/op
+Benchmark_Marshal_JSONBenchSyntheaFHIR_Velox-14       	   10000	    524551 ns/op	6080.37 MB/s	 4995157 B/op	       0 allocs/op
+Benchmark_Marshal_JSONBenchSyntheaFHIR_Velox-14       	   10000	    526750 ns/op	6054.98 MB/s	 4995157 B/op	       0 allocs/op
+Benchmark_Marshal_JSONBenchTwitterStatus_Velox-14     	  106422	     54753 ns/op	9079.64 MB/s	  516108 B/op	       0 allocs/op
+Benchmark_Marshal_JSONBenchTwitterStatus_Velox-14     	  110150	     54456 ns/op	9129.16 MB/s	  516108 B/op	       0 allocs/op
+PASS
+

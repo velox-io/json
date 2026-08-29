@@ -25,9 +25,10 @@
 //   - Keys must not contain 0x00, 0x22 ('"'), or 0x5C ('\\').
 //   - WINDOW..HAND require key length <= 63 bytes; TABLE has no upper bound.
 //   - ndec_lookup_find: `key.str` must sit in a padded buffer with at least
-//     64 bytes of trailing readable padding , AND key.str[key.len] must be '"'.
-//     Uniform for all tiers.
+//     64 bytes of trailing readable padding (SIMD compares and window reads
+//     may touch bytes past key.len). Uniform for all tiers.
 //   - `key.len` must be the actual key length (never scanned by find).
+//     Query keys may contain any byte value, including 0x22.
 //   - Keys are copied into the lookup at init time. The caller may free the
 //     input keys array immediately after ndec_lookup_init returns.
 
@@ -68,6 +69,7 @@ typedef enum {
 } ndec_lookup_tier;
 
 typedef unsigned ndec_lookup_tier_mask;
+
 // clang-format off
 #define NDEC_LOOKUP_TIERS_ALL     ((ndec_lookup_tier_mask)(NDEC_LOOKUP_TIER_WINDOW | NDEC_LOOKUP_TIER_GPERF | \
                                                            NDEC_LOOKUP_TIER_HAND  | NDEC_LOOKUP_TIER_TABLE))
@@ -131,7 +133,6 @@ typedef enum {
 
 typedef struct {
   ndec_lookup_tier kind;
-  uint8_t direction;
   uint8_t byte_offset;
   uint8_t shift;
   ndec_lookup_cmp_kind cmp;
@@ -274,29 +275,16 @@ INLINE uint8_t ndec_lookup_read_window(const char *p, uint8_t byte_offset, uint8
   return (uint8_t)((w >> shift) & 0xFFu);
 }
 
-INLINE uint8_t ndec_lookup_read_window_back(const char *p, size_t len, uint8_t byte_offset, uint8_t shift) {
-  uint16_t w;
-  __builtin_memcpy(&w, p + len - byte_offset, sizeof(w));
-  return (uint8_t)((w >> shift) & 0xFFu);
-}
-
 INLINE int ndec_lookup_window_find(const ndec_lookup_window *w, const char *p, size_t len) {
-  uint8_t ki;
-  if (w->direction == 0) {
-    ki = w->window_to_key[ndec_lookup_read_window(p, w->byte_offset, w->shift)];
-  } else {
-    if (len < w->byte_offset)
-      return -1;
-    ki = w->window_to_key[ndec_lookup_read_window_back(p, len, w->byte_offset, w->shift)];
-  }
-  if (ki >= w->n)
-    return -1;
+  uint8_t ki = w->window_to_key[ndec_lookup_read_window(p, w->byte_offset, w->shift)];
+  if (ki >= w->n) return -1;
   const uint8_t *klen = (const uint8_t *)w + sizeof(ndec_lookup_window);
-  if (p[klen[ki]] != '"')
-    return -1;
+  /* Length compare, not a quote sentinel: a decoded key may carry an embedded
+   * '"' whose position coincides with a shorter stored key's end, and a prefix
+   * compare would then match. Query keys can hold any byte content. */
+  if (klen[ki] != len) return -1;
   const char *stored = (const char *)w + w->key_bytes_off + (size_t)ki * w->stride;
-  if (!ndec_lookup_compare_bytes(w->cmp, p, stored, klen[ki]))
-    return -1;
+  if (!ndec_lookup_compare_bytes(w->cmp, p, stored, klen[ki])) return -1;
   return (int)ki;
 }
 
@@ -309,35 +297,29 @@ INLINE int ndec_lookup_gperf_find(const ndec_lookup_gperf *gp, const char *p, si
     if (np >= 1) {
       uint8_t pos = gp->positions[0];
       size_t idx  = (pos == NDEC_LOOKUP_GPERF_LAST_CH) ? (len - 1) : (size_t)pos;
-      if (idx < len)
-        h += asso0[(unsigned char)p[idx]];
+      if (idx < len) h += asso0[(unsigned char)p[idx]];
     }
     if (np == 2) {
       uint8_t pos = gp->positions[1];
       size_t idx  = (pos == NDEC_LOOKUP_GPERF_LAST_CH) ? (len - 1) : (size_t)pos;
-      if (idx < len)
-        h += asso0[256u + (unsigned char)p[idx]];
+      if (idx < len) h += asso0[256u + (unsigned char)p[idx]];
     }
   } else {
     for (uint8_t i = 0; i < np; i++) {
       uint8_t pos = gp->positions[i];
       size_t idx  = (pos == NDEC_LOOKUP_GPERF_LAST_CH) ? (len - 1) : (size_t)pos;
-      if (idx < len)
-        h += asso0[(size_t)i * 256u + (unsigned char)p[idx]];
+      if (idx < len) h += asso0[(size_t)i * 256u + (unsigned char)p[idx]];
     }
   }
 
   size_t slot          = h & (gp->table_size - 1);
   const uint8_t *slots = (const uint8_t *)gp + gp->slots_off;
   uint8_t ki           = slots[slot];
-  if (ki >= gp->n)
-    return -1;
+  if (ki >= gp->n) return -1;
   const uint8_t *klen = (const uint8_t *)gp + gp->key_len_off;
-  if (klen[ki] != len)
-    return -1;
+  if (klen[ki] != len) return -1;
   const char *stored = (const char *)gp + gp->key_bytes_off + (size_t)ki * gp->stride;
-  if (!ndec_lookup_compare_bytes(gp->cmp, p, stored, klen[ki]))
-    return -1;
+  if (!ndec_lookup_compare_bytes(gp->cmp, p, stored, klen[ki])) return -1;
   return (int)ki;
 }
 
@@ -375,14 +357,11 @@ INLINE int ndec_lookup_hand_find(const ndec_lookup_hand *hd, const char *p, size
       (hd->variant == NDEC_LOOKUP_HD_HASH_2) ? ndec_lookup_hd_hash_2(p, len) : ndec_lookup_hd_hash_4(p, len);
   size_t slot = ((size_t)hd->displacement[bucket] + kh) & hd->mask;
   uint8_t ki  = hd->slot_to_key[slot];
-  if (ki >= hd->n)
-    return -1;
+  if (ki >= hd->n) return -1;
   const uint8_t *klen = (const uint8_t *)hd + sizeof(ndec_lookup_hand);
-  if (klen[ki] != len)
-    return -1;
+  if (klen[ki] != len) return -1;
   const char *stored = (const char *)hd + hd->key_bytes_off + (size_t)ki * hd->stride;
-  if (!ndec_lookup_compare_bytes(hd->cmp, p, stored, klen[ki]))
-    return -1;
+  if (!ndec_lookup_compare_bytes(hd->cmp, p, stored, klen[ki])) return -1;
   return (int)ki;
 }
 
@@ -402,12 +381,10 @@ INLINE int ndec_lookup_table_find(const ndec_lookup_table *fb, const char *p, si
   uint64_t h = ndec_lookup_table_hash(p, len);
   size_t pos = h & fb->mask;
   for (;;) {
-    if (fb->slots[pos].value_p1 == 0)
-      return -1;
+    if (fb->slots[pos].value_p1 == 0) return -1;
     if (fb->slots[pos].key_len == len) {
       const char *stored = (const char *)fb + fb->slots[pos].key_off;
-      if (__builtin_memcmp(stored, p, len) == 0)
-        return (int)fb->slots[pos].value_p1 - 1;
+      if (__builtin_memcmp(stored, p, len) == 0) return (int)fb->slots[pos].value_p1 - 1;
     }
     pos = (pos + 1) & fb->mask;
   }
@@ -416,15 +393,22 @@ INLINE int ndec_lookup_table_find(const ndec_lookup_table *fb, const char *p, si
 // ---- Public API: find (inline dispatcher) ----
 
 INLINE int ndec_lookup_find(const ndec_lookup *l, ndec_lookup_key key) {
-  switch (l->kind) {
-  case NDEC_LOOKUP_TIER_WINDOW:
+  // WINDOW dominates real schemas; predict it hot.
+  if (LIKELY(l->kind == NDEC_LOOKUP_TIER_WINDOW))
     return ndec_lookup_window_find((const ndec_lookup_window *)l, key.str, key.len);
+  switch (l->kind) {
   case NDEC_LOOKUP_TIER_GPERF:
     return ndec_lookup_gperf_find((const ndec_lookup_gperf *)l, key.str, key.len);
   case NDEC_LOOKUP_TIER_HAND:
     return ndec_lookup_hand_find((const ndec_lookup_hand *)l, key.str, key.len);
   case NDEC_LOOKUP_TIER_TABLE:
     return ndec_lookup_table_find((const ndec_lookup_table *)l, key.str, key.len);
+  case NDEC_LOOKUP_TIER_NONE:
+    /* Sentinel for field-less structs (and any other "always miss" caller):
+     * a 4-byte zero region pointed at by the engine. No further memory
+     * access beyond the kind field read above. Kept last so the hot tiers
+     * stay at the top of the compare chain / jump table. */
+    return -1;
   default:
     return -1;
   }
@@ -437,24 +421,22 @@ INLINE int ndec_lookup_find(const ndec_lookup *l, ndec_lookup_key key) {
 
 // ---- Public API: build + introspection (out-of-line) ----
 
+// EXPORT is dllexport on Windows so the trampolines can bind these symbols.
+
 // Upper bound of storage bytes for this config. Returns 0 on invalid config.
-size_t ndec_lookup_size_for(const ndec_lookup_config *cfg);
+EXPORT size_t ndec_lookup_size_for(const ndec_lookup_config *cfg);
 
 // Required size in bytes of the caller-provided build scratch buffer
 // (ndec_lookup_config.scratch). Constant for the library build; callers can
 // allocate once and reuse across ndec_lookup_init calls.
-size_t ndec_lookup_scratch_size(void);
+EXPORT size_t ndec_lookup_scratch_size(void);
 
 // Build a lookup into caller-provided storage. Returns the selected tier
 // on success (positive ndec_lookup_tier), or a negative ndec_lookup_error.
-int ndec_lookup_init(ndec_lookup *storage, size_t storage_size, const ndec_lookup_config *cfg);
+EXPORT int ndec_lookup_init(ndec_lookup *storage, size_t storage_size, const ndec_lookup_config *cfg);
 
-ndec_lookup_tier ndec_lookup_get_tier(const ndec_lookup *l);
-const char *ndec_lookup_tier_name(ndec_lookup_tier t);
-/* Direction-aware variant: when tier is WINDOW, returns "window_fwd" or
-   "window_rev" depending on w->direction; otherwise delegates to
-   ndec_lookup_tier_name. */
-const char *ndec_lookup_tier_name_ex(const ndec_lookup *l);
-size_t ndec_lookup_footprint(const ndec_lookup *l);
+EXPORT ndec_lookup_tier ndec_lookup_get_tier(const ndec_lookup *l);
+EXPORT const char *ndec_lookup_tier_name(ndec_lookup_tier t);
+EXPORT size_t ndec_lookup_footprint(const ndec_lookup *l);
 
 #endif // NDEC_LOOKUP_H

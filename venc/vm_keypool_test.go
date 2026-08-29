@@ -25,7 +25,7 @@ func saveAndInjectKeyPool(used int) (restore func()) {
 // plants pre-existing keys into the fake pool's dedup index, so that
 // subsequent addKey calls for those keys will be dedup hits (ok=true)
 // even though the pool is otherwise full. Each key in `preload` must
-// fit within the `used` region — their offsets are assigned sequentially
+// fit within the `used` region; their offsets are assigned sequentially
 // starting at offset 0.
 func saveAndInjectKeyPoolWithKeys(used int, preload [][]byte) (restore func()) {
 	saved := globalKeyPool.current.Load()
@@ -62,7 +62,7 @@ func saveAndInjectKeyPoolWithKeys(used int, preload [][]byte) (restore func()) {
 // Layer 1: Unit test globalKeyPoolInsert directly
 
 func TestGlobalKeyPoolInsert_OverflowReturnsFalse(t *testing.T) {
-	// Fill the pool to 65530 bytes — only 5 bytes of headroom.
+	// Fill the pool to 65530 bytes, leaving only 5 bytes of headroom.
 	restore := saveAndInjectKeyPool(65530)
 	defer restore()
 
@@ -132,7 +132,7 @@ func TestGlobalKeyPoolInsert_EmptyKeyAlwaysSucceeds(t *testing.T) {
 
 // keyPoolOverflowStruct is a dedicated struct type used ONLY by the
 // key pool overflow end-to-end test. Its field names are chosen to be
-// unique — they won't appear in any other test's key pool entries.
+// unique, so they won't appear in any other test's key pool entries.
 // Since Blueprint compilation is cached per-type via sync.Once, this
 // type must never be used elsewhere.
 type keyPoolOverflowStruct struct {
@@ -168,7 +168,7 @@ func TestKeyPoolOverflow_MarshalProducesCorrectJSON(t *testing.T) {
 		t.Fatalf("Marshal failed: %v", err)
 	}
 
-	// Compare with encoding/json — must produce identical output.
+	// Compare with encoding/json; must produce identical output.
 	want, err := json.Marshal(&v)
 	if err != nil {
 		t.Fatalf("json.Marshal failed: %v", err)
@@ -242,7 +242,7 @@ func TestKeyPoolOverflow_MixedFieldTypes(t *testing.T) {
 	}
 }
 
-// Layer 3: Partial overflow — some fields native, some fallback
+// Layer 3: Partial overflow; some fields native, some fallback
 //
 // This tests the critical scenario where within a single struct's
 // Blueprint, some fields have their keys already in the pool (dedup hit

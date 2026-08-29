@@ -177,26 +177,22 @@ func TestStreamingBufFull_LargeStringIface(t *testing.T) {
 }
 
 // TestStreamingEncoder_RollbackDoesNotConflictWithFlushedBytes pins the
-// invariant that encvm's speculative-key rollback never conflicts with bytes
+// invariant that encvm's iface-yield path never conflicts with bytes
 // already flushed to the writer.
 //
-// OP_INTERFACE speculatively writes the JSON key, then probes the interface
-// cache. A value whose type the C VM cannot compile (here *big.Int via
-// MarshalJSON) returns VJ_IFACE_YIELD, and the VM rolls buf back to before the
-// speculative key write (buf = iface_saved_buf). Go's fallback then re-emits
-// the key itself.
+// OP_INTERFACE probes the interface cache before writing the JSON key.
+// A value whose type the C VM cannot compile (here *big.Int via
+// MarshalJSON) yields VJ_IFACE_YIELD without having written the key.
+// Go's fallback then emits the key + value itself.
 //
-// The concern: if rollback ever undid bytes that flush() had already pushed
-// to the writer, those bytes could not be "un-written" (覆水难收), corrupting
-// the stream. The design prevents this because rollback only touches the
-// in-flight workBuf region (es.buf[len:cap], written this VM call) while flush
-// only drains the already-committed prefix (es.buf[:len]); they occupy disjoint
-// memory and never interleave (flush is Go-side, the VM runs in C between
-// flushes). This test exercises the path under a tiny streaming workBuf so
-// rollback happens near the flush boundary, and asserts:
+// Historically the VM speculatively wrote the key before probing and
+// rolled buf back on yield; this test guards that the key never leaks
+// to the writer on the yield path. It exercises the path under a tiny
+// streaming workBuf so yield happens near the flush boundary, and
+// asserts:
 //
-//   - no rolled-back key leaks to the writer (the speculative key appears
-//     exactly once, written by Go's fallback),
+//   - no key appears in the writer output before Go's fallback emits
+//     it (the key appears exactly once, written by Go),
 //   - the output is byte-identical to a fully-buffered reference.
 func TestStreamingEncoder_RollbackDoesNotConflictWithFlushedBytes(t *testing.T) {
 	if !encvm.Available {
@@ -205,7 +201,7 @@ func TestStreamingEncoder_RollbackDoesNotConflictWithFlushedBytes(t *testing.T) 
 
 	type Wallet struct {
 		Owner   string   `json:"owner"`
-		Balance *big.Int `json:"balance"` // MarshalJSON → VJ_IFACE_YIELD → key rollback
+		Balance *big.Int `json:"balance"` // MarshalJSON → VJ_IFACE_YIELD → Go fallback
 	}
 	v := Wallet{Owner: "alice", Balance: new(big.Int).SetInt64(42)}
 

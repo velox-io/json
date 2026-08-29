@@ -13,7 +13,7 @@ import (
 // TestMarshal_EscapeString_Prescan exercises the VM's prescan-based buffer
 // sizing for string escaping.  The prescan (vj_prescan_string_escaped_len)
 // computes a tight upper bound; if it ever underestimates, the VM writes
-// past the buffer end — which will be caught by -race, vjgcstress, or by
+// past the buffer end, which will be caught by -race, vjgcstress, or by
 // output mismatch against encoding/json.
 
 type escStringWrap struct {
@@ -57,7 +57,7 @@ func allControlChars() string {
 // randomEscapeString builds a string of length n with random bytes that need
 // escaping, interspersed with safe ASCII.
 func randomEscapeString(rng *rand.Rand, n int) string {
-	// Characters that require escaping in JSON (ASCII only — no invalid UTF-8
+	// Characters that require escaping in JSON (ASCII only, no invalid UTF-8
 	// bytes, which would cause round-trip mismatches in fast mode).
 	escapeChars := []byte{
 		0x00, 0x01, 0x08, 0x09, 0x0a, 0x0c, 0x0d, 0x1f, // control chars
@@ -224,7 +224,7 @@ func TestMarshal_EscapeString_Prescan(t *testing.T) {
 		testCase{"mixed_cjk_escape", strings.Repeat("\u4e2d\"\\<\n", 200)},
 	)
 
-	// Invalid UTF-8 cases — only testable in stdcompat mode (fast mode
+	// Invalid UTF-8 cases: only testable in stdcompat mode (fast mode
 	// passes raw bytes through, causing round-trip mismatch with json.Unmarshal).
 	invalidUTF8Cases := []testCase{
 		{"invalid_utf8_0xFF", strings.Repeat("abc\xffdef", 100)},
@@ -284,7 +284,7 @@ func TestMarshal_EscapeString_Prescan(t *testing.T) {
 		}
 	}
 
-	// Invalid UTF-8 cases — only stdcompat modes (fast mode passes raw bytes).
+	// Invalid UTF-8 cases: only stdcompat modes (fast mode passes raw bytes).
 	for _, tc := range invalidUTF8Cases {
 		for _, mode := range marshalModes {
 			if mode.stdFunc == nil {

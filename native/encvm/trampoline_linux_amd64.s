@@ -1,31 +1,31 @@
+//go:build !vj_noencvm
+
 // AMD64 Go assembly trampolines for native encoder C functions (Linux).
 //
 // Bridges Go ABI to x86-64 System V C ABI.
 // System V ABI: first arg in RDI, second in RSI, etc.
-// On Linux (ELF), C symbols have no underscore prefix — the Go linker
+// On Linux (ELF), C symbols have no underscore prefix and the Go linker
 // handles this automatically.
-//
-// Each ISA has three mode variants: full, compact, and fast.
 
 #include "textflag.h"
 
 // ---- Full mode ----
 
-// func vjVMExecFullAVX2(ctx unsafe.Pointer)
-TEXT ·vjVMExecFullAVX2(SB), NOSPLIT, $0-8
+// func vjVMExecFull(ctx unsafe.Pointer)
+TEXT ·vjVMExecFull(SB), NOSPLIT, $0-8
 	MOVQ ctx+0(FP), DI
 	JMP  vj_vm_exec_full_avx2(SB)
 
 // ---- Fast mode ----
 
-// func vjVMExecFastAVX2(ctx unsafe.Pointer)
-TEXT ·vjVMExecFastAVX2(SB), NOSPLIT, $0-8
+// func vjVMExecFast(ctx unsafe.Pointer)
+TEXT ·vjVMExecFast(SB), NOSPLIT, $0-8
 	MOVQ ctx+0(FP), DI
 	JMP  vj_vm_exec_fast_avx2(SB)
 
 // ---- Compact mode ----
 
-// func vjVMExecCompactAVX2(ctx unsafe.Pointer)
-TEXT ·vjVMExecCompactAVX2(SB), NOSPLIT, $0-8
+// func vjVMExecCompact(ctx unsafe.Pointer)
+TEXT ·vjVMExecCompact(SB), NOSPLIT, $0-8
 	MOVQ ctx+0(FP), DI
 	JMP  vj_vm_exec_compact_avx2(SB)

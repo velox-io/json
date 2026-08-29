@@ -67,7 +67,7 @@ func extractNumber(t *testing.T, s string) string {
 	return s[len(prefix) : len(s)-len(suffix)]
 }
 
-// TestNativeFloat64 — table-driven edge cases for float64 via native VM
+// TestNativeFloat64 covers table-driven edge cases for float64 via the native VM.
 
 func TestNativeFloat64(t *testing.T) {
 	cases := []struct {
@@ -188,7 +188,7 @@ func TestNativeFloat64(t *testing.T) {
 	}
 }
 
-// TestNativeFloat32 — table-driven edge cases for float32 via native VM
+// TestNativeFloat32 covers table-driven edge cases for float32 via the native VM.
 
 func TestNativeFloat32(t *testing.T) {
 
@@ -283,7 +283,7 @@ func TestNativeFloat32(t *testing.T) {
 	}
 }
 
-// TestNativeFloat_SpecialValues — NaN / Inf must return error via native VM
+// TestNativeFloat_SpecialValues verifies NaN / Inf must return error via native VM.
 
 func TestNativeFloat_SpecialValues(t *testing.T) {
 
@@ -329,7 +329,7 @@ func TestNativeFloat_SpecialValues(t *testing.T) {
 	})
 }
 
-// TestNativeFloat64_Roundtrip — lossless roundtrip for key float64 values
+// TestNativeFloat64_Roundtrip verifies lossless roundtrip for key float64 values.
 
 func TestNativeFloat64_Roundtrip(t *testing.T) {
 
@@ -361,7 +361,7 @@ func TestNativeFloat64_Roundtrip(t *testing.T) {
 	}
 }
 
-// TestNativeFloat32_Roundtrip — lossless roundtrip for key float32 values
+// TestNativeFloat32_Roundtrip verifies lossless roundtrip for key float32 values.
 
 func TestNativeFloat32_Roundtrip(t *testing.T) {
 
@@ -392,7 +392,7 @@ func TestNativeFloat32_Roundtrip(t *testing.T) {
 	}
 }
 
-// TestNativeFloat64_Random — stress test with random float64 values
+// TestNativeFloat64_Random is a stress test with random float64 values.
 
 func TestNativeFloat64_Random(t *testing.T) {
 
@@ -422,7 +422,7 @@ func TestNativeFloat64_Random(t *testing.T) {
 	}
 }
 
-// TestNativeFloat32_Random — stress test with random float32 values
+// TestNativeFloat32_Random is a stress test with random float32 values.
 
 func TestNativeFloat32_Random(t *testing.T) {
 
@@ -452,7 +452,7 @@ func TestNativeFloat32_Random(t *testing.T) {
 	}
 }
 
-// TestNativeFloat_InStruct — floats in struct with pointers and omitempty
+// TestNativeFloat_InStruct covers floats in struct with pointers and omitempty.
 
 func TestNativeFloat_InStruct(t *testing.T) {
 
@@ -505,7 +505,7 @@ func TestNativeFloat_InStruct(t *testing.T) {
 	}
 }
 
-// TestNativeFloat64_AllPowersOfTwo — all 2^n for n in [-1074, 1023]
+// TestNativeFloat64_AllPowersOfTwo covers all 2^n for n in [-1074, 1023].
 
 func TestNativeFloat64_AllPowersOfTwo(t *testing.T) {
 
@@ -522,7 +522,7 @@ func TestNativeFloat64_AllPowersOfTwo(t *testing.T) {
 	}
 }
 
-// TestNativeFloat64_AllPowersOfTen — all 10^n for n in [-323, 308]
+// TestNativeFloat64_AllPowersOfTen covers all 10^n for n in [-323, 308].
 
 func TestNativeFloat64_AllPowersOfTen(t *testing.T) {
 
@@ -539,7 +539,7 @@ func TestNativeFloat64_AllPowersOfTen(t *testing.T) {
 	}
 }
 
-// TestNativeFloat64_BoundaryBits — normal/subnormal boundary ±10 ULP
+// TestNativeFloat64_BoundaryBits covers normal/subnormal boundary ±10 ULP.
 
 func TestNativeFloat64_BoundaryBits(t *testing.T) {
 
@@ -559,7 +559,7 @@ func TestNativeFloat64_BoundaryBits(t *testing.T) {
 	}
 }
 
-// TestNativeFloat64_Sequential — sweep interesting bit regions (1000 each)
+// TestNativeFloat64_Sequential sweeps interesting bit regions (1000 each).
 
 func TestNativeFloat64_Sequential(t *testing.T) {
 
@@ -604,7 +604,7 @@ func TestNativeFloat64_Sequential(t *testing.T) {
 	}
 }
 
-// TestNativeFloat32_BoundaryBits — float32 normal/subnormal boundary ±10 ULP
+// TestNativeFloat32_BoundaryBits covers float32 normal/subnormal boundary ±10 ULP.
 
 func TestNativeFloat32_BoundaryBits(t *testing.T) {
 
@@ -624,7 +624,7 @@ func TestNativeFloat32_BoundaryBits(t *testing.T) {
 	}
 }
 
-// TestNativeFloat64_Integers — integer values stored as float64
+// TestNativeFloat64_Integers covers integer values stored as float64.
 
 func TestNativeFloat64_Integers(t *testing.T) {
 
@@ -648,7 +648,7 @@ func TestNativeFloat64_Integers(t *testing.T) {
 	}
 }
 
-// TestNativeFloat_ValidJSON — verify native output is valid JSON number
+// TestNativeFloat_ValidJSON verifies native output is valid JSON number.
 
 func TestNativeFloat_ValidJSON(t *testing.T) {
 
@@ -673,7 +673,7 @@ func TestNativeFloat_ValidJSON(t *testing.T) {
 	}
 }
 
-// TestFloat64_ExpAutoRoundTrip — verify float64 values round-trip correctly with ExpAuto formatting
+// TestFloat64_ExpAutoRoundTrip verifies float64 values round-trip correctly with ExpAuto formatting.
 func TestFloat64_ExpAutoRoundTrip(t *testing.T) {
 	// Test specific values that were failing (losing precision)
 	testCases := []float64{

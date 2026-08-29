@@ -7,25 +7,28 @@ import (
 	"strings"
 	"sync"
 
+	"dev.local/benchmark/corpus"
 	"github.com/klauspost/compress/zstd"
 )
 
-//go:embed testdata/tiny.json
-var TinyJSON []byte
+func mustCorpus(name string) []byte {
+	data, err := corpus.Load(name)
+	if err != nil {
+		panic(err)
+	}
+	return data
+}
 
-//go:embed testdata/small.json
-var SmallJSON []byte
+var (
+	TinyJSON        = mustCorpus("tiny")
+	SmallJSON       = mustCorpus("small")
+	MediumJSON      = mustCorpus("medium")
+	EscapeHeavyJSON = mustCorpus("escape_heavy")
+	KubePodsJSON    = mustCorpus("kubepods")
+	TwitterJSON     = mustCorpus("twitter_status")
+)
 
-//go:embed testdata/escape_heavy.json
-var EscapeHeavyJSON []byte
-
-//go:embed testdata/kubepods.json
-var KubePodsJSON []byte
-
-//go:embed testdata/twitter.json
-var TwitterJSON []byte
-
-//go:embed testdata/log.json.zst
+//go:embed corpus/testdata/log.json.zst
 var logJSONZst []byte
 var logJSONLoadOnce sync.Once
 var logJSONData []byte
@@ -54,6 +57,9 @@ var (
 
 	twitterCompactOnce sync.Once
 	twitterCompactData []byte
+
+	mediumCompactOnce sync.Once
+	mediumCompactData []byte
 )
 
 func LoadTinyCompactJSON() []byte {
@@ -79,6 +85,11 @@ func LoadPodsCompactJSON() []byte {
 func LoadTwitterCompactJSON() []byte {
 	twitterCompactOnce.Do(func() { twitterCompactData = compact(TwitterJSON) })
 	return twitterCompactData
+}
+
+func LoadMediumCompactJSON() []byte {
+	mediumCompactOnce.Do(func() { mediumCompactData = compact(MediumJSON) })
+	return mediumCompactData
 }
 
 func compact(src []byte) []byte {
@@ -164,7 +175,7 @@ func buildSpikyNDJSON() []byte {
 }
 
 // buildHalfBufNDJSON constructs an NDJSON stream where every value is
-// ~65 KB — just over half the default 128 KB buffer. This forces the
+// ~65 KB, just over half the default 128 KB buffer. This forces the
 // decoder to allocate a new buffer for almost every value, since the
 // remaining capacity after decoding one value cannot hold the next.
 const (
@@ -195,7 +206,7 @@ func buildHalfBufNDJSON() []byte {
 }
 
 // buildThirdBufNDJSON constructs an NDJSON stream where every value is
-// ~86 KB — about one-third of the 256 KB buffer that maybeNewBuffer
+// ~86 KB, about one-third of the 256 KB buffer that maybeNewBuffer
 // allocates after seeing ~65 KB predictions. The 256 KB buffer fits
 // exactly 2 values but not 3, so buffer switches happen every 2 values.
 const (

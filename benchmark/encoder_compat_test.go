@@ -15,7 +15,7 @@ import (
 //
 // This is a real-world integration test: TwitterStruct contains deeply
 // nested structs, []interface{} fields, interface{} fields, and strings
-// with non-ASCII (Japanese) text — exercising hot resume, pointer
+// with non-ASCII (Japanese) text, exercising hot resume, pointer
 // encoding, and string escaping in the native C engine.
 //
 // We compare semantically (via re-parse + DeepEqual) because:
@@ -128,7 +128,7 @@ func TestNativeEncoder_Twitter_Users(t *testing.T) {
 func assertJSONEqual(t *testing.T, label string, stdOut, vjOut []byte) {
 	t.Helper()
 
-	var stdVal, vjVal interface{}
+	var stdVal, vjVal any
 	if err := json.Unmarshal(stdOut, &stdVal); err != nil {
 		t.Fatalf("%s: re-parse stdlib output: %v", label, err)
 	}
@@ -145,11 +145,8 @@ func assertJSONEqual(t *testing.T, label string, stdOut, vjOut []byte) {
 
 // firstDiff returns the index of the first byte that differs between a and b.
 func firstDiff(a, b []byte) int {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	for i := 0; i < n; i++ {
+	n := min(len(b), len(a))
+	for i := range n {
 		if a[i] != b[i] {
 			return i
 		}
@@ -159,13 +156,7 @@ func firstDiff(a, b []byte) int {
 
 // excerpt returns a short substring around the given index for error messages.
 func excerpt(data []byte, idx int) string {
-	start := idx - 40
-	if start < 0 {
-		start = 0
-	}
-	end := idx + 40
-	if end > len(data) {
-		end = len(data)
-	}
+	start := max(idx-40, 0)
+	end := min(idx+40, len(data))
 	return string(data[start:end])
 }

@@ -24,7 +24,7 @@ BENCH_DIR="$PROJECT_ROOT/benchmark"
 
 # Defaults
 FILTER='.'
-LIBS="StdJSON,Sonic,GoJSON,EasyJSON,Velox"
+LIBS="Sonic,GoJSON,JSONv2,Velox"
 COUNT=3
 BENCHTIME="3s"
 PIN_CPU=""
@@ -154,7 +154,7 @@ for lib in "${LIB_ARRAY[@]}"; do
         run_bench "${FLAG_RUN}=^$" "${FLAG_BENCH}=${bench_re}" "${FLAG_BENCHTIME}=100ms" "${FLAG_COUNT}=1" $DOT_ARG >/dev/null 2>&1 || true
     fi
 
-    # Real run — capture only benchmark lines and PASS/ok lines
+    # Real run: capture only benchmark lines and PASS/ok lines
     run_bench "${FLAG_RUN}=^$" "${FLAG_BENCH}=${bench_re}" $BENCHMEM_ARG "${FLAG_COUNT}=${COUNT}" $BENCHTIME_ARG $DOT_ARG 2>&1 \
         | grep -E '^(Benchmark_|ok |PASS)' >> "$TMPFILE" || true
 
@@ -168,7 +168,9 @@ if [[ -n "$OUTPUT" ]]; then
     if [[ "$OUTPUT" != /* ]]; then
         OUTPUT="$PROJECT_ROOT/$OUTPUT"
     fi
+    # mktemp creates the file 0600; results get committed under docs/benchmarks.
     cp "$TMPFILE" "$OUTPUT"
+    chmod 644 "$OUTPUT"
     echo "Results written to: $OUTPUT" >&2
 fi
 
