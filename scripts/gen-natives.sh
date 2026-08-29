@@ -17,7 +17,10 @@
 # Arguments:
 #   sources.sh  - Build configuration file (relative to repo root). Defines:
 #                    SOURCE_FILE, STDLIB_SOURCES, EXTRA_SOURCES, TARGET_DIR,
-#                    MODES, MODE_FLAGS_<mode>, EXPORT_SYMBOL_PREFIX
+#                    MODES, MODE_FLAGS_<mode>, EXPORT_SYMBOL_*
+#                    (see the sources.sh validation and link sections for
+#                    SYSO_PREFIX / SYSO_EXT / SYSO_ARCH_ONLY / SYSO_MERGE_MODES
+#                    / EXPORT_SYMBOL_PREFIX_PATTERN / EXPORT_SYMBOL_NAMES / SYMBOL_RENAMES)
 #   target_os   - Target OS (linux, darwin, windows). Default: host OS.
 #   target_arch - Target architecture (arm64, amd64). Default: host arch.
 #
@@ -39,7 +42,8 @@
 #
 # Output:
 #   - {OUTPUT_DIR}/{basename}[_{mode}]_{os}_{arch}_{isa}.o
-#   - {TARGET_DIR}/{basename}_{mode}_{isa}_{os}_{arch}.syso  (one per mode×ISA)
+#   - {TARGET_DIR}/{basename}_{mode}_{isa}_{os}_{arch}.syso  (one per mode×ISA;
+#                     SYSO_MERGE_MODES=1 merges all modes into one artifact per ISA)
 #   - {TARGET_DIR}/asm/{basename}[_{mode}]_{os}_{arch}_{isa}.s (if --asm)
 #
 # Cross-compilation terminology:
@@ -137,6 +141,12 @@ fi
 # Source the configuration (sets SOURCE_FILE, STDLIB_SOURCES, EXTRA_SOURCES, TARGET_DIR,
 # MODES, MODE_FLAGS_*, EXPORT_SYMBOL_PREFIX)
 source "$REPO_ROOT/$SOURCES_FILE"
+
+# Artifact extension. A sources.sh may set SYSO_EXT=".elf" for a module that
+# embeds the blob and maps it into executable memory at runtime (see
+# native/execblob) instead of linking it. The extension must not be .syso
+# there: the Go tool links every *.syso sitting in a package directory.
+SYSO_EXT="${SYSO_EXT:-.syso}"
 
 # Validate required variables
 if [ -z "$SOURCE_FILE" ]; then
@@ -254,6 +264,7 @@ fi
 
 PGO_DATA_DIR="$REPO_ROOT/.local/pgo-data"
 PGO_CFLAGS=""
+MERGED_PROFILE=""
 
 if [ "$PGO_INSTR" = true ]; then
   # Instrumentation generate: insert per-block counters (__llvm_prf_* sections).
@@ -262,21 +273,66 @@ if [ "$PGO_INSTR" = true ]; then
   PGO_CFLAGS="-fprofile-instr-generate -fprofile-update=atomic"
   echo "PGO: instrumentation generate enabled (counters inserted; no-prelink forced)"
 elif [ "$PGO_INSTR_USE" = true ]; then
-  PROFDATA="$PGO_DATA_DIR/instr.profdata"
-  if [ ! -f "$PROFDATA" ]; then
-    echo "Error: instrumentation PGO profile not found: $PROFDATA"
-    echo "  Run 'make pgo-instr-collect' first to generate the profile data."
+  # Profile resolution is per mode: a multi-mode module (encvm) collects one
+  # profile per mode (instr-<mode>.profdata, produced by pgo-collect-instr.sh).
+  # A single-profile module keeps the fixed instr.profdata path;
+  # pgo-collect-instr.sh also mirrors every merge to instr-<mode>.profdata, so
+  # single-mode modules resolve the same file either way.
+  #
+  # A mode with no resolvable profile compiles WITHOUT -fprofile-instr-use:
+  # a partial collection (e.g. only the fast mode) still rebuilds the merged
+  # blob with every mode's entry present, the uncollected copies just stay
+  # at their baseline codegen. The per-mode flags attach in the mode compile
+  # loop below; the global PGO_CFLAGS covers the mode-independent extra/
+  # stdlib sources.
+  #
+  # SYSO_MERGE_MODES modules override per-mode resolution with ONE union
+  # profile: every mode TU links into a single LTO image, and each
+  # -fprofile-instr-use TU embeds a whole-file ProfileSummary module flag.
+  # Different profdata files produce different summaries and the LTO link
+  # rejects conflicting values, so the mode copies must all consume the
+  # same file. The union of the per-mode profdatas is safe: entries are
+  # keyed by function name plus CFG hash, and each mode copy's code hashes
+  # differently, so a copy only ever matches its own entries; stale entries
+  # from older vintages hash-mismatch and are ignored with the usual
+  # out-of-date warnings.
+  if ! ls "$PGO_DATA_DIR"/instr*.profdata >/dev/null 2>&1; then
+    echo "Error: no instrumentation profile under $PGO_DATA_DIR (instr.profdata / instr-<mode>.profdata)" >&2
+    echo "  Run 'make pgo-instr-collect' first to generate the profile data." >&2
     exit 1
   fi
-  # MSYS2 hosts: the profile path is embedded in the single argument
-  # -fprofile-instr-use=<path>, which the MSYS2 runtime does not path-convert
-  # (it only converts standalone path arguments). Hand clang a Windows path.
-  if command -v cygpath >/dev/null 2>&1; then
-    PROFDATA="$(cygpath -w "$PROFDATA")"
+  _resolve_profdata() {
+    local pd="$PGO_DATA_DIR/instr-${1}.profdata"
+    if [ ! -f "$pd" ]; then pd="$PGO_DATA_DIR/instr.profdata"; fi
+    if [ ! -f "$pd" ]; then printf ''; return; fi
+    # MSYS2 hosts: the profile path is embedded in the single argument
+    # -fprofile-instr-use=<path>, which the MSYS2 runtime does not path-convert
+    # (it only converts standalone path arguments). Hand clang a Windows path.
+    if command -v cygpath >/dev/null 2>&1; then
+      pd="$(cygpath -w "$pd")"
+    fi
+    printf '%s' "$pd"
+  }
+  if [ "${SYSO_MERGE_MODES:-}" = "1" ]; then
+    _pd_inputs=""
+    for _m in $MODES; do
+      [ -f "$PGO_DATA_DIR/instr-$_m.profdata" ] &&
+        _pd_inputs="$_pd_inputs $PGO_DATA_DIR/instr-$_m.profdata"
+    done
+    if [ -n "$_pd_inputs" ]; then
+      MERGED_PROFILE="$PGO_DATA_DIR/instr-merged.profdata"
+      llvm-profdata merge $_pd_inputs -o "$MERGED_PROFILE"
+      echo "PGO: merged module: union profile from$(echo "$_pd_inputs" | sed "s|$PGO_DATA_DIR/| |g")"
+    elif [ -f "$PGO_DATA_DIR/instr.profdata" ]; then
+      MERGED_PROFILE="$PGO_DATA_DIR/instr.profdata"
+    fi
+    if [ -n "$MERGED_PROFILE" ]; then
+      PGO_CFLAGS="-fprofile-instr-use=$MERGED_PROFILE"
+    fi
+  elif [ -f "$PGO_DATA_DIR/instr.profdata" ]; then
+    PGO_CFLAGS="-fprofile-instr-use=$(_resolve_profdata default)"
   fi
-  # -fprofile-instr-use: precise block-count guided optimization
-  PGO_CFLAGS="-fprofile-instr-use=$PROFDATA"
-  echo "PGO: instrumentation use enabled (profile: $PROFDATA)"
+  echo "PGO: instrumentation use enabled (per-mode profiles from $PGO_DATA_DIR)"
 fi
 
 # Derive VJ_LIB_DIR from the source file's directory
@@ -317,6 +373,38 @@ darwin) TARGET_OS="darwin" ;;
 linux) TARGET_OS="linux" ;;
 windows) TARGET_OS="windows" ;;
 esac
+
+# SYSO_ARCH_ONLY modules ship one arch-canonical blob shared by every OS, and
+# execblob parses it as ELF. Only a linux build produces that container; any
+# other TARGET_OS overwrites the shared blob with a container the loader
+# cannot parse, which fails silently at runtime (Available stays false).
+# Refuse instead.
+if [ "${SYSO_ARCH_ONLY:-}" = "1" ] && [ "$TARGET_OS" != "linux" ]; then
+  echo "Error: SYSO_ARCH_ONLY=1 in $SOURCES_FILE: build the shared ELF blob with 'make -C native/<module> gen-all-platforms' (TARGET_OS=linux), not a $TARGET_OS build" >&2
+  exit 1
+fi
+
+# SYSO_MERGE_MODES=1 (from sources.sh): link ALL mode objects into ONE
+# artifact per ISA instead of one artifact per mode. Used by modules whose
+# several compile-time specializations share a single blob (encvm's full/
+# compact/fast VMs) so the Go side embeds one arch-canonical image. Requires
+# fixed, mode-independent entry names: EXPORT_SYMBOL_NAMES or
+# EXPORT_SYMBOL_PREFIX_PATTERN must carry them, and SYMBOL_RENAMES must not
+# use the {mode} placeholder.
+if [ "${SYSO_MERGE_MODES:-}" = "1" ]; then
+  if [ -n "${EXPORT_SYMBOL_PREFIX:-}" ]; then
+    echo "Error: SYSO_MERGE_MODES=1 requires fixed entry names; EXPORT_SYMBOL_PREFIX synthesizes per-mode names" >&2
+    exit 1
+  fi
+  if [ -z "${EXPORT_SYMBOL_NAMES:-}" ] && [ -z "${EXPORT_SYMBOL_PREFIX_PATTERN:-}" ]; then
+    echo "Error: SYSO_MERGE_MODES=1 requires EXPORT_SYMBOL_NAMES or EXPORT_SYMBOL_PREFIX_PATTERN (fixed entry names)" >&2
+    exit 1
+  fi
+  if [ -n "${SYMBOL_RENAMES:-}" ] && printf '%s' "$SYMBOL_RENAMES" | grep -q '{mode}'; then
+    echo "Error: SYSO_MERGE_MODES=1 is incompatible with {mode} placeholders in SYMBOL_RENAMES" >&2
+    exit 1
+  fi
+fi
 
 # ============================================================
 #  Compiler selection (LLVM clang, with musl sysroot for Linux cross)
@@ -645,11 +733,34 @@ if [ "$TARGET_ARCH" = "arm64" ]; then
   # -mno-outline: prevent compiler from outlining code sequences into
   # separate functions, which would create additional relocations.
   ARCH_FLAGS="-mno-outline"
+  if [ -n "${SYSO_ARCH_ONLY:-}" ]; then
+    # macOS reserves X18 as the platform register, while linux and windows
+    # targets leave it allocatable. A blob built for one operating system and
+    # consumed on another must keep X18 out of the allocation, otherwise the
+    # code corrupts the platform register on macOS.
+    ARCH_FLAGS="$ARCH_FLAGS -ffixed-x18"
+  fi
   if [ "$TARGET_OS" = "linux" ]; then
     # Go's linux/arm64 runtime uses X28 as the current goroutine pointer (g).
     # C code must not clobber it, otherwise crashes on return to Go.
     ARCH_FLAGS="$ARCH_FLAGS -ffixed-x28"
   fi
+elif [ "$TARGET_ARCH" = "amd64" ]; then
+  if [ -n "${SYSO_ARCH_ONLY:-}" ]; then
+    # SysV grants leaf functions a 128-byte red zone below RSP; Win64 grants
+    # none. A blob built for one operating system and consumed on another must
+    # only assume what every consumer's ABI guarantees, so the red zone is off.
+    ARCH_FLAGS="-mno-red-zone"
+  fi
+fi
+
+if [ -n "${SYSO_ARCH_ONLY:-}" ]; then
+  # The arch-canonical blob is built for linux and consumed by every OS on its
+  # arch, so code that must talk to the OS (util/log's raw write syscall) reads
+  # its OS-specific constants from loader-patchable data instead of baked
+  # immediates: see VJ_LOG_SYSCALL_RUNTIME in native/util/log.h and WordPatch
+  # in native/execblob.
+  ARCH_FLAGS="$ARCH_FLAGS -DVJ_LOG_SYSCALL_RUNTIME"
 fi
 
 # PIC flag: only for ELF/Mach-O targets (Windows MSVC does not support -fPIC)
@@ -777,10 +888,29 @@ for isa in $ISAS; do
     COMMON_DEFS="$ISA_MACRO $MODE_FLAG -DOS=${TARGET_OS} -DARCH=${TARGET_ARCH} $NDEBUG_FLAG ${EXTRA_CFLAGS:-}"
     COMMON_INCLUDES="-I$(dirname "$SOURCE_FILE") -I$VJ_LIB_DIR -I$REPO_ROOT/native/include -I$REPO_ROOT/native"
 
+    # Per-mode profile (see the PGO section above): the mode TU consumes its
+    # own instr-<mode>.profdata; extras keep the global PGO_CFLAGS. An empty
+    # resolution compiles the mode at baseline codegen. SYSO_MERGE_MODES
+    # modules consume the single union profile (MERGED_PROFILE) instead, so
+    # every mode TU in the one LTO image shares one ProfileSummary. Under
+    # --pgo-instr the mode TU must carry the generate flags too: the global
+    # PGO_CFLAGS only reaches the extra/stdlib sources.
+    MODE_PGO_FLAGS=""
+    if [ "$PGO_INSTR_USE" = true ]; then
+      if [ -n "$MERGED_PROFILE" ]; then
+        _mode_pd="$MERGED_PROFILE"
+      else
+        _mode_pd=$(_resolve_profdata "$mode")
+      fi
+      [ -n "$_mode_pd" ] && MODE_PGO_FLAGS="-fprofile-instr-use=$_mode_pd"
+    elif [ "$PGO_INSTR" = true ]; then
+      MODE_PGO_FLAGS="$PGO_CFLAGS"
+    fi
+
     # Step 1: Compile to object (with LTO when supported, for cross-TU inlining)
     echo "  Compiling $(basename "$OFILE")"
     $CC $OPT_FLAG $LTO_FLAG $PIC_FLAG $C_DEBUG_FLAGS -fno-stack-protector $NO_BUILTIN_FLAGS $ARCH_FLAGS $ISA_FLAGS \
-      $COMMON_DEFS $COMMON_INCLUDES ${PGO_CFLAGS:-} $STACK_WARN_FLAG \
+      $COMMON_DEFS $COMMON_INCLUDES $MODE_PGO_FLAGS $STACK_WARN_FLAG \
       -c "$SOURCE_FILE" -o "$OFILE"
 
     # Capture flags for .clangd from the first ISA/mode combination
@@ -831,7 +961,7 @@ HEADER
 done
 
 # ============================================================
-#  Link each mode×ISA into separate .syso
+#  Link artifact groups into .syso / .elf
 #
 #  Strategy based on target platform (default):
 #  - darwin, linux, windows: prelink (LTO link → extract .text → zero-relocation object)
@@ -839,8 +969,9 @@ done
 #  Override:
 #  - --no-prelink / NO_PRELINK=1: force ld -r for all platforms
 #
-#  Each (mode, isa) combination produces one syso.
-#  - prelink path: each syso contains stdlib + extra + mode/isa main object
+#  One artifact per group: one mode×ISA by default, or all modes of an ISA
+#  merged when SYSO_MERGE_MODES=1.
+#  - prelink path: each artifact contains stdlib + extra + its main objects
 # ============================================================
 
 echo ""
@@ -861,147 +992,182 @@ fi
 ALL_SYSO_PATHS=""
 COMMON_OBJS_LINKED=false
 
+# Artifact groups: each group links exactly one artifact. The default splits
+# modes across artifacts (one per mode×ISA); SYSO_MERGE_MODES=1 links every
+# mode object of an ISA into ONE artifact, so a multi-specialization module
+# ships a single blob (encvm's full/compact/fast VMs) that the Go side embeds
+# once. Group syntax: "isa:mode1,mode2,..."
+ARTIFACT_SPECS=""
 for isa in $ISAS; do
-  for mode in $ALL_MODES; do
-    MODE_SUFFIX="_${mode}"
-    MAIN_OBJ="${OUTPUT_DIR}/${BASENAME}${MODE_SUFFIX}_${TARGET_OS}_${TARGET_ARCH}_${isa}.o"
+  if [ "${SYSO_MERGE_MODES:-}" = "1" ]; then
+    ARTIFACT_SPECS="$ARTIFACT_SPECS ${isa}:$(echo $ALL_MODES | tr ' ' ',')"
+  else
+    for mode in $ALL_MODES; do
+      ARTIFACT_SPECS="$ARTIFACT_SPECS ${isa}:${mode}"
+    done
+  fi
+done
 
-    if [ -n "${SYSO_PREFIX:-}" ]; then
-      SYSO_NAME="${SYSO_PREFIX}_${TARGET_OS}_${TARGET_ARCH}.syso"
-    else
-      SYSO_NAME="${BASENAME}_${mode}_${isa}_${TARGET_OS}_${TARGET_ARCH}.syso"
-    fi
-    SYSO_PATH="$TARGET_DIR/$SYSO_NAME"
+for spec in $ARTIFACT_SPECS; do
+  isa="${spec%%:*}"
+  group_modes="${spec#*:}"
+  primary_mode="${group_modes%%,*}"
 
-    echo "Linking $SYSO_NAME..."
-
-    if needs_prelink; then
-      # Prelink path (darwin, linux, windows):
-      # Each syso is fully linked from stdlib + extra + main, then
-      # prelink-obj strips all relocations. Since every syso contains
-      # the same stdlib/extra code, the export filter below demotes
-      # internal symbols to local, keeping only vj_vm_exec_<mode>_<isa>
-      # as global; otherwise Go's linker would see duplicate definitions.
-      LINK_OBJS="$STDLIB_OBJS $EXTRA_OBJS $MAIN_OBJ"
-
-      PRELINK_TARGET=$(get_target_triple "$TARGET_OS" "$TARGET_ARCH")
-      PRELINK_FLAGS="-o $SYSO_PATH -t $PRELINK_TARGET -i $isa"
-      if [ "$USE_LTO" = true ]; then
-        PRELINK_FLAGS="-l $PRELINK_FLAGS"
-      fi
-
-      # Export symbol list: keep only the per-syso entry-point(s) as
-      # global. Without this, internal helpers (e.g. vj_write_float32)
-      # remain global in every syso, causing duplicate symbol errors.
-      #
-      # Three forms are supported (in priority order):
-      #
-      #   EXPORT_SYMBOL_PREFIX_PATTERN + EXPORT_SYMBOL_NAMES
-      #     A TU exporting MULTIPLE fixed-name entry points sharing a
-      #     common prefix (e.g. ndec_sax_parse, ndec_dom_parse,
-      #     ndec_bind_parse all start with "ndec_"). EXPORT_SYMBOL_NAMES
-      #     is a space-separated list written into the darwin
-      #     -exported_symbols_list; EXPORT_SYMBOL_PREFIX_PATTERN is
-      #     forwarded to prelink-obj's HasPrefix filter so every
-      #     ndec_* global stays exported on ELF/PE.
-      #
-      #   EXPORT_SYMBOL_NAME
-      #     A TU exporting a single fixed-name entry point. The
-      #     export-list contains that name; prelink-obj uses the same
-      #     name as its prefix filter (so HasPrefix is effectively an
-      #     exact match for the single global).
-      #
-      #   EXPORT_SYMBOL_PREFIX
-      #     The historical naming convention: the export name is
-      #     synthesized as "${EXPORT_SYMBOL_PREFIX}_${mode}_${isa}".
-      if [ -n "${EXPORT_SYMBOL_PREFIX_PATTERN:-}" ] ||
-        [ -n "${EXPORT_SYMBOL_PREFIX:-}" ] ||
-        [ -n "${EXPORT_SYMBOL_NAME:-}" ]; then
-        EXPORT_LIST="$OUTPUT_DIR/_exports_${mode}_${isa}.txt"
-        : >"$EXPORT_LIST"
-        if [ -n "${EXPORT_SYMBOL_NAMES:-}" ]; then
-          sym_names="$EXPORT_SYMBOL_NAMES"
-        elif [ -n "${EXPORT_SYMBOL_NAME:-}" ]; then
-          sym_names="$EXPORT_SYMBOL_NAME"
-        else
-          sym_names="${EXPORT_SYMBOL_PREFIX}_${mode}_${isa}"
-        fi
-        for sym_name in $sym_names; do
-          if [ "$TARGET_OS" = "darwin" ]; then
-            # macOS ld: symbol names must be prefixed with '_'
-            echo "_${sym_name}" >>"$EXPORT_LIST"
-          else
-            # ELF/COFF: no leading underscore
-            echo "${sym_name}" >>"$EXPORT_LIST"
-          fi
-        done
-        PRELINK_FLAGS="$PRELINK_FLAGS -e $EXPORT_LIST"
-      fi
-
-      # SYMBOL_RENAMES (optional, from sources.sh): a space-separated
-      # list of old=new pairs. The {isa} / {mode} placeholders are
-      # expanded per-syso. Useful when the C source uses a fixed
-      # entry-point name (e.g. ndec_parse_default) but the Go side
-      # wants per-ISA names (ndec_parse_default_neon).
-      if [ -n "${SYMBOL_RENAMES:-}" ]; then
-        for r in $SYMBOL_RENAMES; do
-          expanded=${r//\{mode\}/$mode}
-          expanded=${expanded//\{isa\}/$isa}
-          PRELINK_FLAGS="$PRELINK_FLAGS -r $expanded"
-        done
-      fi
-
-      # When the export list contains fixed names, the default
-      # `_${prefix}_${mode}_${isa}` stripping logic in prelink.sh
-      # would return the wrong prefix for ELF/PE export filtering.
-      # Pass an explicit prefix through:
-      #   EXPORT_SYMBOL_PREFIX_PATTERN: common prefix matching
-      #                                  multiple entry points.
-      #   EXPORT_SYMBOL_NAME:          the single fixed name itself.
-      if [ -n "${EXPORT_SYMBOL_PREFIX_PATTERN:-}" ]; then
-        export EXPORT_PREFIX="$EXPORT_SYMBOL_PREFIX_PATTERN"
-      elif [ -n "${EXPORT_SYMBOL_NAME:-}" ]; then
-        export EXPORT_PREFIX="$EXPORT_SYMBOL_NAME"
-      fi
-
-      "$REPO_ROOT/scripts/prelink.sh" $PRELINK_FLAGS $LINK_OBJS
-      unset EXPORT_PREFIX
-    else
-      # Relocatable link path (NO_PRELINK):
-      # - Include stdlib/extra objects only once to avoid duplicate symbol
-      #   definitions across multiple mode×ISA .syso files.
-      # - linux: `ld -r` preserves DWARF + relocations → single relocatable .syso
-      # - darwin: Apple ld64 -r drops DWARF, ld64.lld doesn't support -r.
-      #   Use `llvm-ar rcs` to bundle .o as an archive renamed .syso. Go loader
-      #   detects `!<arch>` magic and iterates members (lib.go:1096); each .o
-      #   keeps its DWARF + relocation entries. Apple ld64 processes members
-      #   individually, generates STABS from DWARF, dsymutil runs, lldb
-      #   source list works. See docs/debug-native.md.
-      # - windows: clang's MSVC target rejects the gcc-style -r flag. Bundle
-      #   the COFF objects with llvm-ar the same way; the instrumented PGO
-      #   build (which forces NO_PRELINK so __llvm_prf_* sections survive)
-      #   depends on this path. Go's loader handles PE archive members and
-      #   the external linker resolves their relocations.
-      if [ "$COMMON_OBJS_LINKED" = false ]; then
-        LINK_OBJS="$STDLIB_OBJS $EXTRA_OBJS $MAIN_OBJ"
-        COMMON_OBJS_LINKED=true
-      else
-        LINK_OBJS="$MAIN_OBJ"
-      fi
-      if [ "$TARGET_OS" = "darwin" ] || [ "$TARGET_OS" = "windows" ]; then
-        # Archive path: bundle .o files (each with own DWARF + relocations).
-        # llvm-ar lives alongside clang in the LLVM toolchain; rely on PATH
-        # (gen-natives.sh runs with the LLVM bin dir on PATH).
-        rm -f "$SYSO_PATH"
-        llvm-ar rcs "$SYSO_PATH" $LINK_OBJS
-      else
-        # linux: ld -r preserves DWARF + relocations in a single relocatable obj.
-        $CC -r $LTO_FLAG $LINK_OBJS -o "$SYSO_PATH"
-      fi
-    fi
-
-    ALL_SYSO_PATHS="$ALL_SYSO_PATHS $SYSO_PATH"
+  # Main object set: one per mode in the group.
+  MAIN_OBJS=""
+  for m in $(echo "$group_modes" | tr ',' ' '); do
+    MAIN_OBJS="$MAIN_OBJS ${OUTPUT_DIR}/${BASENAME}_${m}_${TARGET_OS}_${TARGET_ARCH}_${isa}.o"
   done
+
+  if [ -n "${SYSO_PREFIX:-}" ] && [ -n "${SYSO_ARCH_ONLY:-}" ]; then
+    SYSO_NAME="${SYSO_PREFIX}_${TARGET_ARCH}${SYSO_EXT}"
+  elif [ -n "${SYSO_PREFIX:-}" ]; then
+    SYSO_NAME="${SYSO_PREFIX}_${TARGET_OS}_${TARGET_ARCH}${SYSO_EXT}"
+  elif [ "${SYSO_MERGE_MODES:-}" = "1" ]; then
+    # Merged artifact carries no single mode; name it by basename + isa.
+    SYSO_NAME="${BASENAME}_${isa}_${TARGET_OS}_${TARGET_ARCH}${SYSO_EXT}"
+  else
+    SYSO_NAME="${BASENAME}_${primary_mode}_${isa}_${TARGET_OS}_${TARGET_ARCH}${SYSO_EXT}"
+  fi
+  SYSO_PATH="$TARGET_DIR/$SYSO_NAME"
+
+  if [ "${SYSO_MERGE_MODES:-}" = "1" ]; then
+    echo "Linking $SYSO_NAME (modes: $group_modes)..."
+  else
+    echo "Linking $SYSO_NAME..."
+  fi
+
+  if needs_prelink; then
+    # Prelink path (darwin, linux, windows):
+    # Each artifact is fully linked from stdlib + extra + the group's main
+    # objects, then prelink-obj strips all relocations. Since the internal
+    # helpers are static, the export filter demotes every non-entry symbol
+    # to local, keeping only the exported entry points global.
+    LINK_OBJS="$STDLIB_OBJS $EXTRA_OBJS $MAIN_OBJS"
+
+    PRELINK_TARGET=$(get_target_triple "$TARGET_OS" "$TARGET_ARCH")
+    PRELINK_FLAGS="-o $SYSO_PATH -t $PRELINK_TARGET -i $isa"
+    if [ "$USE_LTO" = true ]; then
+      PRELINK_FLAGS="-l $PRELINK_FLAGS"
+    fi
+
+    # Export symbol list: keep only the entry-point(s) as global. Without
+    # this, internal helpers (e.g. vj_write_float32) remain global, causing
+    # duplicate symbol errors when several artifacts or mode copies link
+    # together.
+    #
+    # Three forms are supported (in priority order):
+    #
+    #   EXPORT_SYMBOL_PREFIX_PATTERN + EXPORT_SYMBOL_NAMES
+    #     A TU exporting MULTIPLE fixed-name entry points sharing a
+    #     common prefix (e.g. ndec_sax_parse, ndec_dom_parse,
+    #     ndec_bind_parse all start with "ndec_"). EXPORT_SYMBOL_NAMES
+    #     is a space-separated list written into the darwin
+    #     -exported_symbols_list; EXPORT_SYMBOL_PREFIX_PATTERN is
+    #     forwarded to prelink-obj's HasPrefix filter so every
+    #     ndec_* global stays exported on ELF/PE.
+    #
+    #   EXPORT_SYMBOL_NAME
+    #     A TU exporting a single fixed-name entry point. The
+    #     export-list contains that name; prelink-obj uses the same
+    #     name as its prefix filter (so HasPrefix is effectively an
+    #     exact match for the single global).
+    #
+    #   EXPORT_SYMBOL_PREFIX
+    #     The historical naming convention: the export name is
+    #     synthesized as "${EXPORT_SYMBOL_PREFIX}_${mode}_${isa}".
+    if [ -n "${EXPORT_SYMBOL_PREFIX_PATTERN:-}" ] ||
+      [ -n "${EXPORT_SYMBOL_PREFIX:-}" ] ||
+      [ -n "${EXPORT_SYMBOL_NAME:-}" ]; then
+      if [ "${SYSO_MERGE_MODES:-}" = "1" ]; then
+        EXPORT_LIST="$OUTPUT_DIR/_exports_${isa}.txt"
+      else
+        EXPORT_LIST="$OUTPUT_DIR/_exports_${primary_mode}_${isa}.txt"
+      fi
+      : >"$EXPORT_LIST"
+      if [ -n "${EXPORT_SYMBOL_NAMES:-}" ]; then
+        sym_names="$EXPORT_SYMBOL_NAMES"
+      elif [ -n "${EXPORT_SYMBOL_NAME:-}" ]; then
+        sym_names="$EXPORT_SYMBOL_NAME"
+      else
+        sym_names="${EXPORT_SYMBOL_PREFIX}_${primary_mode}_${isa}"
+      fi
+      for sym_name in $sym_names; do
+        if [ "$TARGET_OS" = "darwin" ]; then
+          # macOS ld: symbol names must be prefixed with '_'
+          echo "_${sym_name}" >>"$EXPORT_LIST"
+        else
+          # ELF/COFF: no leading underscore
+          echo "${sym_name}" >>"$EXPORT_LIST"
+        fi
+      done
+      PRELINK_FLAGS="$PRELINK_FLAGS -e $EXPORT_LIST"
+    fi
+
+    # SYMBOL_RENAMES (optional, from sources.sh): a space-separated
+    # list of old=new pairs. The {isa} / {mode} placeholders are
+    # expanded per-artifact ({mode} is rejected for merged artifacts
+    # above). Useful when the C source uses a fixed entry-point name
+    # (e.g. ndec_parse_default) but the Go side wants per-ISA names
+    # (ndec_parse_default_neon).
+    if [ -n "${SYMBOL_RENAMES:-}" ]; then
+      for r in $SYMBOL_RENAMES; do
+        expanded=${r//\{mode\}/$primary_mode}
+        expanded=${expanded//\{isa\}/$isa}
+        PRELINK_FLAGS="$PRELINK_FLAGS -r $expanded"
+      done
+    fi
+
+    # When the export list contains fixed names, the default
+    # `_${prefix}_${mode}_${isa}` stripping logic in prelink.sh
+    # would return the wrong prefix for ELF/PE export filtering.
+    # Pass an explicit prefix through:
+    #   EXPORT_SYMBOL_PREFIX_PATTERN: common prefix matching
+    #                                  multiple entry points.
+    #   EXPORT_SYMBOL_NAME:          the single fixed name itself.
+    if [ -n "${EXPORT_SYMBOL_PREFIX_PATTERN:-}" ]; then
+      export EXPORT_PREFIX="$EXPORT_SYMBOL_PREFIX_PATTERN"
+    elif [ -n "${EXPORT_SYMBOL_NAME:-}" ]; then
+      export EXPORT_PREFIX="$EXPORT_SYMBOL_NAME"
+    fi
+
+    "$REPO_ROOT/scripts/prelink.sh" $PRELINK_FLAGS $LINK_OBJS
+    unset EXPORT_PREFIX
+  else
+    # Relocatable link path (NO_PRELINK):
+    # - Include stdlib/extra objects only once to avoid duplicate symbol
+    #   definitions across multiple artifacts.
+    # - linux: `ld -r` preserves DWARF + relocations → single relocatable .syso
+    # - darwin: Apple ld64 -r drops DWARF, ld64.lld doesn't support -r.
+    #   Use `llvm-ar rcs` to bundle .o as an archive renamed .syso. Go loader
+    #   detects `!<arch>` magic and iterates members (lib.go:1096); each .o
+    #   keeps its DWARF + relocation entries. Apple ld64 processes members
+    #   individually, generates STABS from DWARF, dsymutil runs, lldb
+    #   source list works. See docs/debug-native.md.
+    # - windows: clang's MSVC target rejects the gcc-style -r flag. Bundle
+    #   the COFF objects with llvm-ar the same way; the instrumented PGO
+    #   build (which forces NO_PRELINK so __llvm_prf_* sections survive)
+    #   depends on this path. Go's loader handles PE archive members and
+    #   the external linker resolves their relocations.
+    if [ "$COMMON_OBJS_LINKED" = false ]; then
+      LINK_OBJS="$STDLIB_OBJS $EXTRA_OBJS $MAIN_OBJS"
+      COMMON_OBJS_LINKED=true
+    else
+      LINK_OBJS="$MAIN_OBJS"
+    fi
+    if [ "$TARGET_OS" = "darwin" ] || [ "$TARGET_OS" = "windows" ]; then
+      # Archive path: bundle .o files (each with own DWARF + relocations).
+      # llvm-ar lives alongside clang in the LLVM toolchain; rely on PATH
+      # (gen-natives.sh runs with the LLVM bin dir on PATH).
+      rm -f "$SYSO_PATH"
+      llvm-ar rcs "$SYSO_PATH" $LINK_OBJS
+    else
+      # linux: ld -r preserves DWARF + relocations in a single relocatable obj.
+      $CC -r $LTO_FLAG $LINK_OBJS -o "$SYSO_PATH"
+    fi
+  fi
+
+  ALL_SYSO_PATHS="$ALL_SYSO_PATHS $SYSO_PATH"
 done
 
 ## ============================================================

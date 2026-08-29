@@ -10,7 +10,6 @@
 //
 //	-o <file>           Output file (required, except for 'coff' subcommand)
 //	-export-prefix <s>  Demote non-matching symbols to local (ELF/PE only)
-//	-no-adrp-patch      Disable ADRP→ADR patching (ARM64)
 //	-q                  Quiet mode
 package main
 
@@ -37,7 +36,6 @@ Flags:
   -rename old=new     Rename a global symbol in the output. Repeat to rename
                       multiple symbols. Useful for emitting per-ISA syso names
                       from a single fixed C entry point.
-  -no-adrp-patch      Disable ADRP→ADR patching (ARM64); uses 4096 alignment instead
   -q                  Quiet mode
 `)
 	os.Exit(2)
@@ -90,7 +88,6 @@ func main() {
 	var exportPrefix string
 	renames := map[string]string{}
 	quiet := false
-	noADRPPatch := false
 
 	args := os.Args[1:]
 	for i := 0; i < len(args); i++ {
@@ -123,8 +120,6 @@ func main() {
 			renames[old] = newName
 		case "-q":
 			quiet = true
-		case "-no-adrp-patch":
-			noADRPPatch = true
 		case "-h", "--help":
 			usage()
 		default:
@@ -174,17 +169,15 @@ func main() {
 		fatalf("no symbols found in input")
 	}
 
-	// Step 3: ADRP patching (ARM64 only)
-	if result.IsARM64 && !noADRPPatch {
-		patched, err := patchADRPtoADR(result.Blob, result.CodeExtent, result.BlobExtent, quiet)
-		if err != nil {
-			fatalf("ADRP patching failed: %v", err)
-		}
-		result.Blob = patched
-	}
-	// When ADRP patch is disabled, .text needs 4096 alignment so that
-	// page-relative relocations resolve correctly at link time.
-	if result.IsARM64 && noADRPPatch {
+	// Step 3: ARM64 .text alignment. In-blob ADRP instructions stay exactly
+	// as the linker emitted them (their immediates are final for the base-0
+	// layout): every consumer maps the blob at a page-aligned base
+	// (execblob's mmap/VirtualAlloc), so page-relative addressing resolves
+	// without rewriting. The 4096 section alignment keeps that placement
+	// requirement explicit for any linker that consumes the relocatable
+	// output. Rewriting ADRP to ADR (as this tool once did) caps the blob
+	// at ADR's ±1MB reach and fails on larger images.
+	if result.IsARM64 {
 		result.TextAlign = 4096
 	}
 

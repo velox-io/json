@@ -7,6 +7,20 @@ lint-ci:
 hooks:
 	git config core.hooksPath githooks
 
+# Build-constrained files (per-arch trampoline pointer slots, per-OS execmap
+# paths) only enter the lint set for their own GOOS/GOARCH, so a single host
+# run cannot see them. LINT_PLATFORMS is the superset the Go module supports
+# (darwin/linux/windows x amd64/arm64), not the union of native modules'
+# SUPPORTED_PLATFORMS.
+LINT_PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64
+
+lint-all-platforms:
+	@for p in $(LINT_PLATFORMS); do \
+		os=$${p%%/*}; arch=$${p##*/}; \
+		echo "=== lint $$os/$$arch ==="; \
+		GOOS=$$os GOARCH=$$arch golangci-lint run --timeout 10m || exit 1; \
+	done
+
 fmt:
 	gofmt -w -s .
 	goimports -w .
@@ -80,6 +94,12 @@ MODULE ?=
 
 # stackdepth is shared across modules; built once at the top level.
 STACKDEPTH := $(CURDIR)/build/bin/stackdepth
+# Depend on the tool's sources (not just existence): a stale binary silently
+# runs old analysis logic, and nothing else ties build/bin to the source tree.
+STACKDEPTH_SRCS := $(wildcard scripts/cmd/stackdepth/*.go scripts/cmd/stackdepth/go.*)
+
+$(STACKDEPTH): $(STACKDEPTH_SRCS)
+	@cd scripts/cmd/stackdepth && go build -o $@ .
 
 # Primitives forwarded to every module sub-make. Derived values
 # (_ISA, _EXT, GEN_NATIVE_PRELINK_FLAG) are computed by native/common.mk from
@@ -90,9 +110,6 @@ _MODULE_VARS = REPO_ROOT=$(CURDIR) TARGET_OS=$(TARGET_OS) TARGET_ARCH=$(TARGET_A
 	TOOLCHAIN=$(TOOLCHAIN) LINUX_SYSROOT=$(LINUX_SYSROOT) PROFILE=$(PROFILE) \
 	ASM=$(ASM) NO_PRELINK=$(NO_PRELINK) NO_OPT=$(NO_OPT) \
 	$(if $(MODE),MODE=$(MODE)) $(if $(STACK_BUDGET),STACK_BUDGET=$(STACK_BUDGET))
-
-$(STACKDEPTH):
-	@cd scripts/cmd/stackdepth && go build -o $@ .
 
 # Shell guard inlined into each module-picking recipe. Errors naming the real
 # target (passed as $1) with a matching example, instead of an internal helper
@@ -119,8 +136,8 @@ gen-debug:
 gen-pgo-instr-use:
 	@$(call _require_module,gen-pgo-instr-use); $(MAKE) -C native/$(MODULE) gen-pgo-instr-use $(_MODULE_VARS)
 	@echo ""
-	@echo "PGO $(MODULE) syso installed. To restore the committed version:"
-	@echo "  git checkout -- native/$(MODULE)/*.syso"
+	@echo "PGO $(MODULE) native artifact installed. To restore the committed version:"
+	@echo "  git checkout -- native/$(MODULE)/"
 
 # End-to-end instrumentation PGO collection: build an instrumented syso, run the
 # workload (counters flushed via the vjpgoinstr TestMain hook), merge the
@@ -149,7 +166,7 @@ gen-all:
 
 # Per-module shortcuts, auto-generated so the set stays symmetric without
 # per-module boilerplate. <module> and <module>-debug come from NATIVE_LIBS;
-# <module>-pgo only from PGO_LIBS (vlib excluded: its syso exports are
+# <module>-pgo only from PGO_LIBS (vlib excluded: its blob exports are
 # init-time, the hot path is inline in callers, PGO would optimize nothing).
 PGO_LIBS := encvm ndec
 
@@ -159,8 +176,8 @@ $(1):
 	@$(MAKE) gen MODULE=$(1)
 $(1)-debug:
 	@$(MAKE) gen-debug MODULE=$(1)
-# <module>-lldb: build a syso for lldb source-level debugging of C code.
-# Sets NO_PRELINK=1 (darwin: archive .syso with per-.o DWARF + relocations;
+# <module>-lldb: build a native artifact for lldb source-level debugging of C
+# code. Sets NO_PRELINK=1 (darwin: archive with per-.o DWARF + relocations;
 # linux: ld -r relocatable object) and NO_OPT=1 (-O0 so frame variable / step
 # work as expected; auto-disables LTO and the stack-frame size check).
 # See docs/debug-native.md for the full external-linking + lldb attach recipe.
@@ -189,11 +206,11 @@ ndec-test:
 	go test ./tests/ -count=1
 
 # stack-check verifies that no nosplit native call chain from the NOSPLIT
-# trampoline entry points exceeds Go's abi.StackNosplitBase (800B). The
-# trampolines are NOSPLIT $0 tail calls, so the whole .syso call chain is
-# invisible to the Go linker's own stack check and must be validated here.
+# trampoline entry points exceeds its budget. The trampolines are NOSPLIT $0
+# tail calls, so the whole blob call chain is invisible to the Go linker's
+# own stack check and must be validated here.
 # See scripts/cmd/stackdepth. Pass MODULE=encvm|ndec|vlib (no default).
-# stack-check-all walks every module and, for encvm, every mode (full/compact/fast).
+# stack-check-all walks every module's full entry set.
 stack-check: $(STACKDEPTH)
 	@$(call _require_module,stack-check); $(MAKE) -C native/$(MODULE) stack-check $(_MODULE_VARS)
 

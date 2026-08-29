@@ -19,6 +19,16 @@ EXTRA_CFLAGS="${EXTRA_CFLAGS:-} -I$REPO_ROOT/native/ndec/impl -I$REPO_ROOT/nativ
 
 TARGET_DIR="native/ndec"
 
+# Artifact naming: one arch-canonical ELF blob per arch (ndec_amd64.elf /
+# ndec_arm64.elf), exactly like vlib. SYSO_PREFIX replaces the default
+# "{basename}_{mode}_{isa}_{os}_{arch}" name; SYSO_EXT=".elf" keeps the Go
+# tool from linking it (the Go linker picks up every *.syso in a package
+# directory); SYSO_ARCH_ONLY=1 drops the os segment. The blob is embedded by
+# ndec_blob_*.go and mapped at runtime through native/execblob.
+SYSO_PREFIX="ndec"
+SYSO_EXT=".elf"
+SYSO_ARCH_ONLY=1
+
 if [ -z "$MODES" ]; then
   MODES="default"
 fi

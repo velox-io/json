@@ -49,7 +49,8 @@ func extractFromELF(path string) (*ExtractResult, error) {
 		if bind != elf.STB_GLOBAL && bind != elf.STB_LOCAL {
 			continue
 		}
-		if elf.ST_TYPE(s.Info) != elf.STT_FUNC {
+		isObject := elf.ST_TYPE(s.Info) == elf.STT_OBJECT
+		if !isObject && elf.ST_TYPE(s.Info) != elf.STT_FUNC {
 			continue
 		}
 		if s.Size == 0 {
@@ -73,33 +74,16 @@ func extractFromELF(path string) (*ExtractResult, error) {
 			Offset: offset,
 			Size:   s.Size,
 			Local:  bind == elf.STB_LOCAL,
+			Object: isObject,
 		})
 	}
-
-	// Determine code extent: end of the last function symbol.
-	codeExtent := findCodeExtent(syms)
-	blobExtent := uint64(len(textData))
 
 	return &ExtractResult{
 		Blob:       textData,
 		Syms:       syms,
-		CodeExtent: codeExtent,
-		BlobExtent: blobExtent,
 		IsARM64:    machine == elf.EM_AARCH64,
 		ELFMachine: machine,
 	}, nil
-}
-
-// findCodeExtent returns the end offset of the last function symbol.
-func findCodeExtent(syms []SymInfo) uint64 {
-	var maxEnd uint64
-	for _, s := range syms {
-		end := s.Offset + s.Size
-		if end > maxEnd {
-			maxEnd = end
-		}
-	}
-	return maxEnd
 }
 
 // writeRelocatableELF generates an ELF ET_REL object with:
@@ -158,7 +142,11 @@ func writeRelocatableELF(path string, textData []byte, syms []SymInfo, machine e
 		if s.Local {
 			bind = elf.STB_LOCAL
 		}
-		symtabData[off+4] = byte(bind)<<4 | byte(elf.STT_FUNC)      // st_info
+		symType := elf.STT_FUNC
+		if s.Object {
+			symType = elf.STT_OBJECT
+		}
+		symtabData[off+4] = byte(bind)<<4 | byte(symType)           // st_info
 		symtabData[off+5] = byte(elf.STV_DEFAULT)                   // st_other
 		binary.LittleEndian.PutUint16(symtabData[off+6:], 1)        // st_shndx = 1 (.text)
 		binary.LittleEndian.PutUint64(symtabData[off+8:], s.Offset) // st_value

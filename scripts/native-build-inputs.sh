@@ -9,9 +9,9 @@
 # sub-makes in particular): every git call resolves the repository through
 # this script's own location. Pure definitions only, no side effects.
 #
-# The *.syso exclusion matters: the artifacts being replaced must not
-# change the hash, and ls-tree lacks pathspec exclude magic, so that
-# filter runs on the listing lines.
+# The *.syso and *.elf exclusions matter: the artifacts being replaced
+# must not change the hash, and ls-tree lacks pathspec exclude magic, so
+# that filter runs on the listing lines.
 
 NATIVE_INPUT_PATHS=(native scripts/gen-natives.sh scripts/prelink.sh scripts/cmd/prelink-obj
   scripts/pgo-collect-instr.sh)
@@ -24,7 +24,7 @@ _native_inputs_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # one stays valid for the others. Prints "unknown" outside a repository.
 native_inputs_hash() {
   git -C "$_native_inputs_root" rev-parse --git-dir >/dev/null 2>&1 || { echo unknown; return; }
-  git -C "$_native_inputs_root" ls-tree -r HEAD -- "${NATIVE_INPUT_PATHS[@]}" | grep -v '\.syso$' |
+  git -C "$_native_inputs_root" ls-tree -r HEAD -- "${NATIVE_INPUT_PATHS[@]}" | grep -vE '\.(syso|elf)$' |
     git hash-object --stdin
 }
 
@@ -33,5 +33,5 @@ native_inputs_hash() {
 # commit would pair it with sources it was never built from.
 native_inputs_dirty() {
   [ -n "$(git -C "$_native_inputs_root" status --porcelain --untracked-files=no -- \
-    "${NATIVE_INPUT_PATHS[@]}" ':(exclude)*.syso')" ]
+    "${NATIVE_INPUT_PATHS[@]}" ':(exclude)*.syso' ':(exclude)*.elf')" ]
 }

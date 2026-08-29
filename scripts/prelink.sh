@@ -536,9 +536,14 @@ done
 mkdir -p "$WORKDIR"
 mkdir -p "$(dirname "$OUTPUT")"
 
-# Build unified prelink-obj tool (used by both ELF and Mach-O paths)
+# Build unified prelink-obj tool (used by both ELF and Mach-O paths).
+# Rebuild not only when missing but also when any source is newer than the
+# binary: a stale prelink-obj silently produces old-format blobs (e.g.
+# dropping loader-patch local symbols like vj_log_write_nr), and the build
+# stamp only attests the SOURCE lineage, not the tool's.
 PRELINK_OBJ="$REPO_ROOT/build/bin/prelink-obj"
-if [ ! -x "$PRELINK_OBJ" ]; then
+if [ ! -x "$PRELINK_OBJ" ] ||
+   [ -n "$(find "$REPO_ROOT/scripts/cmd/prelink-obj" -name '*.go' -newer "$PRELINK_OBJ" -print -quit 2>/dev/null)" ]; then
     log "  Building prelink-obj..."
     mkdir -p "$(dirname "$PRELINK_OBJ")"
     (cd "$REPO_ROOT/scripts/cmd/prelink-obj" && go build -o "$PRELINK_OBJ" .)

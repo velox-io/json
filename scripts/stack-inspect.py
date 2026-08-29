@@ -27,7 +27,7 @@ logging.getLogger("angr.analyses.fcp.fcp.SimEngineFCPVEX").setLevel(logging.CRIT
 import angr
 import capstone
 
-DEFAULT_TARGET = "native/encvm/encvm_full_avx2_linux_amd64.syso"
+DEFAULT_TARGET = "native/encvm/encvm_amd64.elf"
 
 
 def extract_frame_x86(func, max_ins=25):

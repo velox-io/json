@@ -123,8 +123,16 @@ if [ "$DO_BUILD" = true ]; then
             encvm) tgt=gen ;;
             *)     tgt="$m" ;;
         esac
+        # ndec/vlib are arch-canonical (SYSO_ARCH_ONLY): their blobs are
+        # always linux-built regardless of the profiling host, and the
+        # benchmark still runs them here because the mapped blob is
+        # OS-neutral on its arch. encvm is arch-canonical too now.
+        case "$m" in
+            ndec | vlib | encvm) prof_os=linux ;;
+            *)                   prof_os="$HOST_OS" ;;
+        esac
         echo ">> make $tgt PROFILE=1 (module $m; keeps DWARF in build/prelink/*.so)"
-        make "$tgt" PROFILE=1 TARGET_OS="$HOST_OS" TARGET_ARCH="$HOST_ARCH" >/dev/null \
+        make "$tgt" PROFILE=1 TARGET_OS="$prof_os" TARGET_ARCH="$HOST_ARCH" >/dev/null \
             || { echo "Error: 'make $tgt PROFILE=1' failed" >&2; exit 1; }
     done
     echo ">> make bench-build"
@@ -137,8 +145,11 @@ fi
 # files that actually carry DWARF (.debug_line): build/prelink/ can contain
 # stale non-debug .so leftovers from earlier non-PROFILE builds, and those would
 # give wrong function offsets. Prefer newest first so a fresh PROFILE build wins.
+# The glob covers both naming schemes: per-OS dylibs (<mod>_<mode>_<isa>_<os>_
+# <arch>.so, pre-blob builds) and arch-canonical blobs (<mod>_<arch>.so, which
+# carry no os segment).
 DBG_SOS=()
-for so in $(ls -t build/prelink/*_"${HOST_OS}_${HOST_ARCH}".so 2>/dev/null); do
+for so in $(ls -t build/prelink/*_"${HOST_OS}_${HOST_ARCH}".so build/prelink/*_"${HOST_ARCH}".so 2>/dev/null); do
     [ -f "$so" ] || continue
     if readelf -SW "$so" 2>/dev/null | grep -q '\.debug_line'; then
         DBG_SOS+=("$so")
