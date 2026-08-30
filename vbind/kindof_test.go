@@ -4,7 +4,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"unsafe"
 
 	"github.com/velox-io/json/typ"
 )
@@ -119,21 +118,21 @@ func TestAttachKindofsForStruct_RegistryForm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if len(tt.Kindofs) != 1 {
-		t.Fatalf("got %d kindof tables, want 1", len(tt.Kindofs))
+	if len(tt.Polys) != 1 {
+		t.Fatalf("got %d poly tables, want 1", len(tt.Polys))
 	}
-	o := &tt.Kindofs[0]
-	if o.CaseCount != 2 {
-		t.Errorf("CaseCount = %d, want 2", o.CaseCount)
+	o := &tt.Polys[0]
+	if o.CaseCount != polyKindCount {
+		t.Errorf("CaseCount = %d, want %d (one slot per JSON kind)", o.CaseCount, polyKindCount)
 	}
-	if o.CaseIdxByKind[0] != 0 {
-		t.Errorf("CaseIdxByKind[bool] = %d, want 0", o.CaseIdxByKind[0])
+	if o.CaseRType(0) == nil {
+		t.Error("CaseRType[bool] = nil, want the registered case rtype")
 	}
-	if o.CaseIdxByKind[4] != 1 {
-		t.Errorf("CaseIdxByKind[object] = %d, want 1", o.CaseIdxByKind[4])
+	if o.CaseRType(4) == nil {
+		t.Error("CaseRType[object] = nil, want the registered case rtype")
 	}
-	if o.CaseIdxByKind[1] != -1 {
-		t.Errorf("CaseIdxByKind[number] = %d, want -1 (absent)", o.CaseIdxByKind[1])
+	if o.CaseRType(1) != nil {
+		t.Error("CaseRType[number] != nil, want nil for an unregistered kind")
 	}
 	rootIdx := tt.Root
 	rootType := &tt.Types[rootIdx]
@@ -142,14 +141,13 @@ func TestAttachKindofsForStruct_RegistryForm(t *testing.T) {
 	if !FieldHasKindof(kindofField) {
 		t.Errorf("kindof field missing TagKindof flag")
 	}
-	oidx := FieldKindofIdx(kindofField)
+	oidx := FieldPolyIdx(kindofField)
 	if int(oidx) != 0 {
-		t.Errorf("KindofIdx = %d, want 0", oidx)
+		t.Errorf("PolyIdx = %d, want 0", oidx)
 	}
-	for i := 0; i < 2; i++ {
-		got := *(*uint16)(unsafe.Add(o.CaseTypeIdxData, uintptr(i)*2))
-		if got == 0 {
-			t.Errorf("case %d TypeIdx = 0, want non-zero", i)
+	for _, kind := range [2]int{0, 4} {
+		if got := o.CaseTypeIdx(kind); got == 0 {
+			t.Errorf("CaseTypeIdx[%d] = 0, want non-zero", kind)
 		}
 	}
 }
@@ -160,11 +158,11 @@ func TestAttachKindofsForStruct_MethodForm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if len(tt.Kindofs) != 1 {
-		t.Fatalf("got %d kindof tables, want 1", len(tt.Kindofs))
+	if len(tt.Polys) != 1 {
+		t.Fatalf("got %d poly tables, want 1", len(tt.Polys))
 	}
-	if tt.Kindofs[0].CaseCount != 2 {
-		t.Errorf("CaseCount = %d, want 2", tt.Kindofs[0].CaseCount)
+	if got := tt.Polys[0].CaseCount; got != polyKindCount {
+		t.Errorf("CaseCount = %d, want %d", got, polyKindCount)
 	}
 }
 
@@ -210,8 +208,8 @@ func TestAttachKindofsForStruct_UserDefinedIface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("user-defined interface kindof field should be accepted: %v", err)
 	}
-	if len(tt.Kindofs) != 1 {
-		t.Fatalf("got %d kindof tables, want 1", len(tt.Kindofs))
+	if len(tt.Polys) != 1 {
+		t.Fatalf("got %d poly tables, want 1", len(tt.Polys))
 	}
 }
 
@@ -234,14 +232,14 @@ func TestAttachKindofsForStruct_VariantAndKindofConflict(t *testing.T) {
 	}
 }
 
-func TestFieldKindofIdxPacking(t *testing.T) {
+func TestFieldPolyIdxPacking_Kindof(t *testing.T) {
 	var f BindField
 	f.Flags = PackKindofFieldFlags(0x1234, 0)
 	if !FieldHasKindof(&f) {
 		t.Error("FieldHasKindof false after PackKindofFieldFlags")
 	}
-	if got := FieldKindofIdx(&f); got != 0x1234 {
-		t.Errorf("FieldKindofIdx = %#x, want 0x1234", got)
+	if got := FieldPolyIdx(&f); got != 0x1234 {
+		t.Errorf("FieldPolyIdx = %#x, want 0x1234", got)
 	}
 }
 
@@ -261,8 +259,8 @@ func TestAttachKindofsForStruct_MultipleFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if len(tt.Kindofs) != 2 {
-		t.Fatalf("got %d kindof tables, want 2 (one per kindof field)", len(tt.Kindofs))
+	if len(tt.Polys) != 2 {
+		t.Fatalf("got %d poly tables, want 2 (one per kindof field)", len(tt.Polys))
 	}
 	rootIdx := tt.Root
 	rootType := &tt.Types[rootIdx]
@@ -272,9 +270,9 @@ func TestAttachKindofsForStruct_MultipleFields(t *testing.T) {
 		if !FieldHasKindof(f) {
 			t.Errorf("field %d missing TagKindof flag", i)
 		}
-		oidx := FieldKindofIdx(f)
+		oidx := FieldPolyIdx(f)
 		if int(oidx) != i {
-			t.Errorf("field %d KindofIdx = %d, want %d", i, oidx, i)
+			t.Errorf("field %d PolyIdx = %d, want %d", i, oidx, i)
 		}
 	}
 }

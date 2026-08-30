@@ -62,7 +62,7 @@ enum {
   /* Bit 5 is type-local BIND_FLAG_MAY_PHASE2. The builder excludes it from
    * BindField.flags. */
   BIND_FF_KINDOF = 1u << 8, /* The JSON value kind selects a concrete TypeIdx. */
-  /* The high 16 bits carry VariantIdx for both variant forms. */
+  /* Every poly marker above carries its table index in the high 16 bits. */
   BIND_FF_INLINE_VARIANT = 1u << 9,
   /* Unknown object fields are accumulated into this value.Value field. */
   BIND_FF_RESERVE_UNKNOWN = 1u << 10,
@@ -167,13 +167,7 @@ _Static_assert(offsetof(BindType, u) == 4, "BindType.u off");
 _Static_assert(offsetof(BindType, child) == 8, "BindType.child off");
 _Static_assert(offsetof(BindType, child) == 8, "BindType.child off");
 
-/*
- * Layout matches vbind.BindField. type is uintptr_t so the Go field table stays
- * noscan and remains rooted by TypeTree. flags combines field bits with inherited
- * type bits for one dispatch test. Its high 16 bits carry a poly table index or
- * BindPtrHop start index when the corresponding field flag is set.
- */
-#define BIND_FIELD_VARIANT_IDX(f) ((uint16_t)((f)->flags >> 16))
+#define BIND_FIELD_POLY_IDX(f) ((uint16_t)((f)->flags >> 16))
 typedef struct BindField {
   uintptr_t type;  /* off 0, BindType pointer stored as uintptr_t */
   uint32_t offset; /* off 8, byte offset within the owning struct or final pointee */
@@ -184,18 +178,13 @@ _Static_assert(offsetof(BindField, type) == 0, "BindField.type");
 _Static_assert(offsetof(BindField, offset) == 8, "BindField.offset");
 _Static_assert(offsetof(BindField, flags) == 12, "BindField.flags");
 
-/*
- * This 32-byte record matches vbind.TypeMeta and runs parallel to ctx.types.
- * Its Go payload is a noscan uintptr array, so independent TypeTree owners must
- * keep every referenced object alive while C reads the record.
- */
 typedef struct BindTypeMeta {
   uint32_t _;    /* off 0, ABI placeholder */
   uint32_t size; /* off 4, Go type size in bytes */
   union {        /* off 8, 24-byte kind-specific payload */
     struct {
       uintptr_t lookup;                   /* off 8, field-name perfect-hash blob */
-      uint16_t inline_variant_idx;        /* off 16, ctx.variants index; 0xFFFF means none */
+      uint16_t inline_variant_idx;        /* off 16, ctx.polys index; 0xFFFF means none */
       uint16_t _pad;                      /* off 18 */
       uint32_t reserve_unknown_field_off; /* off 20, byte offset; 0xFFFFFFFF means none */
       /* off 24, BindPtrHop base owned and rooted by TypeTree; NULL when unused */
@@ -334,68 +323,47 @@ _Static_assert(offsetof(BindAnyMeta, map_any_type_idx) == 82, "BindAnyMeta.map_a
 _Static_assert(offsetof(BindAnyMeta, number_type) == 88, "BindAnyMeta.number_type");
 
 /*
- * This 56-byte layout matches vbind.BindVariantTable. BindField.flags selects a
- * table through its high 16 bits. A discriminator value maps through lookup to
- * parallel type, runtime boxing, and SlotClass arrays. default_case_idx handles
- * only an unmatched value; an absent discriminator still selects no case. Go
- * keeps the lookup reachable and VariantCases owns the parallel arrays.
+ * A variant maps a discriminator Go string through lookup to a case index.
+ * default_case_idx handles only an unmatched value; an absent discriminator
+ * still selects no case.
+ *
+ * A kindof table indexes those arrays directly by JSON kind, so it carries no
+ * lookup and no discriminator. Registering a kind writes its case_rtype entry
+ * and leaves that kind's other two entries unused, so a NULL case_rtype is the
+ * unregistered-kind test. case_count is BIND_POLY_KIND_COUNT, which lets one
+ * loop bound cover both interpretations.
+ *
+ * Go owns every pointer here: the scannable TypeTree.Polys array roots the
+ * lookup blob through lookup, and TypeTree.PolyCases roots the case arrays.
  */
-typedef struct BindVariantTable {
-  uint32_t disc_off;             /* off 0, discriminator byte offset in host */
-  uint32_t case_count;           /* off 4, number of explicit cases */
-  uintptr_t lookup;              /* off 8, case string to case index lookup */
-  const uint16_t *case_type_idx; /* off 16, case index to ctx.types index */
-  const void *const *case_rtype; /* off 24, case index to runtime type or itab */
-  uint16_t default_case_idx;     /* off 32, fallback case; 0xFFFF means none */
-  uint16_t _pad;
-  uint32_t _pad2;                 /* off 36 */
-  const int32_t *case_slot_class; /* off 40, case index to SlotClass index */
-  /* off 48, host ctx.types index for inline variants; zero for sibling variants */
-  uint16_t host_type_idx;
-  uint16_t _pad4; /* off 50 */
-  uint32_t _pad5; /* off 52, padding to 56 bytes */
-} BindVariantTable;
-_Static_assert(sizeof(BindVariantTable) == 56, "BindVariantTable size drift");
-_Static_assert(offsetof(BindVariantTable, disc_off) == 0, "BindVariantTable.disc_off");
-_Static_assert(offsetof(BindVariantTable, lookup) == 8, "BindVariantTable.lookup");
-_Static_assert(offsetof(BindVariantTable, case_type_idx) == 16, "BindVariantTable.case_type_idx");
-_Static_assert(offsetof(BindVariantTable, case_rtype) == 24, "BindVariantTable.case_rtype");
-_Static_assert(offsetof(BindVariantTable, default_case_idx) == 32, "BindVariantTable.default_case_idx");
-_Static_assert(offsetof(BindVariantTable, case_slot_class) == 40, "BindVariantTable.case_slot_class");
-_Static_assert(offsetof(BindVariantTable, host_type_idx) == 48, "BindVariantTable.host_type_idx");
+typedef struct BindPolyTable {
+  uint32_t disc_off;              /* off 0, variant disc byte offset in host; zero for kindof */
+  uint16_t default_case_idx;      /* off 4, variant fallback case; BIND_POLY_NO_DEFAULT_CASE means none */
+  uint16_t case_count;            /* off 6, variant case count or BIND_POLY_KIND_COUNT */
+  const uint16_t *case_type_idx;  /* off 8, case or kind to ctx.types index */
+  const void *const *case_rtype;  /* off 16, case or kind to runtime type, itab, or NULL */
+  const int32_t *case_slot_class; /* off 24, case or kind to SlotClass index */
+  uintptr_t lookup;               /* off 32, variant case-string blob; zero for kindof */
+} BindPolyTable;
+_Static_assert(sizeof(BindPolyTable) == 40, "BindPolyTable size drift");
+_Static_assert(offsetof(BindPolyTable, disc_off) == 0, "BindPolyTable.disc_off");
+_Static_assert(offsetof(BindPolyTable, default_case_idx) == 4, "BindPolyTable.default_case_idx");
+_Static_assert(offsetof(BindPolyTable, case_count) == 6, "BindPolyTable.case_count");
+_Static_assert(offsetof(BindPolyTable, case_type_idx) == 8, "BindPolyTable.case_type_idx");
+_Static_assert(offsetof(BindPolyTable, case_rtype) == 16, "BindPolyTable.case_rtype");
+_Static_assert(offsetof(BindPolyTable, case_slot_class) == 24, "BindPolyTable.case_slot_class");
+_Static_assert(offsetof(BindPolyTable, lookup) == 32, "BindPolyTable.lookup");
+
+/* A kindof table's case arrays are indexed by JSON kind: bool, number, string,
+ * array, object. */
+#define BIND_POLY_KIND_COUNT 5u
 
 /*
- * This 56-byte layout matches vbind.BindKindofTable. JSON kind directly selects
- * a case, with -1 meaning unregistered. The parallel case arrays occupy offsets
- * 16, 24, and 40 as in BindVariantTable so close-time boxing shares one access
- * pattern. KindofCaseData owns these arrays while C may read them.
+ * default_case_idx sentinel for a descriptor that declared no default. Zero is
+ * a real case index, so absence needs a value outside the index space.
  */
-typedef struct BindKindofTable {
-  /* off 0, order is bool, number, string, array, object; -1 means absent */
-  int8_t case_idx_by_kind[5];
-  uint8_t _pad0[3];               /* off 5 */
-  uintptr_t _pad1;                /* off 8 */
-  const uint16_t *case_type_idx;  /* off 16, case index to ctx.types index */
-  const void *const *case_rtype;  /* off 24, case index to Go runtime type */
-  uint32_t case_count;            /* off 32, at most 5 */
-  uint32_t _pad2;                 /* off 36 */
-  const int32_t *case_slot_class; /* off 40, case index to SlotClass index */
-  uint64_t _pad3;                 /* off 48, padding to 56 bytes */
-} BindKindofTable;
-_Static_assert(sizeof(BindKindofTable) == 56, "BindKindofTable size drift");
-_Static_assert(offsetof(BindKindofTable, case_type_idx) == 16, "BindKindofTable.case_type_idx");
-_Static_assert(offsetof(BindKindofTable, case_rtype) == 24, "BindKindofTable.case_rtype");
-_Static_assert(offsetof(BindKindofTable, case_count) == 32, "BindKindofTable.case_count");
-_Static_assert(offsetof(BindKindofTable, case_slot_class) == 40, "BindKindofTable.case_slot_class");
+#define BIND_POLY_NO_DEFAULT_CASE 0xFFFFu
 
-/*
- * Layout matches vbind.SlotClass. The mode selects valid overlays. BUMP and
- * RECBUMP use offset and limit. Only BUMP uses len and cap. aux holds the BUMP
- * predictor or the recursive detach group. RECBATCH uses block as the installed
- * RecBatchMatrix and ignores offset, limit, len, and cap. A NULL block means the
- * selected mode has no backing installed; streams may remain detached until Go
- * supplies batch backing.
- */
 typedef struct BindSlotClass {
   uint8_t *block;     /* off 0, mode-specific installed backing */
   void *rtype;        /* off 8, Go-owned runtime type; Go only */
@@ -551,7 +519,7 @@ enum {
 };
 
 /*
- * Go initializes this 80-byte input view before entry and keeps every referenced
+ * Go initializes this 64-byte input view before entry and keeps every referenced
  * object alive through all yields until the parse completes.
  */
 typedef struct NdecBindContext {
@@ -569,14 +537,17 @@ typedef struct NdecBindContext {
   uint32_t root_view_mode;
   /* off 40, pointer-valued ABI field; the caller retains the typed GC root */
   uint8_t *root_dst;
-  uint32_t opt_flags;               /* off 48, BIND_OPT_* */
-  uint32_t any_type_idx;            /* off 52, ctx.types index for ANY */
-  const BindVariantTable *variants; /* off 56, TypeTree-owned table or NULL */
-  uint32_t variants_count;          /* off 64, table entry count */
-  uint32_t kindofs_count;           /* off 68, table entry count */
-  const BindKindofTable *kindofs;   /* off 72, TypeTree-owned table or NULL */
+  uint32_t opt_flags;    /* off 48, BIND_OPT_* */
+  uint32_t any_type_idx; /* off 52, ctx.types index for ANY */
+  /*
+   * off 56: the TypeTree's variant and kindof tables in one array, or NULL when
+   * the type tree has neither. BIND_FIELD_POLY_IDX selects an entry. The array
+   * carries no count because the builder is its only writer and stamps only
+   * in-range indices on the fields that read it.
+   */
+  const BindPolyTable *polys;
 } NdecBindContext;
-_Static_assert(sizeof(NdecBindContext) == 80, "NdecBindContext size drift");
+_Static_assert(sizeof(NdecBindContext) == 64, "NdecBindContext size drift");
 _Static_assert(offsetof(NdecBindContext, types) == 0, "ctx.types");
 _Static_assert(offsetof(NdecBindContext, type_meta) == 8, "ctx.type_meta");
 _Static_assert(offsetof(NdecBindContext, src) == 16, "ctx.src");
@@ -586,10 +557,7 @@ _Static_assert(offsetof(NdecBindContext, root_view_mode) == 36, "ctx.root_view_m
 _Static_assert(offsetof(NdecBindContext, root_dst) == 40, "ctx.root_dst");
 _Static_assert(offsetof(NdecBindContext, opt_flags) == 48, "ctx.opt_flags");
 _Static_assert(offsetof(NdecBindContext, any_type_idx) == 52, "ctx.any_type_idx");
-_Static_assert(offsetof(NdecBindContext, variants) == 56, "ctx.variants");
-_Static_assert(offsetof(NdecBindContext, variants_count) == 64, "ctx.variants_count");
-_Static_assert(offsetof(NdecBindContext, kindofs_count) == 68, "ctx.kindofs_count");
-_Static_assert(offsetof(NdecBindContext, kindofs) == 72, "ctx.kindofs");
+_Static_assert(offsetof(NdecBindContext, polys) == 56, "ctx.polys");
 
 /*
  * Go owns every backing in this 120-byte view. C advances cursors and writes
@@ -721,13 +689,13 @@ _Static_assert(offsetof(NdecBindYield, first_error_pos) == 12, "yield.first_erro
 _Static_assert(offsetof(NdecBindYield, target) == 16, "yield.target");
 
 typedef struct NdecBindBridge {
-  NdecBindContext ctx;     /* off 0, 80 bytes */
-  NdecBindAllocator alloc; /* off 80, 120 bytes */
-  NdecBindYield yield;     /* off 200, 24 bytes */
+  NdecBindContext ctx;     /* off 0, 64 bytes */
+  NdecBindAllocator alloc; /* off 64, 120 bytes */
+  NdecBindYield yield;     /* off 184, 24 bytes */
 } NdecBindBridge;
-_Static_assert(sizeof(NdecBindBridge) == 224, "NdecBindBridge size drift");
+_Static_assert(sizeof(NdecBindBridge) == 208, "NdecBindBridge size drift");
 _Static_assert(offsetof(NdecBindBridge, ctx) == 0, "bridge.ctx");
-_Static_assert(offsetof(NdecBindBridge, alloc) == 80, "bridge.alloc");
-_Static_assert(offsetof(NdecBindBridge, yield) == 200, "bridge.yield");
+_Static_assert(offsetof(NdecBindBridge, alloc) == 64, "bridge.alloc");
+_Static_assert(offsetof(NdecBindBridge, yield) == 184, "bridge.yield");
 
 #endif /* NDEC_BIND_BRIDGE_H */

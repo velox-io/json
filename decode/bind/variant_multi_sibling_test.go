@@ -166,8 +166,8 @@ func msMiddleVariantIdx(t *testing.T, root reflect.Type) uint16 {
 		if field.Offset != uint32(middle.Offset) || field.Flags&uint32(vbind.TagVariant) == 0 {
 			continue
 		}
-		idx := vbind.FieldVariantIdx(field)
-		if int(idx) < len(tt.Variants) && tt.Variants[idx].DiscFieldOff == uint32(disc.Offset) {
+		idx := vbind.FieldPolyIdx(field)
+		if int(idx) < len(tt.Polys) && tt.Polys[idx].DiscFieldOff == uint32(disc.Offset) {
 			matches = append(matches, idx)
 		}
 	}

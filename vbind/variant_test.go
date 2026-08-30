@@ -6,7 +6,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"unsafe"
 
 	"github.com/velox-io/json/native/vlib"
 	"github.com/velox-io/json/typ"
@@ -183,10 +182,10 @@ func TestAttachVariantsForStruct_RegistryForm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if len(tt.Variants) != 1 {
-		t.Fatalf("got %d variant tables, want 1", len(tt.Variants))
+	if len(tt.Polys) != 1 {
+		t.Fatalf("got %d poly tables, want 1", len(tt.Polys))
 	}
-	v := &tt.Variants[0]
+	v := &tt.Polys[0]
 	if v.CaseCount != 2 {
 		t.Errorf("CaseCount = %d, want 2", v.CaseCount)
 	}
@@ -195,11 +194,9 @@ func TestAttachVariantsForStruct_RegistryForm(t *testing.T) {
 		t.Errorf("DiscFieldOff = %d, want %d", v.DiscFieldOff, expectedDiscOff)
 	}
 	for i, want := range []string{"user", "product"} {
-		got := *(*uint16)(unsafe.Add(v.caseTypeIdxData, uintptr(i)*2))
-		if got == 0 {
+		if got := v.CaseTypeIdx(i); got == 0 {
 			t.Errorf("case %d (%q) TypeIdx = 0, want non-zero", i, want)
 		}
-		_ = want
 	}
 	rootIdx := tt.Root
 	rootType := &tt.Types[rootIdx]
@@ -212,9 +209,9 @@ func TestAttachVariantsForStruct_RegistryForm(t *testing.T) {
 	if !FieldHasVariant(variantField) {
 		t.Errorf("variant field missing TagVariant flag")
 	}
-	vidx := FieldVariantIdx(variantField)
+	vidx := FieldPolyIdx(variantField)
 	if int(vidx) != 0 {
-		t.Errorf("VariantIdx = %d, want 0", vidx)
+		t.Errorf("PolyIdx = %d, want 0", vidx)
 	}
 }
 
@@ -252,7 +249,7 @@ func TestAttachVariantsForStruct_ConcurrentBuild(t *testing.T) {
 	}
 	runtime.GC()
 	for i, tree := range trees {
-		if got := LookupFind(tree.Variants[0].Lookup, "user"); got != 0 {
+		if got := LookupFind(tree.Polys[0].Lookup, "user"); got != 0 {
 			t.Errorf("tree %d lookup = %d, want 0", i, got)
 		}
 	}
@@ -264,11 +261,11 @@ func TestAttachVariantsForStruct_MethodForm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if len(tt.Variants) != 1 {
-		t.Fatalf("got %d variant tables, want 1", len(tt.Variants))
+	if len(tt.Polys) != 1 {
+		t.Fatalf("got %d poly tables, want 1", len(tt.Polys))
 	}
-	if tt.Variants[0].CaseCount != 2 {
-		t.Errorf("CaseCount = %d, want 2", tt.Variants[0].CaseCount)
+	if tt.Polys[0].CaseCount != 2 {
+		t.Errorf("CaseCount = %d, want 2", tt.Polys[0].CaseCount)
 	}
 }
 
@@ -323,8 +320,8 @@ func TestAttachVariantsForStruct_MultipleSiblings(t *testing.T) {
 	}
 	// One table per variant field, even where two share a discriminator: the case
 	// set is per field, so sharing a discriminator does not share a table.
-	if len(tt.Variants) != 3 {
-		t.Fatalf("got %d variant tables, want 3 (one per variant field)", len(tt.Variants))
+	if len(tt.Polys) != 3 {
+		t.Fatalf("got %d poly tables, want 3 (one per variant field)", len(tt.Polys))
 	}
 	rootType := &tt.Types[tt.Root]
 	firstFieldIdx := rootType.StructFirstFieldIndex(&tt.Fields[0])
@@ -335,12 +332,12 @@ func TestAttachVariantsForStruct_MultipleSiblings(t *testing.T) {
 		if !FieldHasVariant(f) {
 			t.Fatalf("field %d missing TagVariant", fi)
 		}
-		idx := FieldVariantIdx(f)
+		idx := FieldPolyIdx(f)
 		if seen[idx] {
-			t.Errorf("field %d reuses variant table %d; each sibling needs its own", fi, idx)
+			t.Errorf("field %d reuses poly table %d; each sibling needs its own", fi, idx)
 		}
 		seen[idx] = true
-		if got := tt.Variants[idx].CaseCount; got != 2 {
+		if got := tt.Polys[idx].CaseCount; got != 2 {
 			t.Errorf("table %d CaseCount = %d, want 2", idx, got)
 		}
 	}
@@ -350,7 +347,7 @@ func TestAttachVariantsForStruct_MultipleSiblings(t *testing.T) {
 	wantCateOff := uint32(host.Field(3).Offset)
 	gotOffs := map[uint32]int{}
 	for idx := range seen {
-		gotOffs[tt.Variants[idx].DiscFieldOff]++
+		gotOffs[tt.Polys[idx].DiscFieldOff]++
 	}
 	if gotOffs[wantKindOff] != 2 {
 		t.Errorf("%d tables point at the \"kind\" offset %d, want 2", gotOffs[wantKindOff], wantKindOff)
@@ -396,8 +393,8 @@ func TestAttachVariantsForStruct_UserDefinedIface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("user-defined interface variant field should be accepted: %v", err)
 	}
-	if len(tt.Variants) != 1 {
-		t.Fatalf("got %d variant tables, want 1", len(tt.Variants))
+	if len(tt.Polys) != 1 {
+		t.Fatalf("got %d poly tables, want 1", len(tt.Polys))
 	}
 }
 
@@ -478,14 +475,14 @@ func TestDefineVariantCasesAt_EmptyFieldNamePanics(t *testing.T) {
 	}]("")
 }
 
-func TestFieldVariantIdxPacking(t *testing.T) {
+func TestFieldPolyIdxPacking_Variant(t *testing.T) {
 	var f BindField
 	f.Flags = PackVariantFieldFlags(0x1234, 0)
 	if !FieldHasVariant(&f) {
 		t.Error("FieldHasVariant false after PackVariantFieldFlags")
 	}
-	if got := FieldVariantIdx(&f); got != 0x1234 {
-		t.Errorf("FieldVariantIdx = %#x, want 0x1234", got)
+	if got := FieldPolyIdx(&f); got != 0x1234 {
+		t.Errorf("FieldPolyIdx = %#x, want 0x1234", got)
 	}
 }
 
@@ -608,7 +605,7 @@ func TestAttachVariantsForStruct_DefaultCase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	v := &tt.Variants[0]
+	v := &tt.Polys[0]
 	// Two entries: the named case and the default appended after it.
 	if v.CaseCount != 2 {
 		t.Fatalf("CaseCount = %d, want 2 (named case + default)", v.CaseCount)
@@ -648,7 +645,7 @@ func TestAttachVariantsForStruct_NoDefaultSentinel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if got := tt.Variants[0].DefaultCaseIdx; got != variantNoDefaultCase {
+	if got := tt.Polys[0].DefaultCaseIdx; got != variantNoDefaultCase {
 		t.Errorf("DefaultCaseIdx = %#x, want %#x (no default declared)", got, variantNoDefaultCase)
 	}
 }
@@ -713,7 +710,7 @@ func TestDefineVariantCasesAt_FieldOnlyNoFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if len(tt.Variants) != 1 || tt.Variants[0].CaseCount != 1 {
-		t.Errorf("got %d tables (first CaseCount=%d), want 1 table with 1 case", len(tt.Variants), tt.Variants[0].CaseCount)
+	if len(tt.Polys) != 1 || tt.Polys[0].CaseCount != 1 {
+		t.Errorf("got %d tables (first CaseCount=%d), want 1 table with 1 case", len(tt.Polys), tt.Polys[0].CaseCount)
 	}
 }

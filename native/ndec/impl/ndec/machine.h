@@ -174,9 +174,9 @@ _Static_assert(offsetof(NdecBindCore, cur_aux) == 72, "NdecBindCore.cur_aux offs
 _Static_assert(offsetof(NdecBindCore, frames) == 80, "NdecBindCore.frames offset");
 
 typedef struct NdecBindMachine {
-  NdecBindBridge b;      /* off 0    driver-engine bridge (ctx 80 + alloc 120 + yield 24 = 224B) */
-  NdecBindCore c;        /* off 224  binding state machine internals (scalars 80 + frames 8KiB = 8272B) */
-  const uint32_t *idx_p; /* off 8496 structural index cursor (overlaid by tape cursor during tape-bind) */
+  NdecBindBridge b;      /* off 0    driver-engine bridge (ctx 64 + alloc 120 + yield 24 = 208B) */
+  NdecBindCore c;        /* off 208  binding state machine internals (scalars 80 + frames 8KiB = 8272B) */
+  const uint32_t *idx_p; /* off 8480 structural index cursor (overlaid by tape cursor during tape-bind) */
   const uint32_t *idx_end;
   int32_t aux_depth; /* Current struct auxiliary slot; zero is the sentinel. Cold
                       * poly paths update it in memory, so it consumes no hot register
@@ -208,7 +208,7 @@ typedef struct NdecBindMachine {
   uint8_t in_tape_bind;
 } NdecBindMachine;
 _Static_assert(offsetof(NdecBindMachine, b) == 0, "bridge must be at offset 0");
-_Static_assert(offsetof(NdecBindMachine, idx_p) == 8496, "idx_p offset must match Go BindMachineCursorOffset");
+_Static_assert(offsetof(NdecBindMachine, idx_p) == 8480, "idx_p offset must match Go BindMachineCursorOffset");
 
 /* Save the parent at frames[depth], then advance depth. On success the caller
  * installs the child's hot state.
@@ -544,7 +544,7 @@ INLINE void tape_build_close_or_empty(NdecBindMachine *m, TapeBuild *tb) {
 INLINE int tape_build_bind_disc(NdecBindMachine *m, const BindType *host_type, uint16_t iv_idx, uint8_t *host,
                                 uint32_t start, const uint8_t *src, uint8_t **str_pp, uint32_t *seen) {
   if (*seen) return 1;
-  uint32_t disc_off       = m->b.ctx.variants[iv_idx].disc_off;
+  uint32_t disc_off       = m->b.ctx.polys[iv_idx].disc_off;
   uint64_t *arena         = m->b.alloc.tape_arena;
   const uint64_t *limit   = &arena[start + (uint32_t)(arena[start] & 0xFFFFFFFFu)];
   const ndec_lookup *lk   = (const ndec_lookup *)(uintptr_t)m->b.ctx.type_meta[host_type->type_idx].u.strct.lookup;
@@ -556,7 +556,7 @@ INLINE int tape_build_bind_disc(NdecBindMachine *m, const BindType *host_type, u
     uint32_t klen;
     const uint8_t *kd = tape_bind_string_ptr(*p, m->b.alloc.str_arena, src, &klen);
     int fi            = bind_lookup_key(lk, kd, klen);
-    if (fi >= 0 && (fields[fi].flags & BIND_FF_VDISC) && BIND_FIELD_VARIANT_IDX(&fields[fi]) == iv_idx) {
+    if (fi >= 0 && (fields[fi].flags & BIND_FF_VDISC) && BIND_FIELD_POLY_IDX(&fields[fi]) == iv_idx) {
       const BindField *disc_field = &fields[fi];
       uint64_t word               = p[1];
       uint8_t tag                 = (uint8_t)(word >> 56);
@@ -622,10 +622,9 @@ INLINE void value_install_tape(NdecBindMachine *m, uint8_t *target, uint32_t sta
 /* Poly binding selects a case, acquires its storage, and publishes the eface.
  * A field binds immediately when its discriminator or JSON kind is sufficient.
  * An unbound discriminator or cold case defers the value to the merged tape and
- * re-derives the decision at struct close, so no case state crosses fields.
- * JSON and tape paths share the variant and kindof selectors and table layout. */
+ * re-derives the decision at struct close, so no case state crosses fields. */
 
-/* A negative case_idx means selection failed. */
+/* A negative case_idx means selection failed; a kindof case_idx is its kind. */
 typedef struct PolyCase {
   int32_t case_idx;
   uint16_t case_type_idx;
@@ -685,15 +684,17 @@ INLINE int poly_kind_of_json_char(uint8_t ch) {
 }
 
 INLINE PolyCase poly_case_by_kindof(const NdecBindMachine *m, uint16_t poly_idx, int json_kind) {
-  PolyCase pc               = {-1, 0, 0, NULL};
-  const BindKindofTable *ot = &m->b.ctx.kindofs[poly_idx];
+  PolyCase pc             = {-1, 0, 0, NULL};
+  const BindPolyTable *pt = &m->b.ctx.polys[poly_idx];
   if (json_kind < 0) return pc;
-  int32_t ci = ot->case_idx_by_kind[json_kind];
-  if (ci < 0) return pc;
-  pc.case_idx      = ci;
-  pc.case_type_idx = ot->case_type_idx[ci];
-  pc.slot_class    = ot->case_slot_class[ci];
-  pc.rtype         = ot->case_rtype[ci];
+  /* The kind indexes the case arrays directly, so an unregistered kind is the
+   * one whose rtype slot stayed NULL. poly_kind_of_* bounds the kind to
+   * BIND_POLY_KIND_COUNT. */
+  pc.rtype = pt->case_rtype[json_kind];
+  if (pc.rtype == NULL) return pc;
+  pc.case_idx      = json_kind;
+  pc.case_type_idx = pt->case_type_idx[json_kind];
+  pc.slot_class    = pt->case_slot_class[json_kind];
   return pc;
 }
 
@@ -704,30 +705,30 @@ INLINE PolyCase poly_case_by_kindof(const NdecBindMachine *m, uint16_t poly_idx,
  * this cold selector out of inlined field dispatch. */
 NOINLINE static PolyCase poly_case_by_disc(const NdecBindMachine *m, uint16_t poly_idx, const uint8_t *host,
                                            const uint8_t *str_p, int *disc_bound) {
-  PolyCase pc                = {-1, 0, 0, NULL};
-  const BindVariantTable *vt = &m->b.ctx.variants[poly_idx];
-  const uint8_t *disc_ptr    = *(const uint8_t *const *)(host + vt->disc_off);
-  uint64_t disc_len          = *(const uint64_t *)(host + vt->disc_off + 8);
-  uintptr_t dp               = (uintptr_t)disc_ptr;
-  uintptr_t begin            = (uintptr_t)m->b.alloc.str_arena + m->b.alloc.str_gen_start;
-  uintptr_t end              = (uintptr_t)str_p;
-  *disc_bound                = dp >= begin && dp < end;
+  PolyCase pc             = {-1, 0, 0, NULL};
+  const BindPolyTable *pt = &m->b.ctx.polys[poly_idx];
+  const uint8_t *disc_ptr = *(const uint8_t *const *)(host + pt->disc_off);
+  uint64_t disc_len       = *(const uint64_t *)(host + pt->disc_off + 8);
+  uintptr_t dp            = (uintptr_t)disc_ptr;
+  uintptr_t begin         = (uintptr_t)m->b.alloc.str_arena + m->b.alloc.str_gen_start;
+  uintptr_t end           = (uintptr_t)str_p;
+  *disc_bound             = dp >= begin && dp < end;
   /* Only storage published by this root parse may drive case selection. */
   if (!*disc_bound) return pc;
   int ci = -1;
-  if (disc_len > 0 && disc_len <= 63 && vt->lookup != 0) {
+  if (disc_len > 0 && disc_len <= 63 && pt->lookup != 0) {
     ndec_lookup_key key = {(const char *)disc_ptr, (size_t)disc_len};
-    ci                  = ndec_lookup_find((const ndec_lookup *)vt->lookup, key);
+    ci                  = ndec_lookup_find((const ndec_lookup *)pt->lookup, key);
   }
   if (ci < 0) {
     /* Only a present but unmatched value may select the default. */
-    if (vt->default_case_idx == 0xFFFFu) return pc;
-    ci = (int)vt->default_case_idx;
+    if (pt->default_case_idx == BIND_POLY_NO_DEFAULT_CASE) return pc;
+    ci = (int)pt->default_case_idx;
   }
   pc.case_idx      = ci;
-  pc.case_type_idx = vt->case_type_idx[ci];
-  pc.slot_class    = vt->case_slot_class[ci];
-  pc.rtype         = vt->case_rtype[ci];
+  pc.case_type_idx = pt->case_type_idx[ci];
+  pc.slot_class    = pt->case_slot_class[ci];
+  pc.rtype         = pt->case_rtype[ci];
   return pc;
 }
 
@@ -744,7 +745,7 @@ enum {
 
 INLINE int poly_case_site(const NdecBindMachine *m, const BindField *f, const uint8_t *host, const uint8_t *str_p,
                           int json_kind) {
-  uint16_t poly_idx = BIND_FIELD_VARIANT_IDX(f);
+  uint16_t poly_idx = BIND_FIELD_POLY_IDX(f);
   PolyCase pc;
   if (f->flags & BIND_FF_KINDOF) {
     /* Defer an invalid value start to the tape path, the single syntax-error site. */

@@ -497,7 +497,7 @@ func TestKindof_NestedVariantHost(t *testing.T) {
 // --- Multiple kindof fields per struct ---
 //
 // kindof fields are independent (no disc_seen pairing), so a struct may carry
-// several. Each field gets its own BindKindofTable and its own poly_stack
+// several. Each field gets its own BindPolyTable and its own poly_stack
 // entry at parse time; the close loop drains them LIFO.
 
 // kindofDualFieldFull is a host with two kindof fields sharing one descriptor

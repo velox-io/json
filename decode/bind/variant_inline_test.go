@@ -13,8 +13,8 @@ import (
 // Inline-tag variant (§6.6) tests. The variant field carries
 // `vjson:"variant=<discName>,inline"`; case type fields unfold into the host
 // struct. The C struct-open path intercepts and tapes the whole struct via
-// vd_dispatch; Go rebinds once with HostTypeIdx so walkStruct dispatches host
-// fields and the post-walk loop writes the eface at the variant field's offset.
+// vd_dispatch; Go rebinds once with the host type index so walkStruct dispatches
+// host fields and the post-walk loop writes the eface at the variant offset.
 
 // --- case types ---
 

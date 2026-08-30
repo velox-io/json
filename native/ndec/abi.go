@@ -92,27 +92,26 @@ func (c *FmtContext) Run() { FmtParseRun(unsafe.Pointer(c)) }
 // These aliases let C consume the TypeTree and allocator tables without a
 // translated mirror. Their layouts are part of the binding ABI.
 type (
-	BindType         = vbind.BindType
-	BindField        = vbind.BindField
-	BindTypeMeta     = vbind.TypeMeta
-	BindSlotClass    = vbind.SlotClass
-	BindAnyMeta      = vbind.BindAnyMeta
-	BindVariantTable = vbind.BindVariantTable
-	BindKindofTable  = vbind.BindKindofTable
+	BindType      = vbind.BindType
+	BindField     = vbind.BindField
+	BindTypeMeta  = vbind.TypeMeta
+	BindSlotClass = vbind.SlotClass
+	BindAnyMeta   = vbind.BindAnyMeta
+	BindPolyTable = vbind.BindPolyTable
 )
 
 // BindBridge must match NdecBindBridge in bind_bridge.h byte for byte.
 type BindBridge struct {
 	Ctx   BindContext   // off 0
-	Alloc BindAllocator // off 80
-	Yield BindYield     // off 200
+	Alloc BindAllocator // off 64
+	Yield BindYield     // off 184
 }
 
 // BindMachine mirrors NdecBindMachine through the scalar core prefix. Native
 // frames and private state occupy the same allocation immediately afterward.
 type BindMachine struct {
 	BindBridge                // off 0
-	Core       BindCoreHeader // off 224
+	Core       BindCoreHeader // off 208
 }
 
 // BindContext holds borrowed per-call inputs. Types and TypeMeta remain owned
@@ -134,13 +133,14 @@ type BindContext struct {
 	// write-barrier semantics. The caller's typed reference remains the lifetime
 	// root because the machine backing is noscan. uintptr would erase that GC
 	// identity and may preserve a stale address across stack movement.
-	RootDst       unsafe.Pointer    // off 40
-	OptFlags      uint32            // off 48
-	AnyTypeIdx    uint32            // off 52
-	Variants      *BindVariantTable // off 56
-	VariantsCount uint32            // off 64
-	KindofsCount  uint32            // off 68
-	Kindofs       *BindKindofTable  // off 72
+	RootDst    unsafe.Pointer // off 40
+	OptFlags   uint32         // off 48
+	AnyTypeIdx uint32         // off 52
+	// Polys holds the variant and kindof tables in one array. A field's high 16
+	// flag bits index it, and its tag bit selects the interpretation. The array
+	// needs no count: the builder is its only writer, so every index it stamps
+	// on a field is in range.
+	Polys *BindPolyTable // off 56
 }
 
 // BindAllocator exposes Go-owned memory to C. C advances cursors and installs
@@ -462,16 +462,15 @@ var (
 	_ = [1]struct{}{}[unsafe.Sizeof(BindType{})-16]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindField{})-16]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindSlotClass{})-48]
-	_ = [1]struct{}{}[unsafe.Sizeof(BindContext{})-80]
+	_ = [1]struct{}{}[unsafe.Sizeof(BindContext{})-64]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindAllocator{})-120]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindYield{})-24]
-	_ = [1]struct{}{}[unsafe.Sizeof(BindMachine{})-304]
+	_ = [1]struct{}{}[unsafe.Sizeof(BindMachine{})-288]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindCoreHeader{})-80]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindFrame{})-32]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindMapRegionHeader{})-32]
 	_ = [1]struct{}{}[unsafe.Sizeof(UnmarshalRecord{})-24]
-	_ = [1]struct{}{}[unsafe.Sizeof(BindVariantTable{})-56]
-	_ = [1]struct{}{}[unsafe.Sizeof(BindKindofTable{})-56]
+	_ = [1]struct{}{}[unsafe.Sizeof(BindPolyTable{})-40]
 	// Size assertions cannot detect TapeNeed moving within padding, so both
 	// languages assert this offset explicitly.
 	_ = [1]struct{}{}[unsafe.Offsetof(BindAllocator{}.TapeNeed)-44]

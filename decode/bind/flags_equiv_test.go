@@ -76,7 +76,7 @@ func TestPIN_TypeTreeFlagsMatchIndependentScan(t *testing.T) {
 				break
 			}
 		}
-		wantPoly := len(tt.Variants) > 0 || len(tt.Kindofs) > 0
+		wantPoly := len(tt.Polys) > 0
 		wantAppendStrings := false
 		for i := range tt.Fields {
 			f := &tt.Fields[i]

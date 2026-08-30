@@ -1,8 +1,8 @@
 // Variant descriptors resolve process-wide registrations or method witnesses
-// into immutable per-TypeTree dispatch tables. Each BindVariantTable roots its
-// generated lookup blob, while VariantCaseData owns the arrays exposed through
-// raw ABI pointers. Sibling variants carry per-field state; an inline variant
-// uses the host's single merged-tape dispatch slot.
+// into immutable per-TypeTree dispatch tables. Each BindPolyTable roots its
+// generated lookup blob, while PolyCaseData owns the arrays exposed through raw
+// ABI pointers. Sibling variants carry per-field state; an inline variant uses
+// the host's single merged-tape dispatch slot.
 
 package vbind
 
@@ -504,7 +504,6 @@ func (b *builder) buildOneVariantTable(hostUT *typ.UniType, hostIdx uint32, si *
 	caseTypeIdx := make([]uint16, len(cases))
 	caseRType := make([]unsafe.Pointer, len(cases))
 	caseSlotClass := make([]int32, len(cases))
-	caseStrings := make([]string, len(cases))
 	for i, c := range cases {
 		// The default case has no discriminator value, so name it by role in the
 		// diagnostics below rather than printing an empty %q.
@@ -547,7 +546,6 @@ func (b *builder) buildOneVariantTable(hostUT *typ.UniType, hostIdx uint32, si *
 		} else {
 			caseRType[i] = gort.TypePtr(c.Target)
 		}
-		caseStrings[i] = c.Value
 		caseSlotClass[i] = int32(b.registerSlotClass(targetUT))
 	}
 	// Only the string-keyed cases go in the blob; a lookup miss is what selects the
@@ -562,41 +560,37 @@ func (b *builder) buildOneVariantTable(hostUT *typ.UniType, hostIdx uint32, si *
 	if len(blob) > 0 {
 		lookupBase = unsafe.Pointer(unsafe.SliceData(blob))
 	}
-	variantIdx := uint16(len(b.variants))
-	table := BindVariantTable{
+	polyIdx := uint16(len(b.polys))
+	table := BindPolyTable{
 		DiscFieldOff:      uint32(si.Fields[vdiscFieldIdx].Offset),
-		CaseCount:         uint32(len(cases)),
-		Lookup:            lookupBase,
+		DefaultCaseIdx:    variantNoDefaultCase,
+		CaseCount:         uint16(len(cases)),
 		caseTypeIdxData:   unsafe.Pointer(unsafe.SliceData(caseTypeIdx)),
 		caseRTypeData:     unsafe.Pointer(unsafe.SliceData(caseRType)),
 		caseSlotClassData: unsafe.Pointer(unsafe.SliceData(caseSlotClass)),
-		DefaultCaseIdx:    variantNoDefaultCase,
+		Lookup:            lookupBase,
 	}
 	if defaultCaseIdx >= 0 {
 		table.DefaultCaseIdx = uint16(defaultCaseIdx)
 	}
-	if isInline {
-		table.HostTypeIdx = uint16(hostIdx)
-	}
-	b.variants = append(b.variants, table)
-	b.variantCases = append(b.variantCases, VariantCaseData{
+	b.polys = append(b.polys, table)
+	b.polyCases = append(b.polyCases, PolyCaseData{
 		TypeIdx:   caseTypeIdx,
 		RType:     caseRType,
 		SlotClass: caseSlotClass,
-		Strings:   caseStrings,
 	})
-	// The high 16 flag bits index the variant table for variant tags and the
-	// kindof table for kindof tags. Runtime entries at one depth must therefore
-	// be matched by depth, index, and feature kind.
+	// The high 16 flag bits index the poly table, and the tag bit selects the
+	// variant or kindof interpretation. Runtime entries at one depth must
+	// therefore be matched by depth, index, and feature kind.
 	variantField := &b.fields[fieldsBase+uint32(variantFieldIdx)]
 	if isInline {
-		variantField.Flags |= uint32(TagInlineVariant) | (uint32(variantIdx) << fieldFlagVariantIdxShift)
+		variantField.Flags |= uint32(TagInlineVariant) | (uint32(polyIdx) << fieldFlagPolyIdxShift)
 		// Zero is a valid table index; 0xFFFF means no inline variant. The
 		// native struct-open path reads this to intercept before IDX_CONSUME
 		// and route the whole struct through vd_dispatch.
-		b.typeMeta[hostIdx].StructMeta().InlineVariantIdx = variantIdx
+		b.typeMeta[hostIdx].StructMeta().InlineVariantIdx = polyIdx
 	} else {
-		variantField.Flags |= uint32(TagVariant) | (uint32(variantIdx) << fieldFlagVariantIdxShift)
+		variantField.Flags |= uint32(TagVariant) | (uint32(polyIdx) << fieldFlagPolyIdxShift)
 	}
 	// The vdisc mark routes the discriminator's own value. For an embedded variant
 	// that is the whole point: the value goes onto the merged tape rather than
@@ -619,9 +613,9 @@ func (b *builder) buildOneVariantTable(hostUT *typ.UniType, hostIdx uint32, si *
 	vdiscField := &b.fields[fieldsBase+uint32(vdiscFieldIdx)]
 	if isInline {
 		vdiscField.Flags = (vdiscField.Flags & 0x0000FFFF) | uint32(TagVDisc) | uint32(TagInlineVDisc) |
-			(uint32(variantIdx) << fieldFlagVariantIdxShift)
+			(uint32(polyIdx) << fieldFlagPolyIdxShift)
 	} else if vdiscField.Flags&uint32(TagVDisc) == 0 {
-		vdiscField.Flags |= uint32(TagVDisc) | (uint32(variantIdx) << fieldFlagVariantIdxShift)
+		vdiscField.Flags |= uint32(TagVDisc) | (uint32(polyIdx) << fieldFlagPolyIdxShift)
 	}
 	return nil
 }

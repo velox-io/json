@@ -73,17 +73,13 @@ func Build(root *typ.UniType) (*TypeTree, error) {
 		UnmarshalHooks:      b.unmarshalHooks,
 		MapBufMinBytes:      mapBufMinBytes,
 		ReflectTypes:        b.reflectTypes,
-		Variants:            b.variants,
-		VariantCases:        b.variantCases,
-		Kindofs:             b.kindofs,
-		KindofCases:         b.kindofCases,
+		Polys:               b.polys,
+		PolyCases:           b.polyCases,
 		PtrHops:             b.ptrHops,
 		TapeBindUnsupported: tapeBindUnsupported,
 
-		HasValueField: b.hasValueField,
-		// A variant or kindof table exists exactly when some field binds through a
-		// merged tape, so the tables answer this directly.
-		HasPolyField:             len(b.variants) > 0 || len(b.kindofs) > 0,
+		HasValueField:            b.hasValueField,
+		HasPolyField:             len(b.polys) > 0,
 		HasSplitTape:             b.hasSplitTape,
 		TapeBindMayAppendStrings: tapeBindMayAppendStrings,
 		SplitTapeSites:           splitTapeSites,
@@ -111,14 +107,12 @@ type builder struct {
 	groupCount          uint32
 	unmarshalHooks      []*typ.InterfaceHooks // parallel to types
 	containsUnmarshaler []bool                // transitive and parallel to types
-	variants            []BindVariantTable
-	variantCases        []VariantCaseData // scannable owners of variant case arrays
-	kindofs             []BindKindofTable
-	kindofCases         []KindofCaseData // scannable owners of kindof case arrays
-	ptrHops             [][]BindPtrHop   // scannable owners of per-struct hop arrays
+	polys               []BindPolyTable
+	polyCases           []PolyCaseData // scannable owners of poly case arrays
+	ptrHops             [][]BindPtrHop // scannable owners of per-struct hop arrays
 
 	// Set during collect, published as the TypeTree fields of the same names.
-	// hasPolyField is not here: it follows from the variants/kindofs tables.
+	// hasPolyField is not here: it follows from the polys table.
 	hasValueField bool
 	hasSplitTape  bool
 }
@@ -276,7 +270,7 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 						AllocClass: cls,
 					})
 				}
-				flags |= uint32(TagViaPtr) | (uint32(hopStart) << fieldFlagVariantIdxShift)
+				flags |= uint32(TagViaPtr) | (uint32(hopStart) << fieldFlagPolyIdxShift)
 			}
 			// Type remains an index until freeze. fieldNames is the scannable Go side
 			// companion used by tape walking and is not part of BindField's ABI.
@@ -300,7 +294,6 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 			meta.StructMeta().PtrHops = base
 			b.typeMeta[idx].StructMeta().PtrHops = base
 		}
-		// Inline variants need the host index both in their table and in host metadata.
 		if err := b.attachVariantsForStruct(ut, idx, si, fieldsBase); err != nil {
 			return 0, err
 		}
@@ -1217,41 +1210,28 @@ func (b *builder) computeTapeBindUnsupported(rootIdx uint32) *TapeBindUnsupporte
 // checkVariantCaseTypes applies the tape walker's case-entry gate, then checks
 // each accepted case subtree for nested unsupported positions.
 func (b *builder) checkVariantCaseTypes(fieldFlags uint32, path string) *TapeBindUnsupportedPos {
-	variantIdx := int(fieldFlags >> 16)
+	polyIdx := int(fieldFlags >> 16)
+	if polyIdx >= len(b.polys) {
+		return nil
+	}
 	isKindof := fieldFlags&uint32(TagKindof) != 0
+	reason := "variant case has unsupported cold kind for tape-bind"
 	if isKindof {
-		if variantIdx >= len(b.kindofs) {
-			return nil
+		reason = "kindof case has unsupported cold kind for tape-bind"
+	}
+	pt := b.polys[polyIdx]
+	for caseIdx := range int(pt.CaseCount) {
+		// A kindof table leaves the rtype of an unregistered kind nil.
+		if isKindof && pt.CaseRType(caseIdx) == nil {
+			continue
 		}
-		ot := b.kindofs[variantIdx]
-		for k := range 5 {
-			caseIdx := int(ot.CaseIdxByKind[k])
-			if caseIdx < 0 {
-				continue
-			}
-			caseTypeIdx := ot.CaseTypeIdx(caseIdx)
-			ct := b.types[caseTypeIdx]
-			if (ct.flags&bindFlagCold != 0) && ct.Kind != KindPointer && ct.Kind != KindValue {
-				return &TapeBindUnsupportedPos{Path: path, TypeIdx: caseTypeIdx, Reason: "kindof case has unsupported cold kind for tape-bind"}
-			}
-			if pos := b.walkVariantCaseIntoType(caseTypeIdx, path+".case"); pos != nil {
-				return pos
-			}
+		caseTypeIdx := pt.CaseTypeIdx(caseIdx)
+		ct := b.types[caseTypeIdx]
+		if (ct.flags&bindFlagCold != 0) && ct.Kind != KindPointer && ct.Kind != KindValue {
+			return &TapeBindUnsupportedPos{Path: path, TypeIdx: caseTypeIdx, Reason: reason}
 		}
-	} else {
-		if variantIdx >= len(b.variants) {
-			return nil
-		}
-		vt := b.variants[variantIdx]
-		for caseIdx := range int(vt.CaseCount) {
-			caseTypeIdx := vt.CaseTypeIdx(caseIdx)
-			ct := b.types[caseTypeIdx]
-			if (ct.flags&bindFlagCold != 0) && ct.Kind != KindPointer && ct.Kind != KindValue {
-				return &TapeBindUnsupportedPos{Path: path, TypeIdx: caseTypeIdx, Reason: "variant case has unsupported cold kind for tape-bind"}
-			}
-			if pos := b.walkVariantCaseIntoType(caseTypeIdx, path+".case"); pos != nil {
-				return pos
-			}
+		if pos := b.walkVariantCaseIntoType(caseTypeIdx, path+".case"); pos != nil {
+			return pos
 		}
 	}
 	return nil
@@ -1392,26 +1372,16 @@ func (b *builder) countSplitTapeSitesInCases(fieldFlags uint32, walk func(uint32
 		n += sub
 		return true
 	}
-	if fieldFlags&uint32(TagKindof) != 0 {
-		if tableIdx >= len(b.kindofs) {
-			return 0, true
-		}
-		ot := b.kindofs[tableIdx]
-		for k := range 5 {
-			if caseIdx := int(ot.CaseIdxByKind[k]); caseIdx >= 0 {
-				if !add(ot.CaseTypeIdx(caseIdx)) {
-					return 0, false
-				}
-			}
-		}
-		return n, true
-	}
-	if tableIdx >= len(b.variants) {
+	if tableIdx >= len(b.polys) {
 		return 0, true
 	}
-	vt := b.variants[tableIdx]
-	for caseIdx := range int(vt.CaseCount) {
-		if !add(vt.CaseTypeIdx(caseIdx)) {
+	isKindof := fieldFlags&uint32(TagKindof) != 0
+	pt := b.polys[tableIdx]
+	for caseIdx := range int(pt.CaseCount) {
+		if isKindof && pt.CaseRType(caseIdx) == nil {
+			continue
+		}
+		if !add(pt.CaseTypeIdx(caseIdx)) {
 			return 0, false
 		}
 	}

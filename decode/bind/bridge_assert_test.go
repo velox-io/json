@@ -21,8 +21,8 @@ func TestBindBridgeSizes(t *testing.T) {
 	if sz := unsafe.Sizeof(nativendec.BindSlotClass{}); sz != 48 {
 		t.Errorf("sizeof BindSlotClass = %d, want 48", sz)
 	}
-	if sz := unsafe.Sizeof(nativendec.BindContext{}); sz != 80 {
-		t.Errorf("sizeof BindContext = %d, want 80", sz)
+	if sz := unsafe.Sizeof(nativendec.BindContext{}); sz != 64 {
+		t.Errorf("sizeof BindContext = %d, want 64", sz)
 	}
 	if sz := unsafe.Sizeof(nativendec.BindAllocator{}); sz != 120 {
 		t.Errorf("sizeof BindAllocator = %d, want 120", sz)
@@ -30,8 +30,8 @@ func TestBindBridgeSizes(t *testing.T) {
 	if sz := unsafe.Sizeof(nativendec.BindYield{}); sz != 24 {
 		t.Errorf("sizeof BindYield = %d, want 24", sz)
 	}
-	if sz := unsafe.Sizeof(nativendec.BindMachine{}); sz != 304 {
-		t.Errorf("sizeof BindMachine = %d, want 304", sz)
+	if sz := unsafe.Sizeof(nativendec.BindMachine{}); sz != 288 {
+		t.Errorf("sizeof BindMachine = %d, want 288", sz)
 	}
 	if sz := unsafe.Sizeof(nativendec.BindCoreHeader{}); sz != 80 {
 		t.Errorf("sizeof BindCoreHeader = %d, want 80", sz)
@@ -39,11 +39,8 @@ func TestBindBridgeSizes(t *testing.T) {
 	if sz := unsafe.Sizeof(nativendec.BindMapRegionHeader{}); sz != 32 {
 		t.Errorf("sizeof BindMapRegionHeader = %d, want 32", sz)
 	}
-	if sz := unsafe.Sizeof(nativendec.BindVariantTable{}); sz != 56 {
-		t.Errorf("sizeof BindVariantTable = %d, want 56", sz)
-	}
-	if sz := unsafe.Sizeof(nativendec.BindKindofTable{}); sz != 56 {
-		t.Errorf("sizeof BindKindofTable = %d, want 56", sz)
+	if sz := unsafe.Sizeof(nativendec.BindPolyTable{}); sz != 40 {
+		t.Errorf("sizeof BindPolyTable = %d, want 40", sz)
 	}
 	if sz := unsafe.Sizeof(nativendec.BindTypeMeta{}); sz != 32 {
 		t.Errorf("sizeof BindTypeMeta = %d, want 32", sz)
@@ -62,9 +59,9 @@ func TestBindMachineOffsets(t *testing.T) {
 	}
 
 	check("BindMachine.Ctx", unsafe.Offsetof(a.Ctx), 0)
-	check("BindMachine.Alloc", unsafe.Offsetof(a.Alloc), 80)
-	check("BindMachine.Yield", unsafe.Offsetof(a.Yield), 200)
-	check("BindMachine.Core", unsafe.Offsetof(a.Core), 224)
+	check("BindMachine.Alloc", unsafe.Offsetof(a.Alloc), 64)
+	check("BindMachine.Yield", unsafe.Offsetof(a.Yield), 184)
+	check("BindMachine.Core", unsafe.Offsetof(a.Core), 208)
 
 	check("Ctx.Types", unsafe.Offsetof(a.Ctx.Types), 0)
 	check("Ctx.TypeMeta", unsafe.Offsetof(a.Ctx.TypeMeta), 8)
@@ -74,10 +71,7 @@ func TestBindMachineOffsets(t *testing.T) {
 	check("Ctx.RootDst", unsafe.Offsetof(a.Ctx.RootDst), 40)
 	check("Ctx.OptFlags", unsafe.Offsetof(a.Ctx.OptFlags), 48)
 	check("Ctx.AnyTypeIdx", unsafe.Offsetof(a.Ctx.AnyTypeIdx), 52)
-	check("Ctx.Variants", unsafe.Offsetof(a.Ctx.Variants), 56)
-	check("Ctx.VariantsCount", unsafe.Offsetof(a.Ctx.VariantsCount), 64)
-	check("Ctx.KindofsCount", unsafe.Offsetof(a.Ctx.KindofsCount), 68)
-	check("Ctx.Kindofs", unsafe.Offsetof(a.Ctx.Kindofs), 72)
+	check("Ctx.Polys", unsafe.Offsetof(a.Ctx.Polys), 56)
 
 	check("Alloc.SlotClasses", unsafe.Offsetof(a.Alloc.SlotClasses), 0)
 	check("Alloc.StrArena", unsafe.Offsetof(a.Alloc.StrArena), 8)
@@ -113,8 +107,11 @@ func TestBindMachineOffsets(t *testing.T) {
 	check("BindMapRegionHeader.NextEntryOff", unsafe.Offsetof(r.NextEntryOff), 4)
 	check("BindMapRegionHeader.Hmap", unsafe.Offsetof(r.Hmap), 16)
 
-	var v nativendec.BindVariantTable
-	check("BindVariantTable.HostTypeIdx", unsafe.Offsetof(v.HostTypeIdx), 48)
+	var v nativendec.BindPolyTable
+	check("BindPolyTable.DiscFieldOff", unsafe.Offsetof(v.DiscFieldOff), 0)
+	check("BindPolyTable.DefaultCaseIdx", unsafe.Offsetof(v.DefaultCaseIdx), 4)
+	check("BindPolyTable.CaseCount", unsafe.Offsetof(v.CaseCount), 6)
+	check("BindPolyTable.Lookup", unsafe.Offsetof(v.Lookup), 32)
 
 	var sm vbind.StructMetaPayload
 	check("StructMetaPayload.InlineVariantIdx", unsafe.Offsetof(sm.InlineVariantIdx), 8)

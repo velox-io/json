@@ -677,7 +677,7 @@ phase2_walk: {
  * enclosing cursor before installing the nested tape cursor. */
 phase2_poly_bind: {
   const BindField *f     = cur_struct_field;
-  uint16_t poly_idx      = BIND_FIELD_VARIANT_IDX(f);
+  uint16_t poly_idx      = BIND_FIELD_POLY_IDX(f);
   uint8_t *target        = cur_dst + f->offset;
   const BindAuxFrame *ax = &m->auxFrames[m->aux_depth];
   uint64_t word          = m->b.alloc.tape_arena[ax->val_at];
@@ -1748,7 +1748,7 @@ variant_rebind_resume: { goto phase2_walk; }
  * here with cursor still on the value and rederives the case from field and host. */
 poly_field_bind: {
   const BindField *f = cur_struct_field;
-  uint16_t poly_idx  = BIND_FIELD_VARIANT_IDX(f);
+  uint16_t poly_idx  = BIND_FIELD_POLY_IDX(f);
   uint8_t *target    = cur_dst + f->offset;
   uint8_t ch         = IDX_PEEK();
 
@@ -2020,7 +2020,7 @@ t_object_field_value: {
     body              = cur_dst + cur_struct_field->offset;
     word              = TAP_PEEK();
     tag               = (uint8_t)(word >> 56);
-    uint16_t poly_idx = BIND_FIELD_VARIANT_IDX(cur_struct_field);
+    uint16_t poly_idx = BIND_FIELD_POLY_IDX(cur_struct_field);
     PolyCase pc;
     if (cur_struct_field->flags & BIND_FF_KINDOF) {
       pc = poly_case_by_kindof(m, poly_idx, poly_kind_of_tape_tag(tag));
@@ -2071,16 +2071,14 @@ t_object_field_value: {
    * fields rederive them from the field metadata. */
 t_field_value_ptr_resume: {
   if (cur_struct_field->flags & (BIND_FF_VARIANT | BIND_FF_KINDOF)) {
-    uint8_t *eface      = cur_dst + cur_struct_field->offset;
-    const void *rtype   = *(const void **)eface;
-    uint16_t poly_idx   = BIND_FIELD_VARIANT_IDX(cur_struct_field);
-    uint32_t n          = (cur_struct_field->flags & BIND_FF_KINDOF) ? m->b.ctx.kindofs[poly_idx].case_count
-                                                                     : m->b.ctx.variants[poly_idx].case_count;
-    const uint16_t *cti = (cur_struct_field->flags & BIND_FF_KINDOF) ? m->b.ctx.kindofs[poly_idx].case_type_idx
-                                                                     : m->b.ctx.variants[poly_idx].case_type_idx;
-    const void *const *crt = (cur_struct_field->flags & BIND_FF_KINDOF) ? m->b.ctx.kindofs[poly_idx].case_rtype
-                                                                        : m->b.ctx.variants[poly_idx].case_rtype;
-    ct                     = (const BindType *)0;
+    uint8_t *eface          = cur_dst + cur_struct_field->offset;
+    const void *rtype       = *(const void **)eface;
+    uint16_t poly_idx       = BIND_FIELD_POLY_IDX(cur_struct_field);
+    const BindPolyTable *pt = &m->b.ctx.polys[poly_idx];
+    uint32_t n              = pt->case_count;
+    const uint16_t *cti     = pt->case_type_idx;
+    const void *const *crt  = pt->case_rtype;
+    ct                      = (const BindType *)0;
     for (uint32_t i = 0; i < n; i++) {
       if (crt[i] == rtype) {
         ct = &m->b.ctx.types[cti[i]];

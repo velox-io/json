@@ -11,7 +11,7 @@ import (
 // A case set belongs to the variant field, not to the discriminator. Two fields
 // may read one discriminator and map its values to different types: the
 // discriminator supplies the value, and each field resolves it through its own
-// table (each variant field builds its own BindVariantTable, carrying its own
+// table (each variant field builds its own BindPolyTable, carrying its own
 // lookup blob and its own disc offset).
 //
 // That is why the registry is keyed by field. Keying it by discriminator name made

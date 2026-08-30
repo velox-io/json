@@ -276,21 +276,25 @@ type BindAnyMeta struct {
 	NumberType      unsafe.Pointer // off 88 json.Number runtime type for useNumber
 }
 
-// variantNoDefaultCase is BindVariantTable.DefaultCaseIdx's "none declared"
+// variantNoDefaultCase is BindPolyTable.DefaultCaseIdx's "none declared"
 // sentinel. A case index of 0 is a real case, so absence needs a value outside
 // the index space rather than a zero test.
 const variantNoDefaultCase = 0xFFFF
 
-// BindVariantTable is a 56 byte Go/C ABI record used by sibling and inline
-// variants. VariantIdx occupies the high 16 bits of each associated target or
-// discriminator field. Lookup is a scannable pointer that keeps the case lookup
-// blob alive. VariantCases owns the arrays referenced by the remaining pointers.
-type BindVariantTable struct {
-	DiscFieldOff    uint32         // off 0  byte offset of vdisc field in host struct
-	CaseCount       uint32         // off 4  number of cases (for error reporting)
-	Lookup          unsafe.Pointer // off 8  perfect hash from case string to case index
-	caseTypeIdxData unsafe.Pointer // off 16 case index to Types index
-	caseRTypeData   unsafe.Pointer // off 24 case index to runtime type or itab
+const polyKindCount = 5
+
+// BindPolyTable is a 40 byte Go/C ABI record shared by variants and kindofs. A
+// field's high 16 flag bits index the table, and its tag bit selects how the
+// case arrays are indexed.
+//
+// A variant maps a discriminator Go string through Lookup to a case index. A
+// kindof table indexes the same arrays directly by JSON kind, so it carries no
+// Lookup and no discriminator. Lookup is a scannable pointer that keeps the case
+// lookup blob alive; PolyCases owns the arrays behind the remaining pointers.
+type BindPolyTable struct {
+	// off 0, byte offset of the discriminator field in the host struct; zero for
+	// a kindof, which has no discriminator.
+	DiscFieldOff uint32
 	// DefaultCaseIdx is the case chosen when the discriminator value matched no
 	// case, or variantNoDefaultCase when the descriptor declares no default (the
 	// unmatched value then reports). It indexes the case arrays like any hit, so
@@ -300,77 +304,36 @@ type BindVariantTable struct {
 	// This governs unmatched VALUES only. A discriminator key absent from the input
 	// selects nothing and leaves the target nil, with or without a default: the two
 	// answer different questions ("cannot resolve this value" vs "no value given").
-	DefaultCaseIdx    uint16         // off 32
-	_pad              uint16         // off 34
-	_pad2             uint32         // off 36
-	caseSlotClassData unsafe.Pointer // off 40 case index to SlotClass index
-	HostTypeIdx       uint16         // off 48 inline host TypeIdx; zero for sibling variants
-	_pad4             uint16         // off 50
-	_pad5             uint32         // off 52  keep 56B / 8B-aligned
+	DefaultCaseIdx    uint16         // off 4
+	CaseCount         uint16         // off 6  cases, or polyKindCount for a kindof
+	caseTypeIdxData   unsafe.Pointer // off 8  case or kind to Types index
+	caseRTypeData     unsafe.Pointer // off 16 case or kind to runtime type, itab, or nil
+	caseSlotClassData unsafe.Pointer // off 24 case or kind to SlotClass index
+	Lookup            unsafe.Pointer // off 32 case string to case index lookup; nil for a kindof
 }
 
 // caseIdx must already be validated against CaseCount.
-func (v *BindVariantTable) CaseTypeIdx(caseIdx int) uint16 {
-	return *(*uint16)(unsafe.Add(v.caseTypeIdxData, uintptr(caseIdx)*2))
+func (p *BindPolyTable) CaseTypeIdx(caseIdx int) uint16 {
+	return *(*uint16)(unsafe.Add(p.caseTypeIdxData, uintptr(caseIdx)*2))
 }
 
-// CaseRType contains a runtime type pointer for eface targets and an itab for
-// nonempty interface targets.
-func (v *BindVariantTable) CaseRType(caseIdx int) unsafe.Pointer {
-	return *(*unsafe.Pointer)(unsafe.Add(v.caseRTypeData, uintptr(caseIdx)*8))
+// CaseRType contains a runtime type pointer for eface targets, an itab for
+// nonempty interface targets, and nil for a kind its descriptor did not
+// register.
+func (p *BindPolyTable) CaseRType(caseIdx int) unsafe.Pointer {
+	return *(*unsafe.Pointer)(unsafe.Add(p.caseRTypeData, uintptr(caseIdx)*8))
 }
 
-func (v *BindVariantTable) CaseSlotClass(caseIdx int) int32 {
-	return *(*int32)(unsafe.Add(v.caseSlotClassData, uintptr(caseIdx)*4))
+func (p *BindPolyTable) CaseSlotClass(caseIdx int) int32 {
+	return *(*int32)(unsafe.Add(p.caseSlotClassData, uintptr(caseIdx)*4))
 }
 
-// These slices are the scannable owners of the arrays referenced by a
-// BindVariantTable's raw ABI pointers.
-type VariantCaseData struct {
+// PolyCaseData holds the scannable owners of the arrays a BindPolyTable
+// references through raw ABI pointers.
+type PolyCaseData struct {
 	TypeIdx   []uint16
 	RType     []unsafe.Pointer
 	SlotClass []int32
-	Strings   []string
-}
-
-// BindKindofTable is a 56 byte Go/C ABI record. The case array pointers must
-// remain at offsets 16, 24, and 40 because native close handling shares those
-// loads with BindVariantTable. KindofCases keeps their backing arrays reachable.
-type BindKindofTable struct {
-	CaseIdxByKind     [5]int8        // off 0  [bool,number,string,array,object]; -1 = absent
-	_pad0             [3]byte        // off 5  pad to off 8
-	_pad1             uintptr        // off 8  placeholder (variant has Lookup here)
-	CaseTypeIdxData   unsafe.Pointer // off 16 shared with BindVariantTable
-	CaseRTypeData     unsafe.Pointer // off 24 shared with BindVariantTable
-	CaseCount         uint32         // off 32 number of registered kinds (≤5)
-	_pad2             uint32         // off 36
-	CaseSlotClassData unsafe.Pointer // off 40 shared with BindVariantTable
-	_pad3             uint64         // off 48  tail padding
-}
-
-// caseIdx must be a registered kind case.
-func (o *BindKindofTable) CaseTypeIdx(caseIdx int) uint16 {
-	return *(*uint16)(unsafe.Add(o.CaseTypeIdxData, uintptr(caseIdx)*2))
-}
-
-// CaseRType contains a runtime type pointer for eface targets and an itab for
-// nonempty interface targets.
-func (o *BindKindofTable) CaseRType(caseIdx int) unsafe.Pointer {
-	return *(*unsafe.Pointer)(unsafe.Add(o.CaseRTypeData, uintptr(caseIdx)*8))
-}
-
-func (o *BindKindofTable) CaseSlotClass(caseIdx int) int32 {
-	return *(*int32)(unsafe.Add(o.CaseSlotClassData, uintptr(caseIdx)*4))
-}
-
-// These slices are the scannable owners of the arrays referenced by a
-// BindKindofTable's raw ABI pointers.
-type KindofCaseData struct {
-	TypeIdx   []uint16
-	RType     []unsafe.Pointer
-	SlotClass []int32
-	// Kinds is parallel to the case arrays so errors can report the rejected JSON kind.
-	Kinds []string
 }
 
 // StructMetaPayload is a Go/C ABI view. Lookup points to process-owned field
@@ -379,7 +342,7 @@ type KindofCaseData struct {
 // sentinel and otherwise addresses the destination Value from the struct base.
 type StructMetaPayload struct {
 	Lookup           unsafe.Pointer // off 0  perfect-hash field-name blob base (process-global; noscan via payload [3]uintptr)
-	InlineVariantIdx uint16         // off 8  0-based index into TypeTree.Variants[]; 0xFFFF = none
+	InlineVariantIdx uint16         // off 8  0-based index into TypeTree.Polys[]; 0xFFFF = none
 	// off 10..11 padding (uint32 alignment)
 	ReserveUnknownFieldOff uint32 // off 12  byte offset of the reserve-unknown Value field; 0xFFFFFFFF = none
 
@@ -472,24 +435,22 @@ type FieldTagFlag uint32
 
 const (
 	TagQuoted FieldTagFlag = 1 << 0
-	// The high 16 bits select the sibling variant table. The static field type
-	// remains any or interface until discriminator dispatch selects a case.
+	// The static field type remains any or interface until discriminator
+	// dispatch selects a case.
 	TagVariant FieldTagFlag = 1 << 3
-	// A discriminator field carries a VariantIdx in the high 16 bits, but only the
+	// A discriminator field carries a poly index in the high 16 bits, but only the
 	// embedded case reads it: TagInlineVDisc routes the value onto the merged tape,
 	// and the phase2 scan that binds it matches on the host's InlineVariantIdx.
 	// Sibling dispatch locates the discriminator through its table's own
 	// DiscFieldOff instead, which is why several sibling variants may name one
 	// discriminator field.
 	TagVDisc FieldTagFlag = 1 << 4
-	// Bit 8 lies above the inherited type flag byte. The high 16 bits select
-	// the kindof table used to derive the concrete type from the JSON token.
+	// Bit 8 lies above the inherited type flag byte. The JSON value kind selects
+	// the case that supplies the concrete type.
 	TagKindof FieldTagFlag = 1 << 8
-	// The high 16 bits use the same Variants index space as sibling variants.
-	// The index is also stamped on StructMetaPayload.InlineVariantIdx so the
-	// native struct-open path intercepts before IDX_CONSUME and routes the
-	// whole struct through vd_dispatch. HostTypeIdx lets rebind interpret
-	// case fields in the host struct.
+	// The table index is also stamped on StructMetaPayload.InlineVariantIdx so
+	// the native struct-open path intercepts before IDX_CONSUME and routes the
+	// whole struct through vd_dispatch.
 	TagInlineVariant FieldTagFlag = 1 << 9
 	// TagReserveUnknown marks a value.Value field that reserves all unmatched
 	// object keys into itself (the reserve-unknown). Bit 10 stays clear of
@@ -502,9 +463,9 @@ const (
 	// onto the merged tape rather than straight to Go, because the selected case
 	// may be a value.Value that must see the discriminator among its fields.
 	//
-	// The distinction is static (variant table construction knows whether it is
+	// The distinction is static (poly table construction knows whether it is
 	// building an inline variant), so it is a bit rather than a runtime compare of
-	// the field's VariantIdx against the host's InlineVariantIdx. That keeps the
+	// the field's poly index against the host's InlineVariantIdx. That keeps the
 	// question inside the one cold-path flag mask instead of on the hot path.
 	TagInlineVDisc FieldTagFlag = 1 << 11
 	// TagViaPtr marks a field promoted across at least one embedded pointer, so
@@ -513,46 +474,40 @@ const (
 	//
 	// The field's hop run starts at StructMetaPayload.PtrHops[HopStart] and ends
 	// at the hop whose Last bit is set. HopStart rides in the high 16 bits, which
-	// it can share with the variant and kindof table indices only because a
+	// it can share with the poly table index only because a
 	// via-ptr field is never a polymorphic target: attachVariantsForStruct and
 	// attachKindofsForStruct refuse that combination. The refusal is what keeps
 	// this bit space unambiguous, so it is not an assumption but an invariant.
 	TagViaPtr FieldTagFlag = 1 << 12
 )
 
-// The high 16 bits hold a Variants index for TagVariant, TagVDisc, and
-// TagInlineVariant, or a Kindofs index for TagKindof. The marker bit determines
-// which table owns the index.
-const fieldFlagVariantIdxShift = 16
+// The high 16 bits hold an index into the shared poly table. The marker bit
+// decides whether the variant or the kindof interpretation applies.
+const fieldFlagPolyIdxShift = 16
 
 func PackVariantFieldFlags(variantIdx uint16, inheritedTypeFlags uint8) uint32 {
-	return uint32(TagVariant) | (uint32(variantIdx) << fieldFlagVariantIdxShift) | uint32(inheritedTypeFlags)
+	return uint32(TagVariant) | (uint32(variantIdx) << fieldFlagPolyIdxShift) | uint32(inheritedTypeFlags)
 }
 
 func PackKindofFieldFlags(kindofIdx uint16, inheritedTypeFlags uint8) uint32 {
-	return uint32(TagKindof) | (uint32(kindofIdx) << fieldFlagVariantIdxShift) | uint32(inheritedTypeFlags)
+	return uint32(TagKindof) | (uint32(kindofIdx) << fieldFlagPolyIdxShift) | uint32(inheritedTypeFlags)
 }
 
 func PackInlineVariantFieldFlags(variantIdx uint16, inheritedTypeFlags uint8) uint32 {
-	return uint32(TagInlineVariant) | (uint32(variantIdx) << fieldFlagVariantIdxShift) | uint32(inheritedTypeFlags)
+	return uint32(TagInlineVariant) | (uint32(variantIdx) << fieldFlagPolyIdxShift) | uint32(inheritedTypeFlags)
 }
 
-// FieldVariantIdx is valid for variant targets, discriminators, and inline
-// variant targets.
-func FieldVariantIdx(f *BindField) uint16 {
-	return uint16(f.Flags >> fieldFlagVariantIdxShift)
-}
-
-// FieldKindofIdx is valid only for kindof targets.
-func FieldKindofIdx(f *BindField) uint16 {
-	return uint16(f.Flags >> fieldFlagVariantIdxShift)
+// FieldPolyIdx is valid for every polymorphic field: variant targets,
+// discriminators, inline variant targets, and kindof targets.
+func FieldPolyIdx(f *BindField) uint16 {
+	return uint16(f.Flags >> fieldFlagPolyIdxShift)
 }
 
 // FieldHopStart is valid only for TagViaPtr fields. It shares the high-16 index
-// space with the variant and kindof tables, which is sound because a promoted
-// field is never a polymorphic target.
+// space with the poly table, which is sound because a promoted field is never a
+// polymorphic target.
 func FieldHopStart(f *BindField) uint16 {
-	return uint16(f.Flags >> fieldFlagVariantIdxShift)
+	return uint16(f.Flags >> fieldFlagPolyIdxShift)
 }
 
 func FieldViaPtr(f *BindField) bool {
@@ -710,18 +665,14 @@ type TypeTree struct {
 	// This slice owns the metadata referenced by KindAny and KindIface child pointers.
 	AnyMetas []BindAnyMeta
 
-	// Variants contains sibling and inline tables. Associated target and
-	// discriminator fields carry the table index in Flags bits 16 through 31.
-	Variants []BindVariantTable
+	// Polys contains the variant and kindof tables. Associated target and
+	// discriminator fields carry the table index in Flags bits 16 through 31,
+	// and their tag bit selects the interpretation.
+	Polys []BindPolyTable
 
-	// VariantCases is parallel to Variants and owns the remaining case arrays.
-	VariantCases []VariantCaseData
-
-	// TagKindof fields select this table with Flags bits 16 through 31.
-	Kindofs []BindKindofTable
-
-	// KindofCases is parallel to Kindofs and keeps its raw case array pointers reachable.
-	KindofCases []KindofCaseData
+	// PolyCases is parallel to Polys and owns the case arrays behind its raw
+	// pointers, which keeps them reachable.
+	PolyCases []PolyCaseData
 
 	// PtrHops owns every struct's embedded-pointer hop array. StructMetaPayload
 	// keeps only a raw base pointer (the payload must stay noscan), so this slice

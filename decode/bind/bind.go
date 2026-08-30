@@ -371,13 +371,10 @@ func buildShape(rtp uintptr, t reflect.Type) (*shape, error) {
 		tt:  tt,
 		rtp: rtp,
 		ctxTemplate: ndec.BindContext{
-			Types:         unsafe.SliceData(tt.Types),
-			RootType:      tt.Root,
-			AnyTypeIdx:    tt.AnyTypeIdx,
-			Variants:      unsafe.SliceData(tt.Variants),
-			VariantsCount: uint32(len(tt.Variants)),
-			Kindofs:       unsafe.SliceData(tt.Kindofs),
-			KindofsCount:  uint32(len(tt.Kindofs)),
+			Types:      unsafe.SliceData(tt.Types),
+			RootType:   tt.Root,
+			AnyTypeIdx: tt.AnyTypeIdx,
+			Polys:      unsafe.SliceData(tt.Polys),
 			// The bind machine reads the field-name lookup blob from TypeMeta.
 			TypeMeta: unsafe.SliceData(tt.TypeMeta),
 		},

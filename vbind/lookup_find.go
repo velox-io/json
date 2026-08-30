@@ -4,7 +4,7 @@ import "unsafe"
 
 // LookupFind reads a vlib.Init blob and returns its key index in [0, n), or -1
 // on a miss. Struct blobs live in the process cache; each variant blob is rooted
-// by its owning BindVariantTable in a TypeTree.
+// by its owning BindPolyTable in a TypeTree.
 //
 // The blob layout is the native lookup ABI. WINDOW normally validates the JSON
 // closing quote at key[len]; this Go reader validates the stored length instead.

@@ -97,9 +97,8 @@ func mkVariantErr(p *Parser, m *ndec.BindMachine, kind, pos uint32) error {
 	msg := "unknown discriminator value"
 	if kind == ndec.BindErrVariantMissingDisc {
 		msg = "missing discriminator"
-	} else if int(variantIdx) < len(p.tt.Variants) {
-		vt := &p.tt.Variants[variantIdx]
-		discOff := uintptr(vt.DiscFieldOff)
+	} else if int(variantIdx) < len(p.tt.Polys) {
+		discOff := uintptr(p.tt.Polys[variantIdx].DiscFieldOff)
 		hostPtr := m.Yield.Target
 		if hostPtr != nil {
 			s := readDiscFromHost(hostPtr, discOff)
@@ -176,7 +175,7 @@ func truncateForErr(s string) string {
 // cannot resolve a case from the discriminator.
 type VariantError struct {
 	Host       string // host Go type name (empty if not derivable)
-	VariantIdx uint16 // index into TypeTree.Variants
+	VariantIdx uint16 // variant's index into TypeTree.Polys
 	Message    string
 	Pos        uint32 // source byte offset (0 = no position)
 }

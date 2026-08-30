@@ -1,7 +1,6 @@
 // Kindof resolves a process-wide registration or method witness into an
-// immutable per-TypeTree table. The first JSON value token indexes the fixed
-// five-kind dispatch array, and KindofCaseData owns the case arrays exposed
-// through raw ABI pointers.
+// immutable per-TypeTree table. The first JSON value token indexes the case
+// arrays directly by JSON kind, and PolyCaseData owns those arrays.
 
 package vbind
 
@@ -183,50 +182,43 @@ func (b *builder) buildOneKindofTable(hostUT *typ.UniType, si *typ.StructTypeInf
 	} else {
 		return fmt.Errorf("vbind: kindof field %s.%s must be `any` or an interface (got %s)", host, si.Fields[kindofFieldIdx].JSONName, kindofFieldType)
 	}
-	caseTypeIdx := make([]uint16, len(cases))
-	caseRType := make([]unsafe.Pointer, len(cases))
-	caseSlotClass := make([]int32, len(cases))
-	caseKinds := make([]string, len(cases))
-	for i, c := range cases {
+	// The case arrays are polyKindCount wide and the native selector indexes them
+	// directly by JSON kind. A kind the descriptor did not register keeps a nil
+	// rtype, which is the absence test; its other two entries stay unused.
+	caseTypeIdx := make([]uint16, polyKindCount)
+	caseRType := make([]unsafe.Pointer, polyKindCount)
+	caseSlotClass := make([]int32, polyKindCount)
+	for _, c := range cases {
 		targetUT := typ.UniTypeOf(c.Target)
 		typeIdx, err := b.collect(targetUT)
 		if err != nil {
 			return err
 		}
-		caseTypeIdx[i] = uint16(typeIdx)
+		caseTypeIdx[c.KindIdx] = uint16(typeIdx)
 		if isIface {
 			itab, err := computeItab(kindofFieldType, c.Target)
 			if err != nil {
 				return err
 			}
-			caseRType[i] = itab
+			caseRType[c.KindIdx] = itab
 		} else {
-			caseRType[i] = gort.TypePtr(c.Target)
+			caseRType[c.KindIdx] = gort.TypePtr(c.Target)
 		}
-		caseSlotClass[i] = int32(b.registerSlotClass(targetUT))
-		caseKinds[i] = kindofKindNames[c.KindIdx]
+		caseSlotClass[c.KindIdx] = int32(b.registerSlotClass(targetUT))
 	}
-	// Native code reads this leading field as int8_t[5]. A negative entry means
-	// that the descriptor does not accept the corresponding JSON kind.
-	caseIdxByKind := [5]int8{-1, -1, -1, -1, -1}
-	for i, c := range cases {
-		caseIdxByKind[c.KindIdx] = int8(i)
-	}
-	kindofIdx := uint16(len(b.kindofs))
-	b.kindofs = append(b.kindofs, BindKindofTable{
-		CaseIdxByKind:     caseIdxByKind,
-		CaseCount:         uint32(len(cases)),
-		CaseTypeIdxData:   unsafe.Pointer(unsafe.SliceData(caseTypeIdx)),
-		CaseRTypeData:     unsafe.Pointer(unsafe.SliceData(caseRType)),
-		CaseSlotClassData: unsafe.Pointer(unsafe.SliceData(caseSlotClass)),
+	polyIdx := uint16(len(b.polys))
+	b.polys = append(b.polys, BindPolyTable{
+		CaseCount:         polyKindCount,
+		caseTypeIdxData:   unsafe.Pointer(unsafe.SliceData(caseTypeIdx)),
+		caseRTypeData:     unsafe.Pointer(unsafe.SliceData(caseRType)),
+		caseSlotClassData: unsafe.Pointer(unsafe.SliceData(caseSlotClass)),
 	})
-	b.kindofCases = append(b.kindofCases, KindofCaseData{
+	b.polyCases = append(b.polyCases, PolyCaseData{
 		TypeIdx:   caseTypeIdx,
 		RType:     caseRType,
 		SlotClass: caseSlotClass,
-		Kinds:     caseKinds,
 	})
 	kindofField := &b.fields[fieldsBase+uint32(kindofFieldIdx)]
-	kindofField.Flags |= uint32(TagKindof) | (uint32(kindofIdx) << fieldFlagVariantIdxShift)
+	kindofField.Flags |= uint32(TagKindof) | (uint32(polyIdx) << fieldFlagPolyIdxShift)
 	return nil
 }
