@@ -65,7 +65,7 @@ var envelope Envelope
 err := json.Unmarshal(src, &envelope)
 ```
 
-By default, `Parse` copies the string data needed by the returned `Value`, so `src` may be modified or reused after parsing. If retaining the input buffer is acceptable, zero-copy mode can reduce this copying:
+By default, `Parse` copies the string needed by the returned `Value`. If retaining the input buffer is acceptable, zero-copy mode can reduce this copying:
 
 ```go
 padded := json.Pad(src)
@@ -83,25 +83,31 @@ These string limits apply to `Value`, not to ordinary Go `string` fields decoded
 
 ## Extensions
 
-**Reserve unknown keys.** A `Value` field tagged `json:",embed"` collects every key not matched by a named field, zero-copy:
+- **Reserve unknown keys.**
 
-```go
-type Foo struct {
-    Name string    `json:"name"`
-    Exts json.Value `json:",embed"` // unmatched keys land here
-}
-```
+  A `Value` field tagged `json:",embed"` collects every key not matched by a named field:
 
-**Polymorphic decoding.** A `vjson:"variant=<disc>"` field binds to the concrete Go type selected by a sibling discriminator field; `vjson:"kindof"` selects the case by the JSON value's kind. Case sets are declared explicitly with `vbind.DefineVariantCases`:
+  ```go
+  type Foo struct {
+      Name string    `json:"name"`
+      Exts json.Value `json:",embed"` // unmatched keys land here
+  }
+  ```
 
-```go
-type EventEnvelope struct {
-    Type string `json:"type"`
-    Data any    `json:"data" vjson:"variant=type"` // "user"→User, "product"→Product
-}
-```
+- **Polymorphic decoding.** 
 
-Runnable examples: [examples/unmarshal/partial](examples/unmarshal/partial), [examples/unmarshal/poly](examples/unmarshal/poly).
+  1. A `vjson:"variant=<disc>"` field binds to the concrete Go type selected by a discriminator field.
+
+  2. A `vjson:"kindof"` field selects the case by the JSON value's kind.
+
+  ```go
+  type EventEnvelope struct {
+      Type string `json:"type"`
+      Data any    `json:"data" vjson:"variant=type"` // "user"→User, "product"→Product
+  }
+  ```
+
+Example detail: [partial](examples/unmarshal/partial), [poly](examples/unmarshal/poly).
 
 ## Roadmap
 
