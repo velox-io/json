@@ -1017,7 +1017,7 @@ func TestInlineVariant_IfaceField_ProductCase(t *testing.T) {
 
 // --- strict mode (WithDisallowUnknownFields) + inline variant ---
 //
-// Ported from examples/unmarshal/poly/poly.go's Permission example. The host
+// Ported from examples/unmarshal/poly/main.go's Permission example. The host
 // mirrors Permission: a discriminator (Type) plus a virtual inline variant
 // field (User) whose case fields unfold into the host JSON object.
 //

@@ -1,6 +1,6 @@
-// Package stream demonstrates the streaming JSON binding API.
+// Package main demonstrates the streaming JSON binding API.
 // See README.md for the full design.
-package stream
+package main
 
 import (
 	"fmt"
@@ -52,10 +52,25 @@ type NestedResponse struct {
 	Message string                       `json:"message"`
 }
 
-// StreamBasicIter exercises the basic iteration pattern: register a handler
+func main() {
+	for _, demo := range []func() error{
+		basicIter,
+		streamBreak,
+		allowValueReuse,
+		parallelSiblings,
+		nestedStream,
+		innerBreakOuter,
+	} {
+		if err := demo(); err != nil {
+			panic(err)
+		}
+	}
+}
+
+// basicIter exercises the basic iteration pattern: register a handler
 // before Decode, iterate Items, Decode each element, then access fields that
 // follow the stream in the JSON object after Decode returns.
-func StreamBasicIter() error {
+func basicIter() error {
 	input := []byte(`{
 		"users": [
 			{"id": "u1", "name": "alice"},
@@ -86,10 +101,10 @@ func StreamBasicIter() error {
 	return nil
 }
 
-// StreamBreak exercises current-layer break: native Go `break` ends the
+// streamBreak exercises current-layer break: native Go `break` ends the
 // stream, the parser drains the remaining array elements, and the outer
 // object resumes binding. No nested handler is involved.
-func StreamBreak() error {
+func streamBreak() error {
 	input := []byte(`{
 		"users": [
 			{"id": "u1", "name": "alice"},
@@ -128,10 +143,10 @@ func StreamBreak() error {
 	return nil
 }
 
-// StreamAllowValueReuse exercises the reuse license: the parser may overwrite
+// allowValueReuse exercises the reuse license: the parser may overwrite
 // the previous element's storage on the next iteration. The handler must
 // consume or copy each value before requesting the next item.
-func StreamAllowValueReuse() error {
+func allowValueReuse() error {
 	input := []byte(`{
 		"users": [
 			{"id": "u1", "name": "alice"},
@@ -165,12 +180,12 @@ func StreamAllowValueReuse() error {
 	return nil
 }
 
-// StreamParallelSiblings exercises parallel streams on the same object:
+// parallelSiblings exercises parallel streams on the same object:
 // Users and Grants are semantic siblings whose handler execution order
 // follows JSON member order. When the stream appearing first depends on
 // data from the stream appearing later, the caller buffers the out-of-order
 // items and reconciles when the dependency arrives.
-func StreamParallelSiblings() error {
+func parallelSiblings() error {
 	// Grants appear before Users in the input, but each grant references a
 	// user by ID. The grants handler buffers grants by user ID; when the
 	// users handler runs later, it joins each user with its pending grants.
@@ -224,7 +239,7 @@ func StreamParallelSiblings() error {
 	return nil
 }
 
-// StreamNested exercises a non-leaf stream: each element carries its own
+// nestedStream exercises a non-leaf stream: each element carries its own
 // nested Stream field. The handler registers the nested OnRead via
 // Item.Target before Item.Decode drives the body bind, so the nested handler
 // is active by the time the parser reaches the events array.
@@ -233,7 +248,7 @@ func StreamParallelSiblings() error {
 // OnRead registers the nested handler, Decode binds the user body (the
 // nested handler fires inside this call when the parser reaches events),
 // then the outer loop reads the now-complete user via Target.
-func StreamNested() error {
+func nestedStream() error {
 	input := []byte(`{
 		"users": [
 			{"id": "u1", "events": [{"id": "e1", "match": false}, {"id": "e2", "match": true}]},
@@ -276,7 +291,7 @@ func StreamNested() error {
 	return nil
 }
 
-// StreamInnerBreakOuter exercises cross-scope break: an inner stream handler
+// innerBreakOuter exercises cross-scope break: an inner stream handler
 // returns outer.Break() to jump out of the outer iteration. A native label
 // break cannot cross nested handler invocations, so Scope.Break/IsBreak is
 // the only way to terminate an outer stream from inside an inner one.
@@ -285,7 +300,7 @@ func StreamNested() error {
 // returns it as an error; the outer loop recognizes it via IsBreak and
 // executes a native break. After the break the parser drains the rest of
 // the Users array and resumes binding the enclosing object.
-func StreamInnerBreakOuter() error {
+func innerBreakOuter() error {
 	input := []byte(`{
 		"users": [
 			{"id": "u1", "events": [{"id": "e1", "match": false}]},

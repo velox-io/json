@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	vjson "github.com/velox-io/json"
-	"github.com/velox-io/json/vbind"
+	"github.com/velox-io/json/value"
 )
 
 type User struct {
@@ -43,14 +43,14 @@ type EventEnvelope struct {
 func init() {
 	// Registry-form descriptor: the case value is the field name (or the
 	// `case:"..."` tag for blank fields). Each field's type is the target.
-	vbind.DefineVariantCases[EventEnvelope, struct {
+	vjson.DefineVariantCases[EventEnvelope, struct {
 		_ User    `case:"user"`
 		_ Product `case:"product"`
 	}]()
 
 	// kindof: descriptor field names are JSON kinds (bool/number/string/
 	// array/object). Each field's type is the Go case type for that kind.
-	vbind.DefineKindofCases[Response, struct {
+	vjson.DefineKindofCases[Response, struct {
 		bool   bool
 		number float64
 		string string
@@ -67,19 +67,37 @@ func init() {
 	//   - Report (sibling, disc "observer"): independent case set (KubeletReport/
 	//     SchedulerReport), independent disc.
 	// A host permits any number of siblings but at most one embedded variant.
-	vbind.DefineVariantCasesAt[K8sObject, struct {
+	vjson.DefineVariantCasesAt[K8sObject, struct {
 		_ PodObject     `case:"Pod"`
 		_ ServiceObject `case:"Service"`
 	}]("Object")
-	vbind.DefineVariantCasesAt[K8sObject, struct {
+	vjson.DefineVariantCasesAt[K8sObject, struct {
 		_ KubeletReport   `case:"kubelet"`
 		_ SchedulerReport `case:"scheduler"`
 	}]("Report")
 	// OwnerReference is itself a variant host (its `owner` field is a sibling
 	// variant on `ownerKind`). Demonstrates a second sibling axis via nesting.
-	vbind.DefineVariantCases[OwnerReference, struct {
+	vjson.DefineVariantCases[OwnerReference, struct {
 		_ DeploymentOwner `case:"Deployment"`
 		_ ReplicaSetOwner `case:"ReplicaSet"`
+	}]()
+
+	// NestedInlineHost's inline case carries a second inline variant host, so
+	// two discs on two nesting levels resolve in one scan: the outer disc
+	// selects the case that brings InnerHost's members, the inner disc selects
+	// the case unfolding into InnerHost.
+	vjson.DefineVariantCases[NestedInlineHost, struct {
+		_ NestedInlineCase `case:"nested"`
+	}]()
+	vjson.DefineVariantCases[InnerHost, struct {
+		_ InnerUser  `case:"user"`
+		_ InnerAdmin `case:"admin"`
+	}]()
+
+	// NestedRawOuter's only axis is a case whose target is value.Value: the
+	// case captures its members raw instead of unfolding them.
+	vjson.DefineVariantCases[RawCaseHost, struct {
+		_ value.Value `case:"raw"`
 	}]()
 }
 
@@ -175,6 +193,52 @@ type K8sObject struct {
 	Owner      OwnerReference `json:"owner"`
 }
 
+// --- nested inline hosts ---
+//
+// NestedInlineHost is an inline variant host whose case (NestedInlineCase)
+// carries a second inline host (InnerHost). Two discs on two nesting levels
+// resolve in one scan: the outer one selects the case that brings InnerHost's
+// members into the JSON, the inner one selects the case unfolding into it.
+type NestedInlineHost struct {
+	Type string `json:"type"`
+	Data any    `json:",embed" vjson:"variant=type"`
+}
+
+type InnerHost struct {
+	Type string `json:"type"`
+	Data any    `json:",embed" vjson:"variant=type"`
+}
+
+type NestedInlineCase struct {
+	Label string    `json:"label"`
+	Inner InnerHost `json:"inner"`
+}
+
+// InnerUser / InnerAdmin are InnerHost's cases; their fields unfold into
+// InnerHost's JSON object, one nesting level below the outer host.
+type InnerUser struct {
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
+
+type InnerAdmin struct {
+	Level int `json:"level"`
+}
+
+// --- raw case host ---
+//
+// RawCaseHost's case target is value.Value, so the matched members stay a
+// navigable Value instead of unfolding into the host. NestedRawOuter binds it
+// from an already-parsed Value with UnmarshalValue rather than from bytes.
+type RawCaseHost struct {
+	Type string `json:"type"`
+	Data any    `json:",embed" vjson:"variant=type"`
+}
+
+type NestedRawOuter struct {
+	Inner RawCaseHost `json:"inner"`
+}
+
 func main() {
 	src := `{"type":"user","data":{"name":"Alice","role":"admin"}}`
 	var env EventEnvelope
@@ -239,6 +303,62 @@ func main() {
 		return
 	}
 	useK8sObject(obj)
+
+	// Two inline variant levels nested inside each other.
+	nestedInlineHosts()
+
+	// Variant case captured as a Value, bound from a parsed document.
+	rawCaseFromValue()
+}
+
+// nestedInlineHosts binds two nested inline levels in one scan. The outer disc
+// selects NestedInlineCase, which brings label and inner into the JSON; inner
+// is itself an inline host whose disc selects the case unfolding into it.
+func nestedInlineHosts() {
+	for _, src := range []string{
+		`{"type":"nested","label":"x","inner":{"type":"user","name":"Alice","role":"admin"}}`,
+		`{"type":"nested","label":"y","inner":{"type":"admin","level":9}}`,
+	} {
+		var host NestedInlineHost
+		if err := vjson.Unmarshal([]byte(src), &host); err != nil {
+			fmt.Println("error:", err)
+			return
+		}
+		outer, ok := host.Data.(NestedInlineCase)
+		if !ok {
+			fmt.Printf("  unexpected case type %T\n", host.Data)
+			return
+		}
+		fmt.Printf("nested inline: label=%s inner=%T %+v\n", outer.Label, outer.Inner.Data, outer.Inner.Data)
+	}
+}
+
+// rawCaseFromValue binds with UnmarshalValue, so the source is an
+// already-parsed document rather than bytes. The selected case keeps its
+// members as a navigable Value.
+func rawCaseFromValue() {
+	src := `{"inner":{"type":"raw","extra":{"a":1}}}`
+	val, err := vjson.Parse([]byte(src))
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	var outer NestedRawOuter
+	if err := vjson.UnmarshalValue(val, &outer); err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	raw, ok := outer.Inner.Data.(value.Value)
+	if !ok {
+		fmt.Printf("  unexpected case type %T\n", outer.Inner.Data)
+		return
+	}
+	typ := raw.Get("type")
+	extra := raw.Get("extra")
+	a := extra.Get("a")
+	typStr, _ := typ.Str()
+	aInt, _ := a.Int()
+	fmt.Printf("raw case: type=%s extra.a=%d\n", typStr, aInt)
 }
 
 // useKindof consumes a kindof field: type switch on the concrete case the

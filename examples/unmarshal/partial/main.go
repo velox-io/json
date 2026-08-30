@@ -1,4 +1,6 @@
-package partial
+// Package main demonstrates partial binding: known JSON keys bind to typed
+// Go fields, unmatched keys are captured by an embedded Value.
+package main
 
 import vjson "github.com/velox-io/json"
 
@@ -9,7 +11,7 @@ type Foo struct {
 	Message string      `json:"message"`
 }
 
-func PartialBindDemo() {
+func main() {
 	data := `{"name": "bob", "count": 10, "abc": {"a":1, "b":2, "c": 3}, "message": "OK", "xx": "some info"}`
 
 	var result Foo

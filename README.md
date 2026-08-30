@@ -105,6 +105,23 @@ These string limits apply to `Value`, not to ordinary Go `string` fields decoded
       Type string `json:"type"`
       Data any    `json:"data" vjson:"variant=type"` // "user"→User, "product"→Product
   }
+
+  type User struct {
+  	Name string `json:"name"`
+  	Role string `json:"role"`
+  }
+
+  type Product struct {
+  	Title string `json:"title"`
+  	Price int    `json:"price"`
+  }
+
+  func init() {
+	vjson.DefineVariantCases[EventEnvelope, struct {
+		user    User
+		product Product
+	}]()
+  }
   ```
 
 Example detail: [partial](examples/unmarshal/partial), [poly](examples/unmarshal/poly).
