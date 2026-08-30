@@ -4,6 +4,9 @@ lint:
 lint-ci:
 	golangci-lint run --timeout 10m
 
+hooks:
+	git config core.hooksPath githooks
+
 fmt:
 	gofmt -w -s .
 	goimports -w .

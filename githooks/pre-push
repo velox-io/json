@@ -1,0 +1,78 @@
+#!/usr/bin/env sh
+# Push gate for the protected branches of github.com/velox-io/json.
+#
+# Runs the checks CI runs, so a lint or cross-platform build failure shows up
+# here instead of on the remote. Other remotes are mirrors or scratch and take
+# whatever is pushed to them. Bypass with `git push --no-verify`.
+#
+# Install with `make hooks` (sets core.hooksPath to this directory).
+
+set -eu
+
+remote_url="${2:-}"
+
+# stdin carries one line per ref: <local ref> <local sha> <remote ref> <remote sha>
+push_sha=""
+protected_ref=""
+while read -r _ local_sha remote_ref _; do
+  # Skip branch deletions, whose local sha is all zeros.
+  case "$local_sha" in
+  *[!0]*) ;;
+  *) continue ;;
+  esac
+  case "$remote_ref" in
+  refs/heads/main | refs/heads/develop)
+    push_sha="$local_sha"
+    protected_ref="$remote_ref"
+    ;;
+  esac
+done
+
+# Only the velox remote is gated. The URL is ssh scp form or a plain URL.
+case "$remote_url" in
+*github.com[:/]velox-io/json*) ;;
+*)
+  exit 0
+  ;;
+esac
+
+if [ -z "$protected_ref" ]; then
+  exit 0
+fi
+
+branch="${protected_ref#refs/heads/}"
+echo "pre-push: $remote_url gate for $branch"
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+# The gate checks the worktree, so it only says something about the commit
+# being pushed when the two are the same thing.
+if [ "$push_sha" != "$(git rev-parse HEAD)" ]; then
+  echo "pre-push: refusing, the pushed commit is not HEAD" >&2
+  echo "pre-push: check it out and push again" >&2
+  exit 1
+fi
+if [ -n "$(git status --porcelain)" ]; then
+  echo "pre-push: refusing, the worktree has uncommitted changes" >&2
+  exit 1
+fi
+if ! command -v golangci-lint >/dev/null 2>&1; then
+  echo "pre-push: refusing, golangci-lint is not installed" >&2
+  exit 1
+fi
+
+# CI runs golangci-lint `latest`; a version gap can hide or invent issues.
+echo "pre-push: $(golangci-lint --version 2>/dev/null | head -1)"
+
+echo "pre-push: [1/2] make lint-ci"
+make lint-ci
+
+echo "pre-push: [2/2] cross-platform build"
+for target in linux/amd64 linux/arm64 windows/amd64 darwin/arm64; do
+  goos="${target%/*}"
+  goarch="${target#*/}"
+  echo "pre-push:   GOOS=$goos GOARCH=$goarch go build ./..."
+  GOOS="$goos" GOARCH="$goarch" go build ./...
+done
+
+echo "pre-push: gate passed"

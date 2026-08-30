@@ -142,7 +142,7 @@ func TestArenaBoundsAdversarial(t *testing.T) {
 	for _, d := range docs {
 		src := []byte(d.doc)
 		var host boundValueHost
-		if err := vp.Unmarshal(src, &host); err != nil {
+		if err = vp.Unmarshal(src, &host); err != nil {
 			continue
 		}
 		m := machineOf(vp)
@@ -161,7 +161,7 @@ func TestArenaBoundsAdversarial(t *testing.T) {
 	for _, d := range docs {
 		src := []byte(d.doc)
 		var host boundStringHost
-		if err := sp.Unmarshal(src, &host); err != nil {
+		if err = sp.Unmarshal(src, &host); err != nil {
 			continue
 		}
 		checkArenaBounds(t, "string", d.name, src, sp, 1<<30)

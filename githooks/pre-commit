@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+# Keeps lint findings out of commits. No --fix: an auto-fixed file would stay
+# unstaged and the commit would carry the unfixed content.
+#
+# Install with `make hooks` (sets core.hooksPath to this directory).
+
+set -eu
+
+cd "$(git rev-parse --show-toplevel)"
+
+if ! command -v golangci-lint >/dev/null 2>&1; then
+  echo "pre-commit: refusing, golangci-lint is not installed" >&2
+  exit 1
+fi
+
+make lint-ci
