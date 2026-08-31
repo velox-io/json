@@ -457,8 +457,8 @@ INLINE int dom_visit_primitive(const uint8_t *buf, const uint32_t **idx_pp, tape
 #define SCN_ADVANCE()      (buf + *idx_p++)
 #define SCN_ADVANCE_CHAR() (buf[*idx_p++])
 
-/* The COPY and ZERO_COPY wrappers supply a constant mode to this shared walker.
- * Their noinline boundary isolates the walker's register state from its caller. */
+/* One walker serves both string modes. Callers pass `mode` as a constant so the
+ * per-string branch folds away. */
 INLINE int dom_build_tape_impl(tape_emit_ctx *d, const uint8_t *buf, const uint32_t *idx, uint32_t n_idx,
                                json_dom_str_mode mode) {
   uint64_t *tape_p        = d->doc.tape;
@@ -627,13 +627,5 @@ document_end:
 #undef SCN_PEEK
 #undef SCN_ADVANCE
 #undef SCN_ADVANCE_CHAR
-
-NOINLINE int dom_build_tape_copy(tape_emit_ctx *d, const uint8_t *buf, const uint32_t *idx, uint32_t n_idx) {
-  return dom_build_tape_impl(d, buf, idx, n_idx, JSON_DOM_STR_COPY);
-}
-
-NOINLINE int dom_build_tape_zc(tape_emit_ctx *d, const uint8_t *buf, const uint32_t *idx, uint32_t n_idx) {
-  return dom_build_tape_impl(d, buf, idx, n_idx, JSON_DOM_STR_ZERO_COPY);
-}
 
 #endif /* NDEC_TAPE_H */

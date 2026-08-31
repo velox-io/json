@@ -283,10 +283,6 @@ const variantNoDefaultCase = 0xFFFF
 
 const polyKindCount = 5
 
-// BindPolyTable is a 40 byte Go/C ABI record shared by variants and kindofs. A
-// field's high 16 flag bits index the table, and its tag bit selects how the
-// case arrays are indexed.
-//
 // A variant maps a discriminator Go string through Lookup to a case index. A
 // kindof table indexes the same arrays directly by JSON kind, so it carries no
 // Lookup and no discriminator. Lookup is a scannable pointer that keeps the case

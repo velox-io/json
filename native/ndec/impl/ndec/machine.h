@@ -14,6 +14,21 @@
 #define BIND_MAX_DEPTH      255
 #define BIND_AUX_STACK_SIZE 16 /* Slot zero is the sentinel; 15 nested phase 2 structs remain. */
 
+/* The resumable input position of one pass. Exactly one representation is live,
+ * selected by the phase family:
+ *
+ *   idx   structural index entry produced by the SIMD pre-scan
+ *   tape  tape word, during a tape-bind walk
+ *
+ * Both are pointer-sized, so the machine pair keeps one ABI shape that the Go
+ * driver can seed and the rebind stack can save as raw words. An advance steps
+ * by a different amount in each representation, so macros select a member rather
+ * than cast one canonical type. */
+typedef union NdecCursor {
+  const uint32_t *idx;
+  const uint64_t *tape;
+} NdecCursor;
+
 /* A frame preserves the parent container across a child descent.
  *
  * MAP stores the published parent slot in dst and derives cur_count from the
@@ -90,7 +105,7 @@ typedef struct BindAuxFrame {
   uint32_t walk;    /* off 24 Reserved seam before the next phase 2 entry. */
   /* The active value range survives case descent and BLOCK_FULL. It cannot use
    * the outer cursor, whose structural-index interpretation resumes after the
-   * synchronous phase 2 walk, or idx_end, which the descent replaces. */
+   * synchronous phase 2 walk, or cursor_end, which the descent replaces. */
   uint32_t val_at;  /* off 28 */
   uint32_t val_end; /* off 32 */
   /* Presence must distinguish a missing inline discriminator from an explicit
@@ -106,11 +121,11 @@ _Static_assert(sizeof(BindAuxFrame) == 48, "BindAuxFrame size drift");
 #define BIND_REBIND_STACK_SIZE 4 /* Maximum nested phase 2 descent depth. */
 
 typedef struct BindAuxRebind {
-  const uint32_t *saved_idx_p;   /* off 0  Outer structural or tape cursor. */
-  const uint32_t *saved_idx_end; /* off 8 */
-  uint64_t *saved_value_tape;    /* off 16 Outer tape base restored after descent. */
-  uint32_t return_phase;         /* off 24 Phase restored after the case closes. */
-  int32_t saved_base_depth;      /* off 28 Outer tape-bind close depth. */
+  NdecCursor saved_cursor;     /* off 0  Outer structural, source, or tape cursor. */
+  NdecCursor saved_cursor_end; /* off 8 */
+  uint64_t *saved_value_tape;  /* off 16 Outer tape base restored after descent. */
+  uint32_t return_phase;       /* off 24 Phase restored after the case closes. */
+  int32_t saved_base_depth;    /* off 28 Outer tape-bind close depth. */
   /* A case descent replaces the input cursor, tape base, and view mode as one
    * unit. Case content always uses view A of the host's merged tape, but an
    * outer UnmarshalValue walk may use view B and must regain it on return.
@@ -121,7 +136,7 @@ typedef struct BindAuxRebind {
   uint32_t _pad;            /* off 36 Preserves 8-byte alignment and the 40-byte ABI size. */
 } BindAuxRebind;            /* 40B */
 _Static_assert(sizeof(BindAuxRebind) == 40, "BindAuxRebind size drift");
-_Static_assert(offsetof(BindAuxRebind, saved_idx_p) == 0, "BindAuxRebind.saved_idx_p");
+_Static_assert(offsetof(BindAuxRebind, saved_cursor) == 0, "BindAuxRebind.saved_cursor");
 _Static_assert(offsetof(BindAuxRebind, saved_value_tape) == 16, "BindAuxRebind.saved_value_tape");
 _Static_assert(offsetof(BindAuxRebind, return_phase) == 24, "BindAuxRebind.return_phase");
 
@@ -176,11 +191,11 @@ _Static_assert(offsetof(NdecBindCore, frames) == 80, "NdecBindCore.frames offset
 typedef struct NdecBindMachine {
   NdecBindBridge b;      /* off 0    driver-engine bridge (ctx 64 + alloc 120 + yield 24 = 208B) */
   NdecBindCore c;        /* off 208  binding state machine internals (scalars 80 + frames 8KiB = 8272B) */
-  const uint32_t *idx_p; /* off 8480 structural index cursor (overlaid by tape cursor during tape-bind) */
-  const uint32_t *idx_end;
-  int32_t aux_depth; /* Current struct auxiliary slot; zero is the sentinel. Cold
-                      * poly paths update it in memory, so it consumes no hot register
-                      * and needs no yield spill. */
+  NdecCursor cursor;     /* off 8480 input position of the active pass */
+  NdecCursor cursor_end; /* off 8488 count of real input; the walk reads past it */
+  int32_t aux_depth;     /* Current struct auxiliary slot; zero is the sentinel. Cold
+                          * poly paths update it in memory, so it consumes no hot register
+                          * and needs no yield spill. */
 
   /* Indexed by struct nesting rather than parse depth. A struct entering phase 2
    * lazily claims a slot, then restores parent_aux at close. */
@@ -208,7 +223,7 @@ typedef struct NdecBindMachine {
   uint8_t in_tape_bind;
 } NdecBindMachine;
 _Static_assert(offsetof(NdecBindMachine, b) == 0, "bridge must be at offset 0");
-_Static_assert(offsetof(NdecBindMachine, idx_p) == 8480, "idx_p offset must match Go BindMachineCursorOffset");
+_Static_assert(offsetof(NdecBindMachine, cursor) == 8480, "cursor offset must match Go BindMachineCursorOffset");
 
 /* Save the parent at frames[depth], then advance depth. On success the caller
  * installs the child's hot state.

@@ -376,19 +376,19 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
   case BIND_KIND_UINT64:                                                                                          \
   case BIND_KIND_FLOAT32:                                                                                         \
   case BIND_KIND_FLOAT64:                                                                                         \
-    if (ch == '-' || (ch >= '0' && ch <= '9')) BIND_WRITE_NUMBER(ct, body, IDX_POS(), cont_label, ON_MISMATCH);   \
+    if (ch == '-' || (ch >= '0' && ch <= '9')) BIND_WRITE_NUMBER(ct, body, SRC_POS(), cont_label, ON_MISMATCH);   \
     ON_MISMATCH;                                                                                                  \
   case BIND_KIND_BOOL:                                                                                            \
     if (ch == 't') {                                                                                              \
-      if (bind_validate_atom(IDX_PTR(), 't') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());                  \
+      if (bind_validate_atom(SRC_PTR(), 't') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());                  \
       *(uint8_t *)body = 1;                                                                                       \
-      IDX_CONSUME();                                                                                              \
+      SRC_ADVANCE();                                                                                              \
       goto cont_label;                                                                                            \
     }                                                                                                             \
     if (ch == 'f') {                                                                                              \
-      if (bind_validate_atom(IDX_PTR(), 'f') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());                  \
+      if (bind_validate_atom(SRC_PTR(), 'f') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());                  \
       *(uint8_t *)body = 0;                                                                                       \
-      IDX_CONSUME();                                                                                              \
+      SRC_ADVANCE();                                                                                              \
       goto cont_label;                                                                                            \
     }                                                                                                             \
     ON_MISMATCH;                                                                                                  \
@@ -414,19 +414,19 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
   do {                                                                                                            \
     if (LIKELY((ct)->kind == BIND_KIND_STRING)) {                                                                 \
       if ((ch) == '"') {                                                                                          \
-        if (bind_visit_str(&str_p, IDX_PTR(), (body)) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());         \
-        IDX_CONSUME();                                                                                            \
+        if (bind_visit_str(&str_p, SRC_PTR(), (body)) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());         \
+        SRC_ADVANCE();                                                                                            \
         goto cont_label;                                                                                          \
       }                                                                                                           \
       ON_MISMATCH;                                                                                                \
     }                                                                                                             \
     if ((ct)->kind == BIND_KIND_NUMBER) {                                                                         \
       if ((ch) == '"') {                                                                                          \
-        if (bind_visit_str(&str_p, IDX_PTR(), (body)) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());         \
-        IDX_CONSUME();                                                                                            \
+        if (bind_visit_str(&str_p, SRC_PTR(), (body)) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());         \
+        SRC_ADVANCE();                                                                                            \
         goto cont_label;                                                                                          \
       }                                                                                                           \
-      if ((ch) == '-' || ((ch) >= '0' && (ch) <= '9')) BIND_WRITE_NUMBER_AS_STR((body), IDX_POS(), cont_label);   \
+      if ((ch) == '-' || ((ch) >= '0' && (ch) <= '9')) BIND_WRITE_NUMBER_AS_STR((body), SRC_POS(), cont_label);   \
       ON_MISMATCH;                                                                                                \
     }                                                                                                             \
   } while (0)
@@ -436,7 +436,7 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
  */
 #define __BIND_SAVE_LOCALS(m)                                                                                     \
   do {                                                                                                            \
-    (m)->idx_p       = cursor;                                                                                    \
+    (m)->cursor      = cursor;                                                                                    \
     (m)->c.depth     = depth;                                                                                     \
     (m)->c.cur_dst   = cur_dst;                                                                                   \
     (m)->c.cur_type  = cur_type;                                                                                  \
@@ -490,8 +490,8 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
   do {                                                                                                            \
     if ((m)->rebind_top >= BIND_REBIND_STACK_SIZE) BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);                   \
     BindAuxRebind *_rb    = &(m)->rebind_stack[(m)->rebind_top++];                                                \
-    _rb->saved_idx_p      = cursor;                                                                               \
-    _rb->saved_idx_end    = (m)->idx_end;                                                                         \
+    _rb->saved_cursor     = cursor;                                                                               \
+    _rb->saved_cursor_end = (m)->cursor_end;                                                                      \
     _rb->saved_value_tape = (m)->b.alloc.value_tape;                                                              \
     _rb->return_phase     = (return_phase_);                                                                      \
     _rb->saved_base_depth = (m)->tape_bind_base_depth;                                                            \
@@ -506,9 +506,9 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
     cur_aux                   = cur_type.kind == BIND_KIND_STRUCT                                                 \
                                     ? (void *)(uintptr_t)(m)->b.ctx.type_meta[(case_type_idx_)].u.strct.lookup    \
                                     : NULL;                                                                       \
-    cursor                    = (const uint32_t *)&(m)->b.alloc.tape_arena[(at_)];                                \
-    (m)->idx_p                = cursor;                                                                           \
-    (m)->idx_end              = (const uint32_t *)&(m)->b.alloc.tape_arena[(end_)];                               \
+    cursor.tape               = &(m)->b.alloc.tape_arena[(at_)];                                                  \
+    (m)->cursor               = cursor;                                                                           \
+    (m)->cursor_end.tape      = &(m)->b.alloc.tape_arena[(end_)];                                                 \
     (m)->b.alloc.value_tape   = &(m)->b.alloc.tape_arena[(base_)];                                                \
     (m)->tape_bind_base_depth = depth;                                                                            \
     goto t_document_start;                                                                                        \
@@ -561,7 +561,7 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
  */
 #define BIND_ERR_VALUE_OR_EOF(m, kind, pos)                                                                       \
   do {                                                                                                            \
-    if (UNLIKELY(IDX_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, (pos));                                              \
+    if (UNLIKELY(SRC_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, (pos));                                              \
     BIND_YIELD_ERR(m, (kind), (pos));                                                                             \
   } while (0)
 
@@ -646,8 +646,8 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
  */
 #define BIND_DESCEND_STRUCT(body, child_type_ptr, cont_label, push_fn)                                            \
   do {                                                                                                            \
-    IDX_CONSUME();                                                                                                \
-    int _empty = IDX_ACCEPT('}');                                                                                 \
+    SRC_ADVANCE();                                                                                                \
+    int _empty = SRC_ACCEPT('}');                                                                                 \
     if (_empty && !((child_type_ptr)->flags & BIND_FLAG_MAY_PHASE2)) goto cont_label;                             \
     if (push_fn(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))                                           \
       BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);                                                                \
@@ -726,18 +726,18 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
 
 #define BIND_WRITE_NUMBER(ct, body, err_pos, cont_label, ON_MISMATCH)                                             \
   do {                                                                                                            \
-    const uint8_t *_tok = IDX_PTR();                                                                              \
+    const uint8_t *_tok = SRC_PTR();                                                                              \
     const uint8_t *_end;                                                                                          \
     if (bind_write_number(_tok, (ct)->kind, (body), m->c.atof, &_end) < 0) ON_MISMATCH;                           \
     if (UNLIKELY(is_non_delim(*_end))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (err_pos));                             \
-    IDX_CONSUME();                                                                                                \
+    SRC_ADVANCE();                                                                                                \
     goto cont_label;                                                                                              \
   } while (0)
 
 /* json.Number preserves the validated source token in str_arena. */
 #define BIND_WRITE_NUMBER_AS_STR(body, err_pos, cont_label)                                                       \
   do {                                                                                                            \
-    const uint8_t *_tok = IDX_PTR();                                                                              \
+    const uint8_t *_tok = SRC_PTR();                                                                              \
     const uint8_t *_end;                                                                                          \
     double _dv;                                                                                                   \
     if (UNLIKELY(ndec_parse_double_padded(_tok, &_dv, m->c.atof, &_end)))                                         \
@@ -749,22 +749,23 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
     __builtin_memcpy(_ndata, _tok, _nlen);                                                                        \
     str_p += _nlen;                                                                                               \
     bind_write_str_header((body), _ndata, _nlen);                                                                 \
-    IDX_CONSUME();                                                                                                \
+    SRC_ADVANCE();                                                                                                \
     goto cont_label;                                                                                              \
   } while (0)
 
 /* Tape bind reuses NdecBindMachine to bind a prebuilt tape into typed storage.
- * Its cursor overlays idx_p and idx_end. The outer cursor may be structural or
- * tape state, and rebind_stack restores it at t_document_end. The t_ labels keep
- * this state machine distinct from the JSON bind labels.
+ * Its cursor reads the tape member of the same pair the JSON walk reads through
+ * idx. The outer cursor may be structural or tape state, and rebind_stack
+ * restores it at t_document_end. The t_ labels keep this state machine distinct
+ * from the JSON bind labels.
  */
 
 /* Every tape-bind yield spills the shared hot locals. cursor denotes the active
- * JSON or tape cursor and resumes through the same idx_p home.
+ * JSON or tape cursor and resumes through the same m->cursor home.
  */
 #define __TAPE_BIND_SAVE_LOCALS(m)                                                                                \
   do {                                                                                                            \
-    (m)->idx_p       = cursor;                                                                                    \
+    (m)->cursor      = cursor;                                                                                    \
     (m)->c.depth     = depth;                                                                                     \
     (m)->c.cur_dst   = cur_dst;                                                                                   \
     (m)->c.cur_type  = cur_type;                                                                                  \
@@ -890,7 +891,7 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
 
 /* A root mismatch has no enclosing container, so it must end the document
  * instead of entering the nested skip continuation. Use tape_value_end because
- * consuming a following seam would move past idx_end and report trailing data.
+ * consuming a following seam would move past cursor_end and report trailing data.
  */
 #define TAPE_BIND_ROOT_TYPE_MISMATCH_SKIP(m, pos)                                                                 \
   do {                                                                                                            \
@@ -898,7 +899,7 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
       m->c.first_error_kind      = BIND_ERR_TYPE_MISMATCH;                                                        \
       m->b.yield.first_error_pos = (pos);                                                                         \
     }                                                                                                             \
-    cursor = (const uint32_t *)tape_value_end(TAP_CURSOR, TAP_VIEW());                                            \
+    cursor.tape = tape_value_end(TAP_CURSOR, TAP_VIEW());                                                         \
     goto t_document_end;                                                                                          \
   } while (0)
 

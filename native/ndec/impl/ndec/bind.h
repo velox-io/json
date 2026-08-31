@@ -72,8 +72,8 @@ NDEC_FN_DECL void ndec_bind_parse(void *_m_) {
       m->c.phase = BIND_PHASE_DOCUMENT_END;
       return;
     }
-    m->idx_end                 = m->b.alloc.structural + n_idx;
-    m->idx_p                   = m->b.alloc.structural;
+    m->cursor_end.idx          = m->b.alloc.structural + n_idx;
+    m->cursor.idx              = m->b.alloc.structural;
     m->c.depth                 = 0;
     m->c.cur_dst               = m->b.ctx.root_dst;
     m->c.cur_type              = m->b.ctx.types[m->b.ctx.root_type];
@@ -126,11 +126,10 @@ NDEC_FN_DECL void ndec_bind_parse(void *_m_) {
 
 NOINLINE static void ndec_bind_parse_inner(NdecBindMachine *m) {
   /* cursor is the sole register-resident position for a pass. Resume phases load
-   * it from idx_p once. JSON phases interpret it as structural uint32_t indices;
-   * tape phases interpret it as uint64_t words. The phase gate keeps these views
-   * mutually exclusive. */
-  const uint32_t *cursor = m->idx_p;
-  const uint8_t *src     = m->b.ctx.src;
+   * it from m->cursor once. JSON phases read its idx member, tape phases its tape
+   * member, and the phase gate keeps these views mutually exclusive. */
+  NdecCursor cursor  = m->cursor;
+  const uint8_t *src = m->b.ctx.src;
 
   BindFrame *frames                 = m->c.frames;
   const BindType *types             = m->b.ctx.types;
@@ -224,10 +223,10 @@ NOINLINE static void ndec_bind_parse_inner(NdecBindMachine *m) {
   }
 
 document_start: {
-  if (UNLIKELY(IDX_EOF())) {
-    BIND_YIELD_ERR(m, BIND_ERR_EOF, IDX_POS());
+  if (UNLIKELY(SRC_EOF())) {
+    BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
   }
-  uint8_t ch = IDX_PEEK();
+  uint8_t ch = SRC_PEEK();
   if (UNLIKELY(cur_type.flags | (ch == 'n'))) {
     /* cur_type advances after each pointer allocation, so BLOCK_FULL resumes at
      * the first unresolved layer without advancing the JSON cursor. */
@@ -256,7 +255,7 @@ document_start: {
       }
 
       /* Resume enters below ch initialization, so reload the unconsumed token. */
-      ch = IDX_PEEK();
+      ch = SRC_PEEK();
     }
     if (BIND_IS_ANY(cur_type.kind)) {
       m->c.stash.any_yield.slot = cur_dst;
@@ -281,8 +280,8 @@ document_start: {
     /* Null clears reference-like roots and Number storage. Scalars and structs
      * retain their value, and an outer pointer still names its original slot. */
     if (ch == 'n') {
-      if (bind_validate_atom(IDX_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
-      IDX_CONSUME();
+      if (bind_validate_atom(SRC_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+      SRC_ADVANCE();
       BIND_NULL_ZERO(cur_dst, m, &cur_type);
       goto document_end;
     }
@@ -291,13 +290,13 @@ document_start: {
     if (cur_type.kind == BIND_KIND_MAP) {
       BIND_MAP_OPEN(m, &cur_type, cur_dst, bind_push_map);
     }
-    IDX_CONSUME();
+    SRC_ADVANCE();
     if (cur_type.kind != BIND_KIND_STRUCT) {
-      BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, IDX_POS() - 1);
+      BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS() - 1);
     }
     /* Even an empty object must enter phase2 when the type can owe deferred
      * inline-variant or reserve-unknown work. */
-    int empty = IDX_ACCEPT('}');
+    int empty = SRC_ACCEPT('}');
     if (empty && LIKELY(!(cur_type.flags & BIND_FLAG_MAY_PHASE2))) goto document_end;
     if (bind_push_struct(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
@@ -306,8 +305,8 @@ document_start: {
     goto object_begin;
   }
   if (ch == '[') {
-    IDX_CONSUME();
-    if (IDX_ACCEPT(']')) {
+    SRC_ADVANCE();
+    if (SRC_ACCEPT(']')) {
       /* Stream empty array at root: yield to activate the handler with an
        * empty batch, then resume at array_close to finish document_end. */
       if (cur_type.kind == BIND_KIND_STREAM) {
@@ -327,7 +326,7 @@ document_start: {
 object_begin:
   cur_aux = (void *)(uintptr_t)m->b.ctx.type_meta[cur_type.type_idx].u.strct.lookup;
 object_field: {
-  const uint8_t *key = IDX_ADVANCE();
+  const uint8_t *key = SRC_ADVANCE_PTR();
   if (UNLIKELY(*key != '"')) BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_SYNTAX, (uint32_t)(key - src));
   const BindType *t            = &cur_type;
   const BindField *first_field = (const BindField *)t->child;
@@ -357,22 +356,22 @@ object_field: {
     uint16_t iv_idx              = m->b.ctx.type_meta[cur_type.type_idx].u.strct.inline_variant_idx;
     uint32_t reserve_unknown_off = m->b.ctx.type_meta[cur_type.type_idx].u.strct.reserve_unknown_field_off;
     if ((iv_idx != 0xFFFFu) || (reserve_unknown_off != 0xFFFFFFFF)) {
-      IDX_EXPECT(':');
+      SRC_EXPECT(':');
       goto object_field_tape;
     }
     if (UNLIKELY(m->b.ctx.opt_flags & BIND_OPT_DISALLOW_UNKNOWN))
       BIND_YIELD_ERR(m, BIND_ERR_UNKNOWN_FIELD, (key - src));
-    IDX_EXPECT(':');
+    SRC_EXPECT(':');
     goto skip_value;
   }
   cur_struct_field = &first_field[fidx];
-  IDX_EXPECT(':');
+  SRC_EXPECT(':');
   /* Resume restores cur_struct_field and enters after the consumed colon.
    * cur_type remains the parent struct throughout field iteration and phase2. */
 object_field_value: {
   uint8_t *body              = cur_dst + cur_struct_field->offset;
   const BindType *child_type = (const BindType *)cur_struct_field->type;
-  uint8_t ch                 = IDX_PEEK();
+  uint8_t ch                 = SRC_PEEK();
   if (UNLIKELY(cur_struct_field->flags | (ch == 'n'))) {
     /* Resolve promoted pointer hops before null handling. The field offset is
      * relative to the reached pointee even when the field value is null. */
@@ -413,8 +412,8 @@ object_field_value: {
      * tape for phase2 at struct close. */
     if (cur_struct_field->flags & (BIND_FF_VARIANT | BIND_FF_KINDOF)) {
       if (ch == 'n') {
-        if (bind_validate_atom(IDX_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
-        IDX_CONSUME();
+        if (bind_validate_atom(SRC_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+        SRC_ADVANCE();
         poly_eface_nil(body);
         goto object_continue;
       }
@@ -425,7 +424,7 @@ object_field_value: {
         __BIND_SAVE_LOCALS(m);
         m->c.phase                = BIND_PHASE_DOCUMENT_END;
         m->b.yield.pending_action = BIND_YIELD_ERROR;
-        BIND_ERROR_PAYLOAD(m, BIND_ERR_KINDOF_UNREGISTERED, kind, IDX_POS(), NULL);
+        BIND_ERROR_PAYLOAD(m, BIND_ERR_KINDOF_UNREGISTERED, kind, SRC_POS(), NULL);
         return;
       }
       if (site == POLY_SITE_DEFER) {
@@ -456,8 +455,8 @@ object_field_value: {
     }
 
     if (ch == 'n') {
-      if (bind_validate_atom(IDX_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
-      IDX_CONSUME();
+      if (bind_validate_atom(SRC_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+      SRC_ADVANCE();
       BIND_NULL_ZERO(body, m, child_type);
       goto object_continue;
     }
@@ -466,25 +465,25 @@ object_field_value: {
     if (cur_struct_field->flags & BIND_FF_QUOTED) {
       if (ch == '"') {
         const uint8_t *qd = str_p;
-        int32_t qn        = ndec_str_parse(IDX_PTR() + 1, str_p, NULL);
-        if (qn < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+        int32_t qn        = ndec_str_parse(SRC_PTR() + 1, str_p, NULL);
+        if (qn < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
         if (bind_write_quoted_scalar(&str_p, qd, (uint32_t)qn, child_type->kind, body, m->c.atof) < 0)
-          BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, IDX_POS());
-        IDX_CONSUME();
+          BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+        SRC_ADVANCE();
         goto object_continue;
       }
-      BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, IDX_POS());
+      BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
     }
   }
 
-  BIND_DISPATCH_STRING(child_type, body, ch, object_continue, BIND_TYPE_MISMATCH_SKIP(m, IDX_POS()));
+  BIND_DISPATCH_STRING(child_type, body, ch, object_continue, BIND_TYPE_MISMATCH_SKIP(m, SRC_POS()));
   switch (child_type->kind) {
-    BIND_VALUE_SWITCH_COMMON(child_type, body, ch, object_continue, 0, BIND_TYPE_MISMATCH_SKIP(m, IDX_POS()),
+    BIND_VALUE_SWITCH_COMMON(child_type, body, ch, object_continue, 0, BIND_TYPE_MISMATCH_SKIP(m, SRC_POS()),
                              bind_push_struct);
   case BIND_KIND_SLICE:
   case BIND_KIND_ARRAY:
   case BIND_KIND_STREAM:
-    if (ch != '[') BIND_TYPE_MISMATCH_SKIP(m, IDX_POS());
+    if (ch != '[') BIND_TYPE_MISMATCH_SKIP(m, SRC_POS());
 
     if (bind_push_struct(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
@@ -492,8 +491,8 @@ object_field_value: {
     cur_dst   = body;
     cur_type  = *child_type;
     cur_count = 0;
-    IDX_CONSUME();
-    if (IDX_ACCEPT(']')) {
+    SRC_ADVANCE();
+    if (SRC_ACCEPT(']')) {
       /* Activate an empty stream handler before resuming at array_close. */
       if (cur_type.kind == BIND_KIND_STREAM) {
         BIND_YIELD(m, BIND_YIELD_SLICE_GROW, (uint32_t)cur_type.type_idx, 0, BIND_PHASE_ARRAY_CLOSE);
@@ -502,7 +501,7 @@ object_field_value: {
     }
     goto array_begin;
   }
-  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
 }
 
 /* Phase1 writes every field that depends on an unresolved inline case to one
@@ -523,7 +522,7 @@ object_field_tape: {
 }
 
 object_continue: {
-  uint8_t ch = IDX_ADVANCE_CHAR();
+  uint8_t ch = SRC_ADVANCE_CHAR();
   if (ch == ',') goto object_field;
   /* Phase 2 handles delayed entries or empty close-time finalization. */
   if (ch == '}') {
@@ -544,10 +543,10 @@ object_continue: {
   /* 0x20 is the scan sentinel byte at src[len]. At depth 0 it means the
    * top-level value ended cleanly; at depth > 0 the object is unclosed. */
   if (ch == 0x20) {
-    if (UNLIKELY(depth > 0)) BIND_YIELD_ERR(m, BIND_ERR_EOF, IDX_POS());
+    if (UNLIKELY(depth > 0)) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
     goto document_end;
   }
-  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
 }
 
 /* Phase2 classifies the merged tape after the discriminator is bound. The host
@@ -880,7 +879,7 @@ array_begin: {
     cur_aux = cur_dst;
   } else {
     /* Report the consumed opening bracket as the mismatch position. */
-    BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, IDX_POS() - 1);
+    BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS() - 1);
   }
 }
 
@@ -912,7 +911,7 @@ array_value: {
 array_value_bind_body: {
   uint8_t *body              = cur_aux;
   const BindType *child_type = (const BindType *)cur_type.child;
-  uint8_t ch                 = IDX_PEEK();
+  uint8_t ch                 = SRC_PEEK();
   if (UNLIKELY(child_type->flags | (ch == 'n'))) {
     /* Keep cur_count at the current index until pointer allocation completes.
      * BLOCK_FULL resumes at array_value with the JSON cursor still on this element. */
@@ -939,8 +938,8 @@ array_value_bind_body: {
     }
 
     if (ch == 'n') {
-      if (bind_validate_atom(IDX_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
-      IDX_CONSUME();
+      if (bind_validate_atom(SRC_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+      SRC_ADVANCE();
       goto array_continue;
     }
   } else {
@@ -949,16 +948,16 @@ array_value_bind_body: {
   }
 
   BIND_DISPATCH_STRING(child_type, body, ch, array_continue,
-                       BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, IDX_POS()));
+                       BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, SRC_POS()));
   switch (child_type->kind) {
     // clang-format off
     /* zero_size is zero so reused slice or stream backing and fixed arrays retain
      * omitted struct fields. Newly allocated backing is already zeroed. */
-    BIND_VALUE_SWITCH_COMMON(child_type, body, ch, array_continue, 0, BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, IDX_POS()), bind_push_array_or_slice);
+    BIND_VALUE_SWITCH_COMMON(child_type, body, ch, array_continue, 0, BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, SRC_POS()), bind_push_array_or_slice);
     // clang-format on
   case BIND_KIND_SLICE:
   case BIND_KIND_ARRAY:
-    if (ch != '[') BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, IDX_POS());
+    if (ch != '[') BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
     /* Save elem_idx + 1 as the parent's live count before descending. */
     if (bind_push_array_or_slice(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
@@ -966,18 +965,18 @@ array_value_bind_body: {
     cur_dst   = body;
     cur_type  = *child_type;
     cur_count = 0;
-    IDX_CONSUME();
-    if (IDX_ACCEPT(']')) {
+    SRC_ADVANCE();
+    if (SRC_ACCEPT(']')) {
       BIND_EMPTY_ARRAY_CLOSE(m, &cur_type, array_continue, bind_pop_array_or_slice);
     }
     goto array_begin;
   }
-  BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_SYNTAX, IDX_POS());
+  BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_SYNTAX, SRC_POS());
 }
 }
 
 array_continue: {
-  uint8_t ch = IDX_ADVANCE_CHAR();
+  uint8_t ch = SRC_ADVANCE_CHAR();
   if (ch == ',') {
     if (BIND_IS_SLICE_LIKE(cur_type.kind)) {
       *(intptr_t *)(cur_dst + 8) = (intptr_t)cur_count;
@@ -1021,10 +1020,10 @@ array_continue: {
   if (ch == 0x20) {
     /* 0x20 is the scan sentinel byte at src[len]. At depth 0 it means the
      * top-level value ended cleanly; at depth > 0 the array is unclosed. */
-    if (UNLIKELY(depth > 0)) BIND_YIELD_ERR(m, BIND_ERR_EOF, IDX_POS());
+    if (UNLIKELY(depth > 0)) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
     goto document_end;
   }
-  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
 }
 
 scope_end: {
@@ -1085,8 +1084,8 @@ map_open: {
 
   cur_dst   = parent_slot;
   cur_count = 0;
-  IDX_CONSUME();
-  if (IDX_ACCEPT('}')) {
+  SRC_ADVANCE();
+  if (SRC_ACCEPT('}')) {
     /* Retire the empty map's region; drain later reclaims its buffer space. */
     frames[depth].u.map_region = (BindMapRegionHeader *)0;
     bind_pop(frames, &depth, &cur_dst, &cur_type, &cur_count, &cur_aux);
@@ -1112,10 +1111,10 @@ map_key: {
   }
   uint8_t *slot              = (uint8_t *)map_region + BIND_MAP_REGION_HEADER_SIZE + next_entry_off;
   map_region->next_entry_off = next_entry_off + stride;
-  const uint8_t *key         = IDX_ADVANCE();
+  const uint8_t *key         = SRC_ADVANCE_PTR();
   if (*key != '"') BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_SYNTAX, (uint32_t)(key - src));
   if (bind_visit_str(&str_p, key, slot) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (uint32_t)(key - src));
-  IDX_EXPECT(':');
+  SRC_EXPECT(':');
   goto map_value;
 }
 
@@ -1131,7 +1130,7 @@ map_value: {
   /* Reused value slots may contain stale data. Zero only shapes that do not
    * overwrite the whole area; pointer pointees are already zeroed in typed storage. */
   const BindType *child_type = (const BindType *)mt->child;
-  uint8_t ch                 = IDX_PEEK();
+  uint8_t ch                 = SRC_PEEK();
   if (UNLIKELY(child_type->flags | (ch == 'n'))) {
     /* Preserve the noscan slot address across pointer unwrapping. If body moves,
      * the pointee is already in scannable typed storage; otherwise pointer-bearing
@@ -1190,62 +1189,62 @@ map_value: {
       __builtin_memset(target_slot, 0, (size_t)val_size);
       /* Null publishes the zeroed intermediate through map drain. */
       if (ch == 'n') {
-        if (bind_validate_atom(IDX_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
-        IDX_CONSUME();
+        if (bind_validate_atom(SRC_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+        SRC_ADVANCE();
         goto map_continue;
       }
       if (child_type->kind == BIND_KIND_STRUCT) {
         BIND_DESCEND_STRUCT(target_slot, child_type, map_continue, bind_push_map);
       }
       if (child_type->kind == BIND_KIND_ARRAY || child_type->kind == BIND_KIND_SLICE) {
-        if (ch != '[') BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, IDX_POS());
+        if (ch != '[') BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
         if (bind_push_map(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
           BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
         cur_dst   = target_slot;
         cur_type  = *child_type;
         cur_count = 0;
-        IDX_CONSUME();
-        if (IDX_ACCEPT(']')) {
+        SRC_ADVANCE();
+        if (SRC_ACCEPT(']')) {
           BIND_EMPTY_ARRAY_CLOSE(m, &cur_type, map_continue, bind_pop_map);
         }
         goto array_begin;
       }
       if (child_type->kind == BIND_KIND_MAP) {
         /* Store a nested *hmap in the typed intermediate that map drain copies by value. */
-        if (ch != '{') BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, IDX_POS());
+        if (ch != '{') BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
         BIND_MAP_OPEN(m, child_type, target_slot, bind_push_map);
       }
     }
 
     if (ch == 'n') {
-      if (bind_validate_atom(IDX_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+      if (bind_validate_atom(SRC_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
       __builtin_memset(body, 0, (size_t)stride - BIND_MAP_VAL_OFF);
-      IDX_CONSUME();
+      SRC_ADVANCE();
       goto map_continue;
     }
   }
 
   BIND_DISPATCH_STRING(child_type, body, ch, map_continue,
-                       BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, IDX_POS()));
+                       BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, SRC_POS()));
   switch (child_type->kind) {
     BIND_VALUE_SWITCH_COMMON(child_type, body, ch, map_continue, (size_t)stride - BIND_MAP_VAL_OFF,
-                             BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, IDX_POS()), bind_push_map);
+                             BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, SRC_POS()), bind_push_map);
   case BIND_KIND_SLICE:
   case BIND_KIND_ARRAY:
-    if (ch != '[') BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, IDX_POS());
+    if (ch != '[') BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
     __builtin_memset(body, 0, (size_t)stride - BIND_MAP_VAL_OFF);
     if (bind_push_map(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
     cur_dst   = body;
     cur_type  = *child_type;
     cur_count = 0;
-    IDX_CONSUME();
-    if (IDX_ACCEPT(']')) {
+    SRC_ADVANCE();
+    if (SRC_ACCEPT(']')) {
       BIND_EMPTY_ARRAY_CLOSE(m, &cur_type, map_continue, bind_pop_map);
     }
     goto array_begin;
   }
-  BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_SYNTAX, IDX_POS());
+  BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_SYNTAX, SRC_POS());
 }
 
 map_continue: {
@@ -1254,7 +1253,7 @@ map_continue: {
   if (map_region != (BindMapRegionHeader *)0) {
     map_region->entry_count++;
   }
-  uint8_t ch = IDX_ADVANCE_CHAR();
+  uint8_t ch = SRC_ADVANCE_CHAR();
   if (ch == ',') {
     goto map_key;
   }
@@ -1269,10 +1268,10 @@ map_continue: {
   if (ch == 0x20) {
     /* 0x20 is the scan sentinel byte at src[len]. At depth 0 it means the
      * top-level value ended cleanly; at depth > 0 the map is unclosed. */
-    if (UNLIKELY(depth > 0)) BIND_YIELD_ERR(m, BIND_ERR_EOF, IDX_POS());
+    if (UNLIKELY(depth > 0)) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
     goto document_end;
   }
-  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
 }
 
 /* FLUSH_MAP may relocate the live region, so resume reloads cur_aux from its frame. */
@@ -1291,19 +1290,19 @@ skip_value: {
 
 unsafe_skip_value: {
   /* This path tracks container depth without validating scalars or comma order. */
-  if (UNLIKELY(IDX_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, IDX_POS());
+  if (UNLIKELY(SRC_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
   uint32_t skip_depth = 0;
-  uint8_t ch          = IDX_PEEK();
+  uint8_t ch          = SRC_PEEK();
   if (ch == '{' || ch == '[') {
     skip_depth = 1;
-    IDX_CONSUME();
+    SRC_ADVANCE();
   } else {
-    IDX_CONSUME();
+    SRC_ADVANCE();
     goto object_continue;
   }
   for (;;) {
-    if (UNLIKELY(IDX_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, IDX_POS());
-    ch = IDX_ADVANCE_CHAR();
+    if (UNLIKELY(SRC_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+    ch = SRC_ADVANCE_CHAR();
     if (ch == '{' || ch == '[') skip_depth++;
     else if (ch == '}' || ch == ']') {
       if (--skip_depth == 0) goto object_continue;
@@ -1312,42 +1311,42 @@ unsafe_skip_value: {
 }
 
 safe_skip_value: {
-  if (UNLIKELY(IDX_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, IDX_POS());
+  if (UNLIKELY(SRC_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
   uint32_t skip_depth = 0;
-  uint8_t ch          = IDX_PEEK();
+  uint8_t ch          = SRC_PEEK();
   if (ch == '{' || ch == '[') {
     skip_depth = 1;
-    IDX_CONSUME();
+    SRC_ADVANCE();
   } else {
     /* str_p is scratch (not advanced); decoded bytes are discarded.
      * Padded parsers rely on the 64-byte 0x20 tail on ctx.src. */
     if (ch == '"') {
-      if (UNLIKELY(ndec_str_parse(IDX_PTR() + 1, str_p, NULL) < 0)) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+      if (UNLIKELY(ndec_str_parse(SRC_PTR() + 1, str_p, NULL) < 0)) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     } else if (ch == 't' || ch == 'f' || ch == 'n') {
-      if (UNLIKELY(bind_validate_atom(IDX_PTR(), ch) < 0)) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+      if (UNLIKELY(bind_validate_atom(SRC_PTR(), ch) < 0)) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     } else if (ch == '-' || (ch >= '0' && ch <= '9')) {
       const uint8_t *_end;
       double _dv;
-      if (UNLIKELY(ndec_parse_double_padded(IDX_PTR(), &_dv, m->c.atof, &_end)))
-        BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
-      if (UNLIKELY(is_non_delim(*_end))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+      if (UNLIKELY(ndec_parse_double_padded(SRC_PTR(), &_dv, m->c.atof, &_end)))
+        BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+      if (UNLIKELY(is_non_delim(*_end))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
       (void)_dv;
     } else {
-      BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+      BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     }
-    IDX_CONSUME();
+    SRC_ADVANCE();
     goto scope_end;
   }
   for (;;) {
-    if (UNLIKELY(IDX_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, IDX_POS());
-    ch = IDX_ADVANCE_CHAR();
+    if (UNLIKELY(SRC_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+    ch = SRC_ADVANCE_CHAR();
     if (ch == '{' || ch == '[') skip_depth++;
     else if (ch == '}' || ch == ']') {
       if (--skip_depth == 0) goto scope_end;
     } else if (ch == ',') {
-      if (UNLIKELY(IDX_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, IDX_POS());
-      uint8_t next = IDX_PEEK();
-      if (next == ']' || next == '}' || next == ',') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+      if (UNLIKELY(SRC_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+      uint8_t next = SRC_PEEK();
+      if (next == ']' || next == '}' || next == ',') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     }
   }
 }
@@ -1357,7 +1356,7 @@ safe_skip_value: {
 any_value: {
   const BindAnyMeta *am = (const BindAnyMeta *)m->b.ctx.types[m->b.ctx.any_type_idx].child;
   uint8_t *any_slot     = m->c.stash.any_yield.slot;
-  uint8_t ch            = IDX_PEEK();
+  uint8_t ch            = SRC_PEEK();
 #define ANY_RETURN()                                                                                              \
   do {                                                                                                            \
     if (depth == 0) goto document_end;                                                                            \
@@ -1371,7 +1370,7 @@ any_value: {
     case BIND_KIND_MAP:                                                                                           \
       goto map_continue;                                                                                          \
     }                                                                                                             \
-    BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, IDX_POS());                                                         \
+    BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());                                                         \
   } while (0)
 
   /* Numbers share parsing and typed-slot allocation. UseNumber preserves the
@@ -1388,23 +1387,23 @@ any_value: {
     sc->offset += sc->elem_size;
     const uint8_t *_end;
     double dv;
-    if (UNLIKELY(ndec_parse_double_padded(IDX_PTR(), &dv, m->c.atof, &_end)))
-      BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, IDX_POS());
-    if (UNLIKELY(is_non_delim(*_end))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+    if (UNLIKELY(ndec_parse_double_padded(SRC_PTR(), &dv, m->c.atof, &_end)))
+      BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+    if (UNLIKELY(is_non_delim(*_end))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     if (UNLIKELY(use_number)) {
       (void)dv;
-      uint32_t num_len  = (uint32_t)(_end - (IDX_PTR()));
+      uint32_t num_len  = (uint32_t)(_end - (SRC_PTR()));
       uint8_t *num_data = str_p;
-      __builtin_memcpy(num_data, IDX_PTR(), num_len);
+      __builtin_memcpy(num_data, SRC_PTR(), num_len);
       str_p += num_len;
       bind_write_str_header(data, num_data, num_len);
     } else {
-      if (UNLIKELY(!__builtin_isfinite(dv))) BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, IDX_POS());
+      if (UNLIKELY(!__builtin_isfinite(dv))) BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
       *(double *)data = dv;
     }
     *(const void **)any_slot       = type_tag;
     *(const void **)(any_slot + 8) = data;
-    IDX_CONSUME();
+    SRC_ADVANCE();
     ANY_RETURN();
   }
   if (ch == '"') {
@@ -1414,24 +1413,24 @@ any_value: {
     }
     uint8_t *data = sc->block + sc->offset;
     sc->offset += sc->elem_size;
-    if (bind_visit_str(&str_p, IDX_PTR(), data) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+    if (bind_visit_str(&str_p, SRC_PTR(), data) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     *(const void **)any_slot       = am->string_type;
     *(const void **)(any_slot + 8) = data;
-    IDX_CONSUME();
+    SRC_ADVANCE();
     ANY_RETURN();
   }
   if (ch == 't' || ch == 'f') {
-    if (bind_validate_atom(IDX_PTR(), ch) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+    if (bind_validate_atom(SRC_PTR(), ch) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     *(const void **)any_slot       = am->bool_type;
     *(const void **)(any_slot + 8) = (ch == 't') ? (const void *)am->static_true : (const void *)am->static_false;
-    IDX_CONSUME();
+    SRC_ADVANCE();
     ANY_RETURN();
   }
   if (ch == 'n') {
-    if (bind_validate_atom(IDX_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+    if (bind_validate_atom(SRC_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     *(const void **)any_slot       = am->nil_type;
     *(const void **)(any_slot + 8) = NULL;
-    IDX_CONSUME();
+    SRC_ADVANCE();
     ANY_RETURN();
   }
   /* Publish the []any interface before descent so its slice-header slot is reachable. */
@@ -1449,8 +1448,8 @@ any_value: {
     cur_dst   = data;
     cur_type  = types[am->slice_any_type_idx];
     cur_count = 0;
-    IDX_CONSUME();
-    if (IDX_ACCEPT(']')) {
+    SRC_ADVANCE();
+    if (SRC_ACCEPT(']')) {
       /* Return through the dynamic parent continuation rather than a fixed label. */
       BIND_WRITE_EMPTY_SLICE(cur_dst, m, cur_type.type_idx);
       bind_pop(frames, &depth, &cur_dst, &cur_type, &cur_count, &cur_aux);
@@ -1464,7 +1463,7 @@ any_value: {
     *(const void **)any_slot = am->map_type;
     BIND_MAP_OPEN(m, &types[am->map_any_type_idx], any_slot + 8, bind_push);
   }
-  BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_SYNTAX, IDX_POS());
+  BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_SYNTAX, SRC_POS());
 #undef ANY_RETURN
 }
 
@@ -1476,7 +1475,7 @@ any_value: {
 deferred_value: {
   uint8_t *deferred_slot      = m->c.stash.deferred_yield.slot;
   const BindType *deferred_ct = m->c.stash.deferred_yield.type;
-  uint8_t ch                  = IDX_PEEK();
+  uint8_t ch                  = SRC_PEEK();
 #define DEFERRED_RETURN()                                                                                         \
   do {                                                                                                            \
     if (depth == 0) goto document_end;                                                                            \
@@ -1490,14 +1489,14 @@ deferred_value: {
     case BIND_KIND_MAP:                                                                                           \
       goto map_continue;                                                                                          \
     }                                                                                                             \
-    BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, IDX_POS());                                                         \
+    BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());                                                         \
   } while (0)
 
   /* TextUnmarshaler is not called for JSON null. Consume the token and retain
    * the receiver's zero value; pointer nulls were excluded before dispatch. */
   if (ch == 'n' && deferred_ct->kind == BIND_KIND_TEXT_UNMARSHALER) {
-    if (bind_validate_atom(IDX_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
-    IDX_CONSUME();
+    if (bind_validate_atom(SRC_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+    SRC_ADVANCE();
     DEFERRED_RETURN();
   }
 
@@ -1509,32 +1508,32 @@ deferred_value: {
   if (deferred_ct->kind != BIND_KIND_TEXT_UNMARSHALER) {
     /* Record the raw JSON span from the current structural offset to the first
      * structural offset after the value. */
-    uint32_t start_off = IDX_POS();
+    uint32_t start_off = SRC_POS();
     if (ch == '{' || ch == '[') {
       uint32_t um_depth = 1;
-      IDX_CONSUME();
+      SRC_ADVANCE();
       while (um_depth > 0) {
-        if (UNLIKELY(IDX_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, IDX_POS());
-        uint8_t c = IDX_ADVANCE_CHAR();
+        if (UNLIKELY(SRC_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+        uint8_t c = SRC_ADVANCE_CHAR();
         if (c == '{' || c == '[') um_depth++;
         else if (c == '}' || c == ']')
           um_depth--;
       }
     } else {
-      IDX_CONSUME();
+      SRC_ADVANCE();
     }
-    uint32_t end_off = IDX_POS();
+    uint32_t end_off = SRC_POS();
     rec->arg0        = start_off;
     rec->arg1        = end_off;
   } else {
     /* TextUnmarshaler receives decoded string bytes from str_arena. */
-    if (ch != '"') BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, IDX_POS());
+    if (ch != '"') BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
     const uint8_t *str_data;
     uint32_t str_len;
-    if (bind_intern_str(&str_p, IDX_PTR(), &str_data, &str_len) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+    if (bind_intern_str(&str_p, SRC_PTR(), &str_data, &str_len) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     rec->arg0 = (uint32_t)(str_data - m->b.alloc.str_arena);
     rec->arg1 = str_len;
-    IDX_CONSUME();
+    SRC_ADVANCE();
   }
 
   m->b.alloc.deferred_drain_used += sizeof(UnmarshalRecord);
@@ -1557,29 +1556,29 @@ deferred_value: {
     case BIND_KIND_MAP:                                                                                           \
       goto map_continue;                                                                                          \
     }                                                                                                             \
-    BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, IDX_POS());                                                         \
+    BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());                                                         \
   } while (0)
 
 #define VALUE_DISPATCH_ELEM()                                                                                     \
   do {                                                                                                            \
-    uint8_t _ch = IDX_PEEK();                                                                                     \
+    uint8_t _ch = SRC_PEEK();                                                                                     \
     if (_ch == '{') {                                                                                             \
-      IDX_CONSUME();                                                                                              \
-      if (IDX_ACCEPT('}')) {                                                                                      \
+      SRC_ADVANCE();                                                                                              \
+      if (SRC_ACCEPT('}')) {                                                                                      \
         bind_emit_empty_container(&vd_tape_p, TAPE_START_OBJECT, TAPE_END_OBJECT, vd_tape_base);                  \
       } else {                                                                                                    \
         goto vd_obj_begin;                                                                                        \
       }                                                                                                           \
     } else if (_ch == '[') {                                                                                      \
-      IDX_CONSUME();                                                                                              \
-      if (IDX_ACCEPT(']')) {                                                                                      \
+      SRC_ADVANCE();                                                                                              \
+      if (SRC_ACCEPT(']')) {                                                                                      \
         bind_emit_empty_container(&vd_tape_p, TAPE_START_ARRAY, TAPE_END_ARRAY, vd_tape_base);                    \
       } else {                                                                                                    \
         goto vd_arr_begin;                                                                                        \
       }                                                                                                           \
     } else {                                                                                                      \
-      if (bind_emit_primitive(src, &cursor, vd_str_arena, &vd_str_p, &vd_tape_p, m->c.atof, vd_str_limit))        \
-        BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());                                                            \
+      if (bind_emit_primitive(src, &cursor.idx, vd_str_arena, &vd_str_p, &vd_tape_p, m->c.atof, vd_str_limit))    \
+        BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());                                                            \
     }                                                                                                             \
   } while (0)
 
@@ -1633,18 +1632,18 @@ vd_resume: {
    * nesting remains within BIND_MAX_DEPTH. */
   BindFrame *vd_stack = &m->c.frames[depth + 1];
   int vd_stack_cap    = BIND_MAX_DEPTH - depth;
-  uint8_t ch          = IDX_PEEK();
+  uint8_t ch          = SRC_PEEK();
   if (ch == '{') {
-    IDX_CONSUME();
-    if (IDX_ACCEPT('}')) {
+    SRC_ADVANCE();
+    if (SRC_ACCEPT('}')) {
       bind_emit_empty_container(&vd_tape_p, TAPE_START_OBJECT, TAPE_END_OBJECT, vd_tape_base);
       goto vd_close;
     }
     goto vd_obj_begin;
   }
   if (ch == '[') {
-    IDX_CONSUME();
-    if (IDX_ACCEPT(']')) {
+    SRC_ADVANCE();
+    if (SRC_ACCEPT(']')) {
       bind_emit_empty_container(&vd_tape_p, TAPE_START_ARRAY, TAPE_END_ARRAY, vd_tape_base);
       goto vd_close;
     }
@@ -1656,26 +1655,26 @@ vd_obj_begin: {
   if (bind_emit_start_container(vd_stack, vd_stack_cap, &vd_tape_p, 0, &vd_depth, &vd_cur_count,
                                 &vd_cur_tape_index, vd_tape_base))
     BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
-  const uint8_t *key = IDX_ADVANCE();
-  if (*key != '"') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+  const uint8_t *key = SRC_ADVANCE_PTR();
+  if (*key != '"') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
   vd_cur_count++;
   if (bind_emit_string_copy(vd_str_arena, &vd_str_p, &vd_tape_p, key))
-    BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
-  if (IDX_ADVANCE_CHAR() != ':') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+    BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+  if (SRC_ADVANCE_CHAR() != ':') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
   goto vd_obj_field;
 }
 
 vd_obj_field: { VALUE_DISPATCH_ELEM(); }
 
 vd_obj_continue: {
-  uint8_t ch = IDX_ADVANCE_CHAR();
+  uint8_t ch = SRC_ADVANCE_CHAR();
   if (ch == ',') {
     vd_cur_count++;
-    const uint8_t *key = IDX_ADVANCE();
-    if (*key != '"') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+    const uint8_t *key = SRC_ADVANCE_PTR();
+    if (*key != '"') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     if (bind_emit_string_copy(vd_str_arena, &vd_str_p, &vd_tape_p, key))
-      BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
-    if (IDX_ADVANCE_CHAR() != ':') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+      BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+    if (SRC_ADVANCE_CHAR() != ':') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     goto vd_obj_field;
   }
   if (ch == '}') {
@@ -1683,7 +1682,7 @@ vd_obj_continue: {
                             &vd_cur_tape_index, vd_tape_base);
     goto vd_scope_end;
   }
-  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
 }
 
 vd_arr_begin: {
@@ -1696,7 +1695,7 @@ vd_arr_begin: {
 vd_arr_value: { VALUE_DISPATCH_ELEM(); }
 
 vd_arr_continue: {
-  uint8_t ch = IDX_ADVANCE_CHAR();
+  uint8_t ch = SRC_ADVANCE_CHAR();
   if (ch == ',') {
     vd_cur_count++;
     goto vd_arr_value;
@@ -1706,7 +1705,7 @@ vd_arr_continue: {
                             &vd_cur_tape_index, vd_tape_base);
     goto vd_scope_end;
   }
-  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
 }
 
 vd_scope_end: {
@@ -1716,8 +1715,8 @@ vd_scope_end: {
 }
 
 vd_root_scalar: {
-  if (bind_emit_primitive(src, &cursor, vd_str_arena, &vd_str_p, &vd_tape_p, m->c.atof, vd_str_limit))
-    BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+  if (bind_emit_primitive(src, &cursor.idx, vd_str_arena, &vd_str_p, &vd_tape_p, m->c.atof, vd_str_limit))
+    BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
   goto vd_close;
 }
 
@@ -1750,7 +1749,7 @@ poly_field_bind: {
   const BindField *f = cur_struct_field;
   uint16_t poly_idx  = BIND_FIELD_POLY_IDX(f);
   uint8_t *target    = cur_dst + f->offset;
-  uint8_t ch         = IDX_PEEK();
+  uint8_t ch         = SRC_PEEK();
 
   PolyCase pc;
   if (f->flags & BIND_FF_KINDOF) {
@@ -1770,29 +1769,29 @@ poly_field_bind: {
   uint32_t zero_size = ct->kind == BIND_KIND_STRUCT ? m->b.ctx.type_meta[ct->type_idx].size : 0;
 
   /* Keep cur_type on the host until the descent saves its frame. */
-  BIND_DISPATCH_STRING(ct, body, ch, object_continue, BIND_TYPE_MISMATCH_SKIP(m, IDX_POS()));
+  BIND_DISPATCH_STRING(ct, body, ch, object_continue, BIND_TYPE_MISMATCH_SKIP(m, SRC_POS()));
   switch (ct->kind) {
-    BIND_VALUE_SWITCH_COMMON(ct, body, ch, object_continue, zero_size, BIND_TYPE_MISMATCH_SKIP(m, IDX_POS()),
+    BIND_VALUE_SWITCH_COMMON(ct, body, ch, object_continue, zero_size, BIND_TYPE_MISMATCH_SKIP(m, SRC_POS()),
                              bind_push_struct);
   case BIND_KIND_SLICE:
   case BIND_KIND_ARRAY:
-    if (ch != '[') BIND_TYPE_MISMATCH_SKIP(m, IDX_POS());
+    if (ch != '[') BIND_TYPE_MISMATCH_SKIP(m, SRC_POS());
     if (bind_push_struct(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
     cur_dst   = body;
     cur_type  = *ct;
     cur_count = 0;
-    IDX_CONSUME();
-    if (IDX_ACCEPT(']')) {
+    SRC_ADVANCE();
+    if (SRC_ACCEPT(']')) {
       BIND_EMPTY_ARRAY_CLOSE(m, &cur_type, object_continue, bind_pop_struct);
     }
     goto array_begin;
   }
-  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
 }
 
 root_scalar: {
-  uint8_t ch         = IDX_PEEK();
+  uint8_t ch         = SRC_PEEK();
   const BindType *ct = &cur_type;
   /* PTR chain already unwrapped at document_start; ct and cur_dst point at
    * the ultimate non-pointer type and its storage. For a null root the chain
@@ -1818,35 +1817,35 @@ root_scalar: {
   }
   if (ch == '"') {
     if (ct->kind != BIND_KIND_STRING && ct->kind != BIND_KIND_NUMBER)
-      BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, IDX_POS());
-    if (bind_visit_str(&str_p, IDX_PTR(), cur_dst) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
-    IDX_CONSUME();
+      BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+    if (bind_visit_str(&str_p, SRC_PTR(), cur_dst) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+    SRC_ADVANCE();
     goto document_end;
   }
   if (ch == '-' || (ch >= '0' && ch <= '9')) {
-    if (ct->kind == BIND_KIND_NUMBER) BIND_WRITE_NUMBER_AS_STR(cur_dst, IDX_POS(), document_end);
-    BIND_WRITE_NUMBER(ct, cur_dst, IDX_POS(), document_end, BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, IDX_POS()));
+    if (ct->kind == BIND_KIND_NUMBER) BIND_WRITE_NUMBER_AS_STR(cur_dst, SRC_POS(), document_end);
+    BIND_WRITE_NUMBER(ct, cur_dst, SRC_POS(), document_end, BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS()));
   }
   if (ch == 'n') {
-    if (bind_validate_atom(IDX_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
-    IDX_CONSUME();
+    if (bind_validate_atom(SRC_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+    SRC_ADVANCE();
     goto document_end;
   }
   if (ch == 't') {
-    if (ct->kind != BIND_KIND_BOOL) BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, IDX_POS());
-    if (bind_validate_atom(IDX_PTR(), 't') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+    if (ct->kind != BIND_KIND_BOOL) BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+    if (bind_validate_atom(SRC_PTR(), 't') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     *(uint8_t *)cur_dst = 1;
-    IDX_CONSUME();
+    SRC_ADVANCE();
     goto document_end;
   }
   if (ch == 'f') {
-    if (ct->kind != BIND_KIND_BOOL) BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, IDX_POS());
-    if (bind_validate_atom(IDX_PTR(), 'f') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+    if (ct->kind != BIND_KIND_BOOL) BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+    if (bind_validate_atom(SRC_PTR(), 'f') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     *(uint8_t *)cur_dst = 0;
-    IDX_CONSUME();
+    SRC_ADVANCE();
     goto document_end;
   }
-  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, IDX_POS());
+  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
 }
 
 document_end: {
@@ -1857,16 +1856,16 @@ document_end: {
   if (m->c.first_error_kind != 0) {
     m->b.yield.pending_action = BIND_YIELD_ERROR;
     BIND_ERROR_PAYLOAD(m, m->c.first_error_kind, m->b.yield.first_error_pos, m->b.yield.first_error_pos, NULL);
-  } else if (cursor < m->idx_end) {
-    /* Structural indices remain past the top-level value: trailing data
-     * (e.g. "42 garbage", "[1][]", "{}}"). The scan sentinel at src[len]
-     * is excluded because idx_end stops before it. */
+  } else if (!SRC_EOF()) {
+    /* Input remains past the top-level value: trailing data (e.g. "42 garbage",
+     * "[1][]", "{}}"). The scan sentinel at src[len] is excluded because
+     * cursor_end stops before it. */
     m->b.yield.pending_action = BIND_YIELD_ERROR;
-    BIND_ERROR_PAYLOAD(m, BIND_ERR_TRAILING, *cursor, *cursor, NULL);
+    BIND_ERROR_PAYLOAD(m, BIND_ERR_TRAILING, SRC_POS(), SRC_POS(), NULL);
   } else {
     m->b.yield.pending_action = BIND_YIELD_NONE;
   }
-  m->idx_p       = cursor;
+  m->cursor      = cursor;
   m->c.depth     = depth;
   m->c.cur_dst   = cur_dst;
   m->c.cur_type  = cur_type;
@@ -2882,7 +2881,7 @@ t_route_field_to_variant: {
   const uint64_t *val_end   = tape_value_end(val_start, TAP_VIEW());
   tape_build_copy_entry(m, a, val_start[-1], val_start, (uint32_t)(val_end - val_start),
                         (uint32_t)(val_start - m->b.alloc.value_tape));
-  cursor = (const uint32_t *)val_end;
+  cursor.tape = val_end;
   goto t_object_continue;
 }
 t_skip_value_array: {
@@ -2912,9 +2911,9 @@ t_value_resume_map: {
 t_value_resume_root: {
   /* tape_value_end, not tape_skip_value: this walk is finishing, not continuing to
    * a sibling. A seam may follow the value (the merged tape reserves one after
-   * every entry), and skipping it would carry the cursor past idx_end and read as
-   * trailing data. */
-  cursor = (const uint32_t *)tape_value_end(TAP_CURSOR, TAP_VIEW());
+   * every entry), and skipping it would carry the cursor past cursor_end and read
+   * as trailing data. */
+  cursor.tape = tape_value_end(TAP_CURSOR, TAP_VIEW());
   goto t_document_end;
 }
 
@@ -3107,9 +3106,9 @@ t_document_end: {
   if (m->auxFrames[m->aux_depth].owner_depth == depth) AUX_RELEASE(m);
   bind_pop(frames, &depth, &cur_dst, &cur_type, &cur_count, &cur_aux);
   BindAuxRebind *rb       = &m->rebind_stack[--m->rebind_top];
-  cursor                  = rb->saved_idx_p;
-  m->idx_p                = cursor;
-  m->idx_end              = rb->saved_idx_end;
+  cursor                  = rb->saved_cursor;
+  m->cursor               = cursor;
+  m->cursor_end           = rb->saved_cursor_end;
   m->b.alloc.value_tape   = rb->saved_value_tape;
   m->tape_bind_base_depth = rb->saved_base_depth;
   m->tape_view_mode       = rb->saved_view_mode;
@@ -3119,15 +3118,15 @@ t_document_end: {
 }
 }
 
-#undef IDX_PEEK
-#undef IDX_PTR
-#undef IDX_POS
-#undef IDX_EOF
-#undef IDX_ADVANCE
-#undef IDX_ADVANCE_CHAR
-#undef IDX_CONSUME
-#undef IDX_EXPECT
-#undef IDX_ACCEPT
+#undef SRC_PEEK
+#undef SRC_PTR
+#undef SRC_POS
+#undef SRC_EOF
+#undef SRC_ADVANCE_PTR
+#undef SRC_ADVANCE_CHAR
+#undef SRC_ADVANCE
+#undef SRC_EXPECT
+#undef SRC_ACCEPT
 #undef BIND_YIELD
 #undef BIND_YIELD_ERR
 #undef BIND_YIELD_ERR_NO_POS

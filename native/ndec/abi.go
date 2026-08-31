@@ -419,10 +419,9 @@ const (
 	BindMapRegionSlots      = 16
 )
 
-// BindMachineCursorOffset locates NdecBindMachine.idx_p immediately after the
-// native frame array. JSON binding owns this structural-index cursor. Tape
-// binding type-puns the same pair as the borrowed tape range, so Go writes both
-// words only when seeding BindPhaseTapeBindRoot.
+// BindMachineCursorOffset locates NdecBindMachine.cursor immediately after the
+// native frame array. Go treats the pair as two opaque words owned by C and
+// writes both only when seeding BindPhaseTapeBindRoot.
 const BindMachineCursorOffset = unsafe.Sizeof(BindMachine{}) + unsafe.Sizeof(BindFrame{})*(BindMaxDepth+1)
 
 // Option bits must match BIND_OPT_* in bind_bridge.h.

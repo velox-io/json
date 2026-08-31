@@ -114,6 +114,19 @@ INLINE void json_dom_free(json_dom *d) {
   __builtin_memset(d, 0, sizeof(*d));
 }
 
+/* The COPY and ZERO_COPY wrappers supply a constant mode to the shared walker.
+ * Their noinline boundary isolates the walker's register state from the caller.
+ * They live here rather than in core/tape.h so a translation unit that builds
+ * tape without the DOM entries does not carry a second copy of the walker. */
+NOINLINE static int dom_build_tape_copy(tape_emit_ctx *d, const uint8_t *buf, const uint32_t *idx,
+                                        uint32_t n_idx) {
+  return dom_build_tape_impl(d, buf, idx, n_idx, JSON_DOM_STR_COPY);
+}
+
+NOINLINE static int dom_build_tape_zc(tape_emit_ctx *d, const uint8_t *buf, const uint32_t *idx, uint32_t n_idx) {
+  return dom_build_tape_impl(d, buf, idx, n_idx, JSON_DOM_STR_ZERO_COPY);
+}
+
 /* Parse len bytes into d through the COPY or ZERO_COPY entry. COPY stores
  * decoded bodies in str_arena. ZERO_COPY aliases escape-free bodies and stores
  * escaped bodies in str_arena. The source is immutable and must outlive d when
