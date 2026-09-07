@@ -20,7 +20,7 @@ env:
   BENCH_COUNT: 6
   # Fixed baseline ref for comparison. Update this when establishing a new
   # performance baseline (e.g. after a release or intentional perf change).
-  BENCH_BASELINE_REF: 'v0.1.2'
+  BENCH_BASELINE_REF: 'v0.2.0'
 
 jobs:
   benchmark:
@@ -61,7 +61,7 @@ jobs:
         git checkout "$BASELINE_REF" --quiet
 
         # Run baseline benchmarks
-        cd benchmark && go test -bench="Velox" -benchmem -benchtime=5s -count=${{ env.BENCH_COUNT }} . | tee bench-baseline.txt
+        cd benchmark && go test -bench="Velox$" -benchmem -benchtime=5s -count=${{ env.BENCH_COUNT }} . | tee bench-baseline.txt
         cd ..
 
         # Return to current commit
@@ -69,7 +69,7 @@ jobs:
 
     - name: Run current benchmarks
       run: |
-        cd benchmark && go test -bench="Velox" -benchmem -benchtime=5s -count=${{ env.BENCH_COUNT }} . | tee bench-current.txt
+        cd benchmark && go test -bench="Velox$" -benchmem -benchtime=5s -count=${{ env.BENCH_COUNT }} . | tee bench-current.txt
 
     - name: Compare results
       id: compare
@@ -93,10 +93,9 @@ jobs:
         #   <section>:<bench_substring>:<max_allowed_percent>
         # A benchmark line matching <bench_substring> in the given <section>
         # with a regression ≤ max_allowed_percent is silently skipped.
-        ALLOWED_REGRESSIONS=(
-          "memory:_Marshal_Tiny_Velox:20"
-          "memory:_Marshal_JSONBenchStringUnicode_Velox:15"
-        )
+        # Entries compensate for drift against the fixed baseline; clear this
+        # list whenever BENCH_BASELINE_REF is bumped.
+        ALLOWED_REGRESSIONS=()
 
         REGRESSION_DETECTED=0
         SECTION="unknown"
