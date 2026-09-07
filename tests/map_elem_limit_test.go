@@ -9,7 +9,6 @@ import (
 	vjson "github.com/velox-io/json"
 	"github.com/velox-io/json/decode/bind"
 	"github.com/velox-io/json/decode/dom"
-	"github.com/velox-io/json/vdec"
 )
 
 // Go stores a map element indirectly once its type exceeds 128 bytes
@@ -99,14 +98,6 @@ func mapValueDecoders() []mapValueDecoder {
 					t.Fatalf("dom.Parse: %v", err)
 				}
 				return bind.UnmarshalValue(val, dst)
-			},
-		},
-		{
-			// An independent decoder with its own map assignment site.
-			name: "vdec.Unmarshal",
-			bind: func(t *testing.T, src []byte, dst any) error {
-				t.Helper()
-				return vdec.Unmarshal(src, dst)
 			},
 		},
 	}

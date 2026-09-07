@@ -1,13 +1,13 @@
 // Package vcopy implements type-driven deep copy for Go values.
 //
 // It reuses the precompiled type descriptors from package typ (the same
-// descriptors powering venc/vdec) to drive an unsafe, zero-reflect hot path
+// descriptors powering venc) to drive an unsafe, zero-reflect hot path
 // for primitives, structs, slices, arrays, pointers, and maps. Empty
 // interface (any) and non-empty interface fields resolve the dynamic rtype
 // directly from the interface header and reuse the same type cache, and
 // reflect.Value boxing never occurs anywhere on the copy path.
 //
-// The dispatch shape mirrors vdec.scanValue: a switch on UniType.Kind that
+// The dispatch shape is a switch on UniType.Kind that
 // recurses through the type graph. There is no tokenize step, so the cost
 // per value is one branch plus one typed memmove (for scalars) or one
 // allocation (for containers).
@@ -25,7 +25,7 @@ import (
 	"github.com/velox-io/json/typ"
 )
 
-// UnsupportedTypeError is re-exported from jerr for symmetry with venc/vdec.
+// UnsupportedTypeError is re-exported from jerr for symmetry with venc.
 type UnsupportedTypeError = jerr.UnsupportedTypeError
 
 // A Copier drives deep-copy traversal. Obtain one via NewCopier or use the
@@ -78,9 +78,8 @@ func (c *Copier) beginCall() {
 	}
 }
 
-// copyValue dispatches on UniType.Kind. It is the structural analog of
-// vdec.scanValue: every kind either emits a typed memmove (scalars) or
-// recurses through the type descriptor (containers).
+// copyValue dispatches on UniType.Kind: every kind either emits a typed
+// memmove (scalars) or recurses through the type descriptor (containers).
 func (c *Copier) copyValue(ut *typ.UniType, src, dst unsafe.Pointer) error {
 	switch ut.Kind {
 	case typ.KindBool,

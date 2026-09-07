@@ -9,7 +9,6 @@ import (
 	"github.com/bytedance/sonic"
 	gojson "github.com/goccy/go-json"
 	vjson "github.com/velox-io/json"
-	"github.com/velox-io/json/vdec"
 )
 
 // =============================================================================
@@ -52,17 +51,6 @@ func Benchmark_Unmarshal_Tiny_Velox(b *testing.B) {
 	for b.Loop() {
 		var v Tiny
 		if err := vjson.Unmarshal(TinyJSON, &v); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func Benchmark_Unmarshal_Tiny_VeloxGo(b *testing.B) {
-	b.SetBytes(int64(len(TinyJSON)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var v Tiny
-		if err := vdec.Unmarshal(TinyJSON, &v); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -117,18 +105,6 @@ func Benchmark_Unmarshal_TinyCompact_Velox(b *testing.B) {
 	}
 }
 
-func Benchmark_Unmarshal_TinyCompact_VeloxGo(b *testing.B) {
-	data := LoadTinyCompactJSON()
-	b.SetBytes(int64(len(data)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var v Tiny
-		if err := vdec.Unmarshal(data, &v); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // =============================================================================
 // Small: nested struct with slices (Sonic Book/Author)
 // =============================================================================
@@ -169,17 +145,6 @@ func Benchmark_Unmarshal_Small_Velox(b *testing.B) {
 	for b.Loop() {
 		var v Book
 		if err := vjson.Unmarshal(SmallJSON, &v); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func Benchmark_Unmarshal_Small_VeloxGo(b *testing.B) {
-	b.SetBytes(int64(len(SmallJSON)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var v Book
-		if err := vdec.Unmarshal(SmallJSON, &v); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -229,18 +194,6 @@ func Benchmark_Unmarshal_SmallCompact_Velox(b *testing.B) {
 	for b.Loop() {
 		var v Book
 		if err := vjson.Unmarshal(data, &v); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func Benchmark_Unmarshal_SmallCompact_VeloxGo(b *testing.B) {
-	data := LoadSmallCompactJSON()
-	b.SetBytes(int64(len(data)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var v Book
-		if err := vdec.Unmarshal(data, &v); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -298,18 +251,6 @@ func Benchmark_Unmarshal_Medium_Velox(b *testing.B) {
 	}
 }
 
-func Benchmark_Unmarshal_Medium_VeloxGo(b *testing.B) {
-	data := MediumJSON
-	b.SetBytes(int64(len(data)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var p MediumPayload
-		if err := vdec.Unmarshal(data, &p); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // =============================================================================
 // Medium Compact: same as Medium but with whitespace stripped
 // =============================================================================
@@ -361,18 +302,6 @@ func Benchmark_Unmarshal_MediumCompact_Velox(b *testing.B) {
 	}
 }
 
-func Benchmark_Unmarshal_MediumCompact_VeloxGo(b *testing.B) {
-	data := LoadMediumCompactJSON()
-	b.SetBytes(int64(len(data)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var p MediumPayload
-		if err := vdec.Unmarshal(data, &p); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // =============================================================================
 // EscapeHeavy: real-world ~4KB JSON with ~40% escape density (corpus escape_heavy)
 // =============================================================================
@@ -413,16 +342,6 @@ func Benchmark_Unmarshal_EscapeHeavy_Velox(b *testing.B) {
 	for b.Loop() {
 		var p EscapeHeavyPayload
 		if err := vjson.Unmarshal(EscapeHeavyJSON, &p); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-func Benchmark_Unmarshal_EscapeHeavy_VeloxGo(b *testing.B) {
-	b.SetBytes(int64(len(EscapeHeavyJSON)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var p EscapeHeavyPayload
-		if err := vdec.Unmarshal(EscapeHeavyJSON, &p); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -477,18 +396,6 @@ func Benchmark_Unmarshal_EscapeHeavyCompact_Velox(b *testing.B) {
 	}
 }
 
-func Benchmark_Unmarshal_EscapeHeavyCompact_VeloxGo(b *testing.B) {
-	data := LoadEscapeHeavyCompactJSON()
-	b.SetBytes(int64(len(data)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var p EscapeHeavyPayload
-		if err := vdec.Unmarshal(data, &p); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // =============================================================================
 // Pods: Kubernetes Pod List (~4.6KB, deeply nested, 3 pods)
 // =============================================================================
@@ -530,17 +437,6 @@ func Benchmark_Unmarshal_KubePods_Velox(b *testing.B) {
 	for b.Loop() {
 		var pl KubePodList
 		if err := vjson.Unmarshal(KubePodsJSON, &pl); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func Benchmark_Unmarshal_KubePods_VeloxGo(b *testing.B) {
-	b.SetBytes(int64(len(KubePodsJSON)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var pl KubePodList
-		if err := vdec.Unmarshal(KubePodsJSON, &pl); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -591,18 +487,6 @@ func Benchmark_Unmarshal_KubePodsCompact_Velox(b *testing.B) {
 	for b.Loop() {
 		var pl KubePodList
 		if err := vjson.Unmarshal(data, &pl); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func Benchmark_Unmarshal_KubePodsCompact_VeloxGo(b *testing.B) {
-	data := LoadPodsCompactJSON()
-	b.SetBytes(int64(len(data)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var pl KubePodList
-		if err := vdec.Unmarshal(data, &pl); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -698,17 +582,6 @@ func Benchmark_Unmarshal_Twitter_Velox(b *testing.B) {
 	}
 }
 
-func Benchmark_Unmarshal_Twitter_VeloxGo(b *testing.B) {
-	b.SetBytes(int64(len(TwitterJSON)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var t twitter.TwitterStruct
-		if err := vdec.Unmarshal(TwitterJSON, &t); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // =============================================================================
 // Twitter Compact: same as Twitter but with whitespace stripped
 // =============================================================================
@@ -753,18 +626,6 @@ func Benchmark_Unmarshal_TwitterCompact_Velox(b *testing.B) {
 	for b.Loop() {
 		var t twitter.TwitterStruct
 		if err := vjson.Unmarshal(data, &t); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func Benchmark_Unmarshal_TwitterCompact_VeloxGo(b *testing.B) {
-	data := LoadTwitterCompactJSON()
-	b.SetBytes(int64(len(data)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var t twitter.TwitterStruct
-		if err := vdec.Unmarshal(data, &t); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -820,18 +681,6 @@ func Benchmark_Unmarshal_TwitterTyped_Velox(b *testing.B) {
 	}
 }
 
-func Benchmark_Unmarshal_TwitterTyped_VeloxGo(b *testing.B) {
-	data := LoadTwitterCompactJSON()
-	b.SetBytes(int64(len(data)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var t twitter_typed.TwitterStruct
-		if err := vdec.Unmarshal(data, &t); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // =============================================================================
 // MapAny: map[string]any – exercises the decodeAnyMap / decodeAnyVal path
 // (unmarshal counterpart of marshal's MapAny). Decodes KubePods JSON into
@@ -881,18 +730,6 @@ func Benchmark_Unmarshal_MapAny_Velox(b *testing.B) {
 	for b.Loop() {
 		var v map[string]any
 		if err := vjson.Unmarshal(data, &v); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func Benchmark_Unmarshal_MapAny_VeloxGo(b *testing.B) {
-	data := LoadPodsCompactJSON()
-	b.SetBytes(int64(len(data)))
-	b.ReportAllocs()
-	for b.Loop() {
-		var v map[string]any
-		if err := vdec.Unmarshal(data, &v); err != nil {
 			b.Fatal(err)
 		}
 	}

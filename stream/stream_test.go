@@ -1,5 +1,3 @@
-//go:build !vdec
-
 package stream_test
 
 import (
@@ -383,7 +381,7 @@ func TestStreamNestedIter(t *testing.T) {
 // TestStreamInnerBreakOuter exercises the cross-scope Break propagation path:
 // an inner stream handler returns outer.Break(), the signal routes via
 // streamScopes to the outer scope, and the outer handler's IsBreak recognizes
-// it and executes a native break. Verifies the README §"从内层跳出外层流" UX.
+// it and executes a native break.
 func TestStreamInnerBreakOuter(t *testing.T) {
 	type event struct {
 		ID    string `json:"id"`
@@ -450,10 +448,10 @@ func TestStreamInnerBreakOuter(t *testing.T) {
 	}
 }
 
-// TestStreamThreeLayerBreak exercises the full three-layer call stack from
-// README §"思考" L462-483: innermost Events handler returns outermost
-// users.Break(), the signal routes along streamScopes through the middle
-// Sessions scope, and the outermost Users scope recognizes it via IsBreak.
+// TestStreamThreeLayerBreak exercises break propagation across three nested
+// scopes: the innermost Leaves handler returns outers.Break(), the middle
+// Middles scope propagates the signal unchanged, and the outermost Outers
+// scope recognizes it via IsBreak and stops iteration.
 func TestStreamThreeLayerBreak(t *testing.T) {
 	type leaf struct {
 		ID    string `json:"id"`

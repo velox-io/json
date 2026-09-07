@@ -22,8 +22,7 @@ var knownComplianceAcceptDivergences = map[string]string{
 // accepts input that RFC 8259 says must be rejected.
 var knownComplianceRejectDivergences = map[string]string{
 	// The default native ndec path accepts raw control characters inside string
-	// bodies. WithStrictScan rejects them during the root structural scan. The
-	// vdec backend validates control characters in its own scanner.
+	// bodies. WithStrictScan rejects them during the root structural scan.
 	"n_string_unescaped_ctrl_char.json": "ndec str.h skips raw control char validation (simdjson parity)",
 	"n_string_unescaped_newline.json":   "ndec str.h skips raw control char validation (simdjson parity)",
 	"n_string_unescaped_tab.json":       "ndec str.h skips raw control char validation (simdjson parity)",

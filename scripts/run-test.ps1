@@ -19,10 +19,6 @@ function Invoke-GoTest {
 
 Invoke-GoTest . -count=1
 Invoke-GoTest -race . -count=1
-Invoke-GoTest -tags vdec . -count=1
-
-Invoke-GoTest ./vdec -count=1
-Invoke-GoTest -race ./vdec -count=1
 
 Invoke-GoTest ./vbind ./decode/bind/ -count=1
 Invoke-GoTest -race ./vbind ./decode/bind/ -count=1
@@ -45,7 +41,6 @@ Invoke-GoTest -race -tags vjgcstress ./tests -count=1
 
 Invoke-GoTest ./tests/compat/ -count=1
 Invoke-GoTest -race ./tests/compat/ -count=1
-Invoke-GoTest -tags vdec ./tests/compat/ -count=1
 
 # Invoke-GoTest ./ndec/... -count=1
 # Invoke-GoTest -race ./ndec/... -count=1

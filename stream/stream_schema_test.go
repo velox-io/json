@@ -1,5 +1,3 @@
-//go:build !vdec
-
 package stream_test
 
 import (

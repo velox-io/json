@@ -1,5 +1,3 @@
-//go:build !vdec && !vj_nondec
-
 package vjson_test
 
 import (
@@ -8,12 +6,11 @@ import (
 	vjson "github.com/velox-io/json"
 )
 
-// backendExpectedDivergences lists JSONTestSuite cases where the default
-// native ndec backend intentionally diverges from encoding/json.
+// backendExpectedDivergences lists JSONTestSuite cases where the native
+// ndec backend intentionally diverges from encoding/json.
 //
 // The default ndec string path accepts raw control characters in string bodies.
-// WithStrictScan rejects them during the root structural scan. The vdec backend
-// validates control characters in its own scanner, so this list is empty there.
+// WithStrictScan rejects them during the root structural scan.
 var backendGotPassingWantFailing = []string{
 	"n_string_unescaped_ctrl_char.json",
 	"n_string_unescaped_newline.json",

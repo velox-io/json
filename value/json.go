@@ -24,7 +24,8 @@ func (v Value) MarshalJSON() ([]byte, error) {
 //
 // Raw is the byte-backed counterpart of Value: it carries the raw JSON bytes
 // and accessors walk them via the Go scanner. Use Raw where a tape is not
-// available (stdlib interop, the vdec fallback, or literal construction).
+// available (stdlib interop, platforms without the native parser, or
+// literal construction).
 
 // MarshalJSON returns the raw bytes, or null when r holds none.
 func (r Raw) MarshalJSON() ([]byte, error) {

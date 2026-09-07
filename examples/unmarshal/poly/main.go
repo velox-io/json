@@ -1,6 +1,5 @@
 // Package poly demonstrates polymorphic JSON unmarshaling: a discriminator
 // field selects the concrete Go type for a sibling field at parse time.
-// See README.md for the full design.
 package main
 
 import (

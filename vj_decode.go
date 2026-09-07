@@ -1,8 +1,8 @@
-//go:build !vdec
-
 package vjson
 
 import (
+	"io"
+
 	"github.com/velox-io/json/decode/bind"
 	"github.com/velox-io/json/decode/option"
 	"github.com/velox-io/json/native/ndec"
@@ -67,4 +67,31 @@ func Pad(data []byte) []byte { return bind.Pad(data) }
 func UnmarshalPadded[T any](paddedData []byte, v T, opts ...Option) (err error) {
 	err = bind.UnmarshalPadded(paddedData, v, opts...)
 	return
+}
+
+// DecoderOption configures a [Decoder].
+type DecoderOption = bind.DecoderOption
+
+// Decoder reads and decodes JSON values from an input stream.
+type Decoder = bind.Decoder
+
+// NewDecoder creates a Decoder that reads from r.
+func NewDecoder(r io.Reader, opts ...DecoderOption) *Decoder {
+	return bind.NewDecoder(r, opts...)
+}
+
+// WithBufferSize sets the initial window size (default 128 KB); the window
+// still grows by doubling when a single value exceeds it.
+func WithBufferSize(size int) DecoderOption { return bind.WithBufferSize(size) }
+
+// WithSkipErrors enables skip-on-error recovery for NDJSON streams.
+func WithSkipErrors(fn func(err error) bool) DecoderOption { return bind.WithSkipErrors(fn) }
+
+// WithExpectedSize hints the expected value size; it raises the initial
+// window to fit one value without regrowth.
+func WithExpectedSize(size int) DecoderOption { return bind.WithExpectedSize(size) }
+
+// DecodeValue is a generic convenience wrapper around [Decoder.Decode].
+func DecodeValue[T any](d *Decoder, v *T) error {
+	return bind.DecodeValue(d, v)
 }

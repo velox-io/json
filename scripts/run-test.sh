@@ -9,10 +9,6 @@ cd "$REPO_ROOT"
 
 go test . -count=1
 go test -race . -count=1
-go test -tags vdec . -count=1
-
-go test ./vdec -count=1
-go test -race ./vdec -count=1
 
 go test ./vbind ./decode/bind/ -count=1
 go test -race ./vbind ./decode/bind/ -count=1
@@ -26,6 +22,11 @@ go test -race -tags vjgcstress ./venc -count=1
 go test -tags vjstress ./venc -count=1
 go test -race -tags vjstress ./venc -count=1
 
+go test ./stream -count=1
+go test -race ./stream -count=1
+go test -tags vj_noencvm ./stream -count=1
+go test -race -tags vj_noencvm ./stream -count=1
+
 go test ./tests/ -count=1
 go test -race ./tests/ -count=1
 go test -tags vj_noencvm ./tests -count=1
@@ -37,7 +38,6 @@ go test -race -tags vjstackstress ./tests/stackstress/ -count=1
 
 go test ./tests/compat/ -count=1
 go test -race ./tests/compat/ -count=1
-go test -tags vdec ./tests/compat/ -count=1
 
 # go test ./ndec/... -count=1
 # go test -race ./ndec/... -count=1

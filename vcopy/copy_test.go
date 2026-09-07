@@ -562,9 +562,9 @@ func BenchmarkGortMemmoveScalar(b *testing.B) {
 }
 
 // BenchmarkVcopyMapStringAny is the JSON-parsed-output caching scenario:
-// a map[string]any of the kind vdec produces when decoding into interface{}.
-// Every value goes through copyInterface, so this isolates the reflect-free
-// interface path.
+// a map[string]any of the kind the decoder produces when decoding into
+// interface{}. Every value goes through copyInterface, so this isolates
+// the reflect-free interface path.
 func BenchmarkVcopyMapStringAny(b *testing.B) {
 	src := map[string]any{
 		"id":     int64(12345),

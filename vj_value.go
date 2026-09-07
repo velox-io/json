@@ -32,8 +32,8 @@ type Value = value.Value
 // accessors walk them on demand via the Go scanner (a buger/jsonparser style
 // lazy parse). Raw exposes the same navigation API as Value.
 //
-// Use Raw for literal construction, encoding/json interop, or paths without a
-// tape (e.g. the vdec fallback). Raw implements json.Marshaler and
+// Use Raw for literal construction, encoding/json interop, or platforms
+// without the native parser. Raw implements json.Marshaler and
 // json.Unmarshaler.
 type Raw = value.Raw
 

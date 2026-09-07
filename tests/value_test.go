@@ -1,5 +1,3 @@
-//go:build !vdec
-
 package tests
 
 import (
