@@ -28,19 +28,21 @@ endif
 
 TEST_DEPS  = impl/ndec/core/*.h impl/ndec/*.h test/*.h
 TEST_CFLAGS = -g -O0 -march=native $(INCLUDES) -I$(CRITERION_INC)
-TEST_BINS  = $(BUILD)/sax_tests $(BUILD)/chunkfeed_tests $(BUILD)/dom_tests
+TEST_BINS  = $(BUILD)/sax_tests $(BUILD)/chunkfeed_tests $(BUILD)/dom_tests $(BUILD)/window_tests $(BUILD)/bind_tests
 
 FILTER  ?=
 VERBOSE ?= 2
 TEST_FLAGS = $(if $(VERBOSE),--verbose=$(VERBOSE),) $(addprefix --filter=,$(FILTER))
 
 
-.PHONY: test bench bench-build jsonfmt jsondata data debug clean gen gen-debug gen-pgo-instr-use stack-check stack-check-all gen-all-platforms
+.PHONY: test bench bench-build jsonfmt jsondata data debug bind-debug clean gen gen-debug gen-pgo-instr-use stack-check stack-check-all gen-all-platforms
 
 test: $(TEST_BINS)
 	$(BUILD)/sax_tests $(TEST_FLAGS)
 	$(BUILD)/chunkfeed_tests $(TEST_FLAGS)
 	$(BUILD)/dom_tests $(TEST_FLAGS)
+	$(BUILD)/window_tests $(TEST_FLAGS)
+	$(BUILD)/bind_tests $(TEST_FLAGS)
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -52,6 +54,29 @@ $(BUILD)/%_tests: test/%_tests.c $(TEST_DEPS) | $(BUILD)
 # sax_tests inflates corpus .gz fixtures via zlib.
 $(BUILD)/sax_tests: test/sax_tests.c test/gzload.h $(TEST_DEPS) | $(BUILD)
 	$(CC) $(TEST_CFLAGS) $(ZLIB_CFLAGS) -o $@ test/sax_tests.c $(CRITERION_LDFLAGS) $(ZLIB_LDFLAGS)
+
+# bind_tests drives the typed-binding state machine from C through the driver
+# in test/bind_driver.h, which mirrors the Go driver's yield loop. The extra
+# include paths match sources.sh: bind.h pulls the ABI header from abi/, the
+# lookup header from vlib, and util/log.h from the repo root. log.c backs the
+# -DVJ_DEBUG tracing and trap guards; lookup.c builds fixture lookup blobs.
+BIND_TEST_CFLAGS = -g -O0 -march=native -DVJ_DEBUG $(INCLUDES) -I abi -I ../vlib/impl -I .. -I$(CRITERION_INC)
+ifeq ($(BIND_ASAN),1)
+# Address-only: the production scanner has benign ctz(0) sites that UBSan flags.
+BIND_TEST_CFLAGS += -fsanitize=address -fno-omit-frame-pointer
+endif
+BIND_DRIVER_DEPS = test/bind_driver.h test/bind_fixture.h
+BIND_EXTRA_SRC = ../util/log.c ../vlib/impl/vlib/lookup.c
+
+$(BUILD)/bind_tests: test/bind_tests.c $(BIND_DRIVER_DEPS) $(TEST_DEPS) $(BIND_EXTRA_SRC) | $(BUILD)
+	$(CC) $(BIND_TEST_CFLAGS) -o $@ test/bind_tests.c $(BIND_EXTRA_SRC) $(CRITERION_LDFLAGS)
+
+# Standalone driver for single-step debugging: run one named fixture against
+# JSON on stdin and dump the yield trace, tape, and bound results.
+bind-debug: $(BUILD)/bind_debug
+
+$(BUILD)/bind_debug: test/bind_debug.c test/bind_scenarios.h $(BIND_DRIVER_DEPS) $(TEST_DEPS) $(BIND_EXTRA_SRC) | $(BUILD)
+	$(CC) $(BIND_TEST_CFLAGS) -o $@ test/bind_debug.c $(BIND_EXTRA_SRC)
 
 bench: bench-build
 	@test -n "$${BENCH_PAYLOAD:-}" || { echo "ERROR: BENCH_PAYLOAD is required" >&2; exit 1; }
@@ -103,10 +128,10 @@ MODES := default
 # generated separately with explicit TARGET_OS and TARGET_ARCH values.
 SUPPORTED_PLATFORMS := darwin/arm64 linux/amd64
 
-STACK_CHECK_ENTRIES := ndec_dom_parse_counted ndec_dom_build ndec_bind_parse ndec_fmt_parse
+STACK_CHECK_ENTRIES := ndec_dom_parse_counted ndec_dom_build ndec_bind_parse ndec_bind_parse_stream ndec_window_scan ndec_fmt_parse ndec_valid
 
 ifeq ($(TARGET_OS)-$(TARGET_ARCH),windows-amd64)
-STACK_CHECK_BUDGETS := ndec_dom_parse_counted=900 ndec_dom_build=900 ndec_bind_parse=1200 ndec_fmt_parse=900
+STACK_CHECK_BUDGETS := ndec_dom_parse_counted=900 ndec_dom_build=900 ndec_bind_parse=1200 ndec_bind_parse_stream=1200 ndec_window_scan=900 ndec_fmt_parse=900 ndec_valid=900
 else
 STACK_CHECK_BUDGETS := $(foreach e,$(STACK_CHECK_ENTRIES),$(e)=$(STACK_BUDGET))
 endif
