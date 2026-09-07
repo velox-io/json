@@ -14,10 +14,13 @@ import (
 //
 // Worth pinning because the cheap derivation and the obvious one are different
 // code: HasValueField rides the typ.KindValue arm, HasSplitTape rides the struct
-// branch's metadata stamping. A future kind that reaches value.Value by another
+// branch's metadata stamping, HasRawSpan rides the Unmarshaler hook arm and the
+// RawMessage arm. A future kind that reaches value.Value by another
 // route, or a second place that stamps ReserveUnknownFieldOff, would set one and
 // not the other. Getting HasSplitTape wrong undersizes the tape arena, which C
-// writes into with no bounds check (see unmarshalPadded).
+// writes into with no bounds check (see unmarshalPadded). Getting HasRawSpan
+// wrong leaks window-edge bytes: the streaming engine binds spans straight from
+// the window, so a crossing span without raw scratch reads a relocated buffer.
 func TestPIN_TypeTreeFlagsMatchIndependentScan(t *testing.T) {
 	type plain struct {
 		A int    `json:"a"`
@@ -48,6 +51,11 @@ func TestPIN_TypeTreeFlagsMatchIndependentScan(t *testing.T) {
 	type dualCase struct {
 		Name string `json:"name"`
 	}
+	// textOnly hosts a TextUnmarshaler alone: its decoded bytes land in
+	// str_arena, so the tree records no raw span.
+	type textOnly struct {
+		T feedTextTok `json:"t"`
+	}
 	vbind.DefineVariantCases[dual, struct {
 		_ dualCase `case:"c1"`
 	}]()
@@ -63,6 +71,8 @@ func TestPIN_TypeTreeFlagsMatchIndependentScan(t *testing.T) {
 		reflect.TypeFor[map[string]withValue](),
 		reflect.TypeFor[[]sink](),
 		reflect.TypeFor[any](),
+		reflect.TypeFor[feedRawDoc](),
+		reflect.TypeFor[textOnly](),
 	} {
 		tt, err := vbind.TypeTreeOf(rt)
 		if err != nil {
@@ -107,6 +117,13 @@ func TestPIN_TypeTreeFlagsMatchIndependentScan(t *testing.T) {
 				break
 			}
 		}
+		wantRawSpan := false
+		for i := range tt.Types {
+			if tt.Types[i].Kind == vbind.KindRawMessage || tt.Types[i].Kind == vbind.KindUnmarshaler {
+				wantRawSpan = true
+				break
+			}
+		}
 
 		if tt.HasValueField != wantValue {
 			t.Errorf("%v: HasValueField=%v scan=%v", rt, tt.HasValueField, wantValue)
@@ -120,7 +137,10 @@ func TestPIN_TypeTreeFlagsMatchIndependentScan(t *testing.T) {
 		if tt.TapeBindMayAppendStrings != wantAppendStrings {
 			t.Errorf("%v: TapeBindMayAppendStrings=%v scan=%v", rt, tt.TapeBindMayAppendStrings, wantAppendStrings)
 		}
-		t.Logf("%-28v value=%-5v poly=%-5v split=%v appendStrings=%v", rt, tt.HasValueField,
-			tt.HasPolyField, tt.HasSplitTape, tt.TapeBindMayAppendStrings)
+		if tt.HasRawSpan != wantRawSpan {
+			t.Errorf("%v: HasRawSpan=%v scan=%v", rt, tt.HasRawSpan, wantRawSpan)
+		}
+		t.Logf("%-28v value=%-5v poly=%-5v split=%-5v appendStrings=%-5v rawSpan=%v", rt, tt.HasValueField,
+			tt.HasPolyField, tt.HasSplitTape, tt.TapeBindMayAppendStrings, tt.HasRawSpan)
 	}
 }

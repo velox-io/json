@@ -28,6 +28,9 @@ const (
 // the exact needed size.
 const FmtFull = 1
 
+// ValidErrInvalid is the valid entry's sole failure code.
+const ValidErrInvalid = -1
+
 // DomTapeFull is the counted DOM entry's "tape arena too small" code: TapeNeed
 // then holds the exact word bound, the structural scan is already delivered,
 // and the build entry finishes the parse after the caller grows the arena.
@@ -88,6 +91,21 @@ type FmtContext struct {
 }
 
 func (c *FmtContext) Run() { FmtParseRun(unsafe.Pointer(c)) }
+
+// ValidContext mirrors NdecValidContext in entry/ndec.c. Src must carry
+// ScanPadding bytes of 0x20 past SrcLen; Structural must hold at least
+// SrcLen + 24 u32 slots.
+type ValidContext struct {
+	Src           *byte   // off 0
+	SrcLen        uintptr // off 8
+	Structural    *uint32 // off 16
+	StructuralCap uint32  // off 24
+	_             uint32  // off 28
+	Err           int32   // off 32; 0 = valid, ValidErrInvalid = invalid
+}
+
+// Run validates one complete document. Err holds the verdict.
+func (c *ValidContext) Run() { ValidRun(unsafe.Pointer(c)) }
 
 // These aliases let C consume the TypeTree and allocator tables without a
 // translated mirror. Their layouts are part of the binding ABI.
@@ -201,14 +219,18 @@ type BindAllocator struct {
 // Phase and input cursor before PendingAction. Go preserves both while it may
 // update allocator views and action-specific spill state, then re-enters. For
 // errors, Arg0 is the code, Arg1 is error-specific detail, and FirstErrorPos is
-// the only source byte position; math.MaxUint32 means unavailable. Target names
-// a variant host for variant errors and is nil for other errors.
+// the only source byte position, a full 64-bit document offset. In the
+// streaming engine an immediate error's position is window-local and the driver
+// rebases it, while a recorded skip error is converted to an absolute document
+// offset at its first input yield and flagged by FirstErrorPromoted. Target
+// names a variant host for variant errors and is nil for other errors.
 type BindYield struct {
-	PendingAction uint32         // off 0
-	Arg0          uint32         // off 4
-	Arg1          uint32         // off 8
-	FirstErrorPos uint32         // off 12
-	Target        unsafe.Pointer // off 16
+	PendingAction      uint32         // off 0
+	Arg0               uint32         // off 4
+	Arg1               uint32         // off 8
+	FirstErrorPromoted uint32         // off 12, streaming: FirstErrorPos is absolute
+	FirstErrorPos      uint64         // off 16
+	Target             unsafe.Pointer // off 24
 }
 
 // BindCoreHeader mirrors the scalar prefix of NdecBindCore. JSON entry starts at
@@ -246,20 +268,29 @@ type BindCoreHeader struct {
 
 // UnmarshalRecord defers Go callbacks and RawMessage publication. Target must
 // address scannable storage because the drain may publish heap pointers there.
-// Arg0 and Arg1 identify an immutable Src span for JSON and RawMessage, or a
-// StrArena span for TextUnmarshaler. Both backing stores remain valid until the
-// Go drain consumes the record.
+// Arg0 and Arg1 identify an immutable Src span for JSON, RawMessage, and
+// interface slots, or a StrArena span for TextUnmarshaler and the base64
+// []byte record; Backing selects the span's storage for the source-backed
+// kinds. Both backing stores remain valid until the Go drain consumes the
+// record.
 type UnmarshalRecord struct {
 	Target  *byte   // off 0
 	TypeIdx uint32  // off 8
 	Kind    uint8   // off 12
-	_pad    [3]byte // off 13
+	Backing uint8   // off 13, BindRecordBacking*
+	_pad    [2]byte // off 14
 	Arg0    uint32  // off 16
 	Arg1    uint32  // off 20
 }
 
 // UnmarshalRecordSize is shared with native deferred-drain cursor arithmetic.
 const UnmarshalRecordSize = 24
+
+// Record backing selectors for UnmarshalRecord.Backing.
+const (
+	BindRecordBackingSource  = 0 // offsets into Ctx.Src
+	BindRecordBackingScratch = 1 // offsets into the streaming engine's raw scratch
+)
 
 // BindFrame must match the native container frame byte for byte. A frame saves
 // the parent before descent. U is interpreted by Kind: map region pointer,
@@ -351,6 +382,11 @@ const (
 	// write. Go may therefore grow to TapeNeed without invalidating any live tape
 	// index, then re-enter at the scanned-root phase.
 	BindYieldTapeArena uint32 = 11
+	// BindYieldInput reports that the streaming engine consumed the stable
+	// prefix of the current window. Phase names the native continuation. Go
+	// relocates the scanner-reported tail, reads more bytes, runs the window
+	// scanner, and reinstalls Ctx.Src plus the cursor pair before re-entry.
+	BindYieldInput uint32 = 12
 )
 
 // Resume phases must match BIND_PHASE_* in bind_bridge.h. Go selects the Root
@@ -383,6 +419,40 @@ const (
 	// are committed but before its body binds, allowing Go to register nested
 	// stream handlers at that boundary.
 	BindPhaseArrayValueBegin uint32 = 32
+
+	// Streaming-input continuations. Each re-enters its native label with a
+	// fresh cursor installed by the driver's next window.
+	BindPhaseObjectContinue   uint32 = 36
+	BindPhaseArrayContinue    uint32 = 37
+	BindPhaseMapContinueInput uint32 = 38
+	BindPhaseObjectField      uint32 = 39
+	BindPhaseSkipResume       uint32 = 40
+
+	// BindPhaseObjectFieldFirst resumes after the window ended between an
+	// opening '{' and the first key: a '}' in the next window closes the empty
+	// struct, any other byte is fetched as the first key.
+	BindPhaseObjectFieldFirst uint32 = 41
+
+	// BindPhaseDeferredRawResume re-enters a deferred raw container scan that
+	// stopped at a window edge. The machine's raw fields carry the bracket
+	// depth and scratch position; the next window's offset zero continues the
+	// value's bytes.
+	BindPhaseDeferredRawResume uint32 = 42
+
+	// Value-submachine input-yield continuations. The machine's vd fields and
+	// the frame slots above the parent bind depth carry the walk, and
+	// Alloc.TapeUsed is the committed append cursor.
+	BindPhaseVdObjOpen uint32 = 44
+	BindPhaseVdArrOpen uint32 = 45
+	BindPhaseVdElem    uint32 = 46
+	BindPhaseVdObjKey  uint32 = 47
+	BindPhaseVdObjCont uint32 = 48
+	BindPhaseVdArrCont uint32 = 49
+
+	// BindPhaseRootSkipResume re-enters a root-level mismatch skip that stopped
+	// at a window edge. Machine skip_depth carries the bracket nesting, with
+	// one meaning the opening bracket was already consumed.
+	BindPhaseRootSkipResume uint32 = 50
 )
 
 // Error codes must match BIND_ERR_*. Yield.Arg1 carries error-specific detail;
@@ -421,8 +491,79 @@ const (
 
 // BindMachineCursorOffset locates NdecBindMachine.cursor immediately after the
 // native frame array. Go treats the pair as two opaque words owned by C and
-// writes both only when seeding BindPhaseTapeBindRoot.
+// writes both when seeding BindPhaseTapeBindRoot or installing a stream window.
 const BindMachineCursorOffset = unsafe.Sizeof(BindMachine{}) + unsafe.Sizeof(BindFrame{})*(BindMaxDepth+1)
+
+// Streaming-input machine fields, addressed by offset because they live past
+// the Go frame mirror. The driver owns window_base, window_final,
+// window_stable_end, and the raw scratch trio: window_base translates
+// window-local positions to document offsets, window_final marks the last
+// window, window_stable_end bounds spans recorded from the window, and the
+// raw fields materialize deferred raw values that cross a window edge. The
+// machine backing is noscan, so the driver's raw slice is the lifetime root
+// for RawArena.
+const (
+	BindMachineWindowBaseOffset      = BindMachineCursorOffset + 16
+	BindMachineSkipDepthOffset       = BindMachineCursorOffset + 24
+	BindMachineWindowFinalOffset     = BindMachineCursorOffset + 28
+	BindMachineWindowStableEndOffset = BindMachineCursorOffset + 32
+	BindMachineRawArenaOffset        = BindMachineCursorOffset + 48
+	BindMachineRawCapOffset          = BindMachineCursorOffset + 56
+	BindMachineRawUsedOffset         = BindMachineCursorOffset + 60
+
+	// Retired string-arena generations of the current streaming parse. Each
+	// entry is {base *byte; start, end uint32}; the count caps at 16 because
+	// geometric growth exhausts it only past the 32-bit arena offset limit.
+	// The allocator's retained set keeps the backings alive.
+	BindMachineStrProvCountOffset = BindMachineCursorOffset + 1036
+	BindMachineStrProvOffset      = BindMachineCursorOffset + 1040
+
+	// BindStrProvMax caps the retired-generation history; geometric growth
+	// exhausts it only past the 32-bit arena offset limit.
+	BindStrProvMax = 16
+)
+
+// Window scan verdicts, mirroring NdecWindowStatus in extract.h. Status is a
+// scan-level fact: Incomplete marks a usable window, Invalid a scan error more
+// bytes cannot repair. Root completion is the binder's knowledge; the scanner
+// never claims it.
+const (
+	WindowIncomplete uint32 = 0
+	WindowInvalid    uint32 = 2
+)
+
+// Window scan error kinds, mirroring NDEC_WINDOW_ERR_*.
+const (
+	WindowErrNone           uint32 = 0
+	WindowErrCapacity       uint32 = 1
+	WindowErrControl        uint32 = 2
+	WindowErrUTF8           uint32 = 3
+	WindowErrUnclosedString uint32 = 4
+)
+
+// BindWindowScan mirrors NdecWindowScan: the stable-prefix verdict of one
+// window scan. TailStart equals StableEnd by construction; with no atomic
+// tail both hold the window length.
+type BindWindowScan struct {
+	Status    uint32 // off 0
+	Err       uint32 // off 4
+	NIdx      uint32 // off 8
+	StableEnd uint32 // off 12
+	TailStart uint32 // off 16
+	ErrorPos  uint32 // off 20
+}
+
+// BindWindowScanCtx mirrors NdecWindowScanCtx, the single-pointer entry
+// context for the streaming window scanner.
+type BindWindowScanCtx struct {
+	Src        *byte          // off 0
+	Len        uintptr        // off 8
+	OutIndexes *uint32        // off 16
+	Capacity   uint32         // off 24
+	IsFinal    uint32         // off 28
+	Strict     uint32         // off 32
+	Result     BindWindowScan // off 36
+}
 
 // Option bits must match BIND_OPT_* in bind_bridge.h.
 const (
@@ -463,13 +604,17 @@ var (
 	_ = [1]struct{}{}[unsafe.Sizeof(BindSlotClass{})-48]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindContext{})-64]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindAllocator{})-120]
-	_ = [1]struct{}{}[unsafe.Sizeof(BindYield{})-24]
-	_ = [1]struct{}{}[unsafe.Sizeof(BindMachine{})-288]
+	_ = [1]struct{}{}[unsafe.Sizeof(BindYield{})-32]
+	_ = [1]struct{}{}[unsafe.Sizeof(BindMachine{})-296]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindCoreHeader{})-80]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindFrame{})-32]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindMapRegionHeader{})-32]
 	_ = [1]struct{}{}[unsafe.Sizeof(UnmarshalRecord{})-24]
+	_ = [1]struct{}{}[unsafe.Offsetof(UnmarshalRecord{}.Backing)-13]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindPolyTable{})-40]
+	_ = [1]struct{}{}[unsafe.Sizeof(BindWindowScan{})-24]
+	_ = [1]struct{}{}[unsafe.Sizeof(BindWindowScanCtx{})-64]
+	_ = [1]struct{}{}[unsafe.Offsetof(BindWindowScanCtx{}.Result)-36]
 	// Size assertions cannot detect TapeNeed moving within padding, so both
 	// languages assert this offset explicitly.
 	_ = [1]struct{}{}[unsafe.Offsetof(BindAllocator{}.TapeNeed)-44]
@@ -479,4 +624,9 @@ var (
 	_ = [1]struct{}{}[unsafe.Offsetof(DOMContext{}.NStructural)-100]
 	_ = [1]struct{}{}[unsafe.Offsetof(DOMContext{}.TapeNeed)-104]
 	_ = [1]struct{}{}[unsafe.Offsetof(DOMContext{}.ScanStrict)-108]
+
+	// Valid mirror. NdecValidContext in entry/ndec.c asserts the same offsets.
+	_ = [1]struct{}{}[unsafe.Sizeof(ValidContext{})-40]
+	_ = [1]struct{}{}[unsafe.Offsetof(ValidContext{}.StructuralCap)-24]
+	_ = [1]struct{}{}[unsafe.Offsetof(ValidContext{}.Err)-32]
 )

@@ -309,8 +309,6 @@ func TestUnmarshal_NonEmptyInterface(t *testing.T) {
 // encoding/json unmarshals into that type.
 
 func TestUnmarshal_NonEmptyInterfacePrePopulated(t *testing.T) {
-	t.Skip("velox decoder does not yet unmarshal into pre-populated non-empty interface fields")
-
 	type S struct {
 		Label string `json:"label"`
 		Pet   Animal `json:"pet"`
@@ -339,8 +337,6 @@ func TestUnmarshal_NonEmptyInterfacePrePopulated(t *testing.T) {
 // non-empty interfaces.
 
 func TestUnmarshal_MultipleInterfaceTypes(t *testing.T) {
-	t.Skip("velox decoder does not yet unmarshal into pre-populated non-empty interface fields")
-
 	type S struct {
 		Label string `json:"label"`
 		Pet   Animal `json:"pet"`

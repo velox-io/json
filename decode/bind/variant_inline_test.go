@@ -386,7 +386,7 @@ func TestInlineVariant_OnlyDisc(t *testing.T) {
 	}
 }
 
-// --- internal + sibling on same host (解禁) ---
+// --- internal + sibling on same host ---
 
 func TestInlineVariant_WithSibling(t *testing.T) {
 	// inline variant (case fields unfold into host) + sibling variant

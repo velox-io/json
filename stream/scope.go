@@ -146,8 +146,8 @@ type Scope[T any] interface {
 	IsBreak(err error) bool
 }
 
-// scope is the concrete Scope implementation. It is constructed by Stream.Activate
-// when the decode/bind driver activates a stream field.
+// scope is the concrete Scope implementation. It is constructed by
+// Stream.ActivateRead when the decode/bind driver activates a stream field.
 type scope[T any] struct {
 	driver        ScopeDriver
 	streamAddr    unsafe.Pointer
@@ -182,9 +182,9 @@ type scope[T any] struct {
 
 	// err captures the first parse/bind error the driver reported while
 	// advancing batches. Iter cannot return it (an iter.Seq yields values, not
-	// errors), so it is stashed here and Activate returns it after the handler
-	// finishes. Without this the handler would see iteration end early and a
-	// real parse error would be silently dropped.
+	// errors), so it is stashed here and ActivateRead returns it after the
+	// handler finishes. Without this the handler would see iteration end early
+	// and a real parse error would be silently dropped.
 	err error
 }
 
@@ -219,7 +219,7 @@ func (s *scope[T]) Iter() iter.Seq[*Item[T]] {
 			// leaf streams this drives native to fill the next batch.
 			data, length, done, err := s.nextBatch()
 			if err != nil {
-				// iter.Seq has no error channel, so stash it: Activate
+				// iter.Seq has no error channel, so stash it: ActivateRead
 				// returns it once the handler unwinds.
 				s.err = err
 				return
@@ -298,4 +298,44 @@ func (s *scope[T]) Break() error {
 func (s *scope[T]) IsBreak(err error) bool {
 	bs, ok := err.(*BreakSignal)
 	return ok && bs.target == s
+}
+
+// ActivateRead invokes the registered handler with a Scope backed by driver
+// and seeded with the initial batch view (batchData[0:batchLen]). Called by
+// the decode/bind driver when the native binder yields on a stream slice:
+// batchData/batchLen describe the elements already claimed/bound into the
+// current slice block (per-element unbound for non-leaf streams, cap-full
+// bound for leaf streams, empty for an array close on an empty stream).
+//
+// reason is the stop that produced this seeding batch. Anything other than a
+// per-element or cap-full stop means the batch handed in is the last one, so
+// iteration must end after it rather than drive native past the array.
+//
+// ActivateRead constructs the Scope (reading ElemHasStream from the driver to
+// select the per-element vs leaf advance strategy) and runs the handler to
+// completion. It returns the handler's error, which may be a BreakSignal the
+// driver propagates across scopes. A parse error hit while advancing batches
+// takes precedence: Iter cannot report it, so the Scope stashes it and it
+// surfaces here.
+//
+// ActivateRead is not part of the user-facing API.
+func (s *Stream[T]) ActivateRead(driver ScopeDriver, batchData unsafe.Pointer, batchLen int, reason StopReason) error {
+	if s.onReadHandle == nil {
+		return nil
+	}
+	var zero T
+	sc := &scope[T]{
+		driver:        driver,
+		streamAddr:    unsafe.Pointer(s),
+		elemSize:      unsafe.Sizeof(zero),
+		elemHasStream: driver.ElemHasStream(),
+		batchData:     batchData,
+		batchLen:      batchLen,
+		atEnd:         reason != StopElement && reason != StopBatch,
+	}
+	err := s.onReadHandle(sc)
+	if sc.err != nil {
+		return sc.err
+	}
+	return err
 }

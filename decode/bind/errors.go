@@ -39,9 +39,11 @@ func (e *TapeBindUnsupportedError) Error() string {
 // source immutability and reuse restrictions into the output.
 var ErrZeroCopyValue = errors.New("vjson: cannot bind a zero-copy Value; re-parse without option.WithZeroCopy")
 
-// mkBindErr translates the native yield payload. EOF errors wrap
-// io.ErrUnexpectedEOF for errors.Is.
-func mkBindErr(p *Parser, m *ndec.BindMachine, src []byte) error {
+// mkBindErr translates the native yield payload. srcBase is the document
+// offset of src[0], zero for the contiguous engine's whole-document view and
+// the window base for the streaming engine. EOF errors wrap io.ErrUnexpectedEOF
+// for errors.Is.
+func mkBindErr(p *Parser, m *ndec.BindMachine, src []byte, srcBase uint64) error {
 	kind := m.Yield.Arg0
 	pos, hasPos := bindErrorPos(m)
 	switch kind {
@@ -63,7 +65,7 @@ func mkBindErr(p *Parser, m *ndec.BindMachine, src []byte) error {
 		}
 		value := "json"
 		if hasPos {
-			value = jsonValueName(src, pos)
+			value = jsonValueName(src, pos, srcBase)
 		}
 		return &UnmarshalTypeError{
 			Value:  value,
@@ -91,7 +93,7 @@ func mkBindErr(p *Parser, m *ndec.BindMachine, src []byte) error {
 
 // mkVariantErr uses the variant index and host pointer stashed in the yield to
 // report the discriminator value.
-func mkVariantErr(p *Parser, m *ndec.BindMachine, kind, pos uint32) error {
+func mkVariantErr(p *Parser, m *ndec.BindMachine, kind uint32, pos uint64) error {
 	variantIdx := uint16(m.Yield.Arg1)
 	host := bindErrorHost(p, m)
 	msg := "unknown discriminator value"
@@ -109,21 +111,21 @@ func mkVariantErr(p *Parser, m *ndec.BindMachine, kind, pos uint32) error {
 			}
 		}
 	}
-	return &VariantError{Host: host, VariantIdx: variantIdx, Message: msg, Pos: pos}
+	return &VariantError{Host: host, VariantIdx: variantIdx, Message: msg, Pos: int64(pos)}
 }
 
 // mkKindofErr builds the user-facing error for kindof resolution failures.
 // Arg1 carries the stable kind ordinal independently of source availability.
-func mkKindofErr(p *Parser, m *ndec.BindMachine, pos uint32) error {
+func mkKindofErr(p *Parser, m *ndec.BindMachine, pos uint64) error {
 	msg := "unregistered JSON kind"
 	if kind := kindofName(m.Yield.Arg1); kind != "" {
 		msg += " " + kind
 	}
-	return &KindofError{Host: bindErrorHost(p, m), Message: msg, Pos: pos}
+	return &KindofError{Host: bindErrorHost(p, m), Message: msg, Pos: int64(pos)}
 }
 
-func bindErrorPos(m *ndec.BindMachine) (uint32, bool) {
-	if m.Yield.FirstErrorPos == ^uint32(0) {
+func bindErrorPos(m *ndec.BindMachine) (uint64, bool) {
+	if m.Yield.FirstErrorPos == ^uint64(0) {
 		return 0, false
 	}
 	return m.Yield.FirstErrorPos, true
@@ -177,7 +179,7 @@ type VariantError struct {
 	Host       string // host Go type name (empty if not derivable)
 	VariantIdx uint16 // variant's index into TypeTree.Polys
 	Message    string
-	Pos        uint32 // source byte offset (0 = no position)
+	Pos        int64 // source byte offset (0 = no position)
 }
 
 func (e *VariantError) Error() string {
@@ -193,7 +195,7 @@ func (e *VariantError) Error() string {
 type KindofError struct {
 	Host    string // host Go type name (empty if not derivable)
 	Message string
-	Pos     uint32 // source byte offset (0 = no position)
+	Pos     int64 // source byte offset (0 = no position)
 }
 
 func (e *KindofError) Error() string {
@@ -203,12 +205,18 @@ func (e *KindofError) Error() string {
 	return "bind: kindof " + e.Message
 }
 
-// jsonValueName maps the JSON byte at src[pos] to the value category string
-func jsonValueName(src []byte, pos uint32) string {
-	if int(pos) >= len(src) {
+// jsonValueName maps the JSON byte at the absolute document offset pos to the
+// value category string. The position may fall outside src, for example a
+// recorded skip error whose window the driver already retired.
+func jsonValueName(src []byte, pos, srcBase uint64) string {
+	if pos < srcBase {
 		return "json"
 	}
-	switch src[pos] {
+	local := int(pos - srcBase)
+	if local >= len(src) {
+		return "json"
+	}
+	switch src[local] {
 	case 'n':
 		return "null"
 	case 't', 'f':

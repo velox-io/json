@@ -46,6 +46,8 @@ func Build(root *typ.UniType) (*TypeTree, error) {
 
 	b.reapplyFieldFlags()
 
+	b.propagateArenaUse()
+
 	tapeBindUnsupported := b.computeTapeBindUnsupported(rootIdx)
 	// Reads child and BindField.Type as in-tree indexes, so it must run before
 	// resolveChildPointers rewrites both into ABI pointers.
@@ -82,7 +84,12 @@ func Build(root *typ.UniType) (*TypeTree, error) {
 		HasPolyField:             len(b.polys) > 0,
 		HasSplitTape:             b.hasSplitTape,
 		TapeBindMayAppendStrings: tapeBindMayAppendStrings,
+		HasRawSpan:               b.hasRawSpan,
 		SplitTapeSites:           splitTapeSites,
+		HasStreamField:           b.hasStreamField,
+		TypeWritesStr:            b.writesStr,
+		TypeWritesTape:           b.writesTape,
+		TypePublishesValue:       b.publishesValue,
 	}, nil
 }
 
@@ -107,14 +114,19 @@ type builder struct {
 	groupCount          uint32
 	unmarshalHooks      []*typ.InterfaceHooks // parallel to types
 	containsUnmarshaler []bool                // transitive and parallel to types
+	writesStr           []bool                // transitive, parallel to types: subtree can append str_arena bytes
+	writesTape          []bool                // transitive, parallel to types: subtree can append tape words
+	publishesValue      []bool                // transitive, parallel to types: subtree can publish a Value doc
 	polys               []BindPolyTable
 	polyCases           []PolyCaseData // scannable owners of poly case arrays
 	ptrHops             [][]BindPtrHop // scannable owners of per-struct hop arrays
 
 	// Set during collect, published as the TypeTree fields of the same names.
 	// hasPolyField is not here: it follows from the polys table.
-	hasValueField bool
-	hasSplitTape  bool
+	hasValueField  bool
+	hasSplitTape   bool
+	hasStreamField bool
+	hasRawSpan     bool
 }
 
 var (
@@ -151,6 +163,9 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 	b.reflectTypes = append(b.reflectTypes, ut.Type)
 	b.unmarshalHooks = append(b.unmarshalHooks, nil)
 	b.containsUnmarshaler = append(b.containsUnmarshaler, false)
+	b.writesStr = append(b.writesStr, false)
+	b.writesTape = append(b.writesTape, false)
+	b.publishesValue = append(b.publishesValue, false)
 
 	var info BindType
 	var meta TypeMeta
@@ -165,6 +180,9 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 		info.flags = bindFlagCold
 		b.unmarshalHooks[idx] = ut.Hooks
 		b.containsUnmarshaler[idx] = true
+		// Reached only for types in the tree, so this settles
+		// TypeTree.HasRawSpan without a second pass over Types.
+		b.hasRawSpan = true
 		b.types[idx] = info
 		b.typeMeta[idx] = meta
 		return idx, nil
@@ -174,6 +192,7 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 		info.flags = bindFlagCold
 		b.unmarshalHooks[idx] = ut.Hooks
 		b.containsUnmarshaler[idx] = true
+		b.writesStr[idx] = true // decoded body bytes land in str_arena
 		b.types[idx] = info
 		b.typeMeta[idx] = meta
 		return idx, nil
@@ -186,8 +205,12 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 		typ.KindFloat32, typ.KindFloat64,
 		typ.KindString,
 		typ.KindNumber:
+		if ut.Kind == typ.KindString || ut.Kind == typ.KindNumber {
+			b.writesStr[idx] = true
+		}
 	case typ.KindRawMessage:
 		b.containsUnmarshaler[idx] = true
+		b.hasRawSpan = true
 	case typ.KindValue:
 		// Value contains heap pointers, so an enclosing map value must use scannable
 		// intermediate storage rather than the noscan staging buffer.
@@ -195,6 +218,9 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 		// Reached only for types in the tree, so this settles TypeTree.HasValueField
 		// without a second pass over Types.
 		b.hasValueField = true
+		b.writesStr[idx] = true
+		b.writesTape[idx] = true
+		b.publishesValue[idx] = true
 		// value.Value is reflect.Struct but collected as KindValue, so the struct
 		// payload is never initialized by the KindStruct branch. Stamp the
 		// inline-variant sentinel here: without it, buildOneVariantTable reads a
@@ -351,6 +377,7 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 		if hasPolyField || meta.StructMeta().InlineVariantIdx != 0xFFFF ||
 			meta.StructMeta().ReserveUnknownFieldOff != 0xFFFFFFFF {
 			info.flags |= bindFlagMayPhase2
+			b.writesTape[idx] = true
 		}
 		// The pair, not either member alone, is what makes one merged tape serve two
 		// consumers with different subsets, and so what sizes the tape arena. Both
@@ -365,6 +392,9 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 		info.child = uintptr(fieldsBase)
 
 		b.structSites = append(b.structSites, structSite{idx: idx, si: si})
+		// Escaped field keys intern into str_arena, so a struct element can
+		// append string bytes even when no field type does.
+		b.writesStr[idx] = true
 		// A transitive heap writing field requires scannable staging when this struct
 		// appears as a map value.
 		for i := range fieldTypeIdxs {
@@ -394,6 +424,9 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 		// Stream[T] backings take a further distinct SlotClass from regular []T so
 		// batch sizing and EWMA do not cross-contaminate across pooled parses.
 		isStream := typ.IsStreamType(ut.Type)
+		if isStream {
+			b.hasStreamField = true
+		}
 		var elemHasStream bool
 		if isStream {
 			// T must be a value type: the slice backing holds T by value and
@@ -422,6 +455,12 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 		}
 		ac := b.registerSliceSlotClass(li.ElemType, isStream, elemHasStream)
 		sm.AllocClass = int32(ac)
+		// A byte slice accepts a JSON string, which becomes a deferred record
+		// decoding base64 in Go, so it behaves as a deferred value for staging
+		// and containment flags.
+		if li.ElemType.Kind == typ.KindUint8 {
+			b.containsUnmarshaler[idx] = true
+		}
 		// RecBatch classification must wait for the complete backing dependency graph.
 		if b.containsUnmarshaler[childIdx] {
 			b.containsUnmarshaler[idx] = true
@@ -472,6 +511,8 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 		if b.containsUnmarshaler[valIdx] {
 			b.containsUnmarshaler[idx] = true
 		}
+		// Map staging owns its key bytes in str_arena.
+		b.writesStr[idx] = true
 		stride := uint32(16 + ((valSize + 7) &^ 7))
 		kvStride := stride
 		valIsDeferred := b.mapValueNeedsIndirection(valIdx)
@@ -494,10 +535,13 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 			valSlotClass: valSlotClass,
 			mapRType:     ut.Ptr,
 		})
-	case typ.KindAny, typ.KindIface:
+	case typ.KindAny:
 		// The seen entry must already exist before collecting []any and map[string]any,
 		// which recurse back to this universal any type.
 		b.anyTypeIdx = idx
+		// Boxing writes string and number text bytes into str_arena. Set before
+		// the recursive collects so []any and map[string]any propagate it.
+		b.writesStr[idx] = true
 		sliceAnyUt := typ.UniTypeOf(reflect.TypeFor[[]any]())
 		mapAnyUt := typ.UniTypeOf(reflect.TypeFor[map[string]any]())
 		sliceAnyIdx, err := b.collect(sliceAnyUt)
@@ -531,6 +575,14 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 		})
 		// AnyMetas may still reallocate, so child remains an index until freeze.
 		info.child = uintptr(len(b.anyMetas) - 1)
+	case typ.KindIface:
+		// A non-empty interface slot dispatches through a deferred record: Go
+		// reads the dynamic value and applies the encoding/json strategy, which
+		// dispatches an Unmarshaler held as a pointer, decodes into a non-hook
+		// pointee, or reports a type error. The slot itself stays untouched by
+		// native code, so no BindAnyMeta hangs off the type.
+		b.containsUnmarshaler[idx] = true
+		b.hasRawSpan = true
 	default:
 		return 0, fmt.Errorf("vbind: unsupported kind %d", ut.Kind)
 	}
@@ -556,6 +608,43 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 	return idx, nil
 }
 
+// propagateArenaUse closes the transitive arena-use bits over aggregate edges.
+// Recursive types observe their own in-progress entry during collect, so
+// propagation runs as a post-collect fixpoint while child and BindField.Type
+// are still indexes.
+func (b *builder) propagateArenaUse() {
+	for changed := true; changed; {
+		changed = false
+		for i := range b.types {
+			t := &b.types[i]
+			var children []uint32
+			switch t.Kind {
+			case KindPointer, KindSlice, KindStream, KindArray, KindMap:
+				children = []uint32{uint32(t.child)}
+			case KindStruct:
+				base := uint32(t.child)
+				for f := uint32(0); f < t.Struct().FieldCount; f++ {
+					children = append(children, uint32(b.fields[base+f].Type))
+				}
+			}
+			for _, c := range children {
+				if b.writesStr[c] && !b.writesStr[i] {
+					b.writesStr[i] = true
+					changed = true
+				}
+				if b.writesTape[c] && !b.writesTape[i] {
+					b.writesTape[i] = true
+					changed = true
+				}
+				if b.publishesValue[c] && !b.publishesValue[i] {
+					b.publishesValue[i] = true
+					changed = true
+				}
+			}
+		}
+	}
+}
+
 // mapValueNeedsIndirection defines both sides of the map staging representation.
 // Pointer values already reference scannable pointee storage. Other values that
 // can publish heap pointers use a scannable SlotClass, and the noscan KV entry
@@ -565,7 +654,7 @@ func (b *builder) mapValueNeedsIndirection(valIdx uint32) bool {
 	switch b.types[valIdx].Kind {
 	case KindPointer:
 		return false
-	case KindUnmarshaler, KindTextUnmarshaler, KindRawMessage, KindValue:
+	case KindUnmarshaler, KindTextUnmarshaler, KindRawMessage, KindValue, KindIface:
 		return true
 	}
 	return b.containsUnmarshaler[valIdx]
@@ -647,7 +736,7 @@ func (b *builder) resolveChildPointers() error {
 				return fmt.Errorf("vbind: pass2: type %d first_field %d out of range (%d)", i, firstIdx, fieldsLen)
 			}
 			bt.setChild(unsafe.Add(fieldsBase, firstIdx*fieldSize))
-		case KindAny, KindIface:
+		case KindAny:
 			amIdx := uintptr(bt.child)
 			if amIdx >= uintptr(len(b.anyMetas)) {
 				return fmt.Errorf("vbind: pass2: type %d anymeta idx %d out of range (%d)", i, amIdx, len(b.anyMetas))
@@ -898,7 +987,7 @@ func (b *builder) slotEdgesFrom(ut *typ.UniType, out []uint32, visited []int, to
 		if s, ok := b.bySlot[ut]; ok {
 			out = append(out, s)
 		}
-	case typ.KindAny, typ.KindIface:
+	case typ.KindAny:
 		// eface.data can retain either container backing, and both recurse to any.
 		if len(b.anyMetas) > 0 {
 			am := &b.anyMetas[0]
@@ -1092,7 +1181,7 @@ func (b *builder) buildTypeAdjacency() [][]uint32 {
 			for k := range n {
 				adj[i] = append(adj[i], uint32(b.fields[first+k].Type))
 			}
-		case KindAny, KindIface:
+		case KindAny:
 			am := &b.anyMetas[bt.child]
 			adj[i] = append(adj[i], uint32(am.SliceAnyTypeIdx), uint32(am.MapAnyTypeIdx))
 		}
@@ -1119,6 +1208,8 @@ func tapeBindNestedUnsupportedReason(k Kind) string {
 	switch k {
 	case KindUnmarshaler, KindTextUnmarshaler, KindRawMessage:
 		return "deferred value field unsupported by tape-bind"
+	case KindIface:
+		return "non-empty interface field unsupported by tape-bind (interface dispatch needs the JSON bind path)"
 	case KindNumber:
 		return "json.Number field unsupported by tape-bind (not every numeric tag retains source text)"
 	case KindStream:

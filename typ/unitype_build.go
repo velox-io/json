@@ -178,6 +178,15 @@ var textMarshalerType = reflect.TypeFor[encoding.TextMarshaler]()
 var textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
 
 func detectInterfaceHooks(t reflect.Type) *InterfaceHooks {
+	// An interface type whose method set matches a hook interface would pass
+	// the Implements checks below, but it cannot be instantiated, so the
+	// sentinel assertions would panic on a nil interface value. Hook dispatch
+	// for interface slots is a run-time decision over the dynamic value, not
+	// a compile-time binding.
+	if t.Kind() == reflect.Interface {
+		return nil
+	}
+
 	ptrType := reflect.PointerTo(t)
 
 	var hooks InterfaceHooks

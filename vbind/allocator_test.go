@@ -497,9 +497,9 @@ func TestServeStrArenaFirstAllocSizesToAmortize(t *testing.T) {
 	a.EnsureStrArena(srcLen)
 	buf := a.StrArena
 
-	wantCap := strArenaAmortize*srcLen + strArenaTail
+	wantCap := strArenaAmortize*srcLen + StrArenaTail
 	if cap(buf) != wantCap {
-		t.Errorf("first alloc cap = %d, want %d (strArenaAmortize*srcLen+strArenaTail)", cap(buf), wantCap)
+		t.Errorf("first alloc cap = %d, want %d (strArenaAmortize*srcLen+StrArenaTail)", cap(buf), wantCap)
 	}
 }
 
@@ -520,25 +520,25 @@ func TestServeStrArenaReusesAcrossParses(t *testing.T) {
 		t.Errorf("parse 2 view start = %p, want %p (bump cursor advanced by srcLen)",
 			unsafe.SliceData(buf2), unsafe.Add(base, srcLen))
 	}
-	if uintptr(cap(buf2)) != strArenaAmortize*srcLen+strArenaTail-srcLen {
+	if uintptr(cap(buf2)) != strArenaAmortize*srcLen+StrArenaTail-srcLen {
 		t.Errorf("parse 2 cap = %d, want %d (residual after parse 1)",
-			cap(buf2), strArenaAmortize*srcLen+strArenaTail-srcLen)
+			cap(buf2), strArenaAmortize*srcLen+StrArenaTail-srcLen)
 	}
 
 	for i := 2; i < strArenaAmortize; i++ {
 		a.CommitStrArena(srcLen)
 		a.EnsureStrArena(srcLen)
 		bufN := a.StrArena
-		if uintptr(cap(bufN)) < srcLen+strArenaTail {
-			t.Errorf("parse %d cap = %d, want >= %d (must fit one more parse)", i, cap(bufN), srcLen+strArenaTail)
+		if uintptr(cap(bufN)) < srcLen+StrArenaTail {
+			t.Errorf("parse %d cap = %d, want >= %d (must fit one more parse)", i, cap(bufN), srcLen+StrArenaTail)
 		}
 	}
 	a.CommitStrArena(srcLen)
 	a.EnsureStrArena(srcLen)
 	bufNext := a.StrArena
-	if uintptr(cap(bufNext)) != strArenaAmortize*srcLen+strArenaTail {
+	if uintptr(cap(bufNext)) != strArenaAmortize*srcLen+StrArenaTail {
 		t.Errorf("after exhaustion, grow should reset cap to %d, got %d",
-			strArenaAmortize*srcLen+strArenaTail, cap(bufNext))
+			strArenaAmortize*srcLen+StrArenaTail, cap(bufNext))
 	}
 }
 
@@ -572,9 +572,9 @@ func TestServeStrArenaGrowsWhenSrcLenExceedsBacking(t *testing.T) {
 
 	a.EnsureStrArena(5000)
 	buf := a.StrArena
-	if uintptr(cap(buf)) != strArenaAmortize*5000+strArenaTail {
+	if uintptr(cap(buf)) != strArenaAmortize*5000+StrArenaTail {
 		t.Errorf("after grow for srcLen=5000, cap = %d, want %d",
-			cap(buf), strArenaAmortize*5000+strArenaTail)
+			cap(buf), strArenaAmortize*5000+StrArenaTail)
 	}
 }
 

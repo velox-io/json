@@ -223,7 +223,7 @@ func TestKindof_UnregisteredKindErrorCoordinates(t *testing.T) {
 		name string
 		src  string
 		kind string
-		pos  uint32
+		pos  int64
 	}{
 		{"object", `{"data":{"name":"Alice"}}`, "object", 8},
 		{"array", `{"pad":0,"data":[1,2,3]}`, "array", 16},
@@ -336,7 +336,7 @@ func TestKindof_UnregisteredKindBuildsNoTape(t *testing.T) {
 	// rather than the parser giving up on the field.
 	cases := []struct {
 		src     string
-		wantPos uint32 // offset of the value's first byte
+		wantPos int64 // offset of the value's first byte
 	}{
 		{`{"data":{"name":"Alice"}}`, 8},
 		{`{"data":[1,2,3]}`, 8},

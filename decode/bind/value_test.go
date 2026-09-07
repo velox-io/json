@@ -3,8 +3,10 @@ package bind
 import (
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/velox-io/json/decode/dom"
+	"github.com/velox-io/json/native/ndec"
 	"github.com/velox-io/json/value"
 )
 
@@ -56,6 +58,55 @@ func firstDiff(a, b string) int {
 }
 
 // --- root: all JSON kinds ---
+
+func TestValuePrimitiveErrorKeepsCursorAtTokenStart(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		pos  uint32
+	}{
+		{"root_atom", `tru`, 0},
+		{"root_number", `1e`, 0},
+		{"root_string", `"\q"`, 0},
+		{"array_atom", `[tru]`, 1},
+		{"array_number", `[1e]`, 1},
+		{"object_string", `{"k":"\q"}`, 5},
+	}
+
+	p, err := NewParser[value.Value]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var dst value.Value
+			err := p.Unmarshal([]byte(tc.in), &dst)
+			if err == nil {
+				t.Fatalf("Unmarshal(%q) succeeded", tc.in)
+			}
+			se, ok := err.(*SyntaxError)
+			if !ok {
+				t.Fatalf("Unmarshal(%q) error = %T, want *SyntaxError", tc.in, err)
+			}
+			if se.Offset != int64(tc.pos) {
+				t.Errorf("Unmarshal(%q) error offset = %d, want %d", tc.in, se.Offset, tc.pos)
+			}
+
+			m := machineOf(p)
+			cursor := *(**uint32)(unsafe.Add(unsafe.Pointer(m), ndec.BindMachineCursorOffset))
+			if got := *cursor; got != tc.pos {
+				t.Errorf("Unmarshal(%q) cursor offset = %d, want %d", tc.in, got, tc.pos)
+			}
+
+			if err := p.Unmarshal([]byte(`true`), &dst); err != nil {
+				t.Fatalf("parser reuse after %q: %v", tc.in, err)
+			}
+			if got, ok := dst.Bool(); !ok || !got {
+				t.Fatalf("parser reuse after %q produced Bool() = %v, %v", tc.in, got, ok)
+			}
+		})
+	}
+}
 
 func TestValueRoot_AllKinds(t *testing.T) {
 	cases := []struct {

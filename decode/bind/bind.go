@@ -196,6 +196,16 @@ type Parser struct {
 
 	// streamScopes is the stack of active stream scopes.
 	streamScopes []streamScopeEntry
+
+	// src is the source of the active contiguous drive: the padded document
+	// for an unmarshal call, or the walked document's source for a tape-bind
+	// walk. Nil while the feed driver owns the input; curSrc reads the live
+	// window then.
+	src []byte
+
+	// feed is the active streaming-input driver state. Nil on contiguous
+	// calls; serveYield consults it for BindYieldInput and error rebasing.
+	feed *feedState
 }
 
 // NewParserForType creates a Parser bound to t. Shape construction is shared
@@ -424,9 +434,15 @@ func (p *Parser) padInputInto(data []byte) []byte {
 // syncStructural sizes the structural-index scan buffer for this parse
 // (srcLen+64 u32 slots) and syncs the base/cap into the Alloc ABI view.
 // The buffer is pooled on the Parser; cap grows monotonically across parses.
-func syncStructural(structural *[]uint32, allocABI *ndec.BindAllocator, srcLen int) {
+//
+// A regrow orphans the current backing, whose only GC root is *structural;
+// DropStructuralViews clears the machine's views into it while that root is
+// still live.
+func syncStructural(m *ndec.BindMachine, structural *[]uint32, srcLen int) {
+	allocABI := &m.Alloc
 	needCap := srcLen + 64
 	if cap(*structural) < needCap {
+		m.DropStructuralViews()
 		*structural = make([]uint32, needCap)
 	} else {
 		*structural = (*structural)[:needCap]
@@ -481,14 +497,15 @@ func syncDoc(allocABI *ndec.BindAllocator) *valueabi.Doc {
 }
 
 // publishDoc exposes the source and arena extents whose bases native encoded.
-// Tape is stored last to publish the completed document.
-func publishDoc(doc *valueabi.Doc, alloc *vbind.Allocator, m *ndec.BindMachine, src []byte) {
+// Tape is stored last to publish the completed document. Feed docs never
+// borrow the source, because windows relocate between native runs.
+func publishDoc(p *Parser, doc *valueabi.Doc, m *ndec.BindMachine) {
 	if doc == nil {
 		return
 	}
-	doc.StrArena = alloc.StrArena[:m.Core.StrUsed]
-	doc.Src = src
-	doc.Tape = alloc.TapeArena[:m.Alloc.TapeUsed]
+	doc.StrArena = p.alloc.StrArena[:m.Core.StrUsed]
+	doc.Src = p.docSrc()
+	doc.Tape = p.alloc.TapeArena[:m.Alloc.TapeUsed]
 }
 
 func (p *Parser) unmarshal(data []byte, rootDst unsafe.Pointer) error {
@@ -512,6 +529,7 @@ func checkPadded(paddedData []byte) error {
 
 func (p *Parser) unmarshalPadded(src []byte, rootDst unsafe.Pointer) error {
 	srcLen := len(src)
+	p.src = src
 
 	m := (*ndec.BindMachine)(unsafe.Pointer(unsafe.SliceData(p.machine)))
 	m.Core.Phase = 0 // Select the native root bootstrap phase.
@@ -530,8 +548,16 @@ func (p *Parser) unmarshalPadded(src []byte, rootDst unsafe.Pointer) error {
 
 	// Align the real allocator (alloc) with the machine's ABI view (allocABI):
 	// each field below mirrors allocator-owned state into the C-visible struct.
-	syncStructural(&p.structural, allocABI, srcLen)
-	syncStrArena(alloc, allocABI, srcLen)
+	syncStructural(m, &p.structural, srcLen)
+	if p.tt.HasStreamField {
+		// Scoped views bound stream content; level zero backs root content
+		// alone but still needs the full input bound until the first scope.
+		alloc.EnsureStrArenaExact(srcLen)
+		allocABI.StrArena = (*byte)(unsafe.SliceData(alloc.StrArena))
+		allocABI.StrArenaCap = uint64(cap(alloc.StrArena))
+	} else {
+		syncStrArena(alloc, allocABI, srcLen)
+	}
 	allocABI.StrGenStart = 0
 	m.Core.StrUsed = 0
 
@@ -588,83 +614,115 @@ func (p *Parser) unmarshalPadded(src []byte, rootDst unsafe.Pointer) error {
 		alloc.Release() // Publish native writes, then stage reusable backings.
 		// Clear borrowed ABI pointers before the machine is reused. KeepAlive
 		// preserves their Go owners through the final stores.
-		m.Ctx.Src = nil
+		p.src = nil
+		m.DropWindowView()
 		m.Ctx.RootDst = nil
 		allocABI.ValueDoc = nil
 		runtime.KeepAlive(rootDst) // Preserve ownership through ABI pointer clearing.
 		runtime.KeepAlive(src)
 	}()
 
-	done, err := p.driveBind(m, src, func() bool { return false })
-	if err != nil {
+	if err := p.driveBind(m, func() bool { return false }); err != nil {
 		sealFailedStrArena(alloc, m)
 		return err
 	}
-	if done {
-		// Deferred callbacks complete before map slots publish their values.
-		if m.Alloc.DeferredDrainUsed > 0 {
-			if err := drainDeferredRecords(p, m, src); err != nil {
-				sealFailedStrArena(alloc, m)
-				return err
-			}
+	// Deferred callbacks complete before map slots publish their values.
+	if m.Alloc.DeferredDrainUsed > 0 {
+		if err := drainDeferredRecords(p, m); err != nil {
+			sealFailedStrArena(alloc, m)
+			return err
 		}
-		if m.Alloc.MapBufUsed > 0 {
-			// Object close may leave complete entries after the final
-			// BindYieldFlushMap, so completion drains the remainder.
-			if err := drainAllMapSlots(m); err != nil {
-				sealFailedStrArena(alloc, m)
-				return err
-			}
-		}
-
-		// Native coordinates are relative to the current arena views.
-		publishDoc(valueDoc, alloc, m, src)
-
-		alloc.CommitStrArena(int(m.Core.StrUsed))
-		alloc.CommitTapeArena(int(m.Alloc.TapeUsed))
-		// A completed scan contributes the reusable sizing bound.
-		alloc.NoteTapeBound(int(m.Alloc.TapeNeed))
-		return nil
 	}
-	// driveBind with a never-stop predicate only returns on done or error.
+	if m.Alloc.MapBufUsed > 0 {
+		// Object close may leave complete entries after the final
+		// BindYieldFlushMap, so completion drains the remainder.
+		if err := drainAllMapSlots(m); err != nil {
+			sealFailedStrArena(alloc, m)
+			return err
+		}
+	}
+
+	// Native coordinates are relative to the current arena views.
+	publishDoc(p, valueDoc, m)
+
+	alloc.CommitStrArena(int(m.Core.StrUsed))
+	alloc.CommitTapeArena(int(m.Alloc.TapeUsed))
+	// A completed scan contributes the reusable sizing bound.
+	alloc.NoteTapeBound(int(m.Alloc.TapeNeed))
 	return nil
 }
 
-// driveBind is the unified main loop. It repeatedly runs BindParseRun and
-// dispatches the resulting yield via serveYield until stop() returns true or
-// native signals done (BindYieldNone). stop() is consulted after each
-// BindParseRun (before serveYield) and after each serveYield, so a BreakSignal
-// stashed by an inner handler mid-drive is observed before the next BindParseRun
-// would cross a stream boundary.
+// driveBind is the unified main loop. It repeatedly runs the native entry and
+// dispatches the resulting yield via serveYield until stop() returns true, an
+// error surfaces, or native signals completion (BindYieldNone). A nil return
+// covers both halt and completion; scope drivers tell the two apart from
+// machine state (reason() reads Yield.PendingAction). stop() is consulted
+// after each native run (before serveYield) and after each serveYield, so a
+// BreakSignal stashed by an inner handler mid-drive is observed before the
+// next native run would cross a stream boundary.
 //
-// All BindParseRun driving flows through this function: the top-level unmarshal
-// loop passes a never-stop predicate, Item.Decode (non-leaf) passes scope.stop to
-// bind one element body, and Scope.nextBatch (leaf) passes scope.stop to fill
-// one batch. The recursion (Value -> driveBind -> serveYield -> serveStreamBatch
-// -> OnRead -> Value -> driveBind) is what lets a non-leaf element's body bind
-// activate nested stream handlers.
-func (p *Parser) driveBind(m *ndec.BindMachine, src []byte, stop func() bool) (done bool, err error) {
+// The entry follows the input model: the feed driver runs the window-aware
+// engine over the live window, every other drive runs the scanning engine
+// over p.src. All native driving flows through this function: the top-level
+// unmarshal, feed, and tape-bind walk loops pass a never-stop predicate,
+// Item.Decode (non-leaf) passes scope.stop to bind one element body, and
+// Scope.nextBatch (leaf) passes scope.stop to fill one batch. The recursion
+// (Value -> driveBind -> serveYield -> serveStreamBatch -> OnRead -> Value ->
+// driveBind) is what lets a non-leaf element's body bind activate nested
+// stream handlers.
+func (p *Parser) driveBind(m *ndec.BindMachine, stop func() bool) error {
 	for {
-		ndec.BindParseRun(unsafe.Pointer(m))
-		if stop() {
-			return false, nil
+		if p.feed != nil {
+			ndec.BindParseStreamRun(unsafe.Pointer(m))
+		} else {
+			ndec.BindParseRun(unsafe.Pointer(m))
 		}
-		done, err := p.serveYield(m, src)
+		if stop() {
+			return nil
+		}
+		done, err := p.serveYield(m)
 		if err != nil {
-			return false, err
+			return err
 		}
 		if done {
-			return true, nil
+			return nil
 		}
 		if stop() {
-			return false, nil
+			return nil
 		}
 	}
+}
+
+// curSrc reports the source the machine currently reads: the feed window
+// when streaming input is active, else the contiguous drive source.
+func (p *Parser) curSrc() []byte {
+	if p.feed != nil {
+		return p.feed.src()
+	}
+	return p.src
+}
+
+// docSrc reports the source a published Doc may borrow. Feed windows
+// relocate between native runs, so streaming docs never borrow the source.
+func (p *Parser) docSrc() []byte {
+	if p.feed != nil {
+		return nil
+	}
+	return p.src
+}
+
+// feedRaw returns the streaming driver's raw scratch, the backing for
+// scratch-backed deferred records. It is nil for every other driver.
+func (p *Parser) feedRaw() []byte {
+	if p.feed != nil {
+		return p.feed.raw
+	}
+	return nil
 }
 
 // serveYield services Yield.PendingAction. BindYieldNone returns done so each
 // caller can perform its own completion sequence.
-func (p *Parser) serveYield(m *ndec.BindMachine, src []byte) (done bool, err error) {
+func (p *Parser) serveYield(m *ndec.BindMachine) (done bool, err error) {
 	switch m.Yield.PendingAction {
 	case ndec.BindYieldNone:
 		return true, nil
@@ -672,7 +730,17 @@ func (p *Parser) serveYield(m *ndec.BindMachine, src []byte) (done bool, err err
 		// Reclaim the tails this parse borrowed and will never close. Purely a
 		// memory optimization.
 		sealOpenSlices(p, m)
-		return false, mkBindErr(p, m, src)
+		if p.feed != nil {
+			// Immediate errors carry a window-local position; a recorded skip
+			// error was promoted to an absolute document offset at the first
+			// input yield after its recording, so only the local form is
+			// rebased before translation.
+			if m.Yield.FirstErrorPos != ^uint64(0) && m.Yield.FirstErrorPromoted == 0 {
+				m.Yield.FirstErrorPos += p.feed.base
+			}
+			return false, mkBindErr(p, m, p.feed.src(), p.feed.base)
+		}
+		return false, mkBindErr(p, m, p.curSrc(), 0)
 	case ndec.BindYieldBlockFull:
 		return false, p.alloc.ServeNewBlock(m.Yield.Arg0, m.Yield.Arg1)
 	case ndec.BindYieldTapeArena:
@@ -681,7 +749,7 @@ func (p *Parser) serveYield(m *ndec.BindMachine, src []byte) (done bool, err err
 		return false, syncTapeArena(p.alloc, &m.Alloc, int(m.Alloc.TapeNeed))
 	case ndec.BindYieldSliceGrow:
 		if p.alloc.Tree.IsStreamType(m.Yield.Arg0) {
-			return false, p.serveStreamSliceGrow(m, src)
+			return false, p.serveStreamSliceGrow(m)
 		}
 		sc, hdr := p.slotForGrow(m)
 		if err := p.alloc.ServeSliceGrow(sc, hdr); err != nil {
@@ -707,15 +775,28 @@ func (p *Parser) serveYield(m *ndec.BindMachine, src []byte) (done bool, err err
 		// Drain Unmarshaler records first: closure writes must land before
 		// the map drain copies slots into *hmaps.
 		if m.Alloc.DeferredDrainUsed > 0 {
-			if err := drainDeferredRecords(p, m, src); err != nil {
+			if err := drainDeferredRecords(p, m); err != nil {
 				return false, err
 			}
 		}
 		return false, p.serveFlushMap(m)
 	case ndec.BindYieldFlushUnmarshal:
-		return false, drainDeferredRecords(p, m, src)
+		return false, drainDeferredRecords(p, m)
 	case ndec.BindYieldTapeBindValue:
 		return false, p.serveTapeBindValue(m)
+	case ndec.BindYieldInput:
+		if p.feed == nil {
+			return false, errors.New("bind: input yield outside the streaming driver")
+		}
+		// Records must drain before the window is reused: source-backed spans
+		// die with the tail relocation and str_arena offsets die with the
+		// arena growth the next mount may perform.
+		if m.Alloc.DeferredDrainUsed > 0 {
+			if err := drainDeferredRecords(p, m); err != nil {
+				return false, err
+			}
+		}
+		return false, p.feed.serveInput(p, m)
 	default:
 		return false, errors.New("bind: unknown yield action")
 	}

@@ -252,7 +252,10 @@ func TestWithStrictScan_UnmarshalValueDoesNotRescan(t *testing.T) {
 	if err := UnmarshalValue(doc.V, &got, WithStrictScan()); err != nil {
 		t.Fatalf("UnmarshalValue: %v", err)
 	}
-	if len(got) != 1 || got[0] != 0xff {
-		t.Fatalf("got %q, want raw 0xff", got)
+	// The lax tape build preserves the malformed byte, so serving from the
+	// tape yields the raw byte; a strict rescan of the source would instead
+	// error, which the call above proves it does not.
+	if got != "\xff" {
+		t.Fatalf("got %q, want the tape's raw byte", got)
 	}
 }

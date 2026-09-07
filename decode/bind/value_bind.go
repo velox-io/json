@@ -130,7 +130,7 @@ func tapeBindStringAppendBound(v value.Value) (int, bool) {
 }
 
 // unmarshalValue seeds the native tape binder from a Value descriptor and
-// consumes its existing tape through the shared BindParseRun and serveYield loop.
+// consumes its existing tape through the shared driveBind loop.
 func (p *Parser) unmarshalValue(v value.Value, desc *valueabi.Descriptor, rootDst unsafe.Pointer) error {
 	// TypeTree records the first unsupported target position with its field path.
 	if pos := p.tt.TapeBindUnsupported; pos != nil {
@@ -147,6 +147,7 @@ func (p *Parser) unmarshalValue(v value.Value, desc *valueabi.Descriptor, rootDs
 	if doc.ZeroCopy {
 		return ErrZeroCopyValue
 	}
+	p.src = doc.Src
 
 	m := (*ndec.BindMachine)(unsafe.Pointer(unsafe.SliceData(p.machine)))
 
@@ -199,9 +200,9 @@ func (p *Parser) unmarshalValue(v value.Value, desc *valueabi.Descriptor, rootDs
 	tapeEnd := unsafe.Pointer(unsafe.SliceData(tape[extent:]))
 	allocABI.ValueTape = (*uint64)(tapeBase) // Borrowed for the native walk.
 
-	// BindMachineCursorOffset locates the ABI cursor pair, interpreted as tape
-	// pointers during the native walk.
-	cursor := (*[2]unsafe.Pointer)(unsafe.Add(unsafe.Pointer(m), ndec.BindMachineCursorOffset))
+	// The ABI cursor pair is interpreted as tape pointers during the native
+	// walk.
+	cursor := m.CursorPair()
 	cursor[0] = tapeRoot // First word of the selected Value.
 	cursor[1] = tapeEnd  // One past the selected Value.
 
@@ -251,6 +252,7 @@ func (p *Parser) unmarshalValue(v value.Value, desc *valueabi.Descriptor, rootDs
 		p.alloc.Release() // Publish native writes, then stage reusable backings.
 		// Clear borrowed ABI pointers before the machine is reused. KeepAlive
 		// preserves their Go owners through the final stores.
+		p.src = nil
 		m.Ctx.RootDst = nil
 		m.Ctx.Src = nil
 		allocABI.StrArena = nil
@@ -264,33 +266,27 @@ func (p *Parser) unmarshalValue(v value.Value, desc *valueabi.Descriptor, rootDs
 		runtime.KeepAlive(strArena)
 	}()
 
-	for {
-		ndec.BindParseRun(unsafe.Pointer(m))
-		done, err := p.serveYield(m, doc.Src)
-		if err != nil {
+	if err := p.driveBind(m, func() bool { return false }); err != nil {
+		return err
+	}
+	// Publish the tape produced for nested Values with the string and
+	// source views used by this walk.
+	if valueDoc != nil {
+		valueDoc.StrArena = strArena[:m.Core.StrUsed]
+		valueDoc.Src = doc.Src
+		valueDoc.Tape = alloc.TapeArena[:m.Alloc.TapeUsed]
+	}
+
+	// Deferred callbacks complete before map slots publish their values.
+	if m.Alloc.DeferredDrainUsed > 0 {
+		if err := drainDeferredRecords(p, m); err != nil {
 			return err
 		}
-		if done {
-			// Publish the tape produced for nested Values with the string and
-			// source views used by this walk.
-			if valueDoc != nil {
-				valueDoc.StrArena = strArena[:m.Core.StrUsed]
-				valueDoc.Src = doc.Src
-				valueDoc.Tape = alloc.TapeArena[:m.Alloc.TapeUsed]
-			}
-
-			// Deferred callbacks complete before map slots publish their values.
-			if m.Alloc.DeferredDrainUsed > 0 {
-				if err := drainDeferredRecords(p, m, doc.Src); err != nil {
-					return err
-				}
-			}
-			if m.Alloc.MapBufUsed > 0 {
-				if err := drainAllMapSlots(m); err != nil {
-					return err
-				}
-			}
-			return nil
+	}
+	if m.Alloc.MapBufUsed > 0 {
+		if err := drainAllMapSlots(m); err != nil {
+			return err
 		}
 	}
+	return nil
 }

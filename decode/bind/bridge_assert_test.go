@@ -27,11 +27,11 @@ func TestBindBridgeSizes(t *testing.T) {
 	if sz := unsafe.Sizeof(nativendec.BindAllocator{}); sz != 120 {
 		t.Errorf("sizeof BindAllocator = %d, want 120", sz)
 	}
-	if sz := unsafe.Sizeof(nativendec.BindYield{}); sz != 24 {
-		t.Errorf("sizeof BindYield = %d, want 24", sz)
+	if sz := unsafe.Sizeof(nativendec.BindYield{}); sz != 32 {
+		t.Errorf("sizeof BindYield = %d, want 32", sz)
 	}
-	if sz := unsafe.Sizeof(nativendec.BindMachine{}); sz != 288 {
-		t.Errorf("sizeof BindMachine = %d, want 288", sz)
+	if sz := unsafe.Sizeof(nativendec.BindMachine{}); sz != 296 {
+		t.Errorf("sizeof BindMachine = %d, want 296", sz)
 	}
 	if sz := unsafe.Sizeof(nativendec.BindCoreHeader{}); sz != 80 {
 		t.Errorf("sizeof BindCoreHeader = %d, want 80", sz)
@@ -61,7 +61,7 @@ func TestBindMachineOffsets(t *testing.T) {
 	check("BindMachine.Ctx", unsafe.Offsetof(a.Ctx), 0)
 	check("BindMachine.Alloc", unsafe.Offsetof(a.Alloc), 64)
 	check("BindMachine.Yield", unsafe.Offsetof(a.Yield), 184)
-	check("BindMachine.Core", unsafe.Offsetof(a.Core), 208)
+	check("BindMachine.Core", unsafe.Offsetof(a.Core), 216)
 
 	check("Ctx.Types", unsafe.Offsetof(a.Ctx.Types), 0)
 	check("Ctx.TypeMeta", unsafe.Offsetof(a.Ctx.TypeMeta), 8)
@@ -94,8 +94,9 @@ func TestBindMachineOffsets(t *testing.T) {
 	check("Yield.PendingAction", unsafe.Offsetof(a.Yield.PendingAction), 0)
 	check("Yield.Arg0", unsafe.Offsetof(a.Yield.Arg0), 4)
 	check("Yield.Arg1", unsafe.Offsetof(a.Yield.Arg1), 8)
-	check("Yield.FirstErrorPos", unsafe.Offsetof(a.Yield.FirstErrorPos), 12)
-	check("Yield.Target", unsafe.Offsetof(a.Yield.Target), 16)
+	check("Yield.FirstErrorPromoted", unsafe.Offsetof(a.Yield.FirstErrorPromoted), 12)
+	check("Yield.FirstErrorPos", unsafe.Offsetof(a.Yield.FirstErrorPos), 16)
+	check("Yield.Target", unsafe.Offsetof(a.Yield.Target), 24)
 
 	check("Core.Phase", unsafe.Offsetof(a.Core.Phase), 0)
 	check("Core.StrUsed", unsafe.Offsetof(a.Core.StrUsed), 40)
@@ -115,6 +116,14 @@ func TestBindMachineOffsets(t *testing.T) {
 
 	var sm vbind.StructMetaPayload
 	check("StructMetaPayload.InlineVariantIdx", unsafe.Offsetof(sm.InlineVariantIdx), 8)
+
+	// The retired-generation history lives in the C-private machine tail; the
+	// literals pin the Go offset constants to the native static asserts.
+	check("StrProvCountOffset", nativendec.BindMachineStrProvCountOffset, 9524)
+	check("StrProvOffset", nativendec.BindMachineStrProvOffset, 9528)
+	if end := nativendec.BindMachineStrProvOffset + 16*nativendec.BindStrProvMax; end > nativendec.BindMachineSize {
+		t.Errorf("str_prov region ends at %d, machine budget %d", end, nativendec.BindMachineSize)
+	}
 }
 
 // TestBindKindValues verifies that vbind.Kind values match native BindKind

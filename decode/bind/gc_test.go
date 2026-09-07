@@ -117,6 +117,50 @@ func TestBatchReuseAcrossParse(t *testing.T) {
 	}
 }
 
+// TestErrorReuseAcrossPooledParse alternates malformed inputs against the
+// same type, so every failed parse returns its pooled parser through the
+// error path. Each input must keep its deterministic error across the loop,
+// and a valid parse afterwards must still bind: error-path seals leave no
+// residue in the machine, allocator, or structural buffer.
+func TestErrorReuseAcrossPooledParse(t *testing.T) {
+	type doc struct {
+		ID        string              `json:"id"`
+		Meta      map[string][]string `json:"meta"`
+		ContentMD string              `json:"contentMd"`
+	}
+	inputs := []string{
+		`[{"x":1},{"y":`,
+		`{"\`,
+	}
+	errs := make([]string, len(inputs))
+	for i, in := range inputs {
+		var d doc
+		err := Unmarshal([]byte(in), &d)
+		if err == nil {
+			t.Fatalf("input %d decoded without error", i)
+		}
+		errs[i] = err.Error()
+	}
+	for i := range 50 {
+		idx := i % len(inputs)
+		var d doc
+		err := Unmarshal([]byte(inputs[idx]), &d)
+		if err == nil {
+			t.Fatalf("iter %d: input %d decoded without error", i, idx)
+		}
+		if err.Error() != errs[idx] {
+			t.Fatalf("iter %d: input %d error %q, first parse gave %q", i, idx, err.Error(), errs[idx])
+		}
+	}
+	var d doc
+	if err := Unmarshal([]byte(`{"id":"a","meta":{"k":["v1","v2"]},"contentMd":"md"}`), &d); err != nil {
+		t.Fatalf("valid parse after the error loop: %v", err)
+	}
+	if d.ID != "a" || len(d.Meta["k"]) != 2 || d.Meta["k"][1] != "v2" || d.ContentMD != "md" {
+		t.Fatalf("valid parse bound %+v", d)
+	}
+}
+
 // TestConcurrentMarkBoxedAnyGC guards the publication barrier in
 // Allocator.Release (shadeCarvedBackings).
 //

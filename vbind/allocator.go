@@ -31,10 +31,10 @@ const slotDetachK = 3
 // those stores in bounds outside the per-string hot path. It also absorbs the
 // '\0' reparse sentinel stored past textual numbers; only a final token can lack
 // a trailing source separator, so the sentinel overhang is at most one byte.
-const strArenaTail = 64
+const StrArenaTail = 64
 
 // A fresh string arena covers several worst-case parses. Each parse consumes
-// at most srcLen bytes, so a buffer of strArenaAmortize*srcLen+strArenaTail
+// at most srcLen bytes, so a buffer of strArenaAmortize*srcLen+StrArenaTail
 // serves strArenaAmortize parses per allocation. A larger factor would
 // amortize mallocgc further but hold more memory live when actual string
 // content is small; 3 keeps steady-state live memory near srcLen per parse.
@@ -462,12 +462,26 @@ func (a *Allocator) ServeSliceGrow(sc *SlotClass, hdr *gort.SliceHeader) error {
 // documents keep displaced backings reachable; retained stages a fresh backing
 // for publication at the next release.
 func (a *Allocator) EnsureStrArena(srcLen int) {
-	need := srcLen + strArenaTail
+	need := srcLen + StrArenaTail
 	if cap(a.StrArena) >= need {
 		return
 	}
-	newCap := max(strArenaAmortize*srcLen+strArenaTail, need)
+	newCap := max(strArenaAmortize*srcLen+StrArenaTail, need)
 	a.StrArena = gort.MakeDirtyBytes(int(newCap), int(newCap))
+	a.retained = append(a.retained, unsafe.Pointer(unsafe.SliceData(a.StrArena)))
+}
+
+// EnsureStrArenaExact reserves srcLen+StrArenaTail without the cross-parse
+// amortization factor, for trees that install scoped arena views: the
+// level-zero view backs only root content, but contiguous parses have no
+// string-arena growth yield, so the full remaining-input bound must hold from
+// the first native run.
+func (a *Allocator) EnsureStrArenaExact(srcLen int) {
+	need := srcLen + StrArenaTail
+	if cap(a.StrArena) >= need {
+		return
+	}
+	a.StrArena = gort.MakeDirtyBytes(need, need)
 	a.retained = append(a.retained, unsafe.Pointer(unsafe.SliceData(a.StrArena)))
 }
 
@@ -482,6 +496,65 @@ func (a *Allocator) CommitStrArena(used int) {
 // An error leaves the view unchanged so the next parse may overwrite partial data.
 func (a *Allocator) CommitTapeArena(used int) {
 	a.TapeArena = a.TapeArena[used:]
+}
+
+// GrowStrArenaPreserve grows the streaming driver's arena while keeping every
+// byte below used at the same offset: tape string entries and pending drains
+// resolve their offsets against the new base. The displaced backing joins
+// retained because typed strings published earlier in this parse still point
+// into it. It returns the displaced base, or nil when no growth happened.
+func (a *Allocator) GrowStrArenaPreserve(used, need int) unsafe.Pointer {
+	if cap(a.StrArena) >= need {
+		return nil
+	}
+	newCap := max(strArenaAmortize*need, need)
+	grown := gort.MakeDirtyBytes(int(newCap), int(newCap))
+	copy(grown, a.StrArena[:used])
+	displaced := unsafe.Pointer(unsafe.SliceData(a.StrArena))
+	a.retained = append(a.retained, displaced)
+	a.StrArena = grown
+	return displaced
+}
+
+// GrowTapeArenaPreserve grows the streaming driver's tape arena while keeping
+// every word below used at the same offset, so container indices and seam
+// distances written before the growth remain valid. The displaced backing is
+// staged in retained, matching GrowStrArenaPreserve: a stale base pointer in
+// the write-barrier buffer still names a live span when Release's barriered
+// clear shades it.
+func (a *Allocator) GrowTapeArenaPreserve(used, need int) {
+	if cap(a.TapeArena) >= need {
+		return
+	}
+	newCap := max(tapeAmortize*need, need)
+	grown := make([]uint64, newCap)
+	copy(grown, a.TapeArena[:used])
+	a.retained = append(a.retained, unsafe.Pointer(unsafe.SliceData(a.TapeArena)))
+	a.TapeArena = grown
+}
+
+// InstallScopedStrView replaces the string arena view with a fresh backing for
+// one stream scope, routing the backing through retained so the scoped release
+// publishes native writes. The caller saves the displaced view and restores it
+// at scope exit; a retired backing stays reachable only through published
+// documents and user-visible string headers.
+func (a *Allocator) InstallScopedStrView(need int) {
+	view := gort.MakeDirtyBytes(need, need)
+	a.retained = append(a.retained, unsafe.Pointer(unsafe.SliceData(view)))
+	a.StrArena = view
+}
+
+// InstallScopedTapeView is the tape counterpart of InstallScopedStrView.
+func (a *Allocator) InstallScopedTapeView(words int) {
+	view := make([]uint64, words)
+	a.retained = append(a.retained, unsafe.Pointer(unsafe.SliceData(view)))
+	a.TapeArena = view
+}
+
+// ArenaViewCaps reports the current arena view capacities, for boundedness
+// tests asserting that scoped views shrink as the parse proceeds.
+func (a *Allocator) ArenaViewCaps() (str, tape int) {
+	return cap(a.StrArena), cap(a.TapeArena)
 }
 
 // EnsureTapeArena reserves the caller-computed tape-word bound while preserving

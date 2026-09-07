@@ -1,6 +1,7 @@
 package bind
 
 import (
+	"errors"
 	"reflect"
 	"unsafe"
 
@@ -39,13 +40,18 @@ func (p *Parser) pushStreamScope(addr unsafe.Pointer, elemHasStream bool) int {
 
 // popStreamScope removes the entry at idx. LIFO defer ordering from
 // serveStreamBatch guarantees idx is top-of-stack, so the copy is
-// defensive.
+// defensive. The vacated top slot is nil-ed while its pointers are still
+// rooted by len membership: the backing is scannable and reused across
+// parses, so the next push's store must not capture a stale old value in the
+// write barrier.
 func (p *Parser) popStreamScope(idx int) {
 	if idx < 0 || idx >= len(p.streamScopes) {
 		return
 	}
 	copy(p.streamScopes[idx:], p.streamScopes[idx+1:])
-	p.streamScopes = p.streamScopes[:len(p.streamScopes)-1]
+	top := len(p.streamScopes) - 1
+	p.streamScopes[top] = streamScopeEntry{}
+	p.streamScopes = p.streamScopes[:top]
 }
 
 // peekAnyScopeBreak returns the topmost stashed BreakSignal on the stack
@@ -94,11 +100,11 @@ func assertStreamSlotAtBase(m *ndec.BindMachine, hdr *gort.SliceHeader, elemHasS
 // package consumes the verdicts, so the machine fields have a single reader.
 //
 // Stateless beyond its identity fields: all iteration progress lives in the
-// scope and the native machine.
+// scope and the native machine. The source the machine reads belongs to the
+// Parser (p.curSrc), which tracks the live feed window across relocations.
 type streamScopeDriver struct {
-	p   *Parser
-	m   *ndec.BindMachine
-	src []byte
+	p *Parser
+	m *ndec.BindMachine
 
 	// streamAddr identifies this scope's Stream[T] field, whose first 24 bytes
 	// are the slice header native drives. A yield belongs to this scope only
@@ -112,12 +118,16 @@ type streamScopeDriver struct {
 	// retainMark is this scope's allocator retention floor, taken at scope
 	// entry. SettleBatch drops everything staged above it.
 	retainMark int
+
+	// views owns this scope's arena views, or nil when the element subtree
+	// writes neither arena. Restored at scope exit by restoreViews.
+	views *scopeViews
 }
 
 var _ stream.ScopeDriver = (*streamScopeDriver)(nil)
 
 func (d *streamScopeDriver) DriveBind() (stream.StopReason, error) {
-	if _, err := d.p.driveBind(d.m, d.src, d.stop); err != nil {
+	if err := d.p.driveBind(d.m, d.stop); err != nil {
 		return stream.StopNone, err
 	}
 	return d.reason(), nil
@@ -190,12 +200,12 @@ func (d *streamScopeDriver) PeekAnyBreak() *stream.BreakSignal {
 	return d.p.peekAnyScopeBreak()
 }
 
-// SettleBatch publishes deferred fields and map entries before the handler reads
-// them, then releases scoped retention. Noscan staging requires GC-visible
-// retained roots through the drains.
-func (d *streamScopeDriver) SettleBatch() error {
+// drainStaged publishes deferred fields and map entries so GC-visible roots
+// exist for pointers staged in the noscan buffers. The raw scratch backs
+// records for values that crossed a window edge under the feed driver.
+func (d *streamScopeDriver) drainStaged() error {
 	if d.m.Alloc.DeferredDrainUsed > 0 {
-		if err := drainDeferredRecords(d.p, d.m, d.src); err != nil {
+		if err := drainDeferredRecords(d.p, d.m); err != nil {
 			return err
 		}
 	}
@@ -204,8 +214,43 @@ func (d *streamScopeDriver) SettleBatch() error {
 			return err
 		}
 	}
+	return nil
+}
+
+// SettleBatch publishes deferred fields and map entries before the handler reads
+// them, closes the current generation's arena claims, and releases scoped
+// retention. Noscan staging requires GC-visible retained roots through
+// the drains.
+func (d *streamScopeDriver) SettleBatch() error {
+	if err := d.drainStaged(); err != nil {
+		return err
+	}
+	if d.views != nil {
+		d.views.closeGeneration(d.p, d.m)
+	}
 	d.p.alloc.ReleaseScoped(d.retainMark)
 	return nil
+}
+
+// settleFinal is the scope-exit settle: it drains, truncates this scope's
+// provenance entries while their retired backings are still retained, and
+// releases scoped retention. restoreViews publishes the final extents right
+// after, without rotating.
+func (d *streamScopeDriver) settleFinal() error {
+	if err := d.drainStaged(); err != nil {
+		return err
+	}
+	if d.views != nil {
+		d.views.dropScopedProv(d.m)
+	}
+	d.p.alloc.ReleaseScoped(d.retainMark)
+	return nil
+}
+
+// restoreViews publishes the scope's final Value generation and reinstates the
+// parent arena views.
+func (d *streamScopeDriver) restoreViews() {
+	d.views.restore(d.p, d.m)
 }
 
 // GrowBatch prepares the next leaf batch. The stream SlotClass has no
@@ -260,7 +305,7 @@ func (d *streamScopeDriver) drainStop() bool {
 // pointer to reuse slot 0 for the next element. This path is non-leaf only;
 // leaf cap-full is caught by the stream's stop predicate before reaching
 // serveYield. Otherwise activate the stream via serveStreamBatch.
-func (p *Parser) serveStreamSliceGrow(m *ndec.BindMachine, src []byte) error {
+func (p *Parser) serveStreamSliceGrow(m *ndec.BindMachine) error {
 	if len(p.streamScopes) > 0 &&
 		p.streamScopes[len(p.streamScopes)-1].streamAddr == unsafe.Pointer(m.Yield.Target) {
 		sc, hdr := p.slotForGrow(m)
@@ -269,7 +314,14 @@ func (p *Parser) serveStreamSliceGrow(m *ndec.BindMachine, src []byte) error {
 		p.finishGrow(m, sc, hdr)
 		return nil
 	}
-	return p.serveStreamBatch(m, src)
+	return p.serveStreamBatch(m)
+}
+
+// streamActivator is the activation surface of Stream[T]. ActivateRead takes
+// no type parameters, so every Stream[T] instantiation satisfies it and the
+// parser calls it through one interface assertion.
+type streamActivator interface {
+	ActivateRead(stream.ScopeDriver, unsafe.Pointer, int, stream.StopReason) error
 }
 
 // serveStreamBatch is the stream activation entry point, called from
@@ -278,7 +330,7 @@ func (p *Parser) serveStreamSliceGrow(m *ndec.BindMachine, src []byte) error {
 // serveStreamSliceGrow). It activates OnRead with the initial batch view;
 // the handler iterates via Scope.Iter / Item.Decode, which drive driveBind
 // to bind bodies.
-func (p *Parser) serveStreamBatch(m *ndec.BindMachine, src []byte) error {
+func (p *Parser) serveStreamBatch(m *ndec.BindMachine) error {
 	typeIdx := m.Yield.Arg0
 	tree := p.alloc.Tree
 
@@ -296,7 +348,6 @@ func (p *Parser) serveStreamBatch(m *ndec.BindMachine, src []byte) error {
 	driver := &streamScopeDriver{
 		p:             p,
 		m:             m,
-		src:           src,
 		streamAddr:    streamAddr,
 		elemHasStream: elemHasStream,
 		retainMark:    p.alloc.RetainMark(),
@@ -305,14 +356,18 @@ func (p *Parser) serveStreamBatch(m *ndec.BindMachine, src []byte) error {
 	scopeIdx := p.pushStreamScope(streamAddr, elemHasStream)
 	defer p.popStreamScope(scopeIdx)
 
+	// Publish the final generation and reinstate the parent views; LIFO puts
+	// this between the exit settle and the scope pop.
+	defer driver.restoreViews()
+
 	// Settle on the way out as well as per batch. Per-batch settling bounds one
 	// scope's cost; this bounds a sequence of them. A document holding many
 	// sibling streams (a []Host each with its own Stream field) activates a
 	// scope per host, and each would otherwise leave its last batch's retention
 	// behind for the parse to accumulate.
-	defer func() { _ = driver.SettleBatch() }()
+	defer func() { _ = driver.settleFinal() }()
 
-	// Cross-scope break pending: skip Activate and drain this array to close
+	// Cross-scope break pending: skip ActivateRead and drain this array to close
 	// ']' so native pops to the parent. The signal stays stashed and
 	// propagates up as each layer returns.
 	if p.peekAnyScopeBreak() != nil {
@@ -320,11 +375,20 @@ func (p *Parser) serveStreamBatch(m *ndec.BindMachine, src []byte) error {
 		return nil
 	}
 
+	// Scoped arena views bound this scope's string and tape bytes to the
+	// remaining input. Installed before any native run of this scope; the
+	// deferred restore pairs with it on every exit path.
+	views, err := p.installScopeViews(m, typeIdx)
+	if err != nil {
+		return err
+	}
+	driver.views = views
+
 	// First activation starts with an empty stream backing, so array begin emits
 	// BindYieldSliceGrow with hdr.Data nil. Allocate the
 	// fixed-cap backing (leaf = batch size, non-leaf = 1) and drive to fill
 	// the first batch (leaf) or reach the first element (non-leaf) before
-	// Activate.
+	// ActivateRead.
 	reason := driver.reason()
 	if hdr.Data == nil {
 		sc, _ := p.slotForGrow(m)
@@ -333,7 +397,6 @@ func (p *Parser) serveStreamBatch(m *ndec.BindMachine, src []byte) error {
 		hdr.Len = 0
 		m.Core.CurCount = 0
 		p.finishGrow(m, sc, hdr)
-		var err error
 		if reason, err = driver.DriveBind(); err != nil {
 			return err
 		}
@@ -345,12 +408,12 @@ func (p *Parser) serveStreamBatch(m *ndec.BindMachine, src []byte) error {
 	// non-leaf stop has no bound body yet, so there is nothing to settle and
 	// Item.Decode settles it instead.
 	if reason != stream.StopElement {
-		if err := driver.SettleBatch(); err != nil {
+		if err = driver.SettleBatch(); err != nil {
 			return err
 		}
 	}
 
-	// Initial batch view handed to Activate. A non-leaf stop means native
+	// Initial batch view handed to ActivateRead. A non-leaf stop means native
 	// claimed the element's slot with its body unbound, so the handler gets a
 	// one-element batch to Target() and register nested OnRead on. Otherwise
 	// (cap-full or close) the slice header carries the bound elements.
@@ -359,23 +422,16 @@ func (p *Parser) serveStreamBatch(m *ndec.BindMachine, src []byte) error {
 		batchLen = 1
 	}
 
-	// Activate via reflect. Stream[T] lives at m.Yield.Target: its first 24
-	// bytes are the slice header native drives, so the field address keys
-	// both the native slice cursor and the scope stack entry BreakSignals
-	// route to.
-	streamType := tree.ReflectTypes[typeIdx]
-	streamPtr := reflect.NewAt(streamType, streamAddr)
-	results := streamPtr.MethodByName("Activate").Call([]reflect.Value{
-		reflect.ValueOf(stream.ScopeDriver(driver)),
-		reflect.ValueOf(batchData),
-		reflect.ValueOf(batchLen),
-		reflect.ValueOf(reason),
-	})
-	err, _ := results[0].Interface().(error)
+	// Stream[T] lives at streamAddr: its first 24 bytes are the slice
+	// header native drives, so the field address keys the native slice
+	// cursor and the scope stack entry BreakSignals route to.
+	act := reflect.NewAt(tree.ReflectTypes[typeIdx], streamAddr).Interface().(streamActivator)
+	err = act.ActivateRead(stream.ScopeDriver(driver), batchData, batchLen, reason)
 
 	// Break: drain this array and stash the signal on the matching entry;
 	// the target scope's Item.Decode surfaces it via PeekAnyBreak.
-	if sig, ok := err.(*stream.BreakSignal); ok {
+	var sig *stream.BreakSignal
+	if errors.As(err, &sig) {
 		m.Core.CurType.SetStreamSkip()
 		if !p.stashScopeBreak(sig) {
 			return sig
@@ -400,7 +456,7 @@ func (p *Parser) serveStreamBatch(m *ndec.BindMachine, src []byte) error {
 		// SetStreamSkip would target the wrong scope. Nested
 		// serveStreamBatch re-entries drain themselves via their own
 		// peekAnyScopeBreak entry check.
-		if _, err := p.driveBind(m, src, driver.drainStop); err != nil {
+		if err := p.driveBind(m, driver.drainStop); err != nil {
 			return err
 		}
 		m.Core.CurType.SetStreamSkip()

@@ -718,12 +718,39 @@ type TypeTree struct {
 	// TapeBindMayAppendStrings reports that UnmarshalValue can append copied
 	// discriminators or quoted strings to the input document's string arena.
 	//
+	// HasRawSpan reports that some RawMessage or Unmarshaler is reachable from
+	// Root, i.e. a binding can record a raw JSON span. Only the streaming
+	// engine consults it: a span crossing a window edge must be materialized
+	// through the raw scratch. TextUnmarshaler never records a span; its
+	// decoded bytes land in str_arena.
+	//
 	// These properties are settled while building the type graph rather than
 	// rediscovered by each consumer. Allocation remains the consumer's policy.
 	HasValueField            bool
 	HasPolyField             bool
 	HasSplitTape             bool
 	TapeBindMayAppendStrings bool
+	HasRawSpan               bool
+
+	// HasStreamField reports that some Stream[T] is reachable from Root. The
+	// driver then sizes the level-zero arena for root content alone, because
+	// every stream scope installs its own views.
+	HasStreamField bool
+
+	// TypeWritesStr and TypeWritesTape are parallel to Types and report whether
+	// a type's subtree can append str_arena bytes or tape words during binding.
+	// The stream driver reads the element type's bits at scope activation to
+	// decide whether scoped arena views are needed.
+	TypeWritesStr  []bool
+	TypeWritesTape []bool
+
+	// TypePublishesValue is parallel to Types and reports whether a subtree can
+	// publish a Value doc, i.e. contains a KindValue terminal. The stream
+	// driver reads the element type's bit at scope activation: only a
+	// publishing scope needs doc snapshots, so poly scratch writers under a
+	// tree whose Value fields live elsewhere recycle their tape words without
+	// copying.
+	TypePublishesValue []bool
 
 	// SplitTapeSites bounds how many dual-view merged tapes ONE parse can build,
 	// or SplitTapeSitesUnbounded when the document decides.
