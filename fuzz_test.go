@@ -15,26 +15,17 @@ import (
 // Feeds arbitrary bytes into both vjson.Unmarshal and encoding/json.Unmarshal
 // targeting *any (interface{}). Checks:
 //   - vjson must not be stricter than encoding/json (reject what std accepts)
-//   - result semantic equivalence when both accept (modulo known UTF-8 gap)
+//   - result semantic equivalence when both accept (modulo known divergences)
 //   - vjson may be more lenient (accept what std rejects): logged, not failed
 //
-// Known divergence: encoding/json is semi-strict. It rejects raw control
-// characters (bytes < 0x20) and invalid escape sequences inside strings, but it
-// does not validate UTF-8 byte-sequence well-formedness (malformed UTF-8 is
-// accepted and stored as raw bytes). vjson's stage-1 validation is one
-// strictness switch that gates UTF-8 and control-char checks together, so no
-// single vjson mode matches stdlib on both axes at once:
-//   - strict=1 (ndec_scan_structurals_strict): UTF-8 AND control chars checked
-//       -> rejects UTF-8 that stdlib accepts (vjson too strict)
-//   - strict=0 (ndec_scan_structurals, the default): neither checked
-//       -> accepts control chars that stdlib rejects (vjson too lenient)
-// Matching stdlib would need a third mode (UTF-8 OFF, control chars ON) that is
-// not yet exposed.
-//
-// Status: vjson defaults to strict=0, so control-char inputs like "\x18" trip
-// the "vjson too lenient" branch below. That branch currently calls t.Errorf,
-// which contradicts the "logged, not failed" note above; the harness and the
-// semi-strict contract still need reconciling.
+// Known divergences: encoding/json is semi-strict. It rejects raw control
+// characters (bytes < 0x20) and invalid escape sequences inside strings, and
+// it replaces each invalid UTF-8 byte with U+FFFD during unquote. vjson's
+// string decode passes raw bytes through: the lax scan keeps malformed UTF-8
+// verbatim (the documented raw-passthrough policy; WithStrictScan rejects
+// it) and accepts raw control bytes that std rejects. Inputs carrying
+// invalid UTF-8 are therefore skipped in the value comparison below;
+// control-char leniency is absorbed by the lenient branch.
 //
 // This single target covers strings, numbers, booleans, null, objects, arrays,
 // and all combinations thereof.
@@ -104,15 +95,16 @@ func FuzzUnmarshalAny(f *testing.F) {
 		}
 
 		// Leniency: vjson accepts but encoding/json rejects. In vjson's default
-		// strict=0 (lenient) mode this is by design, not a bug: vjson accepts
-		// raw control characters (< 0x20) and malformed UTF-8 that encoding/json
-		// rejects. Per the function's contract ("vjson may be more lenient:
+		// lax scan this is by design, not a bug: vjson accepts raw control
+		// characters (< 0x20) that encoding/json rejects. Per the function's
+		// contract ("vjson may be more lenient:
 		// logged, not failed"), this divergence is expected and must not fail the
 		// fuzzer, otherwise lenient-mode fuzzing drowns in false positives the
 		// moment the generator emits a control char. Real over-leniency/grammar
 		// bugs are caught separately: FuzzNoCrash catches panics, and a strict
-		// scan (ndec_scan_structurals_strict) or the not-yet-exposed third mode
-		// (UTF-8 OFF, control chars ON) can be used to assert full parity.
+		// scan (ndec_scan_structurals_strict) or the control-only mode
+		// (ndec_scan_structurals_ctl, UTF-8 off, control chars on) can be used
+		// to assert full parity.
 		if vjErr == nil && stdErr != nil {
 			return
 		}
@@ -120,8 +112,9 @@ func FuzzUnmarshalAny(f *testing.F) {
 		// When both accept, results must be semantically equal.
 		if vjErr == nil && stdErr == nil {
 			if !deepEqualJSON(vjResult, stdResult) {
-				// Known divergence: vjson does not validate/replace invalid
-				// UTF-8 on the zero-copy path. encoding/json replaces with U+FFFD.
+				// Known divergence: the raw-passthrough default preserves
+				// invalid UTF-8 bytes where encoding/json's unquote replaces
+				// each with U+FFFD.
 				if !utf8.Valid(data) {
 					return
 				}
@@ -738,7 +731,7 @@ func deepEqualJSON(a, b any) bool {
 //
 // encoding/json falls back to ASCII case folding when no exact field-name
 // match exists. ndec deliberately does not implement this fold (cold-path
-// maintenance burden, no hot-path benefit). vdec mirrors stdlib. The
+// maintenance burden, no hot-path benefit). The
 // differential fuzzers therefore produce false positives on any input whose
 // JSON object key differs from a struct tag only by ASCII case. These helpers
 // detect such keys so the fuzzers can skip the DeepEqual check, mirroring the

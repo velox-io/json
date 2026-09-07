@@ -375,7 +375,11 @@ INLINE int dom_validate_atom_ptr(const uint8_t *value, uint8_t tag) {
 /* Decode one JSON string and emit its tape word. dom_ensure_capacity reserves
  * the whole-document arena bound before this unchecked walk. Every decoded body
  * is charged to a distinct source span. Stored strings carry a quote sentinel;
- * the tape length excludes it. */
+ * the tape length excludes it.
+ *
+ * The raw decode policy keeps every string byte verbatim: lax scans preserve
+ * invalid UTF-8 and strict scans have already rejected it, so a decoded body
+ * never exceeds its source span. */
 INLINE int dom_visit_string(tape_emit_ctx *d, uint8_t **str_pp, uint64_t **pp, const uint8_t *open,
                             json_dom_str_mode mode) {
   switch (mode) {
@@ -384,7 +388,7 @@ INLINE int dom_visit_string(tape_emit_ctx *d, uint8_t **str_pp, uint64_t **pp, c
      * strings cost zero str_arena bookkeeping. */
     uint32_t len;
     uint32_t prefix_bp;
-    int32_t scan = ndec_str_parse_zc_scan(open + 1, &len, &prefix_bp);
+    int32_t scan = ndec_str_parse_zc_scan(open + 1, &len, &prefix_bp, 0);
     if (UNLIKELY(scan < 0)) return -1;
     if (scan == 1) {
       uint64_t off = (uint64_t)((open + 1) - d->doc.src_buf);
@@ -411,7 +415,7 @@ INLINE int dom_visit_string(tape_emit_ctx *d, uint8_t **str_pp, uint64_t **pp, c
      * the sign costs nothing over the `n < 0` this replaces and closes the
      * silent truncation that a separate length check would have had to pay for.
      * See TAPE_STRING for the field layout. */
-    uint32_t nu = (uint32_t)ndec_str_parse(open + 1, base, &esc);
+    uint32_t nu = (uint32_t)ndec_str_parse(open + 1, base, &esc, 0);
     if (UNLIKELY(nu > 0xFFFFFFu)) return -1;
     uint64_t off = (uint64_t)(base - d->doc.str_arena);
     dom_tape_append_tag(pp, esc ? TAPE_STRING : TAPE_STRING_FREE, off | ((uint64_t)nu << 32));

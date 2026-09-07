@@ -16,7 +16,11 @@
 #define SRC_PEEK() (src[*cursor.idx])
 #define SRC_PTR()  (src + *cursor.idx)
 #define SRC_POS()  (*cursor.idx)
-#define SRC_EOF()  (cursor.idx >= m->cursor_end.idx)
+/* Position of the most recently consumed structural. Valid once this pass has
+ * consumed at least one entry; bracket-mismatch sites use it to name the
+ * bracket itself whether or not the next structural has arrived. */
+#define SRC_PREV_POS() (cursor.idx[-1])
+#define SRC_EOF()      (cursor.idx >= m->cursor_end.idx)
 
 #define SRC_ADVANCE() (cursor.idx++)
 #define SRC_ADVANCE_PTR()                                                                                         \

@@ -448,6 +448,15 @@ enum {
    * destination. Go aliases the source ValueDoc tape without copying.
    */
   BIND_YIELD_TAPE_BIND_VALUE = 10,
+  /*
+   * The streaming engine needs more input. The cursor may sit before stable
+   * unconsumed tokens (the phase2 key wait), so Go relocates from the first
+   * unconsumed structural rather than the scanner's tail, reads more bytes,
+   * runs the window scanner, and reinstalls ctx.src plus the cursor pair
+   * before re-entry. Phase names the continuation. Arg0, Arg1, and Target
+   * are unused.
+   */
+  BIND_YIELD_INPUT = 12,
 };
 
 enum {
@@ -500,6 +509,49 @@ enum {
    * This phase survives BIND_YIELD_TAPE_ARENA so reentry does not rescan.
    */
   BIND_PHASE_ROOT_SCANNED = 35,
+  /* Streaming-input continuations. Each re-enters its label with a fresh
+   * cursor installed by the Go driver's next window. */
+  BIND_PHASE_OBJECT_CONTINUE      = 36,
+  BIND_PHASE_ARRAY_CONTINUE       = 37,
+  BIND_PHASE_MAP_CONTINUE_INPUT   = 38,
+  BIND_PHASE_OBJECT_FIELD         = 39,
+  /* Resumes an in-flight value skip; machine skip_depth carries its nesting. */
+  BIND_PHASE_SKIP_RESUME = 40,
+  /*
+   * The window ended between an opening '{' and the first key. Re-entry replays
+   * the decision a leading '}' closes the empty struct, any other byte is the
+   * first key. Resume after a key was confirmed uses BIND_PHASE_OBJECT_FIELD,
+   * where '}' is a trailing-comma error.
+   */
+  BIND_PHASE_OBJECT_FIELD_FIRST = 41,
+  /*
+   * Resumes a deferred raw container scan that stopped at a window edge. The
+   * machine's raw fields carry the bracket depth and the scratch position; the
+   * Go driver has already drained any completed records and installed the next
+   * window, whose offset zero continues the value's bytes.
+   */
+  BIND_PHASE_DEFERRED_RAW_RESUME = 42,
+  /*
+   * Value-submachine continuations. The machine's vd fields and the frame
+   * slots above the parent bind depth carry the walk; alloc.tape_used is the
+   * committed append cursor. OBJ_OPEN and ARR_OPEN replay the empty-close
+   * decision after their bracket was consumed; OBJ_KEY enters with the entry
+   * already counted; ELEM, OBJ_CONT, and ARR_CONT re-enter their labels with
+   * the current container state restored.
+   */
+  BIND_PHASE_VD_OBJ_OPEN = 44,
+  BIND_PHASE_VD_ARR_OPEN = 45,
+  BIND_PHASE_VD_ELEM     = 46,
+  BIND_PHASE_VD_OBJ_KEY  = 47,
+  BIND_PHASE_VD_OBJ_CONT = 48,
+  BIND_PHASE_VD_ARR_CONT = 49,
+  /*
+   * Resumes a root-level mismatch skip that stopped at a window edge. The
+   * machine's skip_depth carries the bracket nesting, with the same entry
+   * convention as BIND_ROOT_TYPE_MISMATCH_SKIP: one means the opening bracket
+   * was already consumed.
+   */
+  BIND_PHASE_ROOT_SKIP_RESUME = 50,
 };
 
 enum {
@@ -617,15 +669,24 @@ _Static_assert(offsetof(NdecBindAllocator, tape_used) == 112, "alloc.tape_used")
 
 /*
  * C appends these 24-byte records and Go drains them in batches. target must be
- * GC-scannable because a hook may publish heap pointers there. arg0 and arg1 are
- * source byte bounds for JSON and RawMessage, or a byte offset and length in the
- * bump-only str_arena for TextUnmarshaler.
+ * GC-scannable because a hook may publish heap pointers there. backing selects
+ * the span's storage: source offsets into ctx.src, or offsets into the
+ * streaming engine's raw scratch. arg0 and arg1 are the exclusive byte bounds
+ * in the selected backing for JSON, RawMessage, and interface slots, or a byte
+ * offset and length in the bump-only str_arena for TextUnmarshaler and the
+ * base64 []byte record.
  */
+enum {
+  BIND_RECORD_BACKING_SOURCE = 0,
+  BIND_RECORD_BACKING_SCRATCH = 1,
+};
+
 typedef struct UnmarshalRecord {
   void *target;      /* off 0, receiver slot pointer */
   uint32_t type_idx; /* off 8, ctx.types and hook-table index */
   uint8_t kind;      /* off 12, deferred BindKind */
-  uint8_t _pad[3];   /* off 13 */
+  uint8_t backing;   /* off 13, BIND_RECORD_BACKING_* */
+  uint8_t _pad[2];   /* off 14 */
   uint32_t arg0;     /* off 16, source start or str_arena byte offset */
   uint32_t arg1;     /* off 20, source end or string byte length */
 } UnmarshalRecord;
@@ -633,6 +694,7 @@ _Static_assert(sizeof(UnmarshalRecord) == 24, "UnmarshalRecord size drift");
 _Static_assert(offsetof(UnmarshalRecord, target) == 0, "urec.target");
 _Static_assert(offsetof(UnmarshalRecord, type_idx) == 8, "urec.type_idx");
 _Static_assert(offsetof(UnmarshalRecord, kind) == 12, "urec.kind");
+_Static_assert(offsetof(UnmarshalRecord, backing) == 13, "urec.backing");
 _Static_assert(offsetof(UnmarshalRecord, arg0) == 16, "urec.arg0");
 _Static_assert(offsetof(UnmarshalRecord, arg1) == 20, "urec.arg1");
 
@@ -670,30 +732,36 @@ _Static_assert(sizeof(int32_t) == 4, "Value coordinate stores are full-width");
 /*
  * C publishes one action and its arguments here before returning to Go. Go must
  * service it before reentry. For ERROR, arg0 is BIND_ERR_*, arg1 is error-specific
- * detail, and first_error_pos is the only source byte position. UINT32_MAX means
- * no source position is available. target names only a variant host for ERROR;
- * other errors publish NULL. Non-error actions use target as their borrowed slot.
+ * detail, and first_error_pos is the only source byte position, a full document
+ * offset. UINT64_MAX means no source position is available. The streaming engine
+ * records a skip error window-locally; the first input yield after recording
+ * converts it to an absolute document offset and raises first_error_promoted,
+ * while immediate errors stay window-local with the flag clear for the driver
+ * to rebase. target names only a variant host for ERROR; other errors publish
+ * NULL. Non-error actions use target as their borrowed slot.
  */
 typedef struct NdecBindYield {
-  uint32_t pending_action;  /* off 0, BIND_YIELD_* */
-  uint32_t arg0;            /* off 4, action-specific argument */
-  uint32_t arg1;            /* off 8, action-specific argument or error detail */
-  uint32_t first_error_pos; /* off 12, source byte offset or UINT32_MAX */
-  uint8_t *target;          /* off 16, action slot or variant host */
+  uint32_t pending_action;      /* off 0, BIND_YIELD_* */
+  uint32_t arg0;                /* off 4, action-specific argument */
+  uint32_t arg1;                /* off 8, action-specific argument or error detail */
+  uint32_t first_error_promoted; /* off 12, streaming: first_error_pos already absolute */
+  uint64_t first_error_pos;     /* off 16, source offset */
+  uint8_t *target;              /* off 24, action slot or variant host */
 } NdecBindYield;
-_Static_assert(sizeof(NdecBindYield) == 24, "NdecBindYield size drift");
+_Static_assert(sizeof(NdecBindYield) == 32, "NdecBindYield size drift");
 _Static_assert(offsetof(NdecBindYield, pending_action) == 0, "yield.pending_action");
 _Static_assert(offsetof(NdecBindYield, arg0) == 4, "yield.arg0");
 _Static_assert(offsetof(NdecBindYield, arg1) == 8, "yield.arg1");
-_Static_assert(offsetof(NdecBindYield, first_error_pos) == 12, "yield.first_error_pos");
-_Static_assert(offsetof(NdecBindYield, target) == 16, "yield.target");
+_Static_assert(offsetof(NdecBindYield, first_error_promoted) == 12, "yield.first_error_promoted");
+_Static_assert(offsetof(NdecBindYield, first_error_pos) == 16, "yield.first_error_pos");
+_Static_assert(offsetof(NdecBindYield, target) == 24, "yield.target");
 
 typedef struct NdecBindBridge {
   NdecBindContext ctx;     /* off 0, 64 bytes */
   NdecBindAllocator alloc; /* off 64, 120 bytes */
-  NdecBindYield yield;     /* off 184, 24 bytes */
+  NdecBindYield yield;     /* off 184, 32 bytes */
 } NdecBindBridge;
-_Static_assert(sizeof(NdecBindBridge) == 208, "NdecBindBridge size drift");
+_Static_assert(sizeof(NdecBindBridge) == 216, "NdecBindBridge size drift");
 _Static_assert(offsetof(NdecBindBridge, ctx) == 0, "bridge.ctx");
 _Static_assert(offsetof(NdecBindBridge, alloc) == 64, "bridge.alloc");
 _Static_assert(offsetof(NdecBindBridge, yield) == 184, "bridge.yield");

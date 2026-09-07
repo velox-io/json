@@ -1,4 +1,4 @@
-//go:build darwin && arm64 && !vj_nondec
+//go:build darwin && arm64
 
 package ndec
 
@@ -19,6 +19,18 @@ func vjNdecBindParse(ctx unsafe.Pointer)
 //go:noescape
 //go:nosplit
 func vjNdecFmtParse(ctx unsafe.Pointer)
+
+//go:noescape
+//go:nosplit
+func vjNdecBindParseStream(ctx unsafe.Pointer)
+
+//go:noescape
+//go:nosplit
+func vjNdecWindowScan(ctx unsafe.Pointer)
+
+//go:noescape
+//go:nosplit
+func vjNdecValid(ctx unsafe.Pointer)
 
 func init() {
 	Available = true

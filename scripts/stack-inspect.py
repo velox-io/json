@@ -221,12 +221,14 @@ def render_png(cfg, frame_map, path):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("root", nargs="?", help="根函数名, 不传则打印 top N 和最深调用链")
-    p.add_argument("--target", default=DEFAULT_TARGET, help=f"目标 .syso 路径 (默认 {DEFAULT_TARGET})")
-    p.add_argument("--depth", type=int, default=5, help="ASCII 树最大深度 (默认 5)")
-    p.add_argument("--top", type=int, default=15, help="栈帧 top N (默认 15)")
-    p.add_argument("--png", help="渲染整张调用图 PNG 到该路径 (无后缀)")
-    p.add_argument("--list", action="store_true", help="列出有名字的函数")
+    p.add_argument(
+        "root", nargs="?", help="root function name; without it, print top N frames and the deepest call chain"
+    )
+    p.add_argument("--target", default=DEFAULT_TARGET, help=f".syso path to analyze (default {DEFAULT_TARGET})")
+    p.add_argument("--depth", type=int, default=5, help="max ASCII tree depth (default 5)")
+    p.add_argument("--top", type=int, default=15, help="top N frames to print (default 15)")
+    p.add_argument("--png", help="render the full call graph PNG to this path (without extension)")
+    p.add_argument("--list", action="store_true", help="list named functions")
     args = p.parse_args()
 
     proj = angr.Project(args.target, auto_load_libs=False)

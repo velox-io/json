@@ -587,7 +587,7 @@ INLINE int atof_i_has_prefix_ci_n(const char *s, const char *lim, const char *pr
 #define ATOF_EXP_MASK_F64   UINT64_C(0x7ff0000000000000)
 #define ATOF_FRAC_MASK_F64  UINT64_C(0x000fffffffffffff)
 #define ATOF_FRAC_BITS_F64  52u
-#define ATOF_NAN_F64        UINT64_C(0x7ff8000000000000)
+#define ATOF_NAN_F64        UINT64_C(0x7ff8000000000001) /* matches math.NaN's payload bit */
 
 /* Eisel-Lemire f64: one (occasionally two) 64x128 truncated multiplies plus
  * round-to-even; writes the binary64 bit pattern to *bits_out. Correctly

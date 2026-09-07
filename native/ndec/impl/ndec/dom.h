@@ -66,7 +66,9 @@ INLINE int dom_ensure_capacity(json_dom *d, size_t len) {
    * Why `len` bounds it. Every arena byte is either a decoded string byte or a
    * byte of a number kept as text, and each is charged to a distinct span of
    * the source. A string costs decoded + 1 for the '"' WINDOW terminator,
-   * against a source body plus its two quotes, so it never breaks even. A
+   * against a source body plus its two quotes, so it never breaks even. The
+   * string decode copies bytes verbatim, so a decoded body never exceeds the
+   * source span that pays for it. A
    * TAPE_NUM_RAW number is copied verbatim plus a '\0' reparse sentinel
    * (dom_store_num_text), so it costs n + 1 against a token of n bytes plus
    * its trailing separator byte; only the document's final token can lack

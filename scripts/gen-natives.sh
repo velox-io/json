@@ -546,10 +546,26 @@ fi
 #   * LTO ELF/COFF link: ld.lld/lld-link emit a warning; prelink.sh promotes
 #     these to hard errors via --fatal-warnings / /WX.
 STACK_WARN_FLAG=""
-STACK_WARN_SIZE="${STACK_WARN_SIZE:-800}"
+# The guardrail mirrors each platform's tightest entry-chain budget: the
+# shared 800B nosplit budget, or 900B on windows where stackReserve-backed
+# entries run 900..1200B budgets (per-module STACK_CHECK_BUDGETS) and PGO
+# codegen legitimately grows hot frames (ndec_bind_parse_inner 648 -> 856)
+# while every measured chain stays within budget.
+if [ -z "${STACK_WARN_SIZE:-}" ]; then
+  STACK_WARN_SIZE=800
+  [ "$TARGET_OS" = "windows" ] && STACK_WARN_SIZE=900
+fi
 
 if [ "$STACK_WARN_SIZE" != "0" ] && [ "$USE_LLVM" = "1" ]; then
-  STACK_WARN_FLAG="-Wframe-larger-than=$STACK_WARN_SIZE -Werror=frame-larger-than= -Xclang -fwarn-stack-size=$STACK_WARN_SIZE"
+  STACK_WARN_FLAG="-Wframe-larger-than=$STACK_WARN_SIZE -Xclang -fwarn-stack-size=$STACK_WARN_SIZE"
+  # Instrumented builds carry per-block counter maintenance that inflates
+  # frames (e.g. ndec_scan_structurals_strict_counted 728 -> 808 on mingw
+  # x64). The instrumented syso is a measurement artifact, never shipped: the
+  # production rebuild (--pgo-instr-use) re-applies the full gate. Keep the
+  # diagnostic visible as a warning so drift stays observable.
+  if [ "$PGO_INSTR" != true ]; then
+    STACK_WARN_FLAG="$STACK_WARN_FLAG -Werror=frame-larger-than="
+  fi
 fi
 # NO_OPT disables inlining; stack frames grow well past the production nosplit
 # budget. NO_NDEBUG enables debug assertions/tracing. The check exists to

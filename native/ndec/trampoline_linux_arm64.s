@@ -1,5 +1,3 @@
-//go:build !vj_nondec
-
 #include "textflag.h"
 
 // func vjNdecDOMParseCounted(ctx unsafe.Pointer)
@@ -28,3 +26,24 @@ TEXT ·vjNdecBindParse(SB), NOSPLIT, $0-8
 TEXT ·vjNdecFmtParse(SB), NOSPLIT, $0-8
 	MOVD ctx+0(FP), R0
 	B  ndec_fmt_parse(SB)
+
+// func vjNdecBindParseStream(ctx unsafe.Pointer)
+// C: void ndec_bind_parse_stream(NdecBindMachine *ctx)
+// C ABI: ctx=X0
+TEXT ·vjNdecBindParseStream(SB), NOSPLIT, $0-8
+	MOVD ctx+0(FP), R0
+	B    ndec_bind_parse_stream(SB)
+
+// func vjNdecWindowScan(ctx unsafe.Pointer)
+// C: void ndec_window_scan(NdecWindowScanCtx *ctx)
+// C ABI: ctx=X0
+TEXT ·vjNdecWindowScan(SB), NOSPLIT, $0-8
+	MOVD ctx+0(FP), R0
+	B    ndec_window_scan(SB)
+
+// func vjNdecValid(ctx unsafe.Pointer)
+// C: void ndec_valid(NdecValidContext *ctx)
+// C ABI: ctx=X0
+TEXT ·vjNdecValid(SB), NOSPLIT, $0-8
+	MOVD ctx+0(FP), R0
+	B    ndec_valid(SB)

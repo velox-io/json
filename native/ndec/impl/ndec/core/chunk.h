@@ -9,8 +9,8 @@
  *                        per-string during DOM build; fewer indexes on
  *                        string-heavy inputs)
  *
- * Both share classify_chunk / compute_escaped / NdecScanState and differ
- * only in the final merge.
+ * Both share compute_escaped / NdecScanState and classify each chunk in
+ * one fused pass.
  */
 
 #ifndef NDEC_CHUNK_H
@@ -418,15 +418,13 @@ typedef struct NdecChunkResult {
   NdecPlanePop plane_pop;
 } NdecChunkResult;
 
-/* Internal: classify, resolve escapes, compute the four bit planes
- * (op / real_quotes / scalar_start / in_string). Both public wrappers
- * call this and differ only in the final OR. Out-params return planes
- * so the wrappers compile to a single OR / OR-AND-OR. */
-INLINE void ndec_scan_chunk_planes(const uint8_t *buf, NdecScanState *state, uint64_t *out_op,
-                                   uint64_t *out_real_quotes, uint64_t *out_scalar_start,
-                                   uint64_t *out_in_string) {
-  NdecChunkClass cls = ndec_classify_chunk(buf);
-
+/* Internal: resolve escapes, propagate the string mask, and derive scalar
+ * starts over one classified chunk. Shared by every emission policy.
+ * Out-params return planes so the wrappers compile to a single OR /
+ * OR-AND-OR. */
+INLINE void ndec_scan_chunk_resolve(NdecChunkClass cls, NdecScanState *state, uint64_t *out_op,
+                                    uint64_t *out_real_quotes, uint64_t *out_scalar_start,
+                                    uint64_t *out_in_string) {
   /* Fast path: most chunks have no backslashes. */
   uint64_t real_quotes;
   if (__builtin_expect(cls.backslash == 0, 1)) {
@@ -470,7 +468,7 @@ INLINE void ndec_scan_chunk_planes(const uint8_t *buf, NdecScanState *state, uin
  * machine needs the close to step out of a string token. */
 INLINE NdecChunkResult ndec_scan_chunk_sax(const uint8_t *buf, NdecScanState *state) {
   uint64_t op, real_quotes, scalar_start, in_string;
-  ndec_scan_chunk_planes(buf, state, &op, &real_quotes, &scalar_start, &in_string);
+  ndec_scan_chunk_resolve(ndec_classify_chunk(buf), state, &op, &real_quotes, &scalar_start, &in_string);
   return (NdecChunkResult){op | real_quotes | scalar_start, {0, 0, 0}};
 }
 
@@ -479,7 +477,7 @@ INLINE NdecChunkResult ndec_scan_chunk_sax(const uint8_t *buf, NdecScanState *st
  * at each quote), so `real_quotes & in_string` keeps only opens. */
 INLINE NdecChunkResult ndec_scan_chunk_dom(const uint8_t *buf, NdecScanState *state) {
   uint64_t op, real_quotes, scalar_start, in_string;
-  ndec_scan_chunk_planes(buf, state, &op, &real_quotes, &scalar_start, &in_string);
+  ndec_scan_chunk_resolve(ndec_classify_chunk(buf), state, &op, &real_quotes, &scalar_start, &in_string);
   return (NdecChunkResult){op | (real_quotes & in_string) | scalar_start, {0, 0, 0}};
 }
 
@@ -497,7 +495,7 @@ INLINE NdecChunkResult ndec_scan_chunk_dom(const uint8_t *buf, NdecScanState *st
  * per chunk would lose the odd one whenever a string spans a chunk boundary. */
 INLINE NdecChunkResult ndec_scan_chunk_dom_counted(const uint8_t *buf, NdecScanState *state) {
   uint64_t op, real_quotes, scalar_start, in_string;
-  ndec_scan_chunk_planes(buf, state, &op, &real_quotes, &scalar_start, &in_string);
+  ndec_scan_chunk_resolve(ndec_classify_chunk(buf), state, &op, &real_quotes, &scalar_start, &in_string);
   NdecPlanePop pop = {(uint32_t)__builtin_popcountll(op), (uint32_t)__builtin_popcountll(real_quotes),
                       (uint32_t)__builtin_popcountll(scalar_start)};
   return (NdecChunkResult){op | (real_quotes & in_string) | scalar_start, pop};
@@ -513,7 +511,7 @@ INLINE NdecChunkResult ndec_scan_chunk_dom_counted(const uint8_t *buf, NdecScanS
  * One popcount per chunk is the entire counting cost. */
 INLINE NdecChunkResult ndec_scan_chunk_dom_scount(const uint8_t *buf, NdecScanState *state) {
   uint64_t op, real_quotes, scalar_start, in_string;
-  ndec_scan_chunk_planes(buf, state, &op, &real_quotes, &scalar_start, &in_string);
+  ndec_scan_chunk_resolve(ndec_classify_chunk(buf), state, &op, &real_quotes, &scalar_start, &in_string);
   return (NdecChunkResult){op | (real_quotes & in_string) | scalar_start,
                            {0, 0, (uint32_t)__builtin_popcountll(scalar_start)}};
 }

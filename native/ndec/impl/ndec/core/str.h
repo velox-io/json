@@ -1,5 +1,14 @@
 /*
  * Shared string-decode primitives used by both the streaming SAX decoder and the DOM string copier.
+ *
+ * Every decoder takes a `validate` policy. validate == 0 copies string bytes
+ * verbatim and is what every caller passes: lax scans preserve the raw bytes
+ * and strict scans reject invalid UTF-8 before the build runs, so decode-time
+ * validation is either unwanted or unreachable. Verbatim copy also keeps a
+ * decoded body within its source span, the str_arena charging invariant (a
+ * replacement byte would triple its cost). The validate == 1 flavor, which
+ * replaces each invalid byte with U+FFFD the way encoding/json's unquote
+ * does, stays available as the policy seam.
  */
 
 #ifndef NDEC_CORE_STR_H
@@ -163,6 +172,85 @@ static __attribute__((noinline)) int ndec_str_handle_escape(const uint8_t **sip,
   return 0;
 }
 
+/* Validate and copy one UTF-8 sequence starting at s. A valid sequence is
+ * copied verbatim; *written receives the output length and the return value
+ * is the consumed length. An invalid lead or continuation consumes exactly
+ * one byte and writes one U+FFFD, mirroring utf8.DecodeRune: every rejected
+ * byte yields one replacement character, so an invalid run of N bytes decodes
+ * to N replacement characters. A sequence truncated by the close quote fails
+ * its continuation check and the caller retries each remaining byte as a
+ * fresh lead. */
+INLINE uint32_t ndec_str_utf8_copy(const uint8_t *s, uint8_t *d, uint32_t *written) {
+  uint8_t c = s[0];
+  uint32_t n, cp;
+  if (LIKELY(c < 0x80)) {
+    d[0]     = c;
+    *written = 1;
+    return 1;
+  }
+  if (c >= 0xC2 && c <= 0xDF) {
+    n  = 2;
+    cp = (uint32_t)(c & 0x1F);
+  } else if (c >= 0xE0 && c <= 0xEF) {
+    n  = 3;
+    cp = (uint32_t)(c & 0x0F);
+  } else if (c >= 0xF0 && c <= 0xF4) {
+    n  = 4;
+    cp = (uint32_t)(c & 0x07);
+  } else {
+    goto invalid;
+  }
+  for (uint32_t i = 1; i < n; i++) {
+    uint8_t cc = s[i];
+    if (UNLIKELY((cc & 0xC0) != 0x80)) goto invalid;
+    cp = (cp << 6) | (uint32_t)(cc & 0x3F);
+  }
+  /* Overlong, surrogate, and out-of-range rejection. The C2 lower bound on
+   * two-byte leads already excludes two-byte overlongs. */
+  if (UNLIKELY(cp > 0x10FFFF || (cp < 0x800 && n == 3) || (cp < 0x10000 && n == 4) ||
+               (cp >= 0xD800 && cp <= 0xDFFF)))
+    goto invalid;
+  for (uint32_t i = 0; i < n; i++)
+    d[i] = s[i];
+  *written = n;
+  return n;
+invalid:
+  d[0]     = 0xEF;
+  d[1]     = 0xBF;
+  d[2]     = 0xBD;
+  *written = 3;
+  return 1;
+}
+
+/* Scalar decoder for string bodies that hold an escape or, under validate,
+ * non-ASCII bytes. Handles escapes; the validate policy decides the high-bit
+ * treatment (see the header comment). Returns the decoded length relative to
+ * dst, or -1 on a malformed escape. */
+static __attribute__((noinline)) int32_t ndec_str_decode_scalar(const uint8_t *si, uint8_t *dst, uint8_t *di,
+                                                                int *esc_seen, int validate) {
+  for (;;) {
+    uint8_t c = *si;
+    if (c == '"') {
+      *di = c; /* sentinel; see the contract above */
+      return (int32_t)(di - dst);
+    }
+    if (UNLIKELY(c == '\\')) {
+      si++;
+      if (ndec_str_handle_escape(&si, &di, NULL) < 0) return -1;
+      if (esc_seen) *esc_seen = 1;
+      continue;
+    }
+    if (UNLIKELY(validate && c >= 0x80)) {
+      uint32_t written;
+      si += ndec_str_utf8_copy(si, di, &written);
+      di += written;
+      continue;
+    }
+    *di++ = c;
+    si++;
+  }
+}
+
 /*
  * SIMD chunk scan for JSON string bodies.
  *
@@ -185,18 +273,20 @@ static __attribute__((noinline)) int ndec_str_handle_escape(const uint8_t **sip,
 #define NDEC_STR_CHUNK 32
 typedef uint32_t ndec_str_mask;
 
-INLINE void ndec_str_chunk_scan(const uint8_t *src, uint8_t *dst, ndec_str_mask *bs, ndec_str_mask *qt) {
+INLINE void ndec_str_chunk_scan(const uint8_t *src, uint8_t *dst, ndec_str_mask *bs, ndec_str_mask *qt, int *hi) {
   __m256i v = _mm256_loadu_si256((const __m256i *)src);
   _mm256_storeu_si256((__m256i *)dst, v);
   *bs = (ndec_str_mask)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, _mm256_set1_epi8('\\')));
   *qt = (ndec_str_mask)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, _mm256_set1_epi8('"')));
+  *hi = !_mm256_testz_si256(v, _mm256_set1_epi8((char)0x80));
 }
 /* Same scan, no store. Used by the raw (uncopied) phase of the zero-copy
  * string state machine. */
-INLINE void ndec_str_chunk_scan_noload(const uint8_t *src, ndec_str_mask *bs, ndec_str_mask *qt) {
+INLINE void ndec_str_chunk_scan_noload(const uint8_t *src, ndec_str_mask *bs, ndec_str_mask *qt, int *hi) {
   __m256i v = _mm256_loadu_si256((const __m256i *)src);
   *bs       = (ndec_str_mask)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, _mm256_set1_epi8('\\')));
   *qt       = (ndec_str_mask)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, _mm256_set1_epi8('"')));
+  *hi       = !_mm256_testz_si256(v, _mm256_set1_epi8((char)0x80));
 }
 INLINE uint32_t ndec_str_mask_ctz(ndec_str_mask m) {
   return (uint32_t)__builtin_ctz(m);
@@ -217,7 +307,15 @@ INLINE uint32_t ndec_str_neon_pack32(uint8x16_t a, uint8x16_t b) {
   return (uint32_t)vgetq_lane_u32(vreinterpretq_u32_u8(s), 0);
 }
 
-INLINE void ndec_str_chunk_scan(const uint8_t *src, uint8_t *dst, ndec_str_mask *bs, ndec_str_mask *qt) {
+/* The high-bit probe is a horizontal signed-min over the OR of both halves:
+ * any byte >= 0x80 makes the minimum negative. */
+INLINE int ndec_str_neon_high(const uint8_t *src) {
+  int8x16_t v0 = vld1q_s8((const int8_t *)src);
+  int8x16_t v1 = vld1q_s8((const int8_t *)(src + 16));
+  return vminvq_s8(vorrq_s8(v0, v1)) < 0;
+}
+
+INLINE void ndec_str_chunk_scan(const uint8_t *src, uint8_t *dst, ndec_str_mask *bs, ndec_str_mask *qt, int *hi) {
   uint8x16_t v0 = vld1q_u8(src);
   uint8x16_t v1 = vld1q_u8(src + 16);
   vst1q_u8(dst, v0);
@@ -228,8 +326,9 @@ INLINE void ndec_str_chunk_scan(const uint8_t *src, uint8_t *dst, ndec_str_mask 
   uint8x16_t qt1 = vceqq_u8(v1, vdupq_n_u8('"'));
   *bs            = ndec_str_neon_pack32(bs0, bs1);
   *qt            = ndec_str_neon_pack32(qt0, qt1);
+  *hi            = ndec_str_neon_high(src);
 }
-INLINE void ndec_str_chunk_scan_noload(const uint8_t *src, ndec_str_mask *bs, ndec_str_mask *qt) {
+INLINE void ndec_str_chunk_scan_noload(const uint8_t *src, ndec_str_mask *bs, ndec_str_mask *qt, int *hi) {
   uint8x16_t v0  = vld1q_u8(src);
   uint8x16_t v1  = vld1q_u8(src + 16);
   uint8x16_t bs0 = vceqq_u8(v0, vdupq_n_u8('\\'));
@@ -238,6 +337,7 @@ INLINE void ndec_str_chunk_scan_noload(const uint8_t *src, ndec_str_mask *bs, nd
   uint8x16_t qt1 = vceqq_u8(v1, vdupq_n_u8('"'));
   *bs            = ndec_str_neon_pack32(bs0, bs1);
   *qt            = ndec_str_neon_pack32(qt0, qt1);
+  *hi            = ndec_str_neon_high(src);
 }
 INLINE uint32_t ndec_str_mask_ctz(ndec_str_mask m) {
   return (uint32_t)__builtin_ctz(m);
@@ -261,33 +361,43 @@ INLINE uint32_t ndec_str_mask_ctz(ndec_str_mask m) {
  *
  * esc_seen (NULL allowed) receives 1 when any escape was decoded. An esc_seen
  * of 0 means the body is verbatim source text: no backslash preceded the
- * closing quote, the TAPE_STRING_FREE predicate. */
-INLINE int32_t ndec_str_parse(const uint8_t *src, uint8_t *dst, int *esc_seen) {
+ * closing quote, the TAPE_STRING_FREE predicate. The validate policy selects
+ * the high-bit treatment (see the header comment); validate == 0 keeps every
+ * high-bit byte on the SIMD store path. */
+INLINE int32_t ndec_str_parse(const uint8_t *src, uint8_t *dst, int *esc_seen, int validate) {
   const uint8_t *si = src;
   uint8_t *di       = dst;
 
 #if NDEC_STR_CHUNK
 #if defined(__ARM_NEON)
   /* On NEON, an escape in the first chunk selects the scalar decoder for the
-   * remaining body. Later escapes stay in the SIMD loop. */
+   * remaining body; later escapes stay in the SIMD loop. Under validate a
+   * non-ASCII first chunk selects it too so UTF-8 validation runs. */
   {
     ndec_str_mask bs, qt;
-    ndec_str_chunk_scan(si, di, &bs, &qt);
+    int hi;
+    ndec_str_chunk_scan(si, di, &bs, &qt, &hi);
     if (((bs - 1) & qt) != 0) {
+      if (UNLIKELY(validate && hi)) return ndec_str_decode_scalar(si, dst, di, esc_seen, validate);
       return (int32_t)ndec_str_mask_ctz(qt);
     }
-    if (UNLIKELY(bs != 0)) goto scalar_tail;
+    if (UNLIKELY(bs != 0 || (validate && hi))) return ndec_str_decode_scalar(si, dst, di, esc_seen, validate);
     si += NDEC_STR_CHUNK;
     di += NDEC_STR_CHUNK;
   }
 #endif
   for (;;) {
     ndec_str_mask bs, qt;
-    ndec_str_chunk_scan(si, di, &bs, &qt);
+    int hi;
+    ndec_str_chunk_scan(si, di, &bs, &qt, &hi);
     /* Quote first: `bs - 1` clears all bits >= lowest bs (or is all-ones
      * if bs == 0); ANDing with qt detects a quote at a strictly earlier
      * position, including the no-bs case. */
     if (((bs - 1) & qt) != 0) {
+      /* Under validate a quote sharing its chunk with high-bit bytes may
+       * still hide invalid bytes before it, so validation runs before the
+       * fast return. */
+      if (UNLIKELY(validate && hi)) return ndec_str_decode_scalar(si, dst, di, esc_seen, validate);
       return (int32_t)(di - dst + ndec_str_mask_ctz(qt));
     }
     if (UNLIKELY(bs != 0)) {
@@ -298,64 +408,76 @@ INLINE int32_t ndec_str_parse(const uint8_t *src, uint8_t *dst, int *esc_seen) {
       if (esc_seen) *esc_seen = 1;
       continue;
     }
+    if (UNLIKELY(validate && hi)) {
+      /* The chunk store already copied these bytes; the scalar decoder
+       * rewrites them from the chunk start with UTF-8 validation. */
+      return ndec_str_decode_scalar(si, dst, di, esc_seen, validate);
+    }
     si += NDEC_STR_CHUNK;
     di += NDEC_STR_CHUNK;
   }
-#if defined(__ARM_NEON)
-scalar_tail:
-  for (;;) {
-    uint8_t c = *si;
-    if (c == '"') {
-      *di = c; /* sentinel; see the contract above */
-      return (int32_t)(di - dst);
-    }
-    if (UNLIKELY(c == '\\')) {
-      si++;
-      if (ndec_str_handle_escape(&si, &di, NULL) < 0) return -1;
-      if (esc_seen) *esc_seen = 1;
-      continue;
-    }
-    *di++ = c;
-    si++;
-  }
-#endif
 #else
   /* Scalar-only fallback (no SIMD). Stage1's close-quote contract still
    * applies; the loop is guaranteed to terminate on the close quote. */
-  for (;;) {
-    uint8_t c = *si;
-    if (c == '"') {
-      *di = c; /* sentinel; see the contract above */
-      return (int32_t)(di - dst);
-    }
-    if (UNLIKELY(c == '\\')) {
-      si++;
-      if (ndec_str_handle_escape(&si, &di, NULL) < 0) return -1;
-      if (esc_seen) *esc_seen = 1;
-      continue;
-    }
-    *di++ = c;
-    si++;
-  }
+  return ndec_str_decode_scalar(si, dst, di, esc_seen, validate);
 #endif
 }
 
 /* Read a zero-copy candidate and preserve the destination. Return 1 with the
  * body length for an escape-free string, 2 with the first backslash offset when
- * decoding is required, or -1 when the raw length exceeds 24 bits. The caller
- * handles result 2 with ndec_str_parse_zc_continue under the same bounds contract. */
-INLINE int32_t ndec_str_parse_zc_scan(const uint8_t *src, uint32_t *out_len, uint32_t *prefix_bp) {
+ * decoding is required, 3 (validate only) with the first high-bit byte offset
+ * when UTF-8 replacement is required, or -1 when the raw length exceeds 24
+ * bits. The caller handles result 2 with ndec_str_parse_zc_continue; result 3
+ * exists only under validate, whose caller decodes rather than alias. Raw
+ * callers alias any escape-free body, high-bit bytes included. */
+INLINE int32_t ndec_str_parse_zc_scan(const uint8_t *src, uint32_t *out_len, uint32_t *prefix_bp, int validate) {
   const uint8_t *si = src;
 
 #if NDEC_STR_CHUNK
   for (;;) {
     ndec_str_mask bs, qt;
-    ndec_str_chunk_scan_noload(si, &bs, &qt);
+    int hi;
+    ndec_str_chunk_scan_noload(si, &bs, &qt, &hi);
     if (((bs - 1) & qt) != 0) {
-      uint32_t len = (uint32_t)(si - src) + ndec_str_mask_ctz(qt);
-      if (UNLIKELY(len > 0xFFFFFFu)) return -1;
-      *out_len = len;
-      return 1;
+      uint32_t qoff = ndec_str_mask_ctz(qt);
+      /* Under validate a high-bit chunk may carry the quote: zero-copy stays
+       * valid only while every byte before the quote is ASCII. */
+      if (LIKELY(!validate || !hi)) {
+        uint32_t len = (uint32_t)(si - src) + qoff;
+        if (UNLIKELY(len > 0xFFFFFFu)) return -1;
+        *out_len = len;
+        return 1;
+      }
+      const uint8_t *hb = si;
+      while (*hb < 0x80)
+        hb++;
+      if (hb >= si + qoff) {
+        uint32_t len = (uint32_t)(si - src) + qoff;
+        if (UNLIKELY(len > 0xFFFFFFu)) return -1;
+        *out_len = len;
+        return 1;
+      }
+      if (bs != 0 && si + ndec_str_mask_ctz(bs) < hb) {
+        *prefix_bp = (uint32_t)(si - src) + ndec_str_mask_ctz(bs);
+        return 2;
+      }
+      *prefix_bp = (uint32_t)(hb - src);
+      return 3;
+    }
+    if (UNLIKELY(validate && hi)) {
+      /* Zero-copy would publish invalid UTF-8 verbatim, so a high-bit byte
+       * forces decoding. Result 3 names the first high-bit byte; an escape
+       * that precedes it keeps result 2, whose tail decoder validates the
+       * rest. */
+      const uint8_t *hb = si;
+      while (*hb < 0x80)
+        hb++;
+      if (bs != 0 && si + ndec_str_mask_ctz(bs) < hb) {
+        *prefix_bp = (uint32_t)(si - src) + ndec_str_mask_ctz(bs);
+        return 2;
+      }
+      *prefix_bp = (uint32_t)(hb - src);
+      return 3;
     }
     if (UNLIKELY(bs != 0)) {
       *prefix_bp = (uint32_t)(si - src) + ndec_str_mask_ctz(bs);
@@ -382,8 +504,10 @@ INLINE int32_t ndec_str_parse_zc_scan(const uint8_t *src, uint32_t *out_len, uin
 }
 
 /* Continue from the first escaped byte reported by ndec_str_parse_zc_scan.
- * The result is the decoded length or -1 for malformed input, and dst[result]
- * carries the quote sentinel on success. */
+ * The DOM string copier is the sole caller and runs the raw policy, so
+ * high-bit bytes copy verbatim and only escapes decode. The result is the
+ * decoded length or -1 for malformed input, and dst[result] carries the quote
+ * sentinel on success. */
 INLINE int32_t ndec_str_parse_zc_continue(const uint8_t *src, uint8_t *dst, uint32_t prefix_bp) {
   __builtin_memcpy(dst, src, prefix_bp);
   const uint8_t *si = src + prefix_bp + 1; /* skip the `\` */
@@ -392,22 +516,24 @@ INLINE int32_t ndec_str_parse_zc_continue(const uint8_t *src, uint8_t *dst, uint
 
 #if NDEC_STR_CHUNK
 #if defined(__ARM_NEON)
-  /* On NEON, another escape in the first continuation chunk selects the scalar
-   * decoder. Later escapes stay in the SIMD loop. */
+  /* On NEON, another escape in the first continuation chunk selects the
+   * scalar decoder; later escapes stay in the SIMD loop. */
   {
     ndec_str_mask bs, qt;
-    ndec_str_chunk_scan(si, di, &bs, &qt);
+    int hi;
+    ndec_str_chunk_scan(si, di, &bs, &qt, &hi);
     if (((bs - 1) & qt) != 0) {
       return (int32_t)(di - dst) + (int32_t)ndec_str_mask_ctz(qt);
     }
-    if (UNLIKELY(bs != 0)) goto zc_scalar_tail;
+    if (UNLIKELY(bs != 0)) return ndec_str_decode_scalar(si, dst, di, NULL, 0);
     si += NDEC_STR_CHUNK;
     di += NDEC_STR_CHUNK;
   }
 #endif
   for (;;) {
     ndec_str_mask bs, qt;
-    ndec_str_chunk_scan(si, di, &bs, &qt);
+    int hi;
+    ndec_str_chunk_scan(si, di, &bs, &qt, &hi);
     if (((bs - 1) & qt) != 0) {
       return (int32_t)(di - dst) + (int32_t)ndec_str_mask_ctz(qt);
     }
@@ -421,38 +547,8 @@ INLINE int32_t ndec_str_parse_zc_continue(const uint8_t *src, uint8_t *dst, uint
     si += NDEC_STR_CHUNK;
     di += NDEC_STR_CHUNK;
   }
-#if defined(__ARM_NEON)
-zc_scalar_tail:
-  for (;;) {
-    uint8_t c = *si;
-    if (c == '"') {
-      *di = c; /* sentinel; see the contract above */
-      return (int32_t)(di - dst);
-    }
-    if (UNLIKELY(c == '\\')) {
-      si++;
-      if (ndec_str_handle_escape(&si, &di, NULL) < 0) return -1;
-      continue;
-    }
-    *di++ = c;
-    si++;
-  }
-#endif
 #else
-  for (;;) {
-    uint8_t c = *si;
-    if (c == '"') {
-      *di = c; /* sentinel; see the contract above */
-      return (int32_t)(di - dst);
-    }
-    if (UNLIKELY(c == '\\')) {
-      si++;
-      if (ndec_str_handle_escape(&si, &di, NULL) < 0) return -1;
-      continue;
-    }
-    *di++ = c;
-    si++;
-  }
+  return ndec_str_decode_scalar(si, dst, di, NULL, 0);
 #endif
 }
 

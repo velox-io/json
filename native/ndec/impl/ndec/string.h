@@ -23,7 +23,7 @@ INLINE void bind_write_str_header(uint8_t *dst, const uint8_t *data, uintptr_t l
 INLINE int bind_intern_str(uint8_t **str_pp, const uint8_t *open_quote, const uint8_t **data_out,
                            uint32_t *len_out) {
   uint8_t *data = *str_pp;
-  int32_t n     = ndec_str_parse(open_quote + 1, data, NULL);
+  int32_t n     = ndec_str_parse(open_quote + 1, data, NULL, 0);
   if (UNLIKELY(n < 0)) return -1;
   uint32_t nu = (uint32_t)n;
   *str_pp     = data + nu + 1;
@@ -37,7 +37,7 @@ INLINE int bind_intern_str(uint8_t **str_pp, const uint8_t *open_quote, const ui
 INLINE int bind_intern_key_for_lookup(uint8_t *str_p, const uint8_t *open_quote, const uint8_t **data_out,
                                       uint32_t *len_out) {
   uint8_t *data = str_p;
-  int32_t n     = ndec_str_parse(open_quote + 1, data, NULL);
+  int32_t n     = ndec_str_parse(open_quote + 1, data, NULL, 0);
   if (UNLIKELY(n < 0)) return -1;
   *data_out = data;
   *len_out  = (uint32_t)n;

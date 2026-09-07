@@ -98,6 +98,65 @@ INLINE ndec_num_status ndec_parse_uint64(const uint8_t *s, uint32_t n, uint64_t 
   return NDEC_NUM_OK;
 }
 
+/* --- Lenient variants for `,string` scalars --- *
+ *
+ * The strconv grammar: the int variant takes an optional '+'/'-' sign and
+ * leading zeros; the uint variant takes digits only, matching
+ * strconv.ParseUint. Byte-bounded like the strict entry, so no readable
+ * padding is required. */
+
+INLINE ndec_num_status ndec_parse_int64_lenient(const uint8_t *s, uint32_t n, int64_t *out) {
+  int neg = 0;
+  if (n > 0 && (*s == '-' || *s == '+')) {
+    neg = (*s == '-');
+    s++;
+    n--;
+  }
+  /* Strip leading zeros so the digit count measures significant digits; a
+   * all-zero body keeps its final zero. */
+  while (n > 1 && *s == '0') {
+    s++;
+    n--;
+  }
+  const uint8_t *end          = s + n;
+  const uint8_t *start_digits = s;
+  uint64_t i                  = 0;
+  while (s < end && (uint8_t)(*s - '0') <= 9) {
+    i = 10 * i + (uint8_t)(*s - '0');
+    s++;
+  }
+  size_t dc = (size_t)(s - start_digits);
+  if (dc == 0) return NDEC_NUM_EMPTY;
+  if (s != end) return NDEC_NUM_FLOAT;
+  if (dc > 19) return NDEC_NUM_OVERFLOW;
+  if (i > (uint64_t)INT64_MAX + (uint64_t)neg) return NDEC_NUM_OVERFLOW;
+  *out = neg ? (int64_t)(~i + 1) : (int64_t)i;
+  return NDEC_NUM_OK;
+}
+
+INLINE ndec_num_status ndec_parse_uint64_lenient(const uint8_t *s, uint32_t n, uint64_t *out) {
+  while (n > 1 && *s == '0') {
+    s++;
+    n--;
+  }
+  const uint8_t *end          = s + n;
+  const uint8_t *start_digits = s;
+  uint64_t i                  = 0;
+  while (s < end && (uint8_t)(*s - '0') <= 9) {
+    i = 10 * i + (uint8_t)(*s - '0');
+    s++;
+  }
+  size_t dc = (size_t)(s - start_digits);
+  if (dc == 0) return NDEC_NUM_EMPTY;
+  if (s != end) return NDEC_NUM_FLOAT;
+  if (dc > 20) return NDEC_NUM_OVERFLOW;
+  if (dc == 20) {
+    if (*start_digits != '1' || i <= (uint64_t)INT64_MAX) return NDEC_NUM_OVERFLOW;
+  }
+  *out = i;
+  return NDEC_NUM_OK;
+}
+
 /* --- Padded variants: token boundary discovered from digit content --- *
  *
  * Callers must guarantee the buffer has readable non-digit padding past the

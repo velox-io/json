@@ -1,6 +1,7 @@
 /*
- * Native ndec exposes counted DOM scan and build, formatter, and typed binding
- * interfaces. This translation unit defines the DOM and binding entries.
+ * Native ndec exposes counted DOM scan and build, formatter, typed binding,
+ * and syntax validation interfaces. This translation unit defines the DOM,
+ * binding, and validation entries.
  */
 
 #include <stddef.h>
@@ -9,6 +10,7 @@
 #define NDEC_FN_DECL EXPORT ALIGN_STACK
 
 #include "ndec/dom.h"
+#include "ndec/valid.h"
 
 #define NDEC_DOM_STATE_SIZE 4096
 #define NDEC_ATOF_SIZE      2688
@@ -84,11 +86,11 @@ NDEC_FN_DECL void ndec_dom_parse_counted(NdecDomContext *ctx) {
   d->emit.doc.src_len = ctx->src_len;
 
   uint32_t scalars = 0;
-  int err = ctx->scan_strict ? ndec_scan_structurals_strict_scount(ctx->src, ctx->src_len, d->structural_indexes,
-                                                                    &d->n_structural_indexes, d->structural_cap,
-                                                                    &scalars)
-                             : ndec_scan_structurals_scount(ctx->src, ctx->src_len, d->structural_indexes,
-                                                            &d->n_structural_indexes, d->structural_cap, &scalars);
+  int err = ctx->scan_strict
+                ? ndec_scan_structurals_strict_scount(ctx->src, ctx->src_len, d->structural_indexes,
+                                                      &d->n_structural_indexes, d->structural_cap, &scalars)
+                : ndec_scan_structurals_scount(ctx->src, ctx->src_len, d->structural_indexes,
+                                               &d->n_structural_indexes, d->structural_cap, &scalars);
   if (err) {
     ctx->err = err;
     return;
@@ -151,10 +153,67 @@ NDEC_FN_DECL void ndec_dom_build(NdecDomContext *ctx) {
   ctx->str_used = d->emit.doc.str_used;
 }
 
+/* The binding engine instantiates twice from one machine body: NDEC_STREAM_MODE
+ * is a compile-time literal in each copy, so the contiguous engine folds away
+ * every window check and the streaming engine resolves window ends to
+ * BIND_YIELD_INPUT. */
+#define NDEC_STREAM_MODE 0
 #include "ndec/bind.h" // IWYU pragma: keep
+#undef NDEC_STREAM_MODE
+
+#define NDEC_STREAM_MODE 1
+#include "ndec/bind.h"
+#undef NDEC_STREAM_MODE
 
 #define NDEC_BIND_MACHINE_SIZE 16384
 
 _Static_assert(
     sizeof(NdecBindMachine) <= NDEC_BIND_MACHINE_SIZE,
     "NdecBindMachine exceeds NDEC_BIND_MACHINE_SIZE; bump it on both the C entry point and the Go binding mirror");
+
+/* Window scan for streaming input. The Go driver owns the buffer, tail
+ * relocation, and padding; this entry publishes the stable prefix's
+ * structural indexes and the scan verdict. */
+_Static_assert(sizeof(NdecWindowScan) == 24, "NdecWindowScan size must match the Go mirror");
+_Static_assert(sizeof(NdecWindowScanCtx) == 64, "NdecWindowScanCtx size must match the Go mirror");
+_Static_assert(offsetof(NdecWindowScanCtx, result) == 36,
+               "NdecWindowScanCtx.result offset must match the Go mirror");
+NDEC_FN_DECL void ndec_window_scan(NdecWindowScanCtx *ctx) {
+  ctx->result =
+      ctx->strict
+          ? ndec_scan_window_strict(ctx->src, ctx->len, ctx->out_indexes, ctx->capacity, (int)ctx->is_final)
+          : ndec_scan_window(ctx->src, ctx->len, ctx->out_indexes, ctx->capacity, (int)ctx->is_final);
+}
+
+/* Syntax-only validation entry. The control-byte scan runs without UTF-8
+ * validation because encoding/json accepts malformed UTF-8 in strings; the
+ * walk then checks the complete grammar over the structural index without
+ * writing a tape. src must carry 64 bytes of 0x20 padding past src_len and
+ * structural must hold src_len + 24 u32 slots, the scanner contract. */
+typedef struct NdecValidContext {
+  const uint8_t *src; /* off 0  */
+  size_t src_len;     /* off 8  */
+
+  uint32_t *structural;    /* off 16; cap >= src_len + 24 (u32 slots) */
+  uint32_t structural_cap; /* off 24 */
+  uint32_t _pad;           /* off 28 */
+
+  int32_t err; /* off 32; 0 = valid JSON, -1 = invalid */
+} NdecValidContext;
+
+_Static_assert(offsetof(NdecValidContext, structural_cap) == 24, "valid ctx structural_cap offset");
+_Static_assert(offsetof(NdecValidContext, err) == 32, "valid ctx err offset");
+_Static_assert(sizeof(NdecValidContext) == 40, "valid ctx size");
+
+NDEC_FN_DECL void ndec_valid(NdecValidContext *ctx) {
+  if (ctx->src_len == 0) {
+    ctx->err = -1;
+    return;
+  }
+  uint32_t n_idx;
+  if (ndec_scan_structurals_ctl(ctx->src, ctx->src_len, ctx->structural, &n_idx, ctx->structural_cap)) {
+    ctx->err = -1;
+    return;
+  }
+  ctx->err = ndec_valid_walk(ctx->src, ctx->structural, n_idx);
+}

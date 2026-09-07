@@ -72,8 +72,10 @@ INLINE int bind_emit_string_copy(uint8_t *str_arena_base, uint8_t **str_pp, uint
   uint8_t *base = *str_pp;
   int esc       = 0;
   /* One unsigned compare for both failures; see dom_visit_string's COPY branch
-   * in core/tape.h for why -1 and a >2^24 body land on the same test. */
-  uint32_t nu = (uint32_t)ndec_str_parse(open + 1, base, &esc);
+   * in core/tape.h for why -1 and a >2^24 body land on the same test.
+   * Raw copy keeps the decoded body within its source span, the str_arena
+   * charging invariant. */
+  uint32_t nu = (uint32_t)ndec_str_parse(open + 1, base, &esc, 0);
   if (UNLIKELY(nu > 0xFFFFFFu)) return -1;
   uint64_t off = (uint64_t)(base - str_arena_base);
   bind_emit_tape_tag(pp, esc ? TAPE_STRING : TAPE_STRING_FREE, off | ((uint64_t)nu << 32));
@@ -82,9 +84,9 @@ INLINE int bind_emit_string_copy(uint8_t *str_arena_base, uint8_t **str_pp, uint
 }
 
 /* Dispatch one structural primitive (string / number / atom) for the value
- * walk. Uses bind_validate_atom (not dom_validate_atom_ptr) and dom_visit_number
- * (flat params, reusable). str_limit bounds the number-text copy; bind pre-sizes
- * str_arena for the whole document at parse entry and never grows it mid-walk. */
+ * walk. The cursor advances optimistically; callers restore it on failure.
+ * str_limit bounds the number-text copy; bind pre-sizes str_arena for the whole
+ * document at parse entry and never grows it mid-walk. */
 INLINE int bind_emit_primitive(const uint8_t *buf, const uint32_t **idx_pp, uint8_t *str_arena_base,
                                uint8_t **str_pp, uint64_t **pp, atof_ctx *atof, const uint8_t *str_limit) {
   uint32_t off         = *(*idx_pp)++;

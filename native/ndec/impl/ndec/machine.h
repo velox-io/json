@@ -120,6 +120,21 @@ _Static_assert(sizeof(BindAuxFrame) == 48, "BindAuxFrame size drift");
 
 #define BIND_REBIND_STACK_SIZE 4 /* Maximum nested phase 2 descent depth. */
 
+/* One string-arena generation retired by streaming growth. The streaming
+ * driver copies content on growth, so a pointer into a retired backing still
+ * names bytes this parse published; the interval carries the offsets that
+ * prove provenance. */
+typedef struct BindStrProv {
+  uint8_t *base;  /* off 0  retired backing base */
+  uint32_t start; /* off 8  first offset of this parse's generation */
+  uint32_t end;   /* off 12  used extent at retirement */
+} BindStrProv;    /* 16B */
+_Static_assert(sizeof(BindStrProv) == 16, "BindStrProv size drift");
+_Static_assert(offsetof(BindStrProv, base) == 0, "BindStrProv.base");
+_Static_assert(offsetof(BindStrProv, start) == 8, "BindStrProv.start");
+
+#define BIND_STR_PROV_MAX 16
+
 typedef struct BindAuxRebind {
   NdecCursor saved_cursor;     /* off 0  Outer structural, source, or tape cursor. */
   NdecCursor saved_cursor_end; /* off 8 */
@@ -189,13 +204,45 @@ _Static_assert(offsetof(NdecBindCore, cur_aux) == 72, "NdecBindCore.cur_aux offs
 _Static_assert(offsetof(NdecBindCore, frames) == 80, "NdecBindCore.frames offset");
 
 typedef struct NdecBindMachine {
-  NdecBindBridge b;      /* off 0    driver-engine bridge (ctx 64 + alloc 120 + yield 24 = 208B) */
-  NdecBindCore c;        /* off 208  binding state machine internals (scalars 80 + frames 8KiB = 8272B) */
-  NdecCursor cursor;     /* off 8480 input position of the active pass */
-  NdecCursor cursor_end; /* off 8488 count of real input; the walk reads past it */
-  int32_t aux_depth;     /* Current struct auxiliary slot; zero is the sentinel. Cold
-                          * poly paths update it in memory, so it consumes no hot register
-                          * and needs no yield spill. */
+  NdecBindBridge b;      /* off 0    driver-engine bridge (ctx 64 + alloc 120 + yield 32 = 216B) */
+  NdecBindCore c;        /* off 216  binding state machine internals (scalars 80 + frames 8KiB = 8272B) */
+  NdecCursor cursor;     /* off 8488 input position of the active pass */
+  NdecCursor cursor_end; /* off 8496 count of real input; the walk reads past it */
+
+  /* Streaming-input state. The Go driver owns the window coordinates:
+   * window_base is the absolute document offset of ctx.src[0] so cold error
+   * paths can translate window-local positions; window_final marks the last
+   * window, where sentinel reads in the streaming engine yield input while
+   * it is clear; window_stable_end bounds every span the binder records
+   * from this window, while the sentinel offset itself is src_len, which
+   * can swallow the scanner's withheld tail. Native owns the skip and raw
+   * cursors: skip_depth preserves an in-flight value skip across an input
+   * yield.
+   *
+   * Raw scratch materializes deferred raw values that cross a window edge.
+   * raw_scratch_start is the value's scratch origin, or BIND_RAW_NONE while
+   * the value never crossed a window, so its record uses the source span.
+   * raw_depth preserves the raw scan's bracket nesting. A value resumed after
+   * an edge appends from the next window's offset zero: the relocated tail is
+   * exactly the value's unconsumed remainder. The Go driver owns raw_arena
+   * and raw_cap and guarantees cap >= raw_used + window_len at every install:
+   * one run's appends cover disjoint byte ranges of a single window, because a
+   * completing value's tail ends at or before the next deferred value's start. */
+  uint64_t window_base;       /* off 8504, absolute document offset of ctx.src[0] */
+  uint32_t skip_depth;        /* off 8512 */
+  uint8_t window_final;       /* off 8516 */
+  uint8_t _pad2[3];           /* off 8517 */
+  uint32_t window_stable_end; /* off 8520 */
+  uint32_t raw_depth;         /* off 8524 */
+  uint32_t raw_scratch_start; /* off 8528 */
+  uint32_t _pad3;             /* off 8532, aligns raw_arena to 8 */
+  uint8_t *raw_arena;         /* off 8536 */
+  uint32_t raw_cap;           /* off 8544 */
+  uint32_t raw_used;          /* off 8548 */
+
+  int32_t aux_depth; /* Current struct auxiliary slot; zero is the sentinel. Cold
+                      * poly paths update it in memory, so it consumes no hot register
+                      * and needs no yield spill. */
 
   /* Indexed by struct nesting rather than parse depth. A struct entering phase 2
    * lazily claims a slot, then restores parent_aux at close. */
@@ -221,9 +268,44 @@ typedef struct NdecBindMachine {
    * always use tape labels and do not change it. Phase 2 uses this flag to return
    * non-root closes to the compatible TAP or IDX continuation family. */
   uint8_t in_tape_bind;
+
+  /* Value-submachine state preserved across input yields. vd_base_off is the
+   * value tape's logical origin and vd_lifecycle selects the close form, because
+   * c.phase holds a vd resume phase after the first yield. The append cursor is
+   * alloc.tape_used, committed at each vd yield: arena growth between windows
+   * would dangle a raw pointer. Frames above the parent bind depth carry the
+   * container stack, so only the current container's scalar state lives here. */
+  uint8_t _pad4[3];           /* off 9501 */
+  int32_t vd_depth;           /* off 9504 */
+  uint32_t vd_cur_count;      /* off 9508 */
+  uint32_t vd_cur_tape_index; /* off 9512 */
+  uint32_t vd_base_off;       /* off 9516 */
+  uint32_t vd_lifecycle;      /* off 9520 */
+
+  /* Retired string backings of the current streaming parse, addressed by the
+   * Go driver at install time. The retained set keeps the backings alive; the
+   * noscan machine cannot. */
+  uint32_t str_prov_count;                 /* off 9524 */
+  BindStrProv str_prov[BIND_STR_PROV_MAX]; /* off 9528 */
 } NdecBindMachine;
 _Static_assert(offsetof(NdecBindMachine, b) == 0, "bridge must be at offset 0");
-_Static_assert(offsetof(NdecBindMachine, cursor) == 8480, "cursor offset must match Go BindMachineCursorOffset");
+_Static_assert(offsetof(NdecBindMachine, cursor) == 8488, "cursor offset must match Go BindMachineCursorOffset");
+_Static_assert(offsetof(NdecBindMachine, window_base) == 8504, "window_base offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, skip_depth) == 8512, "skip_depth offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, window_final) == 8516, "window_final offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, window_stable_end) == 8520,
+               "window_stable_end offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, raw_arena) == 8536, "raw_arena offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, raw_cap) == 8544, "raw_cap offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, raw_used) == 8548, "raw_used offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, vd_depth) == 9504, "vd_depth offset");
+_Static_assert(offsetof(NdecBindMachine, vd_base_off) == 9516, "vd_base_off offset");
+_Static_assert(offsetof(NdecBindMachine, vd_lifecycle) == 9520, "vd_lifecycle offset");
+_Static_assert(offsetof(NdecBindMachine, str_prov_count) == 9524, "str_prov_count offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, str_prov) == 9528, "str_prov offset must match Go mirror");
+
+/* No deferred raw value is being materialized across windows. */
+#define BIND_RAW_NONE 0xFFFFFFFFu
 
 /* Save the parent at frames[depth], then advance depth. On success the caller
  * installs the child's hot state.
@@ -713,6 +795,18 @@ INLINE PolyCase poly_case_by_kindof(const NdecBindMachine *m, uint16_t poly_idx,
   return pc;
 }
 
+/* A discriminator bound before an arena growth stays in the retired backing,
+ * because published string headers never move. Each retired generation keeps
+ * the offset interval this parse produced, so a pointer into any generation
+ * still proves provenance. Non-streaming parses retire nothing. */
+INLINE int str_prov_contains(const NdecBindMachine *m, uintptr_t dp) {
+  for (uint32_t i = 0; i < m->str_prov_count; i++) {
+    const BindStrProv *p = &m->str_prov[i];
+    if (dp >= (uintptr_t)p->base + p->start && dp < (uintptr_t)p->base + p->end) return 1;
+  }
+  return 0;
+}
+
 /* Select from the host's bound Go string discriminator. A null pointer returns
  * no case with disc_bound false; it may mean a later input field, so it must not
  * choose the default early. A present value that is empty, too long for the
@@ -727,7 +821,7 @@ NOINLINE static PolyCase poly_case_by_disc(const NdecBindMachine *m, uint16_t po
   uintptr_t dp            = (uintptr_t)disc_ptr;
   uintptr_t begin         = (uintptr_t)m->b.alloc.str_arena + m->b.alloc.str_gen_start;
   uintptr_t end           = (uintptr_t)str_p;
-  *disc_bound             = dp >= begin && dp < end;
+  *disc_bound             = (dp >= begin && dp < end) || str_prov_contains(m, dp);
   /* Only storage published by this root parse may drive case selection. */
   if (!*disc_bound) return pc;
   int ci = -1;

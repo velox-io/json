@@ -28,12 +28,14 @@ MODE_FLAGS_default=""
 # Entry points share the ndec_ prefix. prelink-obj's HasPrefix
 # filter keeps every global symbol with this prefix and demotes the rest to
 # local, so only ndec_dom_parse_counted / ndec_dom_build /
-# ndec_bind_parse / ndec_fmt_parse reach the linker as globals. Impl helpers
-# are static inline; stdlib symbols are HIDDEN;
+# ndec_bind_parse / ndec_bind_parse_stream / ndec_window_scan /
+# ndec_fmt_parse / ndec_valid reach the linker as globals. Impl helpers are
+# static inline; stdlib symbols are HIDDEN;
 # util/log's vj_fprintf_stderr starts with vj_, not ndec_.
 #
 # No SYMBOL_RENAMES: the Go trampolines call the stable, ISA-independent
 # names (ndec_dom_parse_counted, ndec_dom_build, ndec_bind_parse,
-# ndec_fmt_parse) directly.
+# ndec_bind_parse_stream, ndec_window_scan, ndec_fmt_parse, ndec_valid)
+# directly.
 EXPORT_SYMBOL_PREFIX_PATTERN="ndec_"
-EXPORT_SYMBOL_NAMES="ndec_dom_parse_counted ndec_dom_build ndec_bind_parse ndec_fmt_parse"
+EXPORT_SYMBOL_NAMES="ndec_dom_parse_counted ndec_dom_build ndec_bind_parse ndec_bind_parse_stream ndec_window_scan ndec_fmt_parse ndec_valid"

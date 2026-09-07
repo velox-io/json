@@ -1,10 +1,15 @@
-/* This state machine binds either JSON structural indices or a prebuilt Value
- * tape into a typed Go destination. Both walks share container state and may
- * yield to Go for allocation or draining before resuming at a phase-specific
- * label. */
-
-#ifndef NDEC_BIND_H
-#define NDEC_BIND_H
+/* Typed binding: JSON structural indexes or a prebuilt Value tape into a Go
+ * destination. Both walks share container state and may yield to Go for
+ * allocation or draining before resuming at a phase-specific label.
+ *
+ * One state machine body compiles twice. entry/ndec.c defines NDEC_STREAM_MODE
+ * to 0 and then 1 around two inclusions; the mode is a compile-time literal in
+ * each copy, so the contiguous engine carries no window logic while the
+ * streaming engine resolves window ends to BIND_YIELD_INPUT. The second pass
+ * renames ndec_bind_parse_inner to ndec_bind_parse_inner_stream; each pass
+ * compiles its own entry wrapper ahead of the body. The header is included
+ * once per engine, so it deliberately carries no include guard; the trailing
+ * #endif closes the streaming pass's macro cleanup. */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -24,11 +29,18 @@
 
 #include "util/log.h" // IWYU pragma: keep
 
-NOINLINE static void ndec_bind_parse_inner(NdecBindMachine *);
-
 #ifndef NDEC_FN_DECL
 #define NDEC_FN_DECL
 #endif
+
+/* entry/ndec.c defines the mode around each inclusion; the default selects
+ * the contiguous engine. */
+#ifndef NDEC_STREAM_MODE
+#define NDEC_STREAM_MODE 0
+#endif
+
+#if !NDEC_STREAM_MODE
+NOINLINE static void ndec_bind_parse_inner(NdecBindMachine *);
 
 NDEC_FN_DECL void ndec_bind_parse(void *_m_) {
   NdecBindMachine *m = (NdecBindMachine *)_m_;
@@ -72,15 +84,16 @@ NDEC_FN_DECL void ndec_bind_parse(void *_m_) {
       m->c.phase = BIND_PHASE_DOCUMENT_END;
       return;
     }
-    m->cursor_end.idx          = m->b.alloc.structural + n_idx;
-    m->cursor.idx              = m->b.alloc.structural;
-    m->c.depth                 = 0;
-    m->c.cur_dst               = m->b.ctx.root_dst;
-    m->c.cur_type              = m->b.ctx.types[m->b.ctx.root_type];
-    m->c.cur_count             = 0;
-    m->c.cur_aux               = NULL;
-    m->c.first_error_kind      = 0;
-    m->b.yield.first_error_pos = BIND_ERROR_NO_POS;
+    m->cursor_end.idx               = m->b.alloc.structural + n_idx;
+    m->cursor.idx                   = m->b.alloc.structural;
+    m->c.depth                      = 0;
+    m->c.cur_dst                    = m->b.ctx.root_dst;
+    m->c.cur_type                   = m->b.ctx.types[m->b.ctx.root_type];
+    m->c.cur_count                  = 0;
+    m->c.cur_aux                    = NULL;
+    m->c.first_error_kind           = 0;
+    m->b.yield.first_error_pos      = BIND_ERROR_NO_POS;
+    m->b.yield.first_error_promoted = 0;
     /* Reset both auxiliary stacks. Live aux slots initialize lazily, so only
      * the sentinel must be restored after an earlier failed parse. */
     m->rebind_top               = 0;
@@ -104,18 +117,19 @@ NDEC_FN_DECL void ndec_bind_parse(void *_m_) {
   } else if (m->c.phase == BIND_PHASE_TAPE_BIND_ROOT) {
     /* A tape root borrows a Value tape and appends interned strings after the
      * Value's existing arena content. Its auxiliary stacks start fresh. */
-    m->c.depth                  = 0;
-    m->c.cur_dst                = m->b.ctx.root_dst;
-    m->c.cur_type               = m->b.ctx.types[m->b.ctx.root_type];
-    m->c.cur_count              = 0;
-    m->c.cur_aux                = NULL;
-    m->c.first_error_kind       = 0;
-    m->b.yield.first_error_pos  = BIND_ERROR_NO_POS;
-    m->rebind_top               = 0;
-    m->tape_bind_base_depth     = 0;
-    m->aux_depth                = 0;
-    m->auxFrames[0].owner_depth = -1;
-    m->in_tape_bind             = 1;
+    m->c.depth                      = 0;
+    m->c.cur_dst                    = m->b.ctx.root_dst;
+    m->c.cur_type                   = m->b.ctx.types[m->b.ctx.root_type];
+    m->c.cur_count                  = 0;
+    m->c.cur_aux                    = NULL;
+    m->c.first_error_kind           = 0;
+    m->b.yield.first_error_pos      = BIND_ERROR_NO_POS;
+    m->b.yield.first_error_promoted = 0;
+    m->rebind_top                   = 0;
+    m->tape_bind_base_depth         = 0;
+    m->aux_depth                    = 0;
+    m->auxFrames[0].owner_depth     = -1;
+    m->in_tape_bind                 = 1;
     /* Preserve the caller's Value view. A reserve-unknown Value may expose view B
      * over words shared with inline-case content in view A. */
     m->tape_view_mode = m->b.ctx.root_view_mode;
@@ -123,6 +137,165 @@ NDEC_FN_DECL void ndec_bind_parse(void *_m_) {
 
   ndec_bind_parse_inner(m);
 }
+#else
+NOINLINE static void ndec_bind_parse_inner_stream(NdecBindMachine *);
+
+/* Streaming input entry. The Go driver runs the incremental window scanner,
+ * installs the structural cursor pair and window coordinates, and re-enters
+ * here per window. Phase ROOT performs only the typed bootstrap; the scan
+ * itself belongs to the driver. Tape-sized and tape-input roots use the
+ * contiguous entry. */
+NDEC_FN_DECL void ndec_bind_parse_stream(void *_m_) {
+  NdecBindMachine *m = (NdecBindMachine *)_m_;
+
+  if (UNLIKELY(m->c.phase == BIND_PHASE_ROOT)) {
+    m->c.depth                      = 0;
+    m->c.cur_dst                    = m->b.ctx.root_dst;
+    m->c.cur_type                   = m->b.ctx.types[m->b.ctx.root_type];
+    m->c.cur_count                  = 0;
+    m->c.cur_aux                    = NULL;
+    m->c.first_error_kind           = 0;
+    m->b.yield.first_error_pos      = BIND_ERROR_NO_POS;
+    m->b.yield.first_error_promoted = 0;
+    m->rebind_top                   = 0;
+    m->tape_bind_base_depth         = 0;
+    m->aux_depth                    = 0;
+    m->auxFrames[0].owner_depth     = -1;
+    m->in_tape_bind                 = 0;
+    m->tape_view_mode               = TAPE_VIEW_A;
+    m->skip_depth                   = 0;
+    m->raw_depth                    = 0;
+    m->raw_scratch_start            = BIND_RAW_NONE;
+    m->vd_depth                     = -1;
+    m->vd_cur_count                 = 0;
+    m->vd_cur_tape_index            = 0;
+    m->vd_lifecycle                 = 0;
+    m->str_prov_count               = 0;
+  }
+
+  ndec_bind_parse_inner_stream(m);
+}
+
+/* The rename maps the body onto the streaming inner in the second pass. */
+#define ndec_bind_parse_inner ndec_bind_parse_inner_stream
+#endif
+
+/* Defined here rather than primitive.h because each pass compiles its own
+ * body: primitive.h is include-guarded, so its definitions would leak from
+ * the first pass into the second unchanged.
+ *
+ * A mismatch at the 0x20 scan sentinel is truncation, not a type or syntax
+ * error, so the check stays on the cold error path. In the streaming engine
+ * the sentinel may instead mean the window ended before the value arrived;
+ * the check then yields input at input_resume_phase, which the dispatch
+ * region owning the mismatch site maintains. The contiguous engine compiles
+ * both macros to nothing, so its code carries no window logic.
+ */
+#if NDEC_STREAM_MODE
+#define BIND_INPUT_EOF_YIELD(m)                                                                                   \
+  do {                                                                                                            \
+    VJ_DEBUG_TAPE_BIND_GUARD(m);                                                                                  \
+    VJ_DEBUG_INPUT_PHASE_GUARD();                                                                                 \
+    /* A recorded skip error position is window-local, but its promotion at document_end can land in a later      \
+     * window. Convert it once at the first input yield after recording, adding the recording window's base       \
+     * and raising first_error_promoted so later yields and the driver treat it as an absolute document offset    \
+     * rather than an immediate error's window-local position. */                                                 \
+    if (m->c.first_error_kind != 0 && m->b.yield.first_error_pos != BIND_ERROR_NO_POS &&                          \
+        !m->b.yield.first_error_promoted) {                                                                       \
+      m->b.yield.first_error_pos += m->window_base;                                                               \
+      m->b.yield.first_error_promoted = 1;                                                                        \
+    }                                                                                                             \
+    __BIND_SAVE_LOCALS(m);                                                                                        \
+    (m)->c.phase                = input_resume_phase;                                                             \
+    (m)->b.yield.pending_action = BIND_YIELD_INPUT;                                                               \
+    (m)->b.yield.arg0           = 0;                                                                              \
+    (m)->b.yield.arg1           = 0;                                                                              \
+    (m)->b.yield.target         = NULL;                                                                           \
+    return;                                                                                                       \
+  } while (0)
+
+#define BIND_INPUT_EOF_CHECK(m)                                                                                   \
+  if (UNLIKELY(SRC_EOF() && !(m)->window_final)) BIND_INPUT_EOF_YIELD(m)
+#else
+#define BIND_INPUT_EOF_YIELD(m) ((void)0)
+#define BIND_INPUT_EOF_CHECK(m) ((void)0)
+#endif
+
+/* Debug verification of the input-phase discipline. input_resume_phase starts
+ * poisoned; every read region arms it at entry, so poison surviving to an
+ * input yield means a path reached the window sentinel without arming, and
+ * the yield would save a meaningless phase. Check sites restate their
+ * region's phase; a mismatch means a path entered the region without arming
+ * it for that region. The contiguous pass and release builds compile both to
+ * nothing. */
+#define BIND_INPUT_PHASE_POISON 0xFFFFFFFFu
+
+#if NDEC_STREAM_MODE && defined(VJ_DEBUG)
+#define VJ_DEBUG_INPUT_PHASE_GUARD()                                                                              \
+  do {                                                                                                            \
+    if (UNLIKELY(input_resume_phase == BIND_INPUT_PHASE_POISON)) {                                                \
+      vj_fprintf_stderr("input yield without an armed phase at %s:%d\n", __FILE__, __LINE__);                     \
+      __builtin_trap();                                                                                           \
+    }                                                                                                             \
+  } while (0)
+
+#define BIND_INPUT_PHASE_EXPECT(ph)                                                                               \
+  do {                                                                                                            \
+    if (UNLIKELY(input_resume_phase != (ph))) {                                                                   \
+      vj_fprintf_stderr("input phase mismatch at %s:%d: armed %u, region %u\n", __FILE__, __LINE__,               \
+                        input_resume_phase, (uint32_t)(ph));                                                      \
+      __builtin_trap();                                                                                           \
+    }                                                                                                             \
+  } while (0)
+
+#define BIND_INPUT_PHASE_EXPECT2(ph0, ph1)                                                                        \
+  do {                                                                                                            \
+    if (UNLIKELY(input_resume_phase != (ph0) && input_resume_phase != (ph1))) {                                   \
+      vj_fprintf_stderr("input phase mismatch at %s:%d: armed %u, region %u/%u\n", __FILE__, __LINE__,            \
+                        input_resume_phase, (uint32_t)(ph0), (uint32_t)(ph1));                                    \
+      __builtin_trap();                                                                                           \
+    }                                                                                                             \
+  } while (0)
+#else
+#define VJ_DEBUG_INPUT_PHASE_GUARD()       ((void)0)
+#define BIND_INPUT_PHASE_EXPECT(ph)        ((void)0)
+#define BIND_INPUT_PHASE_EXPECT2(ph0, ph1) ((void)0)
+#endif
+
+/* Tape-input and phase 2 case-descent walks read no source bytes, so an input
+ * yield inside them is a machine invariant violation rather than a recoverable
+ * edge. Debug builds stop at the fault instead of corrupting saved cursors. */
+#ifdef VJ_DEBUG
+#define VJ_DEBUG_TAPE_BIND_GUARD(m)                                                                               \
+  do {                                                                                                            \
+    if ((m)->in_tape_bind || (m)->rebind_top) __builtin_trap();                                                   \
+  } while (0)
+#else
+#define VJ_DEBUG_TAPE_BIND_GUARD(m) ((void)0)
+#endif
+
+#if NDEC_STREAM_MODE
+/* The Value submachine bumps its own string and tape cursors, so an input
+ * yield commits them before the shared spill: c.str_used receives vd_str_p and
+ * alloc.tape_used receives the vd append position. Resume re-derives both
+ * pointers from those offsets, which survive arena growth between windows. */
+#define VD_INPUT_EOF_YIELD(m, ph)                                                                                 \
+  do {                                                                                                            \
+    (m)->vd_depth          = vd_depth;                                                                            \
+    (m)->vd_cur_count      = vd_cur_count;                                                                        \
+    (m)->vd_cur_tape_index = vd_cur_tape_index;                                                                   \
+    (m)->b.alloc.tape_used = (size_t)(vd_tape_p - (m)->b.alloc.tape_arena);                                       \
+    str_p                  = vd_str_p;                                                                            \
+    input_resume_phase     = (ph);                                                                                \
+    BIND_INPUT_EOF_YIELD(m);                                                                                      \
+  } while (0)
+
+#define VD_INPUT_EOF_CHECK(m, ph)                                                                                 \
+  if (UNLIKELY(SRC_EOF() && !(m)->window_final)) VD_INPUT_EOF_YIELD(m, ph)
+#else
+#define VD_INPUT_EOF_YIELD(m, ph) ((void)0)
+#define VD_INPUT_EOF_CHECK(m, ph) ((void)0)
+#endif
 
 NOINLINE static void ndec_bind_parse_inner(NdecBindMachine *m) {
   /* cursor is the sole register-resident position for a pass. Resume phases load
@@ -141,6 +314,17 @@ NOINLINE static void ndec_bind_parse_inner(NdecBindMachine *m) {
   uint8_t *str_p                    = (uint8_t *)((uintptr_t)m->b.alloc.str_arena + m->c.str_used);
   const BindField *cur_struct_field = (const BindField *)0;
 
+#if NDEC_STREAM_MODE
+  /* Resume phase for the next input yield. Every region that can observe the
+   * window sentinel arms this at entry, before any SRC read that can reach the
+   * sentinel; BIND_INPUT_EOF_YIELD saves it as c.phase. The poison start and
+   * the check-site restatements verify that arming in debug builds. */
+  uint32_t input_resume_phase = BIND_INPUT_PHASE_POISON;
+#define NDEC_SET_INPUT_PHASE(ph) (input_resume_phase = (ph))
+#else
+#define NDEC_SET_INPUT_PHASE(ph) ((void)0)
+#endif
+
   switch (m->c.phase) {
   case BIND_PHASE_ROOT:
     goto document_start;
@@ -150,8 +334,15 @@ NOINLINE static void ndec_bind_parse_inner(NdecBindMachine *m) {
     goto array_value;
   case BIND_PHASE_ARRAY_VALUE_BEGIN:
     /* A stream handler may set STREAM_SKIP while this element yield is serviced.
-     * Check it only on this resume edge before entering the unconsumed element. */
-    if (UNLIKELY(cur_type.flags & BIND_FLAG_STREAM_SKIP)) goto safe_skip_value;
+     * Check it only on this resume edge before entering the unconsumed element.
+     * The skip must resume through this same edge: entering it before arming the
+     * phase would make a window-edge input yield inside the skip save the root
+     * phase and re-dispatch document_start with a mid-parse cur_type. */
+    if (UNLIKELY(cur_type.flags & BIND_FLAG_STREAM_SKIP)) {
+      NDEC_SET_INPUT_PHASE(BIND_PHASE_ARRAY_VALUE_BEGIN);
+      goto safe_skip_value;
+    }
+    NDEC_SET_INPUT_PHASE(BIND_PHASE_ARRAY_VALUE_BEGIN);
     goto array_value_bind_body;
   case BIND_PHASE_OBJECT_FIELD_VALUE:
     cur_struct_field = (const BindField *)m->c.stash.field_value.field;
@@ -175,6 +366,7 @@ NOINLINE static void ndec_bind_parse_inner(NdecBindMachine *m) {
   case BIND_PHASE_ARRAY_CLOSE:
     goto array_close;
   case BIND_PHASE_ROOT_UNWRAP:
+    NDEC_SET_INPUT_PHASE(BIND_PHASE_ROOT_SCANNED);
     goto root_ptr_unwrap;
   case BIND_PHASE_VARIANT_REBIND_RESUME:
     goto variant_rebind_resume;
@@ -218,12 +410,48 @@ NOINLINE static void ndec_bind_parse_inner(NdecBindMachine *m) {
   case BIND_PHASE_PHASE2_POLY_RETRY:
     cur_struct_field = (const BindField *)m->c.stash.field_value.field;
     goto phase2_poly_bind;
+  case BIND_PHASE_OBJECT_CONTINUE:
+    goto object_continue;
+  case BIND_PHASE_ARRAY_CONTINUE:
+    goto array_continue;
+  case BIND_PHASE_MAP_CONTINUE_INPUT:
+    goto map_continue_input;
+  case BIND_PHASE_OBJECT_FIELD:
+    goto object_field;
+  case BIND_PHASE_OBJECT_FIELD_FIRST:
+    goto object_first_key;
+  case BIND_PHASE_SKIP_RESUME:
+    /* skip_value restores the block-local skip_depth from m->skip_depth and
+     * routes by SKIP_LENIENT; entering the loops directly would bypass the
+     * local's initialization and count brackets from an indeterminate value. */
+    goto skip_value;
+  case BIND_PHASE_ROOT_SKIP_RESUME:
+    /* root_skip_value restores its bracket depth the same way. */
+    goto root_skip_value;
+  case BIND_PHASE_DEFERRED_RAW_RESUME:
+    /* deferred_raw_scan restores the block-local bracket depth from
+     * m->raw_depth. The scan may stop at a window edge again, so the phase is
+     * re-armed before the loop reads the sentinel. */
+    NDEC_SET_INPUT_PHASE(BIND_PHASE_DEFERRED_RAW_RESUME);
+    goto deferred_raw_scan;
+  case BIND_PHASE_VD_OBJ_OPEN:
+  case BIND_PHASE_VD_ARR_OPEN:
+  case BIND_PHASE_VD_ELEM:
+  case BIND_PHASE_VD_OBJ_KEY:
+  case BIND_PHASE_VD_OBJ_CONT:
+  case BIND_PHASE_VD_ARR_CONT:
+    /* vd_resume restores the walk state from the vd machine fields and
+     * re-enters the phase's label. */
+    goto vd_resume;
   default:
     goto document_start;
   }
 
 document_start: {
+  NDEC_SET_INPUT_PHASE(BIND_PHASE_ROOT_SCANNED);
   if (UNLIKELY(SRC_EOF())) {
+    BIND_INPUT_PHASE_EXPECT(BIND_PHASE_ROOT_SCANNED);
+    BIND_INPUT_EOF_CHECK(m);
     BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
   }
   uint8_t ch = SRC_PEEK();
@@ -292,7 +520,7 @@ document_start: {
     }
     SRC_ADVANCE();
     if (cur_type.kind != BIND_KIND_STRUCT) {
-      BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS() - 1);
+      BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_PREV_POS(), 1);
     }
     /* Even an empty object must enter phase2 when the type can owe deferred
      * inline-variant or reserve-unknown work. */
@@ -306,6 +534,13 @@ document_start: {
   }
   if (ch == '[') {
     SRC_ADVANCE();
+    /* Only array-shaped kinds take a '[' root, mirroring the object branch;
+     * the check precedes the empty fast path so "[]" mismatches like any
+     * other array. */
+    if (UNLIKELY(cur_type.kind != BIND_KIND_SLICE && cur_type.kind != BIND_KIND_STREAM &&
+                 cur_type.kind != BIND_KIND_ARRAY)) {
+      BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_PREV_POS(), 1);
+    }
     if (SRC_ACCEPT(']')) {
       /* Stream empty array at root: yield to activate the handler with an
        * empty batch, then resume at array_close to finish document_end. */
@@ -325,9 +560,52 @@ document_start: {
 
 object_begin:
   cur_aux = (void *)(uintptr_t)m->b.ctx.type_meta[cur_type.type_idx].u.strct.lookup;
-object_field: {
+  /* A window edge between '{' and the first byte defers the close-or-key
+   * decision to object_first_key; the fresh path already saw a non-'}'
+   * byte at its open site. */
+  NDEC_SET_INPUT_PHASE(BIND_PHASE_OBJECT_FIELD_FIRST);
+  goto object_field_key;
+
+/* Streaming resume after the window ended between '{' and the first key.
+ * The open site's no-push fast path answers '}' only when the byte is
+ * already visible; on an edge the frame is pushed and this region re-asks
+ * once the byte arrives. The 0x20 sentinel matches neither '}' nor '"', so
+ * a still-exhausted window falls through to the key fetch, whose cold
+ * path yields input again. */
+object_first_key:
+  NDEC_SET_INPUT_PHASE(BIND_PHASE_OBJECT_FIELD_FIRST);
+  if (SRC_PEEK() == '}') {
+    SRC_ADVANCE();
+    goto object_close;
+  }
+  goto object_field_key;
+object_field:
+  NDEC_SET_INPUT_PHASE(BIND_PHASE_OBJECT_FIELD);
+object_field_key: {
+#if NDEC_STREAM_MODE
+  /* Wait for the key unconsumed: an advanced cursor marks the next
+   * structural consumed and the relocation drops it. A real non-quote
+   * byte is a definite error at any window position, so only a missing
+   * key (cursor at the sentinel) yields. */
+  if (UNLIKELY(SRC_EOF())) {
+    BIND_INPUT_PHASE_EXPECT2(BIND_PHASE_OBJECT_FIELD_FIRST, BIND_PHASE_OBJECT_FIELD);
+    if (!m->window_final) BIND_INPUT_EOF_YIELD(m);
+    BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+  }
+  /* A merged-tape entry consumes the key bytes when its value dispatches, and
+   * a window edge after the key is fetched cannot recover them: the driver
+   * discards the consumed stable prefix. Fields of a phase2 host therefore
+   * wait until the key, colon, and first value token are all visible, so the
+   * key write and the value dispatch share one window with the fetched key.
+   * Ordinary structs are unaffected; their keys never reach the tape. */
+  if (UNLIKELY((cur_type.flags & BIND_FLAG_MAY_PHASE2) && !m->window_final &&
+               cursor.idx + 3 > m->cursor_end.idx)) {
+    BIND_INPUT_PHASE_EXPECT2(BIND_PHASE_OBJECT_FIELD_FIRST, BIND_PHASE_OBJECT_FIELD);
+    BIND_INPUT_EOF_YIELD(m);
+  }
+#endif
   const uint8_t *key = SRC_ADVANCE_PTR();
-  if (UNLIKELY(*key != '"')) BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_SYNTAX, (uint32_t)(key - src));
+  if (UNLIKELY(*key != '"')) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (uint32_t)(key - src));
   const BindType *t            = &cur_type;
   const BindField *first_field = (const BindField *)t->child;
   int fidx;
@@ -337,11 +615,13 @@ object_field: {
     cur_struct_field      = (const BindField *)NULL;
     const ndec_lookup *lk = (const ndec_lookup *)cur_aux;
     uint32_t klen, bp;
-    int32_t st = ndec_str_parse_zc_scan(key + 1, &klen, &bp);
+    int32_t st = ndec_str_parse_zc_scan(key + 1, &klen, &bp, 0);
     if (LIKELY(st == 1)) {
       ndec_lookup_key lkey = {(const char *)(key + 1), (size_t)klen};
       fidx                 = ndec_lookup_find(lk, lkey);
     } else if (st == 2) {
+      /* Escaped keys decode through the raw policy; the high-bit bytes an
+       * escape-free key may carry borrow verbatim through st == 1 above. */
       const uint8_t *kd;
       uint32_t kl;
       if (bind_intern_key_for_lookup(str_p, key, &kd, &kl) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (key - src));
@@ -369,6 +649,14 @@ object_field: {
   /* Resume restores cur_struct_field and enters after the consumed colon.
    * cur_type remains the parent struct throughout field iteration and phase2. */
 object_field_value: {
+  NDEC_SET_INPUT_PHASE(BIND_PHASE_OBJECT_FIELD_VALUE);
+  /* The resume reads cur_struct_field from the stash, so every streaming
+   * entry republishes it before any yield below can fire. */
+  if (NDEC_STREAM_MODE) m->c.stash.field_value.field = (uint8_t *)cur_struct_field;
+  /* The window can end at the ':' so no value byte has arrived yet; the
+   * sentinel read below would dispatch deferred and cold kinds with padding. */
+  BIND_INPUT_PHASE_EXPECT(BIND_PHASE_OBJECT_FIELD_VALUE);
+  BIND_INPUT_EOF_CHECK(m);
   uint8_t *body              = cur_dst + cur_struct_field->offset;
   const BindType *child_type = (const BindType *)cur_struct_field->type;
   uint8_t ch                 = SRC_PEEK();
@@ -465,7 +753,7 @@ object_field_value: {
     if (cur_struct_field->flags & BIND_FF_QUOTED) {
       if (ch == '"') {
         const uint8_t *qd = str_p;
-        int32_t qn        = ndec_str_parse(SRC_PTR() + 1, str_p, NULL);
+        int32_t qn        = ndec_str_parse(SRC_PTR() + 1, str_p, NULL, 0);
         if (qn < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
         if (bind_write_quoted_scalar(&str_p, qd, (uint32_t)qn, child_type->kind, body, m->c.atof) < 0)
           BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
@@ -522,6 +810,7 @@ object_field_tape: {
 }
 
 object_continue: {
+  NDEC_SET_INPUT_PHASE(BIND_PHASE_OBJECT_CONTINUE);
   uint8_t ch = SRC_ADVANCE_CHAR();
   if (ch == ',') goto object_field;
   /* Phase 2 handles delayed entries or empty close-time finalization. */
@@ -531,7 +820,7 @@ object_continue: {
         !struct_needs_phase2(m, &cur_type, m->auxFrames[m->aux_depth].owner_depth == depth)) {
       bind_pop(frames, &depth, &cur_dst, &cur_type, &cur_count, &cur_aux);
       if (depth == 0) goto document_end;
-      goto scope_end;
+      goto json_parent_continue;
     }
     AUX_LAZY_ALLOC(m, BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0));
     BindAuxFrame *ax = &m->auxFrames[m->aux_depth];
@@ -541,8 +830,11 @@ object_continue: {
     goto phase2_walk;
   }
   /* 0x20 is the scan sentinel byte at src[len]. At depth 0 it means the
-   * top-level value ended cleanly; at depth > 0 the object is unclosed. */
+   * top-level value ended cleanly; at depth > 0 the object is unclosed. A
+   * non-final streaming window yields input instead. */
   if (ch == 0x20) {
+    BIND_INPUT_PHASE_EXPECT(BIND_PHASE_OBJECT_CONTINUE);
+    BIND_INPUT_EOF_CHECK(m);
     if (UNLIKELY(depth > 0)) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
     goto document_end;
   }
@@ -831,7 +1123,7 @@ phase2_done: {
   /* A nested case descent is a tape walk even when its outer walk reads JSON.
    * rebind_top therefore participates in continuation selection. */
   if (m->in_tape_bind || m->rebind_top > 0) goto t_scope_end;
-  goto scope_end;
+  goto json_parent_continue;
 }
 
 /* Existing slices use caller-owned backing. Streams use Go-managed batch
@@ -875,15 +1167,14 @@ array_begin: {
     } else {
       __builtin_memcpy(&cur_aux, cur_dst, sizeof(uint8_t *));
     }
-  } else if (cur_type.kind == BIND_KIND_ARRAY) {
-    cur_aux = cur_dst;
   } else {
-    /* Report the consumed opening bracket as the mismatch position. */
-    BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS() - 1);
+    /* BIND_KIND_ARRAY: fixed arrays bind elements inline at cur_dst. */
+    cur_aux = cur_dst;
   }
 }
 
 array_value: {
+  NDEC_SET_INPUT_PHASE(BIND_PHASE_ARRAY_VALUE_BEGIN);
   if (LIKELY(cur_type.kind == BIND_KIND_SLICE)) {
     BIND_SLICE_GROW_CHECK(m, cur_type, cur_dst, cur_aux, cur_count);
   } else if (cur_type.kind == BIND_KIND_ARRAY) {
@@ -907,8 +1198,18 @@ array_value: {
 
   /* body follows pointer chains while cur_aux remains the element-slot cursor.
    * ARRAY_VALUE_BEGIN enters here after the stream resume edge has rechecked
-   * STREAM_SKIP. */
+   * STREAM_SKIP. A non-final window end yields before cur_count and cur_aux
+   * advance, so the element slot is committed exactly once across the yield. */
 array_value_bind_body: {
+  /* The empty-close check at the opening site spans a window boundary: a
+   * leading ']' arriving in a later window closes the empty array. array_close
+   * returns any charged bump tail exactly like the ordinary close. */
+  if (NDEC_STREAM_MODE && SRC_PEEK() == ']' && cur_count == 0) {
+    SRC_ADVANCE();
+    goto array_close;
+  }
+  BIND_INPUT_PHASE_EXPECT(BIND_PHASE_ARRAY_VALUE_BEGIN);
+  BIND_INPUT_EOF_CHECK(m);
   uint8_t *body              = cur_aux;
   const BindType *child_type = (const BindType *)cur_type.child;
   uint8_t ch                 = SRC_PEEK();
@@ -976,6 +1277,7 @@ array_value_bind_body: {
 }
 
 array_continue: {
+  NDEC_SET_INPUT_PHASE(BIND_PHASE_ARRAY_CONTINUE);
   uint8_t ch = SRC_ADVANCE_CHAR();
   if (ch == ',') {
     if (BIND_IS_SLICE_LIKE(cur_type.kind)) {
@@ -1014,22 +1316,28 @@ array_continue: {
     if (depth == 0) goto document_end;
     bind_pop(frames, &depth, &cur_dst, &cur_type, &cur_count, &cur_aux);
     if (depth == 0) goto document_end;
-    goto scope_end;
+    goto json_parent_continue;
   }
   }
   if (ch == 0x20) {
     /* 0x20 is the scan sentinel byte at src[len]. At depth 0 it means the
-     * top-level value ended cleanly; at depth > 0 the array is unclosed. */
+     * top-level value ended cleanly; at depth > 0 the array is unclosed. A
+     * non-final streaming window yields input instead. */
+    BIND_INPUT_PHASE_EXPECT(BIND_PHASE_ARRAY_CONTINUE);
+    BIND_INPUT_EOF_CHECK(m);
     if (UNLIKELY(depth > 0)) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
     goto document_end;
   }
   BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
 }
 
-scope_end: {
+json_value_done:
+  if (depth == 0) goto document_end;
+json_parent_continue: {
   if (cur_type.kind == BIND_KIND_STRUCT) goto object_continue;
   if (BIND_IS_SLICE_LIKE(cur_type.kind) || cur_type.kind == BIND_KIND_ARRAY) goto array_continue;
   if (cur_type.kind == BIND_KIND_MAP) goto map_continue;
+  BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
 }
 
 /* Maps stage entries in fixed regions of a shared noscan buffer. Region headers
@@ -1090,7 +1398,7 @@ map_open: {
     frames[depth].u.map_region = (BindMapRegionHeader *)0;
     bind_pop(frames, &depth, &cur_dst, &cur_type, &cur_count, &cur_aux);
     if (depth == 0) goto document_end;
-    goto scope_end;
+    goto json_parent_continue;
   }
   goto map_key;
 }
@@ -1099,6 +1407,19 @@ map_open: {
  * Reserving advances next_entry_off, but entry_count advances only after the
  * value subtree completes, so drain never publishes an in-progress entry. */
 map_key: {
+  NDEC_SET_INPUT_PHASE(BIND_PHASE_MAP_CONTINUE);
+  /* The empty-close check at map_open spans a window boundary: a leading '}'
+   * arriving in a later window retires the still-empty region. */
+  if (NDEC_STREAM_MODE && SRC_PEEK() == '}') {
+    BindMapRegionHeader *_mr = (BindMapRegionHeader *)cur_aux;
+    if (_mr->entry_count == 0 && _mr->next_entry_off == 0) {
+      SRC_ADVANCE();
+      frames[depth].u.map_region = (BindMapRegionHeader *)0;
+      bind_pop(frames, &depth, &cur_dst, &cur_type, &cur_count, &cur_aux);
+      if (depth == 0) goto document_end;
+      goto json_parent_continue;
+    }
+  }
   BindMapRegionHeader *map_region = (BindMapRegionHeader *)cur_aux;
   uint32_t next_entry_off         = map_region->next_entry_off;
   uint32_t stride                 = map_region->stride;
@@ -1109,10 +1430,21 @@ map_key: {
   if (UNLIKELY(next_entry_off >= region_entry_bytes)) {
     BIND_YIELD_FLUSH_MAP(m, 0, 0, (uint8_t *)0, BIND_PHASE_MAP_CONTINUE);
   }
-  uint8_t *slot              = (uint8_t *)map_region + BIND_MAP_REGION_HEADER_SIZE + next_entry_off;
+  uint8_t *slot = (uint8_t *)map_region + BIND_MAP_REGION_HEADER_SIZE + next_entry_off;
+#if NDEC_STREAM_MODE
+  /* Same contract as object_field_key: wait for the key unconsumed, and a
+   * real non-quote byte is a definite error at any window position. */
+  if (UNLIKELY(SRC_EOF())) {
+    BIND_INPUT_PHASE_EXPECT(BIND_PHASE_MAP_CONTINUE);
+    if (!m->window_final) BIND_INPUT_EOF_YIELD(m);
+    BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+  }
+#endif
+  const uint8_t *key = SRC_ADVANCE_PTR();
+  if (*key != '"') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (uint32_t)(key - src));
+  /* Reserve the slot only after the key structural is confirmed, so an input
+   * yield at the window edge replays map_key without double reservation. */
   map_region->next_entry_off = next_entry_off + stride;
-  const uint8_t *key         = SRC_ADVANCE_PTR();
-  if (*key != '"') BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_SYNTAX, (uint32_t)(key - src));
   if (bind_visit_str(&str_p, key, slot) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (uint32_t)(key - src));
   SRC_EXPECT(':');
   goto map_value;
@@ -1122,6 +1454,11 @@ map_key: {
  * typed SlotClass storage; other pointer-bearing values use typed intermediate
  * slots until deferred records drain and map drain copies them into *hmap. */
 map_value: {
+  NDEC_SET_INPUT_PHASE(BIND_PHASE_MAP_VALUE);
+  /* The window can end at the ':' so no value byte has arrived yet; the
+   * sentinel read below would dispatch deferred and cold kinds with padding. */
+  BIND_INPUT_PHASE_EXPECT(BIND_PHASE_MAP_VALUE);
+  BIND_INPUT_EOF_CHECK(m);
   const BindType *mt              = &cur_type;
   BindMapRegionHeader *map_region = (BindMapRegionHeader *)cur_aux;
   uint32_t stride                 = map_region->stride;
@@ -1173,6 +1510,20 @@ map_value: {
         goto vd_dispatch_value;
       }
       if (BIND_IS_DEFERRED_VALUE(child_type->kind)) {
+        m->c.stash.deferred_yield.slot = target_slot;
+        m->c.stash.deferred_yield.type = (BindType *)child_type;
+        if (m->b.alloc.deferred_drain_used + sizeof(UnmarshalRecord) > m->b.alloc.deferred_drain_cap) {
+          __BIND_SAVE_LOCALS(m);
+          m->c.phase                = BIND_PHASE_DEFERRED_RESUME;
+          m->b.yield.pending_action = BIND_YIELD_FLUSH_UNMARSHAL;
+          return;
+        }
+        goto deferred_value;
+      }
+      /* A byte-slice value staged from a string defers base64 decoding to Go;
+       * the record carries the interned string bytes. */
+      if (child_type->kind == BIND_KIND_SLICE && ch == '"' &&
+          ((const BindType *)child_type->child)->kind == BIND_KIND_UINT8) {
         m->c.stash.deferred_yield.slot = target_slot;
         m->c.stash.deferred_yield.type = (BindType *)child_type;
         if (m->b.alloc.deferred_drain_used + sizeof(UnmarshalRecord) > m->b.alloc.deferred_drain_cap) {
@@ -1253,6 +1604,10 @@ map_continue: {
   if (map_region != (BindMapRegionHeader *)0) {
     map_region->entry_count++;
   }
+  /* Post-commit resume: the entry above is already published, so a window end
+   * here re-enters below the increment rather than through map_continue. */
+map_continue_input:
+  NDEC_SET_INPUT_PHASE(BIND_PHASE_MAP_CONTINUE_INPUT);
   uint8_t ch = SRC_ADVANCE_CHAR();
   if (ch == ',') {
     goto map_key;
@@ -1263,11 +1618,14 @@ map_continue: {
     frames[depth].u.map_region = (BindMapRegionHeader *)0;
     bind_pop(frames, &depth, &cur_dst, &cur_type, &cur_count, &cur_aux);
     if (depth == 0) goto document_end;
-    goto scope_end;
+    goto json_parent_continue;
   }
   if (ch == 0x20) {
     /* 0x20 is the scan sentinel byte at src[len]. At depth 0 it means the
-     * top-level value ended cleanly; at depth > 0 the map is unclosed. */
+     * top-level value ended cleanly; at depth > 0 the map is unclosed. A
+     * non-final streaming window yields input instead. */
+    BIND_INPUT_PHASE_EXPECT(BIND_PHASE_MAP_CONTINUE_INPUT);
+    BIND_INPUT_EOF_CHECK(m);
     if (UNLIKELY(depth > 0)) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
     goto document_end;
   }
@@ -1280,7 +1638,66 @@ map_continue_resume: {
   goto map_key;
 }
 
+/* Root mismatch skip: consume the complete root value, then surface the
+ * recorded first error at document_end so the cursor addresses the next value
+ * and a multi-value stream keeps decoding. Entry from a scalar site reads the
+ * token from its start; entry after a consumed opening bracket starts at
+ * depth one. m->skip_depth carries the depth across window edges and doubles
+ * as the entry convention: zero means a fresh token, one means the bracket is
+ * already consumed. */
+root_skip_value: {
+  NDEC_SET_INPUT_PHASE(BIND_PHASE_ROOT_SKIP_RESUME);
+  uint32_t root_skip_depth = m->skip_depth;
+  m->skip_depth            = 0;
+  if (root_skip_depth == 0) {
+    if (UNLIKELY(SRC_EOF())) {
+      BIND_INPUT_PHASE_EXPECT(BIND_PHASE_ROOT_SKIP_RESUME);
+      BIND_INPUT_EOF_CHECK(m);
+      BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+    }
+    uint8_t ch = SRC_PEEK();
+    if (ch == '{' || ch == '[') {
+      root_skip_depth = 1;
+      SRC_ADVANCE();
+    } else {
+      /* The scanner publishes whole atoms, so validation mirrors safe_skip_value
+       * and one structural advance consumes the token. */
+      if (ch == '"') {
+        if (UNLIKELY(ndec_str_parse(SRC_PTR() + 1, str_p, NULL, 0) < 0))
+          BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+      } else if (ch == 't' || ch == 'f' || ch == 'n') {
+        if (UNLIKELY(bind_validate_atom(SRC_PTR(), ch) < 0)) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+      } else {
+        const uint8_t *_end;
+        double _dv;
+        if (UNLIKELY(ndec_parse_double_padded(SRC_PTR(), &_dv, m->c.atof, &_end)))
+          BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+        if (UNLIKELY(is_non_delim(*_end))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+      }
+      SRC_ADVANCE();
+      goto document_end;
+    }
+  }
+  for (;;) {
+  root_skip_loop:
+    if (UNLIKELY(SRC_EOF())) {
+      if (NDEC_STREAM_MODE && !m->window_final) {
+        BIND_INPUT_PHASE_EXPECT(BIND_PHASE_ROOT_SKIP_RESUME);
+        m->skip_depth = root_skip_depth;
+        BIND_INPUT_EOF_YIELD(m);
+      }
+      BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+    }
+    uint8_t c = SRC_ADVANCE_CHAR();
+    if (c == '{' || c == '[') root_skip_depth++;
+    else if (c == '}' || c == ']') {
+      if (--root_skip_depth == 0) goto document_end;
+    }
+  }
+}
+
 skip_value: {
+  NDEC_SET_INPUT_PHASE(BIND_PHASE_SKIP_RESUME);
   if (m->b.ctx.opt_flags & BIND_OPT_SKIP_LENIENT) {
     goto unsafe_skip_value;
   } else {
@@ -1290,9 +1707,17 @@ skip_value: {
 
 unsafe_skip_value: {
   /* This path tracks container depth without validating scalars or comma order. */
-  if (UNLIKELY(SRC_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
   uint32_t skip_depth = 0;
-  uint8_t ch          = SRC_PEEK();
+  if (NDEC_STREAM_MODE && m->skip_depth != 0) {
+    skip_depth = m->skip_depth;
+    goto unsafe_skip_loop;
+  }
+  if (UNLIKELY(SRC_EOF())) {
+    BIND_INPUT_PHASE_EXPECT(BIND_PHASE_SKIP_RESUME);
+    BIND_INPUT_EOF_CHECK(m);
+    BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+  }
+  uint8_t ch = SRC_PEEK();
   if (ch == '{' || ch == '[') {
     skip_depth = 1;
     SRC_ADVANCE();
@@ -1301,27 +1726,50 @@ unsafe_skip_value: {
     goto object_continue;
   }
   for (;;) {
-    if (UNLIKELY(SRC_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+  unsafe_skip_loop:
+    if (UNLIKELY(SRC_EOF())) {
+      if (NDEC_STREAM_MODE && !m->window_final) {
+        BIND_INPUT_PHASE_EXPECT(BIND_PHASE_SKIP_RESUME);
+        m->skip_depth = skip_depth;
+        BIND_INPUT_EOF_YIELD(m);
+      }
+      BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+    }
     ch = SRC_ADVANCE_CHAR();
     if (ch == '{' || ch == '[') skip_depth++;
     else if (ch == '}' || ch == ']') {
-      if (--skip_depth == 0) goto object_continue;
+      if (--skip_depth == 0) {
+        if (NDEC_STREAM_MODE) m->skip_depth = 0;
+        goto object_continue;
+      }
     }
   }
 }
 
 safe_skip_value: {
-  if (UNLIKELY(SRC_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
   uint32_t skip_depth = 0;
-  uint8_t ch          = SRC_PEEK();
+  if (NDEC_STREAM_MODE && m->skip_depth != 0) {
+    skip_depth = m->skip_depth;
+    goto safe_skip_loop;
+  }
+  if (UNLIKELY(SRC_EOF())) {
+    /* ARRAY_VALUE_BEGIN also arms this region: a stream handler's skip enters
+     * through the array begin edge so its resume rechecks STREAM_SKIP. */
+    BIND_INPUT_PHASE_EXPECT2(BIND_PHASE_SKIP_RESUME, BIND_PHASE_ARRAY_VALUE_BEGIN);
+    BIND_INPUT_EOF_CHECK(m);
+    BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+  }
+  uint8_t ch = SRC_PEEK();
   if (ch == '{' || ch == '[') {
     skip_depth = 1;
     SRC_ADVANCE();
   } else {
-    /* str_p is scratch (not advanced); decoded bytes are discarded.
-     * Padded parsers rely on the 64-byte 0x20 tail on ctx.src. */
+    /* str_p is scratch (not advanced); decoded bytes are discarded. The raw
+     * policy serves the verdict-only walk. Padded parsers rely on the 64-byte
+     * 0x20 tail on ctx.src. */
     if (ch == '"') {
-      if (UNLIKELY(ndec_str_parse(SRC_PTR() + 1, str_p, NULL) < 0)) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+      if (UNLIKELY(ndec_str_parse(SRC_PTR() + 1, str_p, NULL, 0) < 0))
+        BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     } else if (ch == 't' || ch == 'f' || ch == 'n') {
       if (UNLIKELY(bind_validate_atom(SRC_PTR(), ch) < 0)) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     } else if (ch == '-' || (ch >= '0' && ch <= '9')) {
@@ -1335,16 +1783,34 @@ safe_skip_value: {
       BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     }
     SRC_ADVANCE();
-    goto scope_end;
+    goto json_parent_continue;
   }
   for (;;) {
-    if (UNLIKELY(SRC_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+  safe_skip_loop:
+    if (UNLIKELY(SRC_EOF())) {
+      if (NDEC_STREAM_MODE && !m->window_final) {
+        BIND_INPUT_PHASE_EXPECT2(BIND_PHASE_SKIP_RESUME, BIND_PHASE_ARRAY_VALUE_BEGIN);
+        m->skip_depth = skip_depth;
+        BIND_INPUT_EOF_YIELD(m);
+      }
+      BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+    }
     ch = SRC_ADVANCE_CHAR();
     if (ch == '{' || ch == '[') skip_depth++;
     else if (ch == '}' || ch == ']') {
-      if (--skip_depth == 0) goto scope_end;
+      if (--skip_depth == 0) {
+        if (NDEC_STREAM_MODE) m->skip_depth = 0;
+        goto json_parent_continue;
+      }
     } else if (ch == ',') {
-      if (UNLIKELY(SRC_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+      if (UNLIKELY(SRC_EOF())) {
+        if (NDEC_STREAM_MODE && !m->window_final) {
+          BIND_INPUT_PHASE_EXPECT2(BIND_PHASE_SKIP_RESUME, BIND_PHASE_ARRAY_VALUE_BEGIN);
+          m->skip_depth = skip_depth;
+          BIND_INPUT_EOF_YIELD(m);
+        }
+        BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+      }
       uint8_t next = SRC_PEEK();
       if (next == ']' || next == '}' || next == ',') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     }
@@ -1354,25 +1820,10 @@ safe_skip_value: {
  * container interfaces before descending through registered []any or
  * map[string]any metadata. The unchanged parent kind selects continuation. */
 any_value: {
+  NDEC_SET_INPUT_PHASE(BIND_PHASE_ANY_RESUME);
   const BindAnyMeta *am = (const BindAnyMeta *)m->b.ctx.types[m->b.ctx.any_type_idx].child;
   uint8_t *any_slot     = m->c.stash.any_yield.slot;
   uint8_t ch            = SRC_PEEK();
-#define ANY_RETURN()                                                                                              \
-  do {                                                                                                            \
-    if (depth == 0) goto document_end;                                                                            \
-    switch (cur_type.kind) {                                                                                      \
-    case BIND_KIND_STRUCT:                                                                                        \
-      goto object_continue;                                                                                       \
-    case BIND_KIND_SLICE:                                                                                         \
-    case BIND_KIND_STREAM:                                                                                        \
-    case BIND_KIND_ARRAY:                                                                                         \
-      goto array_continue;                                                                                        \
-    case BIND_KIND_MAP:                                                                                           \
-      goto map_continue;                                                                                          \
-    }                                                                                                             \
-    BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());                                                         \
-  } while (0)
-
   /* Numbers share parsing and typed-slot allocation. UseNumber preserves the
    * original text as json.Number; the default path stores a finite float64. */
   if (ch == '-' || (ch >= '0' && ch <= '9')) {
@@ -1404,7 +1855,7 @@ any_value: {
     *(const void **)any_slot       = type_tag;
     *(const void **)(any_slot + 8) = data;
     SRC_ADVANCE();
-    ANY_RETURN();
+    goto json_value_done;
   }
   if (ch == '"') {
     BindSlotClass *sc = &m->b.alloc.slot_classes[am->string_slot_class];
@@ -1417,21 +1868,21 @@ any_value: {
     *(const void **)any_slot       = am->string_type;
     *(const void **)(any_slot + 8) = data;
     SRC_ADVANCE();
-    ANY_RETURN();
+    goto json_value_done;
   }
   if (ch == 't' || ch == 'f') {
     if (bind_validate_atom(SRC_PTR(), ch) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     *(const void **)any_slot       = am->bool_type;
     *(const void **)(any_slot + 8) = (ch == 't') ? (const void *)am->static_true : (const void *)am->static_false;
     SRC_ADVANCE();
-    ANY_RETURN();
+    goto json_value_done;
   }
   if (ch == 'n') {
     if (bind_validate_atom(SRC_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     *(const void **)any_slot       = am->nil_type;
     *(const void **)(any_slot + 8) = NULL;
     SRC_ADVANCE();
-    ANY_RETURN();
+    goto json_value_done;
   }
   /* Publish the []any interface before descent so its slice-header slot is reachable. */
   if (ch == '[') {
@@ -1453,7 +1904,7 @@ any_value: {
       /* Return through the dynamic parent continuation rather than a fixed label. */
       BIND_WRITE_EMPTY_SLICE(cur_dst, m, cur_type.type_idx);
       bind_pop(frames, &depth, &cur_dst, &cur_type, &cur_count, &cur_aux);
-      ANY_RETURN();
+      goto json_value_done;
     }
     goto array_begin;
   }
@@ -1464,40 +1915,24 @@ any_value: {
     BIND_MAP_OPEN(m, &types[am->map_any_type_idx], any_slot + 8, bind_push);
   }
   BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_SYNTAX, SRC_POS());
-#undef ANY_RETURN
 }
 
 /* Deferred values are staged until FLUSH_UNMARSHAL or document end.
- * Unmarshaler and RawMessage records carry the source byte span; a
- * TextUnmarshaler record carries decoded string bytes from str_arena. JSON
- * null bypasses TextUnmarshaler but remains part of the raw span for the
- * other deferred kinds. */
+ * Unmarshaler and RawMessage records carry the raw JSON span as source
+ * offsets, or as raw-scratch offsets when the value crossed a window edge; a
+ * TextUnmarshaler record and a base64 []byte record carry decoded string
+ * bytes from str_arena. JSON null bypasses TextUnmarshaler but remains part
+ * of the raw span for the other deferred kinds. */
 deferred_value: {
   uint8_t *deferred_slot      = m->c.stash.deferred_yield.slot;
   const BindType *deferred_ct = m->c.stash.deferred_yield.type;
   uint8_t ch                  = SRC_PEEK();
-#define DEFERRED_RETURN()                                                                                         \
-  do {                                                                                                            \
-    if (depth == 0) goto document_end;                                                                            \
-    switch (cur_type.kind) {                                                                                      \
-    case BIND_KIND_STRUCT:                                                                                        \
-      goto object_continue;                                                                                       \
-    case BIND_KIND_SLICE:                                                                                         \
-    case BIND_KIND_STREAM:                                                                                        \
-    case BIND_KIND_ARRAY:                                                                                         \
-      goto array_continue;                                                                                        \
-    case BIND_KIND_MAP:                                                                                           \
-      goto map_continue;                                                                                          \
-    }                                                                                                             \
-    BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());                                                         \
-  } while (0)
-
   /* TextUnmarshaler is not called for JSON null. Consume the token and retain
    * the receiver's zero value; pointer nulls were excluded before dispatch. */
   if (ch == 'n' && deferred_ct->kind == BIND_KIND_TEXT_UNMARSHALER) {
     if (bind_validate_atom(SRC_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     SRC_ADVANCE();
-    DEFERRED_RETURN();
+    goto json_value_done;
   }
 
   UnmarshalRecord *rec = (UnmarshalRecord *)(m->b.alloc.deferred_drain + m->b.alloc.deferred_drain_used);
@@ -1505,93 +1940,124 @@ deferred_value: {
   rec->type_idx        = deferred_ct->type_idx;
   rec->kind            = deferred_ct->kind;
 
-  if (deferred_ct->kind != BIND_KIND_TEXT_UNMARSHALER) {
+  if (deferred_ct->kind != BIND_KIND_TEXT_UNMARSHALER && deferred_ct->kind != BIND_KIND_SLICE) {
     /* Record the raw JSON span from the current structural offset to the first
-     * structural offset after the value. */
-    uint32_t start_off = SRC_POS();
+     * structural offset after the value. The scanner publishes only whole
+     * atoms, so a primitive never crosses a window edge; only the container
+     * scan can stop for more input. */
     if (ch == '{' || ch == '[') {
-      uint32_t um_depth = 1;
-      SRC_ADVANCE();
-      while (um_depth > 0) {
-        if (UNLIKELY(SRC_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
-        uint8_t c = SRC_ADVANCE_CHAR();
-        if (c == '{' || c == '[') um_depth++;
-        else if (c == '}' || c == ']')
-          um_depth--;
-      }
-    } else {
-      SRC_ADVANCE();
+      /* deferred_raw_scan owns the record write: an input yield must not
+       * leave a half-written record behind the unadvanced drain cursor. */
+      NDEC_SET_INPUT_PHASE(BIND_PHASE_DEFERRED_RAW_RESUME);
+      goto deferred_raw_scan;
     }
+    uint32_t start_off = SRC_POS();
+    SRC_ADVANCE();
     uint32_t end_off = SRC_POS();
-    rec->arg0        = start_off;
-    rec->arg1        = end_off;
+    if (NDEC_STREAM_MODE && end_off > m->window_stable_end) end_off = m->window_stable_end;
+    rec->backing = BIND_RECORD_BACKING_SOURCE;
+    rec->arg0    = start_off;
+    rec->arg1    = end_off;
   } else {
     /* TextUnmarshaler receives decoded string bytes from str_arena. */
     if (ch != '"') BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
     const uint8_t *str_data;
     uint32_t str_len;
     if (bind_intern_str(&str_p, SRC_PTR(), &str_data, &str_len) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-    rec->arg0 = (uint32_t)(str_data - m->b.alloc.str_arena);
-    rec->arg1 = str_len;
+    rec->backing = BIND_RECORD_BACKING_SOURCE;
+    rec->arg0    = (uint32_t)(str_data - m->b.alloc.str_arena);
+    rec->arg1    = str_len;
     SRC_ADVANCE();
   }
 
   m->b.alloc.deferred_drain_used += sizeof(UnmarshalRecord);
-  DEFERRED_RETURN();
-#undef DEFERRED_RETURN
+  goto json_value_done;
+}
+
+/* The raw container scan for deferred values. deferred_value enters at the
+ * opening bracket; the BIND_PHASE_DEFERRED_RAW_RESUME gate re-enters after an
+ * input yield with the bracket depth restored from m->raw_depth. The scan
+ * steps one structural per iteration, so brackets inside strings leave the
+ * count untouched. A non-final window edge appends the value's stable bytes
+ * to the raw scratch and yields; the next window's offset zero continues the
+ * value because the relocated tail is exactly its unconsumed remainder. */
+deferred_raw_scan: {
+  /* The cursor sits on the opening bracket at entry, so the span origin is
+   * the current structural offset. A resumed scan reads raw_scratch_start. */
+  uint32_t um_start_off = SRC_POS();
+  uint32_t um_depth     = 1;
+  if (NDEC_STREAM_MODE && m->raw_scratch_start != BIND_RAW_NONE) {
+    um_depth = m->raw_depth;
+    goto deferred_raw_loop;
+  }
+  SRC_ADVANCE();
+  while (um_depth > 0) {
+  deferred_raw_loop:
+    if (UNLIKELY(SRC_EOF())) {
+      if (NDEC_STREAM_MODE && !m->window_final) {
+        BIND_INPUT_PHASE_EXPECT(BIND_PHASE_DEFERRED_RAW_RESUME);
+        uint32_t from = (m->raw_scratch_start == BIND_RAW_NONE) ? um_start_off : 0;
+        if (m->raw_scratch_start == BIND_RAW_NONE) m->raw_scratch_start = m->raw_used;
+        uint32_t len = m->window_stable_end - from;
+        __builtin_memcpy(m->raw_arena + m->raw_used, src + from, len);
+        m->raw_used += len;
+        m->raw_depth = um_depth;
+        BIND_INPUT_EOF_YIELD(m);
+      }
+      BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+    }
+    uint8_t c = SRC_ADVANCE_CHAR();
+    if (c == '{' || c == '[') um_depth++;
+    else if (c == '}' || c == ']')
+      um_depth--;
+  }
+  uint32_t end_off = SRC_POS();
+  if (NDEC_STREAM_MODE && end_off > m->window_stable_end) end_off = m->window_stable_end;
+  UnmarshalRecord *rec = (UnmarshalRecord *)(m->b.alloc.deferred_drain + m->b.alloc.deferred_drain_used);
+  rec->target          = m->c.stash.deferred_yield.slot;
+  rec->type_idx        = m->c.stash.deferred_yield.type->type_idx;
+  rec->kind            = m->c.stash.deferred_yield.type->kind;
+  if (NDEC_STREAM_MODE && m->raw_scratch_start != BIND_RAW_NONE) {
+    __builtin_memcpy(m->raw_arena + m->raw_used, src, end_off);
+    m->raw_used += end_off;
+    rec->backing         = BIND_RECORD_BACKING_SCRATCH;
+    rec->arg0            = m->raw_scratch_start;
+    rec->arg1            = m->raw_used;
+    m->raw_scratch_start = BIND_RAW_NONE;
+  } else {
+    rec->backing = BIND_RECORD_BACKING_SOURCE;
+    rec->arg0    = um_start_off;
+    rec->arg1    = end_off;
+  }
+  m->b.alloc.deferred_drain_used += sizeof(UnmarshalRecord);
+  goto json_value_done;
 }
 
 /* The Value submachine uses separate locals, so the saved parent depth and type
  * remain authoritative for continuation. */
-#define VALUE_RETURN()                                                                                            \
-  do {                                                                                                            \
-    if (depth == 0) goto document_end;                                                                            \
-    switch (cur_type.kind) {                                                                                      \
-    case BIND_KIND_STRUCT:                                                                                        \
-      goto object_continue;                                                                                       \
-    case BIND_KIND_SLICE:                                                                                         \
-    case BIND_KIND_STREAM:                                                                                        \
-    case BIND_KIND_ARRAY:                                                                                         \
-      goto array_continue;                                                                                        \
-    case BIND_KIND_MAP:                                                                                           \
-      goto map_continue;                                                                                          \
-    }                                                                                                             \
-    BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());                                                         \
-  } while (0)
 
-#define VALUE_DISPATCH_ELEM()                                                                                     \
-  do {                                                                                                            \
-    uint8_t _ch = SRC_PEEK();                                                                                     \
-    if (_ch == '{') {                                                                                             \
-      SRC_ADVANCE();                                                                                              \
-      if (SRC_ACCEPT('}')) {                                                                                      \
-        bind_emit_empty_container(&vd_tape_p, TAPE_START_OBJECT, TAPE_END_OBJECT, vd_tape_base);                  \
-      } else {                                                                                                    \
-        goto vd_obj_begin;                                                                                        \
-      }                                                                                                           \
-    } else if (_ch == '[') {                                                                                      \
-      SRC_ADVANCE();                                                                                              \
-      if (SRC_ACCEPT(']')) {                                                                                      \
-        bind_emit_empty_container(&vd_tape_p, TAPE_START_ARRAY, TAPE_END_ARRAY, vd_tape_base);                    \
-      } else {                                                                                                    \
-        goto vd_arr_begin;                                                                                        \
-      }                                                                                                           \
-    } else {                                                                                                      \
-      if (bind_emit_primitive(src, &cursor.idx, vd_str_arena, &vd_str_p, &vd_tape_p, m->c.atof, vd_str_limit))    \
-        BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());                                                            \
-    }                                                                                                             \
-  } while (0)
-
-/* The synchronous Value submachine either appends a standalone Value or appends
- * an entry value to an open merged tape. vd_close uses phase to finalize the
- * selected lifecycle, and frames above the parent enforce the shared depth limit. */
+/* The Value submachine either appends a standalone Value or appends an entry
+ * value to an open merged tape. vd_close dispatches on the lifecycle marker,
+ * and frames above the parent enforce the shared depth limit.
+ *
+ * Streaming: every structural read is an input-yield safe point. The vd
+ * machine fields and alloc.tape_used carry the walk across windows; frame
+ * entries already hold logical tape indices, and vd_base_off survives the
+ * arena growth that would dangle a raw base pointer. */
 
 /* A standalone Value appends at tape_used without per-value reservation. Its
  * container indices are relative to the segment start, and value_doc keeps arena
- * backings reachable. Phase zero tells vd_close to patch its end and commit it. */
+ * backings reachable. Lifecycle zero tells vd_close to patch its end and commit it. */
 vd_dispatch_value: {
   uint64_t *vd_tape_base = m->b.alloc.tape_arena + m->b.alloc.tape_used;
   m->b.alloc.value_tape  = vd_tape_base; /* vd_resume reads this */
+#if NDEC_STREAM_MODE
+  m->vd_base_off       = (uint32_t)m->b.alloc.tape_used;
+  m->vd_lifecycle      = 0;
+  m->vd_depth          = -1;
+  m->vd_cur_count      = 0;
+  m->vd_cur_tape_index = 0;
+#endif
 
   /* Standalone Value output is contiguous view A without seams. */
   uint8_t *target = m->c.stash.deferred_yield.slot;
@@ -1606,25 +2072,37 @@ vd_dispatch_value: {
  * for relative container indices, but append value words at tape_used. */
 vd_dispatch_unknown_value: {
   m->b.alloc.value_tape = m->b.alloc.tape_arena + m->auxFrames[m->aux_depth].a.start;
+#if NDEC_STREAM_MODE
+  m->vd_base_off       = m->auxFrames[m->aux_depth].a.start;
+  m->vd_lifecycle      = 1;
+  m->vd_depth          = -1;
+  m->vd_cur_count      = 0;
+  m->vd_cur_tape_index = 0;
+#endif
   __BIND_SAVE_LOCALS(m);
   m->c.phase = BIND_PHASE_RESERVE_UNKNOWN_VALUE_RESUME;
   goto vd_resume;
 }
 
-/* Both Value lifecycles share the parse string arena. The merged-entry phase
+/* Both Value lifecycles share the parse string arena. The merged-entry form
  * separates its container-index base from its append cursor. */
 vd_resume: {
-  uint64_t *vd_tape_base = m->b.alloc.value_tape;
-  uint8_t *vd_str_arena  = m->b.alloc.str_arena; /* shared with bind */
+  uint8_t *vd_str_arena = m->b.alloc.str_arena; /* shared with bind */
   /* Bound raw-number copies by the pre-sized document string arena. */
   const uint8_t *vd_str_limit = vd_str_arena + m->b.alloc.str_arena_cap;
-  /* Standalone output starts at its base. Merged-entry output appends at tape_used
-   * while container close indices remain relative to the merged object root. */
-  uint64_t *vd_tape_p = vd_tape_base;
+  uint8_t *vd_str_p           = str_p; /* continue the shared bump cursor */
+#if NDEC_STREAM_MODE
+  /* Logical coordinates survive arena growth between windows, so the container
+   * base and the append cursor both derive from offsets. */
+  uint64_t *vd_tape_base = m->b.alloc.tape_arena + m->vd_base_off;
+  uint64_t *vd_tape_p    = m->b.alloc.tape_arena + m->b.alloc.tape_used;
+#else
+  uint64_t *vd_tape_base = m->b.alloc.value_tape;
+  uint64_t *vd_tape_p    = vd_tape_base;
   if (m->c.phase == BIND_PHASE_RESERVE_UNKNOWN_VALUE_RESUME) {
     vd_tape_p = m->b.alloc.tape_arena + m->b.alloc.tape_used;
   }
-  uint8_t *vd_str_p          = str_p; /* continue the shared bump cursor */
+#endif
   int32_t vd_depth           = -1;
   uint32_t vd_cur_count      = 0;
   uint32_t vd_cur_tape_index = 0;
@@ -1632,50 +2110,103 @@ vd_resume: {
    * nesting remains within BIND_MAX_DEPTH. */
   BindFrame *vd_stack = &m->c.frames[depth + 1];
   int vd_stack_cap    = BIND_MAX_DEPTH - depth;
-  uint8_t ch          = SRC_PEEK();
+#if NDEC_STREAM_MODE
+  /* An input-yield resume restores the walk state and re-enters its label.
+   * Fresh dispatch initialized the same machine fields, so a yield before the
+   * first token is equally recoverable. */
+  if (m->c.phase >= BIND_PHASE_VD_OBJ_OPEN && m->c.phase <= BIND_PHASE_VD_ARR_CONT) {
+    vd_depth          = m->vd_depth;
+    vd_cur_count      = m->vd_cur_count;
+    vd_cur_tape_index = m->vd_cur_tape_index;
+    switch (m->c.phase) {
+    case BIND_PHASE_VD_OBJ_OPEN:
+      goto vd_obj_open;
+    case BIND_PHASE_VD_ARR_OPEN:
+      goto vd_arr_open;
+    case BIND_PHASE_VD_ELEM:
+      goto vd_elem;
+    case BIND_PHASE_VD_OBJ_KEY:
+      goto vd_obj_key;
+    case BIND_PHASE_VD_OBJ_CONT:
+      goto vd_obj_continue;
+    default:
+      goto vd_arr_continue;
+    }
+  }
+#endif
+  goto vd_elem;
+
+/* One element of the current container, or the root value itself. A scalar
+ * completes here; an empty container completes through its open label's
+ * empty-close check. Either way control returns through vd_scope_end: at the
+ * root that closes the whole Value, inside a container the current count's
+ * is_array bit selects the continuation. */
+vd_elem: {
+  VD_INPUT_EOF_CHECK(m, BIND_PHASE_VD_ELEM);
+  uint8_t ch = SRC_PEEK();
   if (ch == '{') {
     SRC_ADVANCE();
-    if (SRC_ACCEPT('}')) {
-      bind_emit_empty_container(&vd_tape_p, TAPE_START_OBJECT, TAPE_END_OBJECT, vd_tape_base);
-      goto vd_close;
-    }
-    goto vd_obj_begin;
+    goto vd_obj_open;
   }
   if (ch == '[') {
     SRC_ADVANCE();
-    if (SRC_ACCEPT(']')) {
-      bind_emit_empty_container(&vd_tape_p, TAPE_START_ARRAY, TAPE_END_ARRAY, vd_tape_base);
-      goto vd_close;
-    }
-    goto vd_arr_begin;
+    goto vd_arr_open;
   }
-  goto vd_root_scalar;
+  if (bind_emit_primitive(src, &cursor.idx, vd_str_arena, &vd_str_p, &vd_tape_p, m->c.atof, vd_str_limit))
+    goto vd_primitive_error;
+  goto vd_scope_end;
+}
 
-vd_obj_begin: {
+/* The '{' is consumed. A leading '}' closes an empty container; otherwise the
+ * push and the first key fetch follow once the token is visible. */
+vd_obj_open: {
+  VD_INPUT_EOF_CHECK(m, BIND_PHASE_VD_OBJ_OPEN);
+  if (SRC_ACCEPT('}')) {
+    bind_emit_empty_container(&vd_tape_p, TAPE_START_OBJECT, TAPE_END_OBJECT, vd_tape_base);
+    goto vd_scope_end;
+  }
   if (bind_emit_start_container(vd_stack, vd_stack_cap, &vd_tape_p, 0, &vd_depth, &vd_cur_count,
                                 &vd_cur_tape_index, vd_tape_base))
     BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
+  vd_cur_count++;
+  goto vd_obj_key;
+}
+
+/* The '[' is consumed. A leading ']' closes an empty container; otherwise the
+ * first element dispatch follows once the token is visible. */
+vd_arr_open: {
+  VD_INPUT_EOF_CHECK(m, BIND_PHASE_VD_ARR_OPEN);
+  if (SRC_ACCEPT(']')) {
+    bind_emit_empty_container(&vd_tape_p, TAPE_START_ARRAY, TAPE_END_ARRAY, vd_tape_base);
+    goto vd_scope_end;
+  }
+  if (bind_emit_start_container(vd_stack, vd_stack_cap, &vd_tape_p, 1, &vd_depth, &vd_cur_count,
+                                &vd_cur_tape_index, vd_tape_base))
+    BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
+  vd_cur_count++;
+  goto vd_elem;
+}
+
+/* Fetch one object key and its colon. The count already covers the entry whose
+ * value follows, so a resume does not recount it. The scanner withholds a
+ * trailing key quote lacking its successor, which keeps the key and ':' atomic
+ * within the stable prefix. */
+vd_obj_key: {
+  VD_INPUT_EOF_CHECK(m, BIND_PHASE_VD_OBJ_KEY);
   const uint8_t *key = SRC_ADVANCE_PTR();
   if (*key != '"') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-  vd_cur_count++;
   if (bind_emit_string_copy(vd_str_arena, &vd_str_p, &vd_tape_p, key))
     BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
   if (SRC_ADVANCE_CHAR() != ':') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-  goto vd_obj_field;
+  goto vd_elem;
 }
 
-vd_obj_field: { VALUE_DISPATCH_ELEM(); }
-
 vd_obj_continue: {
+  VD_INPUT_EOF_CHECK(m, BIND_PHASE_VD_OBJ_CONT);
   uint8_t ch = SRC_ADVANCE_CHAR();
   if (ch == ',') {
     vd_cur_count++;
-    const uint8_t *key = SRC_ADVANCE_PTR();
-    if (*key != '"') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-    if (bind_emit_string_copy(vd_str_arena, &vd_str_p, &vd_tape_p, key))
-      BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-    if (SRC_ADVANCE_CHAR() != ':') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-    goto vd_obj_field;
+    goto vd_obj_key;
   }
   if (ch == '}') {
     bind_emit_end_container(vd_stack, &vd_tape_p, TAPE_START_OBJECT, TAPE_END_OBJECT, &vd_depth, &vd_cur_count,
@@ -1685,20 +2216,12 @@ vd_obj_continue: {
   BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
 }
 
-vd_arr_begin: {
-  if (bind_emit_start_container(vd_stack, vd_stack_cap, &vd_tape_p, 1, &vd_depth, &vd_cur_count,
-                                &vd_cur_tape_index, vd_tape_base))
-    BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
-  vd_cur_count++;
-}
-
-vd_arr_value: { VALUE_DISPATCH_ELEM(); }
-
 vd_arr_continue: {
+  VD_INPUT_EOF_CHECK(m, BIND_PHASE_VD_ARR_CONT);
   uint8_t ch = SRC_ADVANCE_CHAR();
   if (ch == ',') {
     vd_cur_count++;
-    goto vd_arr_value;
+    goto vd_elem;
   }
   if (ch == ']') {
     bind_emit_end_container(vd_stack, &vd_tape_p, TAPE_START_ARRAY, TAPE_END_ARRAY, &vd_depth, &vd_cur_count,
@@ -1714,20 +2237,22 @@ vd_scope_end: {
   goto vd_obj_continue;
 }
 
-vd_root_scalar: {
-  if (bind_emit_primitive(src, &cursor.idx, vd_str_arena, &vd_str_p, &vd_tape_p, m->c.atof, vd_str_limit))
-    BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-  goto vd_close;
-}
+vd_primitive_error:
+  cursor.idx--;
+  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
 
 /* vd_close commits the shared string cursor and dispatches by lifecycle.
- * RESERVE_UNKNOWN_VALUE_RESUME commits the merged entry and trailing seam for
- * phase2 classification. Phase zero patches and commits a standalone Value. */
+ * The merged entry commits the tape cursor and trailing seam for phase2
+ * classification. The standalone form patches and commits its Value. */
 vd_close: {
   uint32_t tape_len = (uint32_t)(vd_tape_p - vd_tape_base);
   str_p             = vd_str_p;
   vd_depth          = -1;
+#if NDEC_STREAM_MODE
+  if (m->vd_lifecycle) {
+#else
   if (m->c.phase == BIND_PHASE_RESERVE_UNKNOWN_VALUE_RESUME) {
+#endif
     m->b.alloc.tape_used = (size_t)(vd_tape_p - m->b.alloc.tape_arena);
     tape_build_entry_end(m, &m->auxFrames[m->aux_depth].a);
     goto object_continue;
@@ -1735,11 +2260,9 @@ vd_close: {
   uint8_t *target                      = m->c.stash.deferred_yield.slot;
   *(int32_t *)(target + VALUE_END_OFF) = (int32_t)tape_len;
   m->b.alloc.tape_used                 = (size_t)(vd_tape_p - m->b.alloc.tape_arena);
-  VALUE_RETURN();
+  goto json_value_done;
 }
 }
-#undef VALUE_RETURN
-#undef VALUE_DISPATCH_ELEM
 
 variant_rebind_resume: { goto phase2_walk; }
 
@@ -1816,15 +2339,27 @@ root_scalar: {
     goto deferred_value;
   }
   if (ch == '"') {
-    if (ct->kind != BIND_KIND_STRING && ct->kind != BIND_KIND_NUMBER)
-      BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+    if (ct->kind != BIND_KIND_STRING && ct->kind != BIND_KIND_NUMBER) {
+      if (ct->kind == BIND_KIND_SLICE && ((const BindType *)ct->child)->kind == BIND_KIND_UINT8) {
+        m->c.stash.deferred_yield.slot = (uint8_t *)cur_dst;
+        m->c.stash.deferred_yield.type = (BindType *)ct;
+        if (m->b.alloc.deferred_drain_used + sizeof(UnmarshalRecord) > m->b.alloc.deferred_drain_cap) {
+          __BIND_SAVE_LOCALS(m);
+          m->c.phase                = BIND_PHASE_DEFERRED_RESUME;
+          m->b.yield.pending_action = BIND_YIELD_FLUSH_UNMARSHAL;
+          return;
+        }
+        goto deferred_value;
+      }
+      BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_POS(), 0);
+    }
     if (bind_visit_str(&str_p, SRC_PTR(), cur_dst) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     SRC_ADVANCE();
     goto document_end;
   }
   if (ch == '-' || (ch >= '0' && ch <= '9')) {
     if (ct->kind == BIND_KIND_NUMBER) BIND_WRITE_NUMBER_AS_STR(cur_dst, SRC_POS(), document_end);
-    BIND_WRITE_NUMBER(ct, cur_dst, SRC_POS(), document_end, BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS()));
+    BIND_WRITE_NUMBER(ct, cur_dst, SRC_POS(), document_end, BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_POS(), 0));
   }
   if (ch == 'n') {
     if (bind_validate_atom(SRC_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
@@ -1832,14 +2367,14 @@ root_scalar: {
     goto document_end;
   }
   if (ch == 't') {
-    if (ct->kind != BIND_KIND_BOOL) BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+    if (ct->kind != BIND_KIND_BOOL) BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_POS(), 0);
     if (bind_validate_atom(SRC_PTR(), 't') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     *(uint8_t *)cur_dst = 1;
     SRC_ADVANCE();
     goto document_end;
   }
   if (ch == 'f') {
-    if (ct->kind != BIND_KIND_BOOL) BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+    if (ct->kind != BIND_KIND_BOOL) BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_POS(), 0);
     if (bind_validate_atom(SRC_PTR(), 'f') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     *(uint8_t *)cur_dst = 0;
     SRC_ADVANCE();
@@ -1856,10 +2391,12 @@ document_end: {
   if (m->c.first_error_kind != 0) {
     m->b.yield.pending_action = BIND_YIELD_ERROR;
     BIND_ERROR_PAYLOAD(m, m->c.first_error_kind, m->b.yield.first_error_pos, m->b.yield.first_error_pos, NULL);
-  } else if (!SRC_EOF()) {
-    /* Input remains past the top-level value: trailing data (e.g. "42 garbage",
-     * "[1][]", "{}}"). The scan sentinel at src[len] is excluded because
-     * cursor_end stops before it. */
+  } else if (!NDEC_STREAM_MODE && !SRC_EOF()) {
+    /* Contiguous pass: input remains past the top-level value, so trailing
+     * data (e.g. "42 garbage", "[1][]", "{}}"). The scan sentinel at src[len]
+     * is excluded because cursor_end stops before it. The streaming pass
+     * completes here instead: its Go driver owns the trailing judgment,
+     * because for a value-per-call driver the remainder is the next value. */
     m->b.yield.pending_action = BIND_YIELD_ERROR;
     BIND_ERROR_PAYLOAD(m, BIND_ERR_TRAILING, SRC_POS(), SRC_POS(), NULL);
   } else {
@@ -2265,10 +2802,8 @@ t_array_begin: {
     cur_count = 0;
     goto t_array_value;
   }
-  BindType *child_type = (BindType *)cur_type.child;
-  int32_t ci           = m->b.ctx.type_meta[cur_type.type_idx].u.slice.alloc_class;
-  BindSlotClass *sc    = &m->b.alloc.slot_classes[ci];
-  uint32_t child_size  = child_type->u.slice.child_size;
+  int32_t ci        = m->b.ctx.type_meta[cur_type.type_idx].u.slice.alloc_class;
+  BindSlotClass *sc = &m->b.alloc.slot_classes[ci];
   if (sc->mode == BIND_SLOT_RECBATCH) {
     void *bk = recbatch_alloc(sc, 0);
     if (UNLIKELY(bk == NULL)) {
@@ -3118,9 +3653,25 @@ t_document_end: {
 }
 }
 
+/* Mode-dependent macro bodies: each pass defines its own and must retire it
+ * before the next inclusion. */
+#undef NDEC_SET_INPUT_PHASE
+#undef BIND_INPUT_EOF_YIELD
+#undef BIND_INPUT_EOF_CHECK
+#undef VD_INPUT_EOF_YIELD
+#undef VD_INPUT_EOF_CHECK
+#undef VJ_DEBUG_INPUT_PHASE_GUARD
+#undef BIND_INPUT_PHASE_EXPECT
+#undef BIND_INPUT_PHASE_EXPECT2
+
+#undef ndec_bind_parse_inner
+
+#if NDEC_STREAM_MODE
+/* Both engines exist; retire the macro surface after the final pass. */
 #undef SRC_PEEK
 #undef SRC_PTR
 #undef SRC_POS
+#undef SRC_PREV_POS
 #undef SRC_EOF
 #undef SRC_ADVANCE_PTR
 #undef SRC_ADVANCE_CHAR
@@ -3159,5 +3710,4 @@ t_document_end: {
 #undef TAPE_BIND_DESCEND_STRUCT
 #undef TAPE_BIND_MAP_OPEN
 #undef TAPE_BIND_TYPE_MISMATCH_SKIP
-
-#endif /* NDEC_BIND_H */
+#endif

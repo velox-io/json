@@ -230,11 +230,13 @@ func (p *Parser) parseTapePadded(paddedSrc []byte, mode StrMode, strictScan bool
 	//
 	// str_arena at srcLen: every arena byte is a decoded string byte or a byte
 	// of a number kept as text, each charged to a distinct source span. A
-	// string costs decoded + 1 terminator against a body plus two quotes; a
-	// kept number copies 1:1, which is the tight case. ZC writes strictly
-	// less than COPY, so one figure serves both modes; and since the parse
-	// allocates nothing, an undersized arena means rejecting a legal
-	// document, not growing mid-parse.
+	// string costs decoded + 1 terminator against a body plus two quotes; the
+	// decode copies string bytes verbatim (lax preserves raw bytes, strict has
+	// already rejected invalid UTF-8 at scan), so a decoded body never exceeds
+	// its source span. A kept number copies 1:1, which is the tight case. ZC
+	// writes strictly less than COPY, so one figure serves both modes; and
+	// since the parse allocates nothing, an undersized arena means rejecting a
+	// legal document, not growing mid-parse.
 	//
 	// The 64-byte tail covers one SIMD chunk store past the decoded end and
 	// the string terminator.
