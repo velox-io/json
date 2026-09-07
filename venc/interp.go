@@ -11,7 +11,11 @@ import (
 	"github.com/velox-io/json/value"
 )
 
-func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
+// interp runs one Blueprint against base using the stack of ctx, which may be
+// the root context or a child invocation's. Output state (es.buf, indent
+// strings, escape flags) is shared; continuation state (stack, program
+// counter, base) belongs to this run only.
+func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer) error {
 	ops := bp.Ops
 	opsLen := int32(len(ops))
 	indent := es.indentString != ""
@@ -19,16 +23,26 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 		pc    int32
 		first = true // tracks whether to write comma before next value
 		depth int32  // stack depth
+
+		// elemNL marks the first element of a just-opened container in indent
+		// mode: the element's leading newline+indent is written by whichever
+		// op renders it. Keyed writes own their newline (interpWriteKey), so
+		// only keyless opens and the interface op consult this flag. A keyless
+		// pointer deref passes it through: the pointee's open writes the
+		// newline. A stream driver seeds it through es.childElemNL when it
+		// hands the interpreter an element whose separators it already wrote.
+		elemNL = es.childElemNL
 	)
+	es.childElemNL = false
 
 	// On any non-empty stack at function exit (i.e. an error abort that
 	// skipped pop-time cleanup), clear leftover frames so the recycled
-	// encodeState carries no stale pointers in Payload[0..8] / RetBase.
+	// context carries no stale pointers in Payload[0..8] / RetBase.
 	// Normal completion (opRet at depth==0) leaves depth==0, making this
 	// a no-op on the hot path.
 	defer func() {
 		for i := int32(0); i < depth; i++ {
-			frame := &es.vmCtx.Stack[i]
+			frame := &ctx.Stack[i]
 			frame.RetBase = nil
 			*(*uintptr)(unsafe.Pointer(&frame.Payload[0])) = 0
 		}
@@ -43,11 +57,17 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 		case opObjOpen:
 			if hdr.KeyLen > 0 {
 				es.interpWriteKey(hdr, first, indent)
+				elemNL = false
 			} else if !first {
 				es.buf = append(es.buf, ',')
 				if indent {
 					es.appendNewlineIndent()
 				}
+			} else if elemNL {
+				// First container element: open on its own line like the
+				// primitives do via interpWriteKey.
+				es.appendNewlineIndent()
+				elemNL = false
 			}
 			es.buf = append(es.buf, '{')
 			if indent {
@@ -68,12 +88,9 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			pc += 8
 
 		case opBool:
-			fieldPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
-			if hdr.KeyLen > 0 {
-				es.interpWriteKey(hdr, first, indent)
-				first = false
-			}
-			if *(*bool)(fieldPtr) {
+			es.interpWriteKey(hdr, first, indent)
+			first = false
+			if *(*bool)(unsafe.Add(base, uintptr(hdr.FieldOff))) {
 				es.buf = append(es.buf, litTrue...)
 			} else {
 				es.buf = append(es.buf, litFalse...)
@@ -282,7 +299,7 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			if depth >= VJ_MAX_STACK_DEPTH {
 				return fmt.Errorf("venc: nesting depth exceeds limit (%d)", depth)
 			}
-			frame := &es.vmCtx.Stack[depth]
+			frame := &ctx.Stack[depth]
 			frame.RetBase = base
 			*(*int32)(unsafe.Pointer(&frame.Payload[0])) = pc + 16
 			// Payload[4] is the preserve-first flag consumed by opRet; a call
@@ -305,7 +322,7 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 				return nil // program termination
 			}
 			depth--
-			frame := &es.vmCtx.Stack[depth]
+			frame := &ctx.Stack[depth]
 			base = frame.RetBase
 			frame.RetBase = nil
 			pc = *(*int32)(unsafe.Pointer(&frame.Payload[0]))
@@ -345,7 +362,7 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			if depth >= VJ_MAX_STACK_DEPTH {
 				return fmt.Errorf("venc: nesting depth exceeds limit (%d)", depth)
 			}
-			frame := &es.vmCtx.Stack[depth]
+			frame := &ctx.Stack[depth]
 			frame.RetBase = base
 			*(*int32)(unsafe.Pointer(&frame.Payload[0])) = pc + 8
 			*(*int32)(unsafe.Pointer(&frame.Payload[4])) = 1 // preserve first on ret
@@ -377,7 +394,7 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 				if depth >= VJ_MAX_STACK_DEPTH {
 					return fmt.Errorf("venc: nesting depth exceeds limit (%d)", depth)
 				}
-				frame := &es.vmCtx.Stack[depth]
+				frame := &ctx.Stack[depth]
 				frame.RetBase = base
 				*(*int32)(unsafe.Pointer(&frame.Payload[4])) = boolToInt32(first)
 				depth++
@@ -388,10 +405,10 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 		case opPtrEnd:
 			if depth > 0 {
 				depth--
-				base = es.vmCtx.Stack[depth].RetBase
-				es.vmCtx.Stack[depth].RetBase = nil
+				base = ctx.Stack[depth].RetBase
+				ctx.Stack[depth].RetBase = nil
 				// Symmetric pop cleanup: see opRet for rationale.
-				*(*uintptr)(unsafe.Pointer(&es.vmCtx.Stack[depth].Payload[0])) = 0
+				*(*uintptr)(unsafe.Pointer(&ctx.Stack[depth].Payload[0])) = 0
 				first = false
 			}
 			pc += 8
@@ -404,7 +421,16 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 
 			if hdr.KeyLen > 0 {
 				es.interpWriteKey(hdr, first, indent)
+				elemNL = false
 				first = false
+			} else if !first {
+				es.buf = append(es.buf, ',')
+				if indent {
+					es.appendNewlineIndent()
+				}
+			} else if elemNL {
+				es.appendNewlineIndent()
+				elemNL = false
 			}
 
 			if sh.Data == nil {
@@ -431,7 +457,7 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			if depth >= VJ_MAX_STACK_DEPTH {
 				return fmt.Errorf("venc: nesting depth exceeds limit (%d)", depth)
 			}
-			frame := &es.vmCtx.Stack[depth]
+			frame := &ctx.Stack[depth]
 			frame.RetBase = base
 			*(*unsafe.Pointer)(unsafe.Pointer(&frame.Payload[0])) = sh.Data
 			*(*int64)(unsafe.Pointer(&frame.Payload[8])) = int64(sh.Len)
@@ -441,12 +467,13 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 
 			base = sh.Data // point to first element
 			first = true
+			elemNL = indent
 			pc += 16 // enter loop body
 
 		case opSliceEnd:
 			ext := opExtAt(ops, pc)
 			depth--
-			frame := &es.vmCtx.Stack[depth]
+			frame := &ctx.Stack[depth]
 			idx := *(*int32)(unsafe.Pointer(&frame.Payload[16])) + 1
 			count := *(*int64)(unsafe.Pointer(&frame.Payload[8]))
 			elemSize := uintptr(frame.State)
@@ -483,12 +510,27 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 
 			if hdr.KeyLen > 0 {
 				es.interpWriteKey(hdr, first, indent)
+				elemNL = false
 				first = false
+			} else if !first {
+				es.buf = append(es.buf, ',')
+				if indent {
+					es.appendNewlineIndent()
+				}
+			} else if elemNL {
+				es.appendNewlineIndent()
+				elemNL = false
 			}
 
 			es.buf = append(es.buf, '[')
+			if indent {
+				es.indentDepth++
+			}
 
 			if arrayLen == 0 {
+				if indent {
+					es.indentDepth--
+				}
 				es.buf = append(es.buf, ']')
 				pc += 16 + bodyLen + 16
 				continue
@@ -499,7 +541,7 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			if depth >= VJ_MAX_STACK_DEPTH {
 				return fmt.Errorf("venc: nesting depth exceeds limit (%d)", depth)
 			}
-			frame := &es.vmCtx.Stack[depth]
+			frame := &ctx.Stack[depth]
 			frame.RetBase = base
 			*(*unsafe.Pointer)(unsafe.Pointer(&frame.Payload[0])) = fieldPtr
 			*(*int64)(unsafe.Pointer(&frame.Payload[8])) = int64(arrayLen)
@@ -509,10 +551,25 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 
 			base = fieldPtr
 			first = true
+			elemNL = indent
 			pc += 16
 
 		case opSeqFloat64, opSeqInt, opSeqInt64, opSeqString:
-			if err := es.interpSeq(hdr, ops, pc, base, first, op); err != nil {
+			// The seq op renders the whole array; the element-position comma
+			// and leading newline belong here, not inside interpSeq.
+			if hdr.KeyLen > 0 {
+				es.interpWriteKey(hdr, first, indent)
+				elemNL = false
+			} else if !first {
+				es.buf = append(es.buf, ',')
+				if indent {
+					es.appendNewlineIndent()
+				}
+			} else if elemNL {
+				es.appendNewlineIndent()
+				elemNL = false
+			}
+			if err := es.interpSeq(hdr, ops, pc, base, op); err != nil {
 				return err
 			}
 			first = false
@@ -578,8 +635,15 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 			fieldPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
 			if hdr.KeyLen > 0 {
 				es.interpWriteKey(hdr, first, indent)
+				elemNL = false
 			} else if !first {
 				es.buf = append(es.buf, ',')
+				if indent {
+					es.appendNewlineIndent()
+				}
+			} else if elemNL {
+				es.appendNewlineIndent()
+				elemNL = false
 			}
 			if err := es.encodeAnyIface(fieldPtr); err != nil {
 				return err
@@ -603,6 +667,22 @@ func (es *encodeState) interp(bp *Blueprint, base unsafe.Pointer) error {
 					continue
 				}
 				fieldPtr = unsafe.Add(fieldBase, fb.Offset)
+			}
+
+			// A Stream field runs the OnWrite producer with lazy member
+			// commitment; the generic omitempty and prefix logic below does
+			// not apply to it.
+			if fb.TI.Kind == typ.KindStream {
+				if err := es.streamFromInterp(fb, fieldPtr, first, elemNL); err != nil {
+					if err == errStreamOmitted {
+						pc += 8
+						continue
+					}
+					return err
+				}
+				first = false
+				pc += 8
+				continue
 			}
 
 			if fb.TagFlags&EncTagFlagOmitEmpty != 0 && fb.IsZeroFn != nil {
@@ -731,14 +811,10 @@ func interpIsZero(ptr unsafe.Pointer, tag int32) bool {
 	}
 }
 
-func (es *encodeState) interpSeq(hdr *VjOpHdr, ops []byte, pc int32, base unsafe.Pointer, first bool, op uint16) error {
+func (es *encodeState) interpSeq(hdr *VjOpHdr, ops []byte, pc int32, base unsafe.Pointer, op uint16) error {
 	ext := opExtAt(ops, pc)
 	fieldPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
 	doIndent := es.indentString != ""
-
-	if hdr.KeyLen > 0 {
-		es.interpWriteKey(hdr, first, doIndent)
-	}
 
 	packed := uint32(ext.OperandA)
 	var data unsafe.Pointer

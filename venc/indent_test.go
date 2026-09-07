@@ -77,12 +77,14 @@ func TestIndentDepthReset_EncoderPath(t *testing.T) {
 	runIndentDepthReset(t, encoderSetup("", "\u00a0"))
 }
 
-// TestIndentYieldLeavesStaleDepth guards the VM yield path: a yieldFallback at
-// depth > 0 must leave es.indentDepth stale (synced from ctx.IndentDepth in
-// vm_exec.go) so the next encode's entry point has something to reset. This
-// stale-state leakage is a VM-yield phenomenon; under vj_noencvm there is no
-// yield, so the scenario cannot arise.
-func TestIndentYieldLeavesStaleDepth(t *testing.T) {
+// TestIndentYieldRunExitsAtEntryDepth guards the VM yield path: a
+// yieldFallback at depth > 0 syncs es.indentDepth up from ctx.IndentDepth
+// while the run is suspended, and the outermost exec restores the entry depth
+// at exit. A root stream driver starts one outermost run per element, so a
+// stale post-run depth would compound across elements. This exit discipline
+// lives in exec; under vj_noencvm the interpreter keeps es.indentDepth
+// balanced itself, so the scenario cannot arise there.
+func TestIndentYieldRunExitsAtEntryDepth(t *testing.T) {
 	if !encvm.Available {
 		t.Skip("native encoder not available on this platform")
 	}
@@ -95,10 +97,9 @@ func TestIndentYieldLeavesStaleDepth(t *testing.T) {
 	if err := es.encodeTop(ti, unsafe.Pointer(&outer)); err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	if es.indentDepth == 0 {
-		t.Fatalf("yield did not leave stale indentDepth; got 0, want > 0")
+	if es.indentDepth != 0 {
+		t.Fatalf("outermost run exited at indentDepth %d, want 0 (entry depth)", es.indentDepth)
 	}
-	t.Logf("after yield: es.indentDepth=%d", es.indentDepth)
 }
 
 // TestCompactModeUsesNativeVM guards compact (no-indent) routing: exec() sends

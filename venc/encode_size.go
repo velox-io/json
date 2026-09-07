@@ -47,6 +47,10 @@ func buildSizeFn(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 		return buildSizeMap(ti, depth)
 	case typ.KindPointer:
 		return buildSizePointer(ti, depth)
+	case typ.KindStream:
+		// A stream's output size is producer-driven; the producer must run
+		// exactly once, so no dynamic sizer may exist for it.
+		return nil
 	default:
 		return nil
 	}
@@ -100,6 +104,16 @@ func buildSizeStruct(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 		fi := &si.Fields[i]
 		overhead := len(fi.KeyBytes) + 1 // key + comma
 		omit := fi.TagFlags&EncTagFlagOmitEmpty != 0
+
+		// A stream field's emptiness is producer-driven and its whole-struct
+		// IsZeroFn says nothing about the write side, so it never registers a
+		// sizer: charge the static empty-array floor and move on.
+		if fi.Type.Kind == typ.KindStream {
+			if !omit {
+				fixedTotal += overhead + 2
+			}
+			continue
+		}
 
 		fn := buildSizeFn(fi.Type, depth+1)
 		if fn == nil {
@@ -334,6 +348,9 @@ func computeHintBytes(ti *EncTypeInfo, depth int) int {
 			return 64
 		}
 		return computeHintBytes(pi.ElemType, depth+1)
+	case typ.KindStream:
+		// Empty-array floor; element output is producer-driven.
+		return 2
 	case typ.KindMap:
 		return 128
 	case typ.KindRawMessage, typ.KindValue:

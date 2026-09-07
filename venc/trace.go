@@ -40,6 +40,7 @@ var fbReasonLabels = [...]string{
 	fbReasonIface:         "iface",
 	fbReasonOverflow:      "overflow",
 	fbReasonViaPtr:        "via_ptr",
+	fbReasonStream:        "stream",
 }
 
 func expandFallbackReasons(data []byte) []byte {
@@ -119,11 +120,11 @@ func addIndentGuides(data []byte) []byte {
 	return out
 }
 
-func (m *encodeState) flushVMTrace() {
-	if m.vmCtx.TraceBuf == nil {
+func (es *encodeState) flushVMTrace() {
+	if es.vmCtx.TraceBuf == nil {
 		return
 	}
-	tb := (*VjTraceBuf)(m.vmCtx.TraceBuf)
+	tb := (*VjTraceBuf)(es.vmCtx.TraceBuf)
 	if tb.Total == 0 {
 		return
 	}
@@ -153,12 +154,12 @@ func (m *encodeState) flushVMTrace() {
 	tb.Total = 0
 }
 
-func (m *encodeState) setupVMTrace() {
-	if m.vmCtx.TraceBuf == nil {
+func (es *encodeState) setupVMTrace() {
+	if es.vmCtx.TraceBuf == nil {
 		tb := allocTraceBuf()
-		m.vmCtx.TraceBuf = unsafe.Pointer(tb)
+		es.vmCtx.TraceBuf = unsafe.Pointer(tb)
 	} else {
-		tb := (*VjTraceBuf)(m.vmCtx.TraceBuf)
+		tb := (*VjTraceBuf)(es.vmCtx.TraceBuf)
 		tb.Head = 0
 		tb.Total = 0
 	}
@@ -166,8 +167,8 @@ func (m *encodeState) setupVMTrace() {
 
 var traceBlueprints sync.Map // *encodeState → *[]*Blueprint
 
-func (m *encodeState) traceRecordBlueprint(bp *Blueprint) {
-	val, _ := traceBlueprints.LoadOrStore(m, &[]*Blueprint{})
+func (es *encodeState) traceRecordBlueprint(bp *Blueprint) {
+	val, _ := traceBlueprints.LoadOrStore(es, &[]*Blueprint{})
 	list := val.(*[]*Blueprint)
 	for _, existing := range *list {
 		if existing == bp {
@@ -177,8 +178,8 @@ func (m *encodeState) traceRecordBlueprint(bp *Blueprint) {
 	*list = append(*list, bp)
 }
 
-func (m *encodeState) traceFlushBlueprints() {
-	val, ok := traceBlueprints.LoadAndDelete(m)
+func (es *encodeState) traceFlushBlueprints() {
+	val, ok := traceBlueprints.LoadAndDelete(es)
 	if !ok {
 		return
 	}

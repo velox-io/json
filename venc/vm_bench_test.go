@@ -186,7 +186,7 @@ func marshalGoOnly[T any](v *T) ([]byte, error) {
 
 	// Force interpreter path.
 	bp := ti.getBlueprint()
-	if err := es.interp(bp, unsafe.Pointer(v)); err != nil {
+	if err := es.interp(&es.vmCtx, bp, unsafe.Pointer(v)); err != nil {
 		releaseEncodeState(es)
 		return nil, err
 	}
@@ -495,7 +495,7 @@ func marshalSliceGoOnly[T any](sl *[]T) ([]byte, error) {
 		if i > 0 {
 			es.buf = append(es.buf, ',')
 		}
-		if err := es.interp(bp, unsafe.Pointer(&(*sl)[i])); err != nil {
+		if err := es.interp(&es.vmCtx, bp, unsafe.Pointer(&(*sl)[i])); err != nil {
 			releaseEncodeState(es)
 			return nil, err
 		}

@@ -57,6 +57,10 @@ func (t *EncTypeInfo) ResolvePointer() *EncPointerInfo {
 	return (*EncPointerInfo)(t.Ext)
 }
 
+func (t *EncTypeInfo) ResolveStream() *EncStreamInfo {
+	return (*EncStreamInfo)(t.Ext)
+}
+
 func (t *EncTypeInfo) getBlueprint() *Blueprint {
 	cache := t.bpCache()
 	if cache == nil {
@@ -124,6 +128,14 @@ type EncArrayInfo struct {
 }
 
 type EncPointerInfo struct {
+	ElemType *EncTypeInfo
+}
+
+// EncStreamInfo describes a stream.Stream[T] for encoding. The decode-side
+// slice storage (the first 24 bytes of the Stream value) never leaks into
+// encode semantics: the write side is driven by the OnWrite producer, and the
+// element plan is the only shared structure.
+type EncStreamInfo struct {
 	ElemType *EncTypeInfo
 }
 

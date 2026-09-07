@@ -162,6 +162,17 @@ func bindEncodeFn(ti *EncTypeInfo) {
 			return pi.ElemType.Encode(es, elemPtr)
 		}
 
+	case typ.KindStream:
+		// Encode drives the OnWrite producer with prefix-free framing: every
+		// caller that reaches here (encodeTop, map values, interface payloads,
+		// pointer pointees) has already written its own member prefix, and
+		// struct-field positions dispatch through the stream fallback
+		// instead, whose driver commits the prefix lazily.
+		sti := ti
+		ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
+			return es.encodeStreamField(sti, ptr, streamPrefixNone, false, nil, false, false, false)
+		}
+
 	case typ.KindAny:
 		ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
 			return es.encodeAny(*(*any)(ptr))

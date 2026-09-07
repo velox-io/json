@@ -25,15 +25,45 @@ func (es *encodeState) writeKeySpace(ctx *VjExecCtx) {
 	}
 }
 
-func (es *encodeState) execVM(bp *Blueprint, base unsafe.Pointer) error {
+// clearStackFrames zeroes the Go pointers a native run left in ctx.Stack, so
+// a pooled or reused context retains no stale references. The depth is read
+// from VMState at exit: zero on a clean run, the held frame count on an error
+// or panic unwind.
+func clearStackFrames(ctx *VjExecCtx) {
+	depth := int(vmstateGetStackDepth(ctx.VMState))
+	if depth > VJ_MAX_STACK_DEPTH {
+		depth = VJ_MAX_STACK_DEPTH
+	}
+	for i := 0; i < depth; i++ {
+		f := &ctx.Stack[i]
+		f.RetBase = nil
+		f.Payload = [20]byte{}
+		f.State = 0
+	}
+}
+
+// execVM runs one native VM execution against ctx, which may be the root
+// context (&es.vmCtx) or a child invocation's. Nesting is tracked so es.inVM
+// stays true while any run is active or suspended; cleanup runs via defer so
+// error returns and panics both clear OpsPtr, CurBase, and the held frames.
+func (es *encodeState) execVM(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer) (err error) {
+	es.vmDepth++
 	es.inVM = true
+	defer func() {
+		es.vmDepth--
+		if es.vmDepth == 0 {
+			es.inVM = false
+		}
+		ctx.OpsPtr = nil
+		ctx.CurBase = nil
+		clearStackFrames(ctx)
+	}()
 
 	if vjTraceEnabled {
 		es.traceRecordBlueprint(bp)
 		defer es.traceFlushBlueprints()
 	}
 
-	ctx := &es.vmCtx
 	ctx.OpsPtr = unsafe.Pointer(&bp.Ops[0])
 	ctx.PC = 0
 	// CurBase lives in heap state, so it must never point at stack memory.
@@ -61,7 +91,9 @@ func (es *encodeState) execVM(bp *Blueprint, base unsafe.Pointer) error {
 		ctx.IndentTpl = unsafe.Pointer(&es.indentTpl[0])
 		ctx.IndentStep = uint8(len(es.indentString))
 		ctx.IndentPrefixLen = uint8(len(es.indentPrefix))
-		ctx.IndentDepth = 0
+		// The invocation inherits the logical indent depth (a child element
+		// encodes at its parent's depth; the root entry points set it to 0).
+		ctx.IndentDepth = int16(es.indentDepth)
 		defer func() {
 			ctx.IndentTpl = nil
 			ctx.IndentStep = 0
@@ -78,12 +110,7 @@ func (es *encodeState) execVM(bp *Blueprint, base unsafe.Pointer) error {
 		}
 	}
 
-	err := es.execVMLoop(ctx, bp, vmExec)
-
-	es.inVM = false
-	ctx.OpsPtr = nil
-	ctx.CurBase = nil
-	return err
+	return es.execVMLoop(ctx, bp, vmExec)
 }
 
 func (es *encodeState) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(unsafe.Pointer)) error {
@@ -333,6 +360,13 @@ func (es *encodeState) handleFallbackYield(ctx *VjExecCtx, bp *Blueprint) error 
 			return nil
 		}
 		fieldPtr = unsafe.Add(fieldBase, fb.Offset)
+	}
+
+	// A Stream field runs the OnWrite producer: its omitempty and key commit
+	// lazily on the first element, so it must bypass the generic prefix logic
+	// below.
+	if fb.TI.Kind == typ.KindStream {
+		return es.streamFromYield(ctx, fb, fieldPtr, isFirst)
 	}
 
 	if fb.TagFlags&EncTagFlagOmitEmpty != 0 && fb.IsZeroFn != nil {

@@ -86,6 +86,17 @@ func newEncTypeFromUT(ut *typ.UniType) *EncTypeInfo {
 }
 
 func fillContainerExt(et *EncTypeInfo, ut *typ.UniType, building map[uintptr]*EncTypeInfo) {
+	// KindStream is backed by a synthetic *SliceTypeInfo on the decode side,
+	// but encoding never touches that storage: the OnWrite producer drives
+	// element production. Branch on the kind before the Ext type switch so
+	// the slice-like storage does not leak into encode semantics.
+	if ut.Kind == typ.KindStream {
+		info := ut.Ext.(*typ.SliceTypeInfo)
+		et.Ext = unsafe.Pointer(&EncStreamInfo{
+			ElemType: buildEncRec(info.ElemType.Type, building),
+		})
+		return
+	}
 	switch info := ut.Ext.(type) {
 	case *typ.StructTypeInfo:
 		et.Ext = unsafe.Pointer(buildStructInfo(info, building))

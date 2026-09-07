@@ -1,9 +1,11 @@
-// Package main demonstrates the streaming JSON binding API.
-// See README.md for the full design.
+// Package main demonstrates the streaming JSON binding API: OnRead handlers
+// consume decoded elements one at a time, and OnWrite producers encode them
+// without either side materializing the whole array.
 package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	vjson "github.com/velox-io/json"
@@ -52,16 +54,45 @@ type NestedResponse struct {
 	Message string                       `json:"message"`
 }
 
+// main runs every demo when invoked without arguments; with one argument it
+// runs only the named demo (for example "writeCursor"). An unknown name lists
+// the available demos.
 func main() {
-	for _, demo := range []func() error{
-		basicIter,
-		streamBreak,
-		allowValueReuse,
-		parallelSiblings,
-		nestedStream,
-		innerBreakOuter,
-	} {
-		if err := demo(); err != nil {
+	demos := []struct {
+		name string
+		fn   func() error
+	}{
+		{"basicIter", basicIter},
+		{"streamBreak", streamBreak},
+		{"allowValueReuse", allowValueReuse},
+		{"parallelSiblings", parallelSiblings},
+		{"nestedStream", nestedStream},
+		{"innerBreakOuter", innerBreakOuter},
+		{"writeBasic", writeBasic},
+		{"writeEncoder", writeEncoder},
+		{"writeNested", writeNested},
+		{"writeCursor", writeCursor},
+	}
+
+	if len(os.Args) > 1 {
+		for _, d := range demos {
+			if d.name == os.Args[1] {
+				if err := d.fn(); err != nil {
+					panic(err)
+				}
+				return
+			}
+		}
+		fmt.Fprintf(os.Stderr, "unknown demo %q, available:", os.Args[1])
+		for _, d := range demos {
+			fmt.Fprintf(os.Stderr, " %s", d.name)
+		}
+		fmt.Fprintln(os.Stderr)
+		os.Exit(1)
+	}
+
+	for _, d := range demos {
+		if err := d.fn(); err != nil {
 			panic(err)
 		}
 	}
@@ -350,5 +381,229 @@ func innerBreakOuter() error {
 	fmt.Println("found:", found.ID)
 	fmt.Println("seen before break:", strings.Join(seenBeforeBreak, ","))
 	fmt.Println("message:", response.Message)
+	return nil
+}
+
+// writeBasic exercises the write-side counterpart of basicIter: OnWrite
+// registers a producer that pushes elements into a Sink one at a time while
+// the encoder owns the array framing. The producer may reuse one element
+// slot across Encode calls: the encoder has read the element fully by the
+// time Encode returns.
+func writeBasic() error {
+	// A Stream field with no registered producer is a configuration error:
+	// encoding has no data source for the field.
+	if _, err := vjson.Marshal(&Response{}); err != nil {
+		fmt.Println("unconfigured:", err)
+	}
+
+	var resp Response
+	resp.Users.OnWrite(func(sink stream.Sink[User]) error {
+		var u User
+		for i, name := range []string{"alice", "bob"} {
+			u.ID = fmt.Sprintf("u%d", i+1)
+			u.Name = name
+			if err := sink.Encode(&u); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	resp.Grants.OnWrite(func(sink stream.Sink[Grant]) error {
+		g := Grant{UserID: "u1", Action: "read"}
+		if err := sink.Encode(&g); err != nil {
+			return err
+		}
+		g.Action = "write"
+		return sink.Encode(&g)
+	})
+	resp.Message = "ok"
+
+	out, err := vjson.MarshalIndent(&resp, "", "\t")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(out))
+	return nil
+}
+
+// countingWriter counts bytes and write calls without retaining output.
+type countingWriter struct {
+	bytes  int
+	writes int
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.bytes += len(p)
+	w.writes++
+	return len(p), nil
+}
+
+// writeEncoder drives a root-level stream through an Encoder: elements are
+// generated lazily and flushed to the writer at a low-water mark, so both
+// the producer state and the encoder window stay bounded regardless of the
+// array length.
+func writeEncoder() error {
+	const elems = 1_000_000
+	w := &countingWriter{}
+	enc := vjson.NewEncoder(w)
+
+	var ints vjson.Stream[int]
+	ints.OnWrite(func(sink stream.Sink[int]) error {
+		for i := range elems {
+			if err := sink.Encode(&i); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	if err := enc.Encode(&ints); err != nil {
+		return err
+	}
+	fmt.Printf("root stream: %d elements, %d bytes, %d writes\n", elems, w.bytes, w.writes)
+	return nil
+}
+
+// writeNested exercises the write-side counterpart of nestedStream: each
+// element carries its own nested Stream, and the producer registers the
+// nested OnWrite on the element before submitting it, mirroring the read
+// side's ordering of Target before Decode.
+func writeNested() error {
+	users := []struct {
+		id     string
+		events []Event
+	}{
+		{"u1", []Event{{ID: "e1"}, {ID: "e2", Match: true}}},
+		{"u2", []Event{{ID: "e3"}}},
+	}
+
+	var resp NestedResponse
+	resp.Users.OnWrite(func(sink stream.Sink[UserWithEvents]) error {
+		for _, u := range users {
+			elem := UserWithEvents{ID: u.id}
+			events := u.events
+			elem.Events.OnWrite(func(sink stream.Sink[Event]) error {
+				for i := range events {
+					if err := sink.Encode(&events[i]); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+			if err := sink.Encode(&elem); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	resp.Message = "done"
+
+	out, err := vjson.Marshal(&resp)
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(out))
+	return nil
+}
+
+// Item is the element type of the database-export demo: one row per sink
+// call, produced by the mock cursor on demand.
+type Item struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+// PageData nests the stream one struct level below the response root, the
+// common API envelope shape: response.Data.Items. Total is declared before
+// Items so the summary precedes the array in the output.
+type PageData struct {
+	Total int                `json:"total"`
+	Items vjson.Stream[Item] `json:"items"`
+}
+
+// Envelope is the outer response object of the database-export demo.
+type Envelope struct {
+	Data  PageData `json:"data"`
+	Error string   `json:"error"`
+}
+
+// cursor mocks a database result set with the surface of database/sql's
+// Rows: Next advances, Scan fills the destination, Err reports traversal
+// failures. Rows are generated on demand, so the "table" is never held in
+// memory. Swap it for a real *sql.Rows and the demo body is unchanged.
+type cursor struct {
+	rows int
+	i    int
+}
+
+func (c *cursor) Next() bool {
+	if c.i >= c.rows {
+		return false
+	}
+	c.i++
+	return true
+}
+
+func (c *cursor) Scan(item *Item) error {
+	item.ID = c.i
+	item.Name = fmt.Sprintf("item-%d", c.i)
+	return nil
+}
+
+func (c *cursor) Err() error { return nil }
+
+// headTailWriter keeps the first and last bytes of the output and counts
+// writes, so a huge document can be shown as its shape plus totals.
+type headTailWriter struct {
+	head, tail int
+	headBuf    []byte
+	tailBuf    []byte
+	bytes      int
+	writes     int
+}
+
+func (w *headTailWriter) Write(p []byte) (int, error) {
+	w.bytes += len(p)
+	w.writes++
+	if n := w.head - len(w.headBuf); n > 0 {
+		w.headBuf = append(w.headBuf, p[:min(len(p), n)]...)
+	}
+	w.tailBuf = append(w.tailBuf, p...)
+	if len(w.tailBuf) > w.tail {
+		w.tailBuf = w.tailBuf[len(w.tailBuf)-w.tail:]
+	}
+	return len(p), nil
+}
+
+// writeCursor exercises the database-export shape: a cursor feeds a nested
+// response.Data.Items stream through an Encoder. The cursor yields rows one
+// at a time and the encoder flushes at a low-water mark, so neither the row
+// source nor the encoded array is materialized. Peak memory is one row plus
+// the output window, regardless of the row count.
+func writeCursor() error {
+	cur := &cursor{rows: 100_000}
+
+	var resp Envelope
+	resp.Error = "ok"
+	resp.Data.Total = cur.rows
+	resp.Data.Items.OnWrite(func(sink stream.Sink[Item]) error {
+		var item Item
+		for cur.Next() {
+			if err := cur.Scan(&item); err != nil {
+				return err
+			}
+			if err := sink.Encode(&item); err != nil {
+				return err
+			}
+		}
+		return cur.Err()
+	})
+
+	w := &headTailWriter{head: 96, tail: 80}
+	if err := vjson.NewEncoder(w).Encode(&resp); err != nil {
+		return err
+	}
+	fmt.Printf("cursor export: %d rows, %d bytes, %d writes\n%s ... %s\n",
+		cur.rows, w.bytes, w.writes, w.headBuf, w.tailBuf)
 	return nil
 }

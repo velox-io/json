@@ -121,6 +121,7 @@ const (
 	fbReasonValue                      // value.Value deeper than the walk's native bounds
 	fbReasonSpread                     // reserve-unknown spread beyond native bounds or via pointer hops
 	fbReasonUnfold                     // inline variant unfold via pointer hops or over the offset limit
+	fbReasonStream                     // stream.Stream[T] producer activation (lazy member prefix)
 )
 
 // opFlagIfaceField mirrors native VJ_OP_FLAG_IFACE_FIELD: the unfold field's

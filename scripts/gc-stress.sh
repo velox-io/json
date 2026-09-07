@@ -100,7 +100,10 @@ SOAK_WORKERS="${GC_STRESS_SOAK_WORKERS:-$(default_soak_workers)}"
 # end-to-end unmarshal/marshal safety tests, and the streaming paths whose
 # retained set is scoped per batch.
 DECODE_PKGS=". ./decode/bind ./vbind ./tests ./stream ./value"
-ENCODE_PKGS="./venc ./tests ./examples/marshal"
+# ./stream carries the write-side stream tests too: an OnWrite producer hands
+# the encoder element addresses that live only in the ABI ctx for the duration
+# of one element, so it belongs to the encode leg as well as the decode legs.
+ENCODE_PKGS="./venc ./tests ./examples/marshal ./stream"
 SOAK_PKG="./tests"
 
 leg_tags() {

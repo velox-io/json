@@ -8,8 +8,12 @@
 // The decoder drives element production through a single unified main loop
 // (driveBind in decode/bind); Item.Decode calls back into that loop to bind a
 // non-leaf element's body, recursing through nested stream handlers. The
-// handler never touches tokens, delimiters, or parser depth. See
-// examples/unmarshal/stream/README.md for the full design.
+// handler never touches tokens, delimiters, or parser depth.
+//
+// On the encode side, OnWrite registers a producer that pushes elements into
+// a Sink[T] one at a time while the encoder writes the array framing around
+// them. Read and write handlers are independent: registering one does not
+// configure the other.
 package stream
 
 import (
@@ -18,16 +22,19 @@ import (
 )
 
 // Stream is the field-local streaming binding marker and handler registration
-// point. Embed it as a struct field tagged with the JSON key; the decoder
-// activates the registered OnRead handler when the field's array is reached in
-// the input.
+// point. Declare it as a named struct field tagged with the JSON key; the
+// decoder activates the registered OnRead handler when the field's array is
+// reached in the input, and the encoder activates the registered OnWrite
+// handler when the field is encoded.
 //
-// A Stream with no registered handler is skipped by the decoder.
+// A Stream with no registered OnRead handler is skipped by the decoder; a
+// Stream with no registered OnWrite handler is a configuration error at encode
+// time (omitted when the field is omitempty).
 //
 // Layout: the first 24 bytes carry a slice header (data/len/cap) that the
 // native binder drives like an ordinary slice backing, so stream element
-// storage reuses the same SlotClass machinery as []T. The handler is stored
-// after the header so the native path never sees it.
+// storage reuses the same SlotClass machinery as []T. The handlers are stored
+// after the header so the native path never sees them.
 type Stream[T any] struct {
 	// sliceData / sliceLen / sliceCap form a slice header at offset 0..23.
 	// The native binder reads and writes them exactly like a []T backing
@@ -37,10 +44,15 @@ type Stream[T any] struct {
 	sliceLen  uintptr        // off 8
 	sliceCap  uintptr        // off 16
 
-	// onReadHandle is the user-registered handler. It is invoked once per
+	// onReadHandle is the user-registered read handler. It is invoked once per
 	// activation of the stream field, with a fresh Scope that yields the
 	// array's elements as Item[T] values.
 	onReadHandle func(Scope[T]) error // off 24
+
+	// onWriteHandle is the user-registered producer. It is invoked once per
+	// activation of the stream field at encode time, with a Sink that
+	// consumes the produced elements.
+	onWriteHandle func(Sink[T]) error // off 32
 }
 
 // OnRead registers the handler invoked when the decoder activates this stream
@@ -48,12 +60,32 @@ type Stream[T any] struct {
 //
 //   - It must be called before Decode starts (typically at field initialization
 //     time, before the owning struct's Value is bound).
-//   - A specific Stream instance accepts exactly one handler. Calling OnRead
-//     twice on the same instance is a configuration error recorded by the
-//     parse session and returned by Decode; the second registration does not
-//     overwrite the first.
+//   - A later registration overwrites the earlier one; OnRead(nil) clears the
+//     handler. Handlers must not be re-registered while a decode that can
+//     reach this stream is in progress.
 func (s *Stream[T]) OnRead(handle func(Scope[T]) error) {
 	s.onReadHandle = handle
+}
+
+// OnWrite registers the producer invoked when the encoder activates this
+// stream field. OnWrite is an encode-time configuration call, not a data
+// operation:
+//
+//   - The producer runs once per activation: each time an encoder reaches this
+//     stream, it invokes the handler, which pushes zero or more elements into
+//     the Sink and returns.
+//   - A later registration overwrites the earlier one; OnWrite(nil) clears the
+//     producer. Producers must not be re-registered while an encode that can
+//     reach this stream is in progress.
+//   - The same Stream may be read by different encoders concurrently, but the
+//     handler and any state it captures must be concurrency-safe by itself;
+//     one encoder still cannot be used concurrently.
+//
+// A Stream encodes as a JSON array: an unregistered producer is a
+// configuration error (the field is omitted when tagged omitempty), and an
+// empty producer encodes as []. Use a nil *Stream[T] to encode null.
+func (s *Stream[T]) OnWrite(handle func(Sink[T]) error) {
+	s.onWriteHandle = handle
 }
 
 // ElemType returns the reflect.Type of the stream's element type T. The
@@ -62,44 +94,4 @@ func (s *Stream[T]) OnRead(handle func(Scope[T]) error) {
 // application code.
 func (s *Stream[T]) ElemType() reflect.Type {
 	return reflect.TypeFor[T]()
-}
-
-// Activate invokes the registered handler with a Scope backed by driver and
-// seeded with the initial batch view (batchData[0:batchLen]). Called by the
-// decode/bind driver through reflect when the native binder yields on a stream
-// slice: batchData/batchLen describe the elements already claimed/bound into
-// the current slice block (per-element unbound for non-leaf streams, cap-full
-// bound for leaf streams, empty for an array close on an empty stream).
-//
-// reason is the stop that produced this seeding batch. Anything other than a
-// per-element or cap-full stop means the batch handed in is the last one, so
-// iteration must end after it rather than drive native past the array.
-//
-// Activate constructs the Scope (reading ElemHasStream from the driver to
-// select the per-element vs leaf advance strategy) and runs the handler to
-// completion. It returns the handler's error, which may be a BreakSignal the
-// driver propagates across scopes. A parse error hit while advancing batches
-// takes precedence: Iter cannot report it, so the Scope stashes it and it
-// surfaces here.
-//
-// Activate is not part of the user-facing API.
-func (s *Stream[T]) Activate(driver ScopeDriver, batchData unsafe.Pointer, batchLen int, reason StopReason) error {
-	if s.onReadHandle == nil {
-		return nil
-	}
-	var zero T
-	sc := &scope[T]{
-		driver:        driver,
-		streamAddr:    unsafe.Pointer(s),
-		elemSize:      unsafe.Sizeof(zero),
-		elemHasStream: driver.ElemHasStream(),
-		batchData:     batchData,
-		batchLen:      batchLen,
-		atEnd:         reason != StopElement && reason != StopBatch,
-	}
-	err := s.onReadHandle(sc)
-	if sc.err != nil {
-		return sc.err
-	}
-	return err
 }

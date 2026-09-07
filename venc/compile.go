@@ -63,33 +63,58 @@ func compileBlueprint(et *EncTypeInfo) *Blueprint {
 		visiting: make(map[*EncTypeInfo]Label),
 	}
 
-	switch et.Kind {
-	case typ.KindValue:
+	switch {
+	case et.Kind == typ.KindValue:
 		// A root value.Value is a single tape-walk op: the native VM walks
 		// the tape, the interpreter mirrors it through appendTapeValue.
+		// Precedes the marshal-hook branch: Value implements Marshaler, and
+		// the hook path would route it through MarshalJSON's intermediate
+		// allocation.
 		emitValue(b, fieldContext{}, typeFBInfo(et, 0, fbReasonValue))
-	case typ.KindStruct:
-		rootLabel := b.allocLabel()
-		b.visiting[et] = rootLabel
-		b.defineLabel(rootLabel)
-		b.emit(IRInst{
-			Op:         opObjOpen,
-			Annotation: typeName(et.Type),
-			SourceType: et.Type,
-		})
-		emitStructBody(b, et.ResolveStruct(), 0)
-		b.emit(IRInst{Op: opObjClose})
-	case typ.KindSlice:
-		si := et.ResolveSlice()
-		if si.ElemType.Kind == typ.KindUint8 && si.ElemSize == 1 {
-			b.emit(IRInst{Op: opByteSlice, FieldOff: 0})
+	case et.TypeFlags&(EncTypeFlagHasMarshalFn|EncTypeFlagHasTextMarshalFn) != 0:
+		// Marshal-hook types route through the Go fallback at every position.
+		// A root blueprint for them exists for the stream driver's
+		// interpreter-mode elements; their Encode never compiles one.
+		if isTimeType(et) {
+			emitTime(b, et, fieldContext{}, typeFBInfo(et, 0, fbReasonMarshaler))
 		} else {
-			emitSlice(b, et, fieldContext{})
+			b.emit(IRInst{
+				Op:       opFallback,
+				Fallback: typeFBInfo(et, 0, fallbackReasonFromFlags(et.TypeFlags, 0)),
+			})
 		}
-	case typ.KindArray:
-		emitArray(b, et, fieldContext{})
-	case typ.KindMap:
-		emitMap(b, et, fieldContext{})
+	default:
+		switch et.Kind {
+		case typ.KindStruct:
+			rootLabel := b.allocLabel()
+			b.visiting[et] = rootLabel
+			b.defineLabel(rootLabel)
+			b.emit(IRInst{
+				Op:         opObjOpen,
+				Annotation: typeName(et.Type),
+				SourceType: et.Type,
+			})
+			emitStructBody(b, et.ResolveStruct(), 0)
+			b.emit(IRInst{Op: opObjClose})
+		case typ.KindSlice:
+			si := et.ResolveSlice()
+			if si.ElemType.Kind == typ.KindUint8 && si.ElemSize == 1 {
+				b.emit(IRInst{Op: opByteSlice, FieldOff: 0})
+			} else {
+				emitSlice(b, et, fieldContext{})
+			}
+		case typ.KindArray:
+			emitArray(b, et, fieldContext{})
+		case typ.KindMap:
+			emitMap(b, et, fieldContext{})
+		default:
+			// Root blueprints for the remaining kinds exist for the stream
+			// driver's interpreter-mode elements, which encode through the
+			// blueprint so the element-position newline protocol holds;
+			// every op writes its own leading newline there. Mirrors
+			// emitTypeBody's element positions.
+			emitTypeBody(b, et)
+		}
 	}
 
 	b.emit(IRInst{Op: opRet})
@@ -247,6 +272,16 @@ func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 		fc, ok := addKeyForField(b, fi, fieldOff)
 		if !ok {
 			emitFieldFallbackOverflow(b, fi, fieldOff)
+			continue
+		}
+
+		// A Stream field is a producer activation point, not storage: its
+		// emptiness is only known after the producer runs, so neither
+		// SKIP_IF_ZERO nor the generic fallback's eager prefix applies. The
+		// stream driver commits key, comma, and omitempty lazily on the
+		// first element.
+		if fi.Type.Kind == typ.KindStream {
+			emitFieldFallback(b, fc, fieldFBInfo(fi, fc, fbReasonStream))
 			continue
 		}
 
@@ -804,6 +839,14 @@ func emitTypeBody(b *irBuilder, elemTI *EncTypeInfo) {
 		emitTypeBody(b, elemTI.ResolvePointer().ElemType)
 		b.emit(IRInst{Op: opPtrEnd})
 		b.defineLabel(afterLabel)
+
+	case typ.KindStream:
+		// Element position: the stream driver owns the comma and the array
+		// framing; the keyless fallback yields before writing anything.
+		b.emit(IRInst{
+			Op:       opFallback,
+			Fallback: typeFBInfo(elemTI, 0, fbReasonStream),
+		})
 
 	default:
 		b.emit(IRInst{

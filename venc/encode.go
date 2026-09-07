@@ -1,6 +1,7 @@
 package venc
 
 import (
+	"fmt"
 	"io"
 	"sync"
 	"unsafe"
@@ -40,9 +41,16 @@ const (
 
 type encodeState struct {
 	// vmCtx must stay first so VjExecCtx.Stack keeps the native-required alignment.
+	// It is the root invocation's execution context; nested executions get
+	// their own invocation (see invocations).
 	vmCtx VjExecCtx
 	flags uint32
-	inVM  bool
+	// inVM reports that a native VM run is active or suspended on this
+	// encodeState (vmDepth > 0). It routes map Encode and nested dispatch away
+	// from re-entering the root context; nesting per se is governed by
+	// execDepth.
+	inVM    bool
+	vmDepth int
 	// buf is the working output buffer and the VM's write window. Its backing
 	// array has one of three origins: the pooled arena (Marshal, the default
 	// resident), the caller's dst (AppendMarshal), or out's parked streaming
@@ -57,7 +65,11 @@ type encodeState struct {
 	// if encvm is unavailable, or if indent mode uses a pattern the VM cannot
 	// synthesize (isSimpleIndent); in those cases exec falls back to interp.
 	useNativeVM bool
-	tplKey      string // L1 cache key for indentTpl (survives pool recycle)
+	// tplPrefix/tplIndent retain the pattern the cached indentTpl was built
+	// for (survive pool recycle); comparing them avoids rebuilding a concat
+	// key on every nested invocation.
+	tplPrefix string
+	tplIndent string
 
 	// mode selects how a full es.buf reclaims writable space (see reclaim). Its
 	// zero value (arena) is the Marshal/AppendMarshal default, so the hot path
@@ -75,9 +87,45 @@ type encodeState struct {
 	// Zero means "not set".
 	bufSize int
 
+	// execDepth counts es.exec runs on the Go call stack. The outermost run
+	// owns vmCtx; every nested run executes in its own child invocation, so a
+	// suspended parent's stack frames are never shared or overwritten. It is
+	// the cross-invocation nesting budget: a child cannot push past
+	// VJ_MAX_STACK_DEPTH levels.
+	execDepth int
+
+	// childNative, when set by the stream driver around an element encode,
+	// makes nested es.exec runs prefer the native VM for their child
+	// invocation. Saved and restored per element so nested activations compose.
+	childNative bool
+
+	// childElemNL seeds the initial elemNL latch of the next interpreter run
+	// when a stream driver hands it an element in interpreter mode: the driver
+	// supplies separators (native-style), so the element's own leading newline
+	// must still come from the element side. Consumed at interp entry and
+	// cleared by execStreamElement when the element never runs the
+	// interpreter.
+	childElemNL bool
+
+	// invocations is the child-invocation stack. invocations[:len] are active
+	// (innermost last); the entries beyond len are the free list. The backing
+	// array holds pointers, so each invocation's address stays stable even if
+	// the slice grows.
+	invocations []*invocation
+
 	// inUse is a diagnostic guard (race builds only) that catches the pool
 	// handing one encodeState to two goroutines, which would alias es.buf.
 	inUse poolGuard
+}
+
+// invocation is one nested execution: a suspended or running child of an
+// outer es.exec. It carries its own VjExecCtx (stack included) and the
+// interpreter's logical indent depth to restore when it completes. Elements
+// of one stream activation reuse the same invocation, and an element's nested
+// streams push the next one.
+type invocation struct {
+	ctx         VjExecCtx
+	savedIndent int
 }
 
 var _ [0]byte = [unsafe.Offsetof(encodeState{}.vmCtx)]byte{}
@@ -172,11 +220,98 @@ func (es *encodeState) grow() {
 	es.buf = newBuf
 }
 
+// exec runs one Blueprint against base. The outermost run owns vmCtx; a run
+// nested inside another (a Go fallback handler, an interpreter fallback op, or
+// a stream driver) executes in a child invocation so the parent's stack,
+// program counter, and base stay intact. Nested runs use the interpreter,
+// matching the pre-invocation routing, except when the stream driver requests
+// the native plan via execStreamElement. Every run is depth-balanced: it exits
+// with es.indentDepth at its entry value, nested runs through popInvocation
+// and the outermost run through its exit defer.
 func (es *encodeState) exec(bp *Blueprint, base unsafe.Pointer) error {
-	if !es.inVM && es.useNativeVM {
-		return es.execVM(bp, base)
+	if es.execDepth == 0 {
+		es.execDepth++
+		// The outermost run exits at its entry indent depth, mirroring
+		// popInvocation for nested runs: yields sync es.indentDepth up from
+		// ctx.IndentDepth, and a root stream driver runs one outermost
+		// execution per stream element.
+		savedDepth := es.indentDepth
+		defer func() {
+			es.execDepth--
+			es.indentDepth = savedDepth
+		}()
+		if es.useNativeVM {
+			return es.execVM(&es.vmCtx, bp, base)
+		}
+		return es.interp(&es.vmCtx, bp, base)
 	}
-	return es.interp(bp, base)
+
+	if es.execDepth >= VJ_MAX_STACK_DEPTH {
+		return fmt.Errorf("venc: nesting depth exceeds limit (%d)", VJ_MAX_STACK_DEPTH)
+	}
+	inv := es.pushInvocation()
+	defer es.popInvocation()
+	if es.useNativeVM && es.childNative {
+		return es.execVM(&inv.ctx, bp, base)
+	}
+	return es.interp(&inv.ctx, bp, base)
+}
+
+// execStreamElement encodes one stream element. It is the explicit child
+// entry: executions nested inside the element (and the element's own
+// blueprint run, when a parent execution is suspended) prefer the native plan
+// for their child invocation. In interpreter mode the element runs through
+// its Blueprint rather than its Encode shortcut, so the element-position
+// newline protocol (every blueprint op writes its own leading newline) holds
+// uniformly; elemNL seeds that latch for the element's run.
+func (es *encodeState) execStreamElement(ti *EncTypeInfo, ptr unsafe.Pointer, interpElem bool) (err error) {
+	prev := es.childNative
+	es.childNative = true
+	defer func() {
+		es.childNative = prev
+		es.childElemNL = false
+	}()
+	es.childElemNL = interpElem
+	if interpElem {
+		return es.exec(ti.getBlueprint(), ptr)
+	}
+	return ti.Encode(es, ptr)
+}
+
+// pushInvocation activates the next child invocation, reusing a released one
+// (LIFO, so consecutive stream elements share the same context). The indent
+// depth at entry is saved for restoration by popInvocation.
+func (es *encodeState) pushInvocation() *invocation {
+	var inv *invocation
+	if n := len(es.invocations); n < cap(es.invocations) {
+		// The slot beyond len holds the most recently popped invocation; it is
+		// nil where a previous append growth left unwritten capacity.
+		if extended := es.invocations[:n+1]; extended[n] != nil {
+			es.invocations = extended
+			inv = extended[n]
+		}
+	}
+	if inv == nil {
+		inv = &invocation{}
+		es.invocations = append(es.invocations, inv)
+	}
+	inv.savedIndent = es.indentDepth
+	// Trace builds share the root's trace buffer across invocations; the
+	// executions are serialized, so the interleaved log keeps one buffer.
+	inv.ctx.TraceBuf = es.vmCtx.TraceBuf
+	return inv
+}
+
+// popInvocation deactivates the innermost child invocation and restores the
+// interpreter indent depth it inherited. The stack is truncated before the
+// invocation is read so a fault here cannot leave a corrupted length behind.
+func (es *encodeState) popInvocation() {
+	n := len(es.invocations) - 1
+	inv := es.invocations[n]
+	es.invocations = es.invocations[:n]
+	if inv != nil {
+		es.indentDepth = inv.savedIndent
+	}
 }
 
 func (es *encodeState) encodeTop(ti *EncTypeInfo, ptr unsafe.Pointer) error {
@@ -184,17 +319,20 @@ func (es *encodeState) encodeTop(ti *EncTypeInfo, ptr unsafe.Pointer) error {
 }
 
 // buildIndentTpl looks up (or creates) a cached indent template for the
-// given prefix/indent pair.
-// L1: compare the key kept on the encodeState (survives pool recycle).
+// given prefix/indent pair. The comparison fast path avoids the concat key
+// allocation: execVM runs per nested invocation, so a stream of N elements
+// calls this N times per encode.
+// L1: the retained pattern strings (survive pool recycle).
 // L2: global sync.Map for all known patterns.
 func (es *encodeState) buildIndentTpl(prefix, indent string) {
-	key := prefix + "\x00" + indent
-	if key == es.tplKey {
+	if es.indentTpl != nil && es.tplPrefix == prefix && es.tplIndent == indent {
 		return
 	}
+	key := prefix + "\x00" + indent
 	if v, ok := indentTplCache.Load(key); ok {
 		es.indentTpl = v.(*[1 + 255 + maxIndentDepth*8]byte)
-		es.tplKey = key
+		es.tplPrefix = prefix
+		es.tplIndent = indent
 		return
 	}
 	tpl := new([1 + 255 + maxIndentDepth*8]byte)
@@ -206,7 +344,8 @@ func (es *encodeState) buildIndentTpl(prefix, indent string) {
 	}
 	actual, _ := indentTplCache.LoadOrStore(key, tpl)
 	es.indentTpl = actual.(*[1 + 255 + maxIndentDepth*8]byte)
-	es.tplKey = key
+	es.tplPrefix = prefix
+	es.tplIndent = indent
 }
 
 // isSimpleIndent reports whether the native VM can synthesize this indent
