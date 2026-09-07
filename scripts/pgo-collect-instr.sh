@@ -56,7 +56,9 @@
 #                      additive), so running a single benchmark for longer here
 #                      effectively up-weights its blocks in the merged profdata.
 #                      All three must be set together or all empty; partial
-#                      sets are rejected. Default: all empty (single run).
+#                      sets are rejected. Default: all empty (single run),
+#                      except ndec, which appends a Decoder+Valid run to cover
+#                      the streaming engine and the valid entry.
 #   PGO_KEEP_SYSO      If 1, leave the freshly built PGO syso in the tree.
 #                      Default: 0 (the syso is a local, non-committed artifact).
 
@@ -172,6 +174,18 @@ PGO_EXTRA_BENCH_FILTER="${PGO_EXTRA_BENCH_FILTER:-}"
 PGO_EXTRA_BENCH_TIME="${PGO_EXTRA_BENCH_TIME:-}"
 PGO_EXTRA_BENCH_COUNT="${PGO_EXTRA_BENCH_COUNT:-}"
 PGO_KEEP_SYSO="${PGO_KEEP_SYSO:-0}"
+
+# ndec default extra run: the Unmarshal filter never drives the feed-driver
+# path (ndec_bind_parse_stream / ndec_window_scan) or ndec_valid, so their
+# counters would stay zero and the PGO rebuild would codegen them cold. The
+# Decoder and Valid suites cover both; counters accumulate across runs, so the
+# merged profile carries every engine's real frequencies.
+if [ "$MODULE" = ndec ] && [ -z "$PGO_EXTRA_BENCH_FILTER" ] \
+  && [ -z "$PGO_EXTRA_BENCH_TIME" ] && [ -z "$PGO_EXTRA_BENCH_COUNT" ]; then
+  PGO_EXTRA_BENCH_FILTER='^Benchmark_(Decoder|Valid)_.*_Velox$'
+  PGO_EXTRA_BENCH_TIME="${PGO_BENCH_TIME}"
+  PGO_EXTRA_BENCH_COUNT="${PGO_BENCH_COUNT}"
+fi
 
 # PGO_EXTRA_BENCH_* is all-or-nothing: a partial set would silently fall back
 # to PGO_BENCH_* defaults for the missing fields, which is almost never what
