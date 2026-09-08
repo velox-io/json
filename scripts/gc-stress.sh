@@ -103,7 +103,9 @@ DECODE_PKGS=". ./decode/bind ./vbind ./tests ./stream ./value"
 # ./stream carries the write-side stream tests too: an OnWrite producer hands
 # the encoder element addresses that live only in the ABI ctx for the duration
 # of one element, so it belongs to the encode leg as well as the decode legs.
-ENCODE_PKGS="./venc ./tests ./examples/marshal ./stream"
+# ./tests/preemptstress carries the encoder-VM preemption stress: async
+# preemption and concurrent mark arriving inside active C frames.
+ENCODE_PKGS="./venc ./tests ./tests/preemptstress ./stream"
 SOAK_PKG="./tests"
 
 leg_tags() {

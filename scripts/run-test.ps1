@@ -39,6 +39,11 @@ Invoke-GoTest -tags vj_noencvm -race ./tests -count=1
 Invoke-GoTest -tags vjgcstress ./tests -count=1
 Invoke-GoTest -race -tags vjgcstress ./tests -count=1
 
+# Windows has no gc-stress leg, so the encoder-VM preemption stress runs
+# here directly; Linux and macOS cover it through scripts/gc-stress.sh.
+Invoke-GoTest -tags vjgcstress ./tests/preemptstress -count=1
+Invoke-GoTest -race -tags vjgcstress ./tests/preemptstress -count=1
+
 Invoke-GoTest ./tests/compat/ -count=1
 Invoke-GoTest -race ./tests/compat/ -count=1
 
