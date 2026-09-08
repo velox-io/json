@@ -2,7 +2,6 @@ package vjson
 
 import (
 	"github.com/velox-io/json/decode/dom"
-	"github.com/velox-io/json/decode/option"
 	"github.com/velox-io/json/value"
 )
 
@@ -37,15 +36,6 @@ type Value = value.Value
 // json.Unmarshaler.
 type Raw = value.Raw
 
-// WithZeroCopy aliases option.WithZeroCopy: escape-free strings alias the
-// padded source buffer instead of being copied into strArena. Honored by
-// ParsePadded and UnmarshalPadded; every entry that copies or relocates its
-// input rejects it with ErrZeroCopyNeedsPadded. Zero-copy Values are
-// navigation-only (UnmarshalValue returns bind.ErrZeroCopyValue), and
-// UnmarshalPadded rejects trees carrying value.Value or poly fields with
-// bind.ErrZeroCopyTypedTree.
-func WithZeroCopy() Option { return option.WithZeroCopy() }
-
 // ParseOption aliases Option, retained for source compatibility with code
 // written against the dom-specific type.
 type ParseOption = Option
@@ -64,9 +54,9 @@ func Parse(src []byte, opts ...Option) (Value, error) {
 // unavailable.
 //
 // paddedSrc must carry at least PaddingSize bytes of 0x20 padding past its
-// length; use Pad to construct it. With WithZeroCopy, escape-free strings
-// alias paddedSrc directly, so the caller must keep paddedSrc alive and
-// unmodified as long as the Value (or any sub-value) is reachable.
+// length; use Pad to construct it. WithZeroCopy(true) makes escape-free
+// strings alias paddedSrc directly, so the caller must keep paddedSrc alive
+// and unmodified as long as the Value (or any sub-value) is reachable.
 // Zero-copy Values are navigation-only and rejected by UnmarshalValue.
 func ParsePadded(paddedSrc []byte, opts ...Option) (Value, error) {
 	return dom.ParsePadded(paddedSrc, opts...)

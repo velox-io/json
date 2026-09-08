@@ -314,9 +314,9 @@ func (p *Parser) UnmarshalFeed(r io.Reader, dst any, opts ...UnmarshalOption) er
 		return &InvalidUnmarshalError{Type: rt}
 	}
 	// Feed windows relocate between native runs, so published strings cannot
-	// alias the input.
-	if cfg := applyOpts(p, opts); cfg.ZeroCopy {
-		return option.ErrZeroCopyNeedsPadded
+	// alias the input; an explicit demand is rejected rather than downgraded.
+	if cfg := applyOpts(p, opts); cfg.ZeroCopy == option.ZeroCopyOn {
+		return option.ErrZeroCopyUnsupported
 	}
 	return p.unmarshalFeed(r, dstPtr)
 }

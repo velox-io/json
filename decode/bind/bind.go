@@ -34,18 +34,17 @@ func WithDisallowUnknownFields() UnmarshalOption { return option.WithDisallowUnk
 
 func WithStrictScan() UnmarshalOption { return option.WithStrictScan() }
 
-func WithZeroCopy() UnmarshalOption { return option.WithZeroCopy() }
+func WithZeroCopy(enabled bool) UnmarshalOption { return option.WithZeroCopy(enabled) }
 
 // applyOpts translates opts into the C-side opt flag bits and returns the
-// resolved config so each entry can enforce its input-model gate.
+// resolved config so each entry can enforce its input-model gate. The
+// zero-copy bit is entry-resolved: resolveZeroCopy arms it for contiguous
+// drives, and every other drive stays copying.
 func applyOpts(p *Parser, opts []UnmarshalOption) option.Config {
 	cfg := option.Apply(opts)
 	p.optFlags = 0
 	if cfg.UseNumber {
 		p.optFlags |= ndec.BindOptUseNumber
-	}
-	if cfg.ZeroCopy {
-		p.optFlags |= ndec.BindOptZeroCopyStr
 	}
 	if cfg.DisallowUnknown {
 		p.optFlags |= ndec.BindOptDisallowUnknown
@@ -59,8 +58,35 @@ func applyOpts(p *Parser, opts []UnmarshalOption) option.Config {
 	return cfg
 }
 
+// resolveZeroCopy maps the caller's string-backing choice onto a contiguous
+// drive, whose input is caller bytes and therefore aliasable. The default
+// aliases escape-free strings into that input. Trees carrying value.Value or
+// poly fields keep the copying parse under the default, because their content
+// flows through the tape machinery and stays arena-backed; an explicit demand
+// on those trees is rejected instead of silently downgraded.
+func resolveZeroCopy(p *Parser, cfg option.Config) error {
+	if p.tt.HasValueField || p.tt.HasPolyField {
+		if cfg.ZeroCopy == option.ZeroCopyOn {
+			return ErrZeroCopyTypedTree
+		}
+		return nil
+	}
+	if cfg.ZeroCopy != option.ZeroCopyOff {
+		p.optFlags |= ndec.BindOptZeroCopyStr
+	}
+	return nil
+}
+
 // Unmarshal parses JSON data into the value pointed to by v.
 // v must be a non-nil pointer, directly or via an interface{}.
+//
+// Escape-free strings alias data's backing by default: the input is scanned
+// through an internal padded copy, and each aliased span rebases into the
+// caller-owned original, so the caller preserves data's bytes while any
+// decoded value remains reachable. WithZeroCopy(false) selects the copying
+// parse. Trees carrying value.Value or poly fields stay arena-backed under
+// the default and are rejected with ErrZeroCopyTypedTree when zero-copy is
+// demanded explicitly.
 func Unmarshal[T any](data []byte, v T, opts ...UnmarshalOption) error {
 	rt := reflect.TypeFor[T]()
 	var ptr unsafe.Pointer
@@ -97,8 +123,8 @@ func Unmarshal[T any](data []byte, v T, opts ...UnmarshalOption) error {
 	}
 	p := getParser(sh)
 	defer putParser(sh, p)
-	if cfg := applyOpts(p, opts); cfg.ZeroCopy {
-		return option.ErrZeroCopyNeedsPadded
+	if err := resolveZeroCopy(p, applyOpts(p, opts)); err != nil {
+		return err
 	}
 	return p.unmarshal(data, ptr)
 }
@@ -132,10 +158,13 @@ func Pad(data []byte) []byte {
 // length; use Pad to construct it. The native parser reads up to 64 bytes
 // past the actual JSON end.
 //
-// WithZeroCopy makes escape-free strings alias paddedData. Decoded values
-// keep its backing reachable; the caller preserves its bytes while any decoded
-// value remains reachable. Trees carrying value.Value or poly fields are
-// rejected with ErrZeroCopyTypedTree.
+// Escape-free strings alias paddedData by default: decoded values keep its
+// backing reachable, and the caller preserves its bytes while any decoded
+// value remains reachable. Escaped strings still decode through the internal
+// string arena, and WithZeroCopy(false) selects the copying parse. Trees
+// carrying value.Value or poly fields stay arena-backed under the default and
+// are rejected with ErrZeroCopyTypedTree when zero-copy is demanded
+// explicitly.
 func UnmarshalPadded[T any](paddedData []byte, v T, opts ...UnmarshalOption) error {
 	rt := reflect.TypeFor[T]()
 	var ptr unsafe.Pointer
@@ -175,10 +204,10 @@ func UnmarshalPadded[T any](paddedData []byte, v T, opts ...UnmarshalOption) err
 	}
 	p := getParser(sh)
 	defer putParser(sh, p)
-	if cfg := applyOpts(p, opts); cfg.ZeroCopy && (p.tt.HasValueField || p.tt.HasPolyField) {
-		return ErrZeroCopyTypedTree
+	if err := resolveZeroCopy(p, applyOpts(p, opts)); err != nil {
+		return err
 	}
-	return p.unmarshalPadded(paddedData, ptr)
+	return p.unmarshalPadded(paddedData, ptr, nil)
 }
 
 // shape is the immutable binding plan and parser pool for one Go root type.
@@ -218,6 +247,12 @@ type Parser struct {
 	// walk. Nil while the feed driver owns the input; curSrc reads the live
 	// window then.
 	src []byte
+
+	// aliasSrc is the caller-owned original this call's zero-copy aliases
+	// reference when src is an internal copy of it. It is also the GC root
+	// for that backing through the native call, which otherwise outlives
+	// padInputInto's last read of it. Nil on every direct padded drive.
+	aliasSrc []byte
 
 	// feed is the active streaming-input driver state. Nil on contiguous
 	// calls; serveYield consults it for BindYieldInput and error rebasing.
@@ -299,6 +334,11 @@ func (p *Parser) FinalSlotState() (muBlock, cap, limit, offset []uint32) {
 
 // Unmarshal parses data into dst. dst must be a non-nil *T matching the type
 // the Parser was created for; the hot path does not recheck that contract.
+//
+// Escape-free strings alias data's backing by default through the internal
+// padded copy; WithZeroCopy(false) selects the copying parse. Trees carrying
+// value.Value or poly fields stay arena-backed under the default and are
+// rejected with ErrZeroCopyTypedTree when zero-copy is demanded explicitly.
 func (p *Parser) Unmarshal(data []byte, dst any, opts ...UnmarshalOption) error {
 	rt := reflect.TypeOf(dst)
 	if rt == nil || rt.Kind() != reflect.Pointer {
@@ -311,8 +351,8 @@ func (p *Parser) Unmarshal(data []byte, dst any, opts ...UnmarshalOption) error 
 	if len(data) == 0 {
 		return jerr.NewSyntaxErrorWrap("vjson: unexpected end of input", 0, io.ErrUnexpectedEOF)
 	}
-	if cfg := applyOpts(p, opts); cfg.ZeroCopy {
-		return option.ErrZeroCopyNeedsPadded
+	if err := resolveZeroCopy(p, applyOpts(p, opts)); err != nil {
+		return err
 	}
 	return p.unmarshal(data, dstPtr)
 }
@@ -324,8 +364,10 @@ func (p *Parser) Unmarshal(data []byte, dst any, opts ...UnmarshalOption) error 
 // length; use Pad to construct it. The parser reads up to 64 bytes past the
 // actual JSON end.
 //
-// WithZeroCopy makes escape-free strings alias paddedData; trees carrying
-// value.Value or poly fields are rejected with ErrZeroCopyTypedTree.
+// Escape-free strings alias paddedData by default; WithZeroCopy(false)
+// selects the copying parse. Trees carrying value.Value or poly fields stay
+// arena-backed under the default and are rejected with ErrZeroCopyTypedTree
+// when zero-copy is demanded explicitly.
 func (p *Parser) UnmarshalPadded(paddedData []byte, dst any, opts ...UnmarshalOption) error {
 	rt := reflect.TypeOf(dst)
 	if rt == nil || rt.Kind() != reflect.Pointer {
@@ -341,10 +383,10 @@ func (p *Parser) UnmarshalPadded(paddedData []byte, dst any, opts ...UnmarshalOp
 	if err := checkPadded(paddedData); err != nil {
 		return err
 	}
-	if cfg := applyOpts(p, opts); cfg.ZeroCopy && (p.tt.HasValueField || p.tt.HasPolyField) {
-		return ErrZeroCopyTypedTree
+	if err := resolveZeroCopy(p, applyOpts(p, opts)); err != nil {
+		return err
 	}
-	return p.unmarshalPadded(paddedData, dstPtr)
+	return p.unmarshalPadded(paddedData, dstPtr, nil)
 }
 
 var shapeCache rtcache.Cache[*shape]
@@ -532,27 +574,36 @@ func publishDoc(p *Parser, doc *valueabi.Doc, m *ndec.BindMachine) {
 }
 
 func (p *Parser) unmarshal(data []byte, rootDst unsafe.Pointer) error {
-	return p.unmarshalPadded(p.padInputInto(data), rootDst)
+	return p.unmarshalPadded(p.padInputInto(data), rootDst, data)
 }
 
 // checkPadded verifies the caller-supplied padded buffer meets the scan
 // sentinel contract: at least BindScanPad bytes of capacity past len, all 0x20.
 func checkPadded(paddedData []byte) error {
-	if cap(paddedData)-len(paddedData) < ndec.BindScanPad {
+	n := len(paddedData)
+	if cap(paddedData)-n < ndec.BindScanPad {
 		return fmt.Errorf("vjson: padded buffer must have at least %d bytes of capacity past len", ndec.BindScanPad)
 	}
-	tail := paddedData[len(paddedData) : len(paddedData)+ndec.BindScanPad]
-	for _, b := range tail {
-		if b != 0x20 {
-			return errors.New("vjson: padded buffer tail must be all 0x20")
-		}
+	w := (*[ndec.BindScanPad / 8]uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(paddedData)), uintptr(n)))
+	const sp = uint64(0x2020202020202020)
+	acc := w[0] ^ sp
+	acc |= w[1] ^ sp
+	acc |= w[2] ^ sp
+	acc |= w[3] ^ sp
+	acc |= w[4] ^ sp
+	acc |= w[5] ^ sp
+	acc |= w[6] ^ sp
+	acc |= w[7] ^ sp
+	if acc != 0 {
+		return errors.New("vjson: padded buffer tail must be all 0x20")
 	}
 	return nil
 }
 
-func (p *Parser) unmarshalPadded(src []byte, rootDst unsafe.Pointer) error {
+func (p *Parser) unmarshalPadded(src []byte, rootDst unsafe.Pointer, aliasSrc []byte) error {
 	srcLen := len(src)
 	p.src = src
+	p.aliasSrc = aliasSrc
 
 	m := (*ndec.BindMachine)(unsafe.Pointer(unsafe.SliceData(p.machine)))
 	m.Core.Phase = 0 // Select the native root bootstrap phase.
@@ -564,6 +615,13 @@ func (p *Parser) unmarshalPadded(src []byte, rootDst unsafe.Pointer) error {
 	m.Ctx.OptFlags |= p.optFlags
 	m.Ctx.Src = unsafe.SliceData(src) // Borrowed for the native call.
 	m.Ctx.SrcLen = uint64(srcLen)
+	// A copied drive is byte-identical to the caller-owned original over
+	// [0, srcLen), so SrcAliasDelta rebases every zero-copy alias from the
+	// scan buffer back into the caller's backing.
+	if aliasSrc != nil {
+		m.Ctx.SrcAliasDelta = uintptr(unsafe.Pointer(unsafe.SliceData(src))) -
+			uintptr(unsafe.Pointer(unsafe.SliceData(aliasSrc)))
+	}
 	m.Ctx.RootDst = rootDst // Borrowed for the native call.
 
 	alloc := p.alloc
@@ -638,11 +696,13 @@ func (p *Parser) unmarshalPadded(src []byte, rootDst unsafe.Pointer) error {
 		// Clear borrowed ABI pointers before the machine is reused. KeepAlive
 		// preserves their Go owners through the final stores.
 		p.src = nil
+		p.aliasSrc = nil
 		m.DropWindowView()
 		m.Ctx.RootDst = nil
 		allocABI.ValueDoc = nil
 		runtime.KeepAlive(rootDst) // Preserve ownership through ABI pointer clearing.
 		runtime.KeepAlive(src)
+		runtime.KeepAlive(aliasSrc) // Roots the zero-copy aliased backing.
 	}()
 
 	if err := p.driveBind(m, func() bool { return false }); err != nil {

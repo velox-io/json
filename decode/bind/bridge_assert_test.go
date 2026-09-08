@@ -21,8 +21,8 @@ func TestBindBridgeSizes(t *testing.T) {
 	if sz := unsafe.Sizeof(nativendec.BindSlotClass{}); sz != 48 {
 		t.Errorf("sizeof BindSlotClass = %d, want 48", sz)
 	}
-	if sz := unsafe.Sizeof(nativendec.BindContext{}); sz != 64 {
-		t.Errorf("sizeof BindContext = %d, want 64", sz)
+	if sz := unsafe.Sizeof(nativendec.BindContext{}); sz != 72 {
+		t.Errorf("sizeof BindContext = %d, want 72", sz)
 	}
 	if sz := unsafe.Sizeof(nativendec.BindAllocator{}); sz != 120 {
 		t.Errorf("sizeof BindAllocator = %d, want 120", sz)
@@ -30,8 +30,8 @@ func TestBindBridgeSizes(t *testing.T) {
 	if sz := unsafe.Sizeof(nativendec.BindYield{}); sz != 32 {
 		t.Errorf("sizeof BindYield = %d, want 32", sz)
 	}
-	if sz := unsafe.Sizeof(nativendec.BindMachine{}); sz != 296 {
-		t.Errorf("sizeof BindMachine = %d, want 296", sz)
+	if sz := unsafe.Sizeof(nativendec.BindMachine{}); sz != 304 {
+		t.Errorf("sizeof BindMachine = %d, want 304", sz)
 	}
 	if sz := unsafe.Sizeof(nativendec.BindCoreHeader{}); sz != 80 {
 		t.Errorf("sizeof BindCoreHeader = %d, want 80", sz)
@@ -59,9 +59,9 @@ func TestBindMachineOffsets(t *testing.T) {
 	}
 
 	check("BindMachine.Ctx", unsafe.Offsetof(a.Ctx), 0)
-	check("BindMachine.Alloc", unsafe.Offsetof(a.Alloc), 64)
-	check("BindMachine.Yield", unsafe.Offsetof(a.Yield), 184)
-	check("BindMachine.Core", unsafe.Offsetof(a.Core), 216)
+	check("BindMachine.Alloc", unsafe.Offsetof(a.Alloc), 72)
+	check("BindMachine.Yield", unsafe.Offsetof(a.Yield), 192)
+	check("BindMachine.Core", unsafe.Offsetof(a.Core), 224)
 
 	check("Ctx.Types", unsafe.Offsetof(a.Ctx.Types), 0)
 	check("Ctx.TypeMeta", unsafe.Offsetof(a.Ctx.TypeMeta), 8)
@@ -72,6 +72,7 @@ func TestBindMachineOffsets(t *testing.T) {
 	check("Ctx.OptFlags", unsafe.Offsetof(a.Ctx.OptFlags), 48)
 	check("Ctx.AnyTypeIdx", unsafe.Offsetof(a.Ctx.AnyTypeIdx), 52)
 	check("Ctx.Polys", unsafe.Offsetof(a.Ctx.Polys), 56)
+	check("Ctx.SrcAliasDelta", unsafe.Offsetof(a.Ctx.SrcAliasDelta), 64)
 
 	check("Alloc.SlotClasses", unsafe.Offsetof(a.Alloc.SlotClasses), 0)
 	check("Alloc.StrArena", unsafe.Offsetof(a.Alloc.StrArena), 8)
@@ -119,8 +120,8 @@ func TestBindMachineOffsets(t *testing.T) {
 
 	// The retired-generation history lives in the C-private machine tail; the
 	// literals pin the Go offset constants to the native static asserts.
-	check("StrProvCountOffset", nativendec.BindMachineStrProvCountOffset, 9524)
-	check("StrProvOffset", nativendec.BindMachineStrProvOffset, 9528)
+	check("StrProvCountOffset", nativendec.BindMachineStrProvCountOffset, 9532)
+	check("StrProvOffset", nativendec.BindMachineStrProvOffset, 9536)
 	if end := nativendec.BindMachineStrProvOffset + 16*nativendec.BindStrProvMax; end > nativendec.BindMachineSize {
 		t.Errorf("str_prov region ends at %d, machine budget %d", end, nativendec.BindMachineSize)
 	}

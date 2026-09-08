@@ -12,7 +12,7 @@ import (
 // destination, so both the root and any child sharing the doc are rejected
 // before the machine runs.
 func TestUnmarshalValueRejectsZeroCopy(t *testing.T) {
-	v, err := dom.ParsePadded(dom.Pad([]byte(`{"s":"hello","n":[1,2]}`)), dom.WithZeroCopy())
+	v, err := dom.ParsePadded(dom.Pad([]byte(`{"s":"hello","n":[1,2]}`)), dom.WithZeroCopy(true))
 	if err != nil {
 		t.Fatalf("ParsePadded: %v", err)
 	}

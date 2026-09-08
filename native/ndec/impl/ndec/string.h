@@ -72,15 +72,16 @@ NOINLINE int bind_visit_str_zc_decode(uint8_t **str_pp, const uint8_t *open_quot
 }
 
 /* Bind a string under BIND_OPT_ZERO_COPY_STR. An escape-free body aliases the
- * source span in place, so str_p stays untouched; the inlined scan keeps the
- * alias path free of call overhead. Escaped bodies decode into str_arena,
- * matching bind_intern_str's commit of body plus quote sentinel, and a body
- * over the 24-bit scan cap falls back to the copying parse. */
-INLINE int bind_visit_str_zc(uint8_t **str_pp, const uint8_t *open_quote, uint8_t *dst) {
+ * source span rebased by alias_delta into the caller-owned backing, so str_p
+ * stays untouched; the inlined scan keeps the alias path free of call overhead.
+ * Escaped bodies decode into str_arena, matching bind_intern_str's commit of
+ * body plus quote sentinel, and a body over the 24-bit scan cap falls back to
+ * the copying parse. */
+INLINE int bind_visit_str_zc(uint8_t **str_pp, const uint8_t *open_quote, uint8_t *dst, size_t alias_delta) {
   uint32_t len, bp;
   int32_t st = ndec_str_parse_zc_scan(open_quote + 1, &len, &bp, 0);
   if (LIKELY(st == 1)) {
-    bind_write_str_header(dst, open_quote + 1, len);
+    bind_write_str_header(dst, open_quote + 1 - alias_delta, len);
     return 0;
   }
   return bind_visit_str_zc_decode(str_pp, open_quote, dst);
@@ -88,9 +89,10 @@ INLINE int bind_visit_str_zc(uint8_t **str_pp, const uint8_t *open_quote, uint8_
 
 /* String visitor for typed destinations. The per-call zero-copy opt selects
  * between the aliasing and interning forms; both share the error contract. */
-#define BIND_VISIT_STR(m, open_quote, dst)                                                                         \
-  (((m)->b.ctx.opt_flags & BIND_OPT_ZERO_COPY_STR) ? bind_visit_str_zc(&str_p, (open_quote), (dst))                \
-                                                   : bind_visit_str(&str_p, (open_quote), (dst)))
+#define BIND_VISIT_STR(m, open_quote, dst)                                                                        \
+  (((m)->b.ctx.opt_flags & BIND_OPT_ZERO_COPY_STR)                                                                \
+       ? bind_visit_str_zc(&str_p, (open_quote), (dst), (m)->b.ctx.src_alias_delta)                               \
+       : bind_visit_str(&str_p, (open_quote), (dst)))
 
 /* Decode the inner JSON literal carried by a `,string` string field. The bounded scalar
  * walk supports an in-place destination one byte behind the source, so a direct JSON bind

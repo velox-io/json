@@ -459,7 +459,7 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
   do {                                                                                                            \
     if (LIKELY((ct)->kind == BIND_KIND_STRING)) {                                                                 \
       if ((ch) == '"') {                                                                                          \
-        if (BIND_VISIT_STR(m, SRC_PTR(), (body)) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());                \
+        if (BIND_VISIT_STR(m, SRC_PTR(), (body)) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());              \
         SRC_ADVANCE();                                                                                            \
         goto cont_label;                                                                                          \
       }                                                                                                           \
@@ -467,7 +467,7 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
     }                                                                                                             \
     if ((ct)->kind == BIND_KIND_NUMBER) {                                                                         \
       if ((ch) == '"') {                                                                                          \
-        if (BIND_VISIT_STR(m, SRC_PTR(), (body)) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());                \
+        if (BIND_VISIT_STR(m, SRC_PTR(), (body)) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());              \
         SRC_ADVANCE();                                                                                            \
         goto cont_label;                                                                                          \
       }                                                                                                           \
@@ -832,7 +832,8 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
   } while (0)
 
 /* json.Number preserves the validated source token in str_arena. Under the
- * zero-copy opt the header aliases the token in the caller-owned source. */
+ * zero-copy opt the header aliases the token rebased into the caller-owned
+ * backing. */
 #define BIND_WRITE_NUMBER_AS_STR(body, err_pos, cont_label)                                                       \
   do {                                                                                                            \
     const uint8_t *_tok = SRC_PTR();                                                                              \
@@ -844,7 +845,7 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
     (void)_dv;                                                                                                    \
     uint32_t _nlen = (uint32_t)(_end - _tok);                                                                     \
     if (m->b.ctx.opt_flags & BIND_OPT_ZERO_COPY_STR) {                                                            \
-      bind_write_str_header((body), _tok, _nlen);                                                                 \
+      bind_write_str_header((body), _tok - m->b.ctx.src_alias_delta, _nlen);                                      \
     } else {                                                                                                      \
       uint8_t *_ndata = str_p;                                                                                    \
       __builtin_memcpy(_ndata, _tok, _nlen);                                                                      \

@@ -33,6 +33,12 @@ func drainDeferredRecords(p *Parser, m *ndec.BindMachine) error {
 		return nil
 	}
 	src, raw := p.curSrc(), p.feedRaw()
+	// A zero-copy drive over an internal copy publishes spans that alias the
+	// caller-owned original, so the pooled pad buffer's next reuse cannot
+	// corrupt them.
+	if p.optFlags&ndec.BindOptZeroCopyStr != 0 && p.aliasSrc != nil {
+		src = p.aliasSrc
+	}
 	buf := unsafe.Slice(m.Alloc.DeferredDrain, used)
 	for off := uint32(0); off < used; off += ndec.UnmarshalRecordSize {
 		rec := (*ndec.UnmarshalRecord)(unsafe.Pointer(&buf[off]))
@@ -70,8 +76,7 @@ func drainDeferredRecords(p *Parser, m *ndec.BindMachine) error {
 			if hooks == nil {
 				return errors.New("bind: unmarshal hook missing for type")
 			}
-			strBase := unsafe.Pointer(m.Alloc.StrArena)
-			data := unsafe.Slice((*byte)(unsafe.Add(strBase, uintptr(rec.Arg0))), rec.Arg1)
+			data := recordSpanBytes(m, rec, src, raw)
 			if err := hooks.TextUnmarshalFn(unsafe.Pointer(rec.Target), data); err != nil {
 				return err
 			}
@@ -87,10 +92,10 @@ func drainDeferredRecords(p *Parser, m *ndec.BindMachine) error {
 		case vbind.KindSlice:
 			// A []byte target staged from a JSON string: decode base64 from
 			// the interned string bytes, like encoding/json. An empty string
-			// yields a non-nil empty slice. The record carries a str-arena
-			// span, not a document position, so the syntax error claims none.
-			strBase := unsafe.Pointer(m.Alloc.StrArena)
-			s := unsafe.Slice((*byte)(unsafe.Add(strBase, uintptr(rec.Arg0))), rec.Arg1)
+			// yields a non-nil empty slice. The record carries a borrowed
+			// source span or a str-arena span, never a document position, so
+			// the syntax error claims none.
+			s := recordSpanBytes(m, rec, src, raw)
 			dbuf := make([]byte, base64.StdEncoding.DecodedLen(len(s)))
 			n, err := base64.StdEncoding.Decode(dbuf, s)
 			if err != nil {
@@ -108,16 +113,31 @@ func drainDeferredRecords(p *Parser, m *ndec.BindMachine) error {
 
 // recordDocOffset translates a record's span offset into a document offset.
 // Source-backed records drain before their window relocates, so the live
-// window base rebases them; scratch-backed spans name the raw scratch, whose
-// bytes have no document position.
+// window base rebases them; scratch-backed and str-arena-backed spans carry
+// bytes with no document position.
 func recordDocOffset(p *Parser, rec *ndec.UnmarshalRecord) int64 {
-	if rec.Backing == ndec.BindRecordBackingScratch {
+	if rec.Backing != ndec.BindRecordBackingSource {
 		return 0
 	}
 	if p.feed != nil {
 		return int64(rec.Arg0) + int64(p.feed.base)
 	}
 	return int64(rec.Arg0)
+}
+
+// recordSpanBytes returns the string body a TextUnmarshaler or base64 record
+// references: a source span borrowed under the zero-copy opt, or the interned
+// str-arena bytes.
+func recordSpanBytes(m *ndec.BindMachine, rec *ndec.UnmarshalRecord, src, raw []byte) []byte {
+	if rec.Backing == ndec.BindRecordBackingStrArena {
+		strBase := unsafe.Pointer(m.Alloc.StrArena)
+		return unsafe.Slice((*byte)(unsafe.Add(strBase, uintptr(rec.Arg0))), rec.Arg1)
+	}
+	span := src
+	if rec.Backing == ndec.BindRecordBackingScratch {
+		span = raw
+	}
+	return span[rec.Arg0:rec.Arg1]
 }
 
 // bindIfaceRecord applies the encoding/json strategy over a staged non-empty
@@ -173,9 +193,9 @@ func unmarshalRawInto(p *Parser, data []byte, rt reflect.Type, ptr unsafe.Pointe
 	}
 	sp := getParser(sh)
 	defer putParser(sh, sp)
-	// The sub-parse copies its input through a reusable pad buffer, so the
-	// zero-copy alias must not propagate.
-	sp.optFlags = p.optFlags &^ ndec.BindOptZeroCopyStr
+	// The sub-parse owns its aliasSrc for this span, so its zero-copy aliases
+	// rebase into the same caller-owned backing the parent published from.
+	sp.optFlags = p.optFlags
 	return sp.unmarshal(data, ptr)
 }
 

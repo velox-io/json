@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/velox-io/json/native/ndec"
 	"github.com/velox-io/json/vbind"
 )
 
@@ -132,5 +133,37 @@ func TestRootDblPtrScalar(t *testing.T) {
 	}
 	if **got != **want {
 		t.Errorf("value mismatch: ndec=%d stdlib=%d", **got, **want)
+	}
+}
+
+// TestUnmarshalPaddedRejectsCorruptTail pins the sentinel check across the
+// whole pad: every one of the BindScanPad tail bytes is verified, and a
+// buffer without spare capacity past len is rejected.
+func TestUnmarshalPaddedRejectsCorruptTail(t *testing.T) {
+	padded := Pad([]byte(`{"n":42}`))
+	var x struct {
+		N int `json:"n"`
+	}
+	if err := UnmarshalPadded(padded, &x); err != nil {
+		t.Fatalf("clean pad: %v", err)
+	}
+	n := len(padded)
+	tail := padded[:n+ndec.BindScanPad] // window over the sentinel region
+	for i := 0; i < ndec.BindScanPad; i++ {
+		saved := tail[n+i]
+		tail[n+i] = 0x21
+		var y struct {
+			N int `json:"n"`
+		}
+		if err := UnmarshalPadded(padded, &y); err == nil {
+			t.Fatalf("tail byte %d: corrupt pad accepted", i)
+		}
+		tail[n+i] = saved
+	}
+	var z struct {
+		N int `json:"n"`
+	}
+	if err := UnmarshalPadded(padded[:n:n], &z); err == nil {
+		t.Fatal("missing pad capacity accepted")
 	}
 }

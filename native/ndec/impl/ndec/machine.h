@@ -204,10 +204,10 @@ _Static_assert(offsetof(NdecBindCore, cur_aux) == 72, "NdecBindCore.cur_aux offs
 _Static_assert(offsetof(NdecBindCore, frames) == 80, "NdecBindCore.frames offset");
 
 typedef struct NdecBindMachine {
-  NdecBindBridge b;      /* off 0    driver-engine bridge (ctx 64 + alloc 120 + yield 32 = 216B) */
-  NdecBindCore c;        /* off 216  binding state machine internals (scalars 80 + frames 8KiB = 8272B) */
-  NdecCursor cursor;     /* off 8488 input position of the active pass */
-  NdecCursor cursor_end; /* off 8496 count of real input; the walk reads past it */
+  NdecBindBridge b;      /* off 0    driver-engine bridge (ctx 72 + alloc 120 + yield 32 = 224B) */
+  NdecBindCore c;        /* off 224  binding state machine internals (scalars 80 + frames 8KiB = 8272B) */
+  NdecCursor cursor;     /* off 8496 input position of the active pass */
+  NdecCursor cursor_end; /* off 8504 count of real input; the walk reads past it */
 
   /* Streaming-input state. The Go driver owns the window coordinates:
    * window_base is the absolute document offset of ctx.src[0] so cold error
@@ -228,17 +228,17 @@ typedef struct NdecBindMachine {
    * and raw_cap and guarantees cap >= raw_used + window_len at every install:
    * one run's appends cover disjoint byte ranges of a single window, because a
    * completing value's tail ends at or before the next deferred value's start. */
-  uint64_t window_base;       /* off 8504, absolute document offset of ctx.src[0] */
-  uint32_t skip_depth;        /* off 8512 */
-  uint8_t window_final;       /* off 8516 */
-  uint8_t _pad2[3];           /* off 8517 */
-  uint32_t window_stable_end; /* off 8520 */
-  uint32_t raw_depth;         /* off 8524 */
-  uint32_t raw_scratch_start; /* off 8528 */
-  uint32_t _pad3;             /* off 8532, aligns raw_arena to 8 */
-  uint8_t *raw_arena;         /* off 8536 */
-  uint32_t raw_cap;           /* off 8544 */
-  uint32_t raw_used;          /* off 8548 */
+  uint64_t window_base;       /* off 8512, absolute document offset of ctx.src[0] */
+  uint32_t skip_depth;        /* off 8520 */
+  uint8_t window_final;       /* off 8524 */
+  uint8_t _pad2[3];           /* off 8525 */
+  uint32_t window_stable_end; /* off 8528 */
+  uint32_t raw_depth;         /* off 8532 */
+  uint32_t raw_scratch_start; /* off 8536 */
+  uint32_t _pad3;             /* off 8540, aligns raw_arena to 8 */
+  uint8_t *raw_arena;         /* off 8544 */
+  uint32_t raw_cap;           /* off 8552 */
+  uint32_t raw_used;          /* off 8556 */
 
   int32_t aux_depth; /* Current struct auxiliary slot; zero is the sentinel. Cold
                       * poly paths update it in memory, so it consumes no hot register
@@ -275,34 +275,34 @@ typedef struct NdecBindMachine {
    * alloc.tape_used, committed at each vd yield: arena growth between windows
    * would dangle a raw pointer. Frames above the parent bind depth carry the
    * container stack, so only the current container's scalar state lives here. */
-  uint8_t _pad4[3];           /* off 9501 */
-  int32_t vd_depth;           /* off 9504 */
-  uint32_t vd_cur_count;      /* off 9508 */
-  uint32_t vd_cur_tape_index; /* off 9512 */
-  uint32_t vd_base_off;       /* off 9516 */
-  uint32_t vd_lifecycle;      /* off 9520 */
+  uint8_t _pad4[3];           /* off 9509 */
+  int32_t vd_depth;           /* off 9512 */
+  uint32_t vd_cur_count;      /* off 9516 */
+  uint32_t vd_cur_tape_index; /* off 9520 */
+  uint32_t vd_base_off;       /* off 9524 */
+  uint32_t vd_lifecycle;      /* off 9528 */
 
   /* Retired string backings of the current streaming parse, addressed by the
    * Go driver at install time. The retained set keeps the backings alive; the
    * noscan machine cannot. */
-  uint32_t str_prov_count;                 /* off 9524 */
-  BindStrProv str_prov[BIND_STR_PROV_MAX]; /* off 9528 */
+  uint32_t str_prov_count;                 /* off 9532 */
+  BindStrProv str_prov[BIND_STR_PROV_MAX]; /* off 9536 */
 } NdecBindMachine;
 _Static_assert(offsetof(NdecBindMachine, b) == 0, "bridge must be at offset 0");
-_Static_assert(offsetof(NdecBindMachine, cursor) == 8488, "cursor offset must match Go BindMachineCursorOffset");
-_Static_assert(offsetof(NdecBindMachine, window_base) == 8504, "window_base offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, skip_depth) == 8512, "skip_depth offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, window_final) == 8516, "window_final offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, window_stable_end) == 8520,
+_Static_assert(offsetof(NdecBindMachine, cursor) == 8496, "cursor offset must match Go BindMachineCursorOffset");
+_Static_assert(offsetof(NdecBindMachine, window_base) == 8512, "window_base offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, skip_depth) == 8520, "skip_depth offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, window_final) == 8524, "window_final offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, window_stable_end) == 8528,
                "window_stable_end offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, raw_arena) == 8536, "raw_arena offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, raw_cap) == 8544, "raw_cap offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, raw_used) == 8548, "raw_used offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, vd_depth) == 9504, "vd_depth offset");
-_Static_assert(offsetof(NdecBindMachine, vd_base_off) == 9516, "vd_base_off offset");
-_Static_assert(offsetof(NdecBindMachine, vd_lifecycle) == 9520, "vd_lifecycle offset");
-_Static_assert(offsetof(NdecBindMachine, str_prov_count) == 9524, "str_prov_count offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, str_prov) == 9528, "str_prov offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, raw_arena) == 8544, "raw_arena offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, raw_cap) == 8552, "raw_cap offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, raw_used) == 8556, "raw_used offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, vd_depth) == 9512, "vd_depth offset");
+_Static_assert(offsetof(NdecBindMachine, vd_base_off) == 9524, "vd_base_off offset");
+_Static_assert(offsetof(NdecBindMachine, vd_lifecycle) == 9528, "vd_lifecycle offset");
+_Static_assert(offsetof(NdecBindMachine, str_prov_count) == 9532, "str_prov_count offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, str_prov) == 9536, "str_prov offset must match Go mirror");
 
 /* No deferred raw value is being materialized across windows. */
 #define BIND_RAW_NONE 0xFFFFFFFFu

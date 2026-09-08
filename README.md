@@ -65,21 +65,23 @@ var envelope Envelope
 err := json.Unmarshal(src, &envelope)
 ```
 
-By default, `Parse` copies the string needed by the returned `Value`. If retaining the input buffer is acceptable, zero-copy mode can reduce this copying:
-
-```go
-padded := json.Pad(src)
-doc, err := json.ParsePadded(padded, json.WithZeroCopy())
-```
-
-Do not modify `padded` or any slice sharing its backing array until you have finished using `doc` and every `Value` obtained from it.
-
 Tape-backed values have two representation limits:
 
 - the JSON document must be smaller than 4 GiB because source offsets are 32-bit;
 - each decoded string or object key must be smaller than 16 MiB because string lengths are 24-bit.
 
 These string limits apply to `Value`, not to ordinary Go `string` fields decoded directly by `Unmarshal`.
+
+## Zero-copy decoding
+
+`Unmarshal` is zero-copy by default: escape-free strings alias the caller's input buffer, skipping the per-string copies through the internal arena. Escaped strings still decode through the arena. The caller must preserve the input's bytes while any decoded value remains reachable:
+
+```go
+var pod KubePodList
+err := json.Unmarshal(src, &pod) // pod's clean strings alias src
+```
+
+Pass `json.WithZeroCopy(false)` when the destination must own its bytes, for example when the input buffer is reused after decoding.
 
 ## Extensions
 

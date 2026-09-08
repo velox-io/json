@@ -4,19 +4,31 @@ package option
 
 import "errors"
 
-// ErrZeroCopyNeedsPadded reports that zero-copy strings require a caller-owned
-// padded buffer. Every entry that copies or relocates its input rejects
-// WithZeroCopy with this error.
-var ErrZeroCopyNeedsPadded = errors.New("vjson: WithZeroCopy requires a padded caller-owned buffer")
+// ErrZeroCopyUnsupported reports that zero-copy strings require a caller-owned
+// input buffer. Entries whose input relocates across windows or is not caller
+// bytes reject an explicit WithZeroCopy(true) demand with this error.
+var ErrZeroCopyUnsupported = errors.New("vjson: WithZeroCopy(true) requires a caller-owned input buffer")
+
+// ZeroCopyMode selects how escape-free decoded strings are backed.
+type ZeroCopyMode uint8
+
+const (
+	// ZeroCopyAuto lets each entry apply its input model's default: Unmarshal
+	// and UnmarshalPadded alias the caller-owned input, while every entry
+	// whose input relocates across windows or is not caller bytes copies.
+	ZeroCopyAuto ZeroCopyMode = iota
+	// ZeroCopyOn demands aliasing into the caller-owned input.
+	ZeroCopyOn
+	// ZeroCopyOff demands the copying parse.
+	ZeroCopyOff
+)
 
 // Config holds the resolved option state for one decode call.
 type Config struct {
-	// ZeroCopy lets escape-free strings alias the padded source in
-	// dom.ParsePadded and bind.UnmarshalPadded. The decoded values keep the
-	// source's backing reachable; callers preserve its bytes while any
-	// decoded value remains reachable. Every other decode path rejects the
-	// option with ErrZeroCopyNeedsPadded.
-	ZeroCopy bool
+	// ZeroCopy selects the string backing for the call. The zero value
+	// defers to each entry's input-model default; WithZeroCopy resolves it
+	// to an explicit demand or disable.
+	ZeroCopy ZeroCopyMode
 
 	// UseNumber decodes any/interface{} numbers as json.Number instead of
 	// float64. Bind only.
@@ -39,14 +51,18 @@ type Config struct {
 // regardless of how many opts are applied.
 type Option func(Config) Config
 
-// WithZeroCopy arms the zero-copy string path. Honored by dom.ParsePadded and
-// bind.UnmarshalPadded; escaped strings still decode through the string arena.
-// Entries with a different input model reject it with ErrZeroCopyNeedsPadded,
-// and bind additionally rejects trees carrying value.Value or poly fields
-// with bind.ErrZeroCopyTypedTree.
-func WithZeroCopy() Option {
+// WithZeroCopy selects the string backing. Unmarshal and UnmarshalPadded
+// alias escape-free strings into the caller-owned input by default:
+// WithZeroCopy(false) selects the copying parse, and WithZeroCopy(true) is an
+// explicit demand that entries whose input cannot alias reject with
+// ErrZeroCopyUnsupported.
+func WithZeroCopy(enabled bool) Option {
 	return func(c Config) Config {
-		c.ZeroCopy = true
+		if enabled {
+			c.ZeroCopy = ZeroCopyOn
+		} else {
+			c.ZeroCopy = ZeroCopyOff
+		}
 		return c
 	}
 }

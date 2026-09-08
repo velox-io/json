@@ -272,7 +272,9 @@ func TestRawMessage_OmitEmpty(t *testing.T) {
 	}
 }
 
-// Byte independence: source mutation must not affect result
+// Byte independence: source mutation must not affect result. Unmarshal's
+// zero-copy default aliases the RawMessage span into the input, so byte
+// independence needs the explicit opt-out.
 
 func TestRawMessage_ByteIndependence(t *testing.T) {
 	type Msg struct {
@@ -280,7 +282,7 @@ func TestRawMessage_ByteIndependence(t *testing.T) {
 	}
 	input := []byte(`{"data":{"key":"value"}}`)
 	var msg Msg
-	if err := vjson.Unmarshal(input, &msg); err != nil {
+	if err := vjson.Unmarshal(input, &msg, vjson.WithZeroCopy(false)); err != nil {
 		t.Fatal(err)
 	}
 	saved := string(msg.Data) // snapshot

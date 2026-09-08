@@ -514,10 +514,10 @@ enum {
   BIND_PHASE_ROOT_SCANNED = 35,
   /* Streaming-input continuations. Each re-enters its label with a fresh
    * cursor installed by the Go driver's next window. */
-  BIND_PHASE_OBJECT_CONTINUE      = 36,
-  BIND_PHASE_ARRAY_CONTINUE       = 37,
-  BIND_PHASE_MAP_CONTINUE_INPUT   = 38,
-  BIND_PHASE_OBJECT_FIELD         = 39,
+  BIND_PHASE_OBJECT_CONTINUE    = 36,
+  BIND_PHASE_ARRAY_CONTINUE     = 37,
+  BIND_PHASE_MAP_CONTINUE_INPUT = 38,
+  BIND_PHASE_OBJECT_FIELD       = 39,
   /* Resumes an in-flight value skip; machine skip_depth carries its nesting. */
   BIND_PHASE_SKIP_RESUME = 40,
   /*
@@ -574,7 +574,7 @@ enum {
 };
 
 /*
- * Go initializes this 64-byte input view before entry and keeps every referenced
+ * Go initializes this 72-byte input view before entry and keeps every referenced
  * object alive through all yields until the parse completes.
  */
 typedef struct NdecBindContext {
@@ -601,8 +601,15 @@ typedef struct NdecBindContext {
    * in-range indices on the fields that read it.
    */
   const BindPolyTable *polys;
+  /*
+   * off 64: the byte distance from ctx.src to the caller-owned buffer that
+   * zero-copy aliases must reference. A direct padded input carries zero. A
+   * copied input is byte-identical over [0, src_len), so every span the scan
+   * validates rebases by this delta into the caller's backing.
+   */
+  size_t src_alias_delta;
 } NdecBindContext;
-_Static_assert(sizeof(NdecBindContext) == 64, "NdecBindContext size drift");
+_Static_assert(sizeof(NdecBindContext) == 72, "NdecBindContext size drift");
 _Static_assert(offsetof(NdecBindContext, types) == 0, "ctx.types");
 _Static_assert(offsetof(NdecBindContext, type_meta) == 8, "ctx.type_meta");
 _Static_assert(offsetof(NdecBindContext, src) == 16, "ctx.src");
@@ -613,6 +620,7 @@ _Static_assert(offsetof(NdecBindContext, root_dst) == 40, "ctx.root_dst");
 _Static_assert(offsetof(NdecBindContext, opt_flags) == 48, "ctx.opt_flags");
 _Static_assert(offsetof(NdecBindContext, any_type_idx) == 52, "ctx.any_type_idx");
 _Static_assert(offsetof(NdecBindContext, polys) == 56, "ctx.polys");
+_Static_assert(offsetof(NdecBindContext, src_alias_delta) == 64, "ctx.src_alias_delta");
 
 /*
  * Go owns every backing in this 120-byte view. C advances cursors and writes
@@ -673,15 +681,17 @@ _Static_assert(offsetof(NdecBindAllocator, tape_used) == 112, "alloc.tape_used")
 /*
  * C appends these 24-byte records and Go drains them in batches. target must be
  * GC-scannable because a hook may publish heap pointers there. backing selects
- * the span's storage: source offsets into ctx.src, or offsets into the
- * streaming engine's raw scratch. arg0 and arg1 are the exclusive byte bounds
- * in the selected backing for JSON, RawMessage, and interface slots, or a byte
- * offset and length in the bump-only str_arena for TextUnmarshaler and the
- * base64 []byte record.
+ * the span's storage: source offsets into ctx.src, offsets into the streaming
+ * engine's raw scratch, or offsets into str_arena for interned string bytes.
+ * arg0 and arg1 are the exclusive byte bounds in the selected backing for JSON,
+ * RawMessage, interface, and zero-copy TextUnmarshaler records, or a byte
+ * offset and length in str_arena for interned TextUnmarshaler and the base64
+ * []byte record.
  */
 enum {
-  BIND_RECORD_BACKING_SOURCE = 0,
-  BIND_RECORD_BACKING_SCRATCH = 1,
+  BIND_RECORD_BACKING_SOURCE   = 0,
+  BIND_RECORD_BACKING_SCRATCH  = 1,
+  BIND_RECORD_BACKING_STRARENA = 2,
 };
 
 typedef struct UnmarshalRecord {
@@ -744,12 +754,12 @@ _Static_assert(sizeof(int32_t) == 4, "Value coordinate stores are full-width");
  * NULL. Non-error actions use target as their borrowed slot.
  */
 typedef struct NdecBindYield {
-  uint32_t pending_action;      /* off 0, BIND_YIELD_* */
-  uint32_t arg0;                /* off 4, action-specific argument */
-  uint32_t arg1;                /* off 8, action-specific argument or error detail */
+  uint32_t pending_action;       /* off 0, BIND_YIELD_* */
+  uint32_t arg0;                 /* off 4, action-specific argument */
+  uint32_t arg1;                 /* off 8, action-specific argument or error detail */
   uint32_t first_error_promoted; /* off 12, streaming: first_error_pos already absolute */
-  uint64_t first_error_pos;     /* off 16, source offset */
-  uint8_t *target;              /* off 24, action slot or variant host */
+  uint64_t first_error_pos;      /* off 16, source offset */
+  uint8_t *target;               /* off 24, action slot or variant host */
 } NdecBindYield;
 _Static_assert(sizeof(NdecBindYield) == 32, "NdecBindYield size drift");
 _Static_assert(offsetof(NdecBindYield, pending_action) == 0, "yield.pending_action");
@@ -760,13 +770,13 @@ _Static_assert(offsetof(NdecBindYield, first_error_pos) == 16, "yield.first_erro
 _Static_assert(offsetof(NdecBindYield, target) == 24, "yield.target");
 
 typedef struct NdecBindBridge {
-  NdecBindContext ctx;     /* off 0, 64 bytes */
-  NdecBindAllocator alloc; /* off 64, 120 bytes */
-  NdecBindYield yield;     /* off 184, 32 bytes */
+  NdecBindContext ctx;     /* off 0, 72 bytes */
+  NdecBindAllocator alloc; /* off 72, 120 bytes */
+  NdecBindYield yield;     /* off 192, 32 bytes */
 } NdecBindBridge;
-_Static_assert(sizeof(NdecBindBridge) == 216, "NdecBindBridge size drift");
+_Static_assert(sizeof(NdecBindBridge) == 224, "NdecBindBridge size drift");
 _Static_assert(offsetof(NdecBindBridge, ctx) == 0, "bridge.ctx");
-_Static_assert(offsetof(NdecBindBridge, alloc) == 64, "bridge.alloc");
-_Static_assert(offsetof(NdecBindBridge, yield) == 184, "bridge.yield");
+_Static_assert(offsetof(NdecBindBridge, alloc) == 72, "bridge.alloc");
+_Static_assert(offsetof(NdecBindBridge, yield) == 192, "bridge.yield");
 
 #endif /* NDEC_BIND_BRIDGE_H */

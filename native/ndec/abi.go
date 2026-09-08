@@ -121,15 +121,15 @@ type (
 // BindBridge must match NdecBindBridge in bind_bridge.h byte for byte.
 type BindBridge struct {
 	Ctx   BindContext   // off 0
-	Alloc BindAllocator // off 64
-	Yield BindYield     // off 184
+	Alloc BindAllocator // off 72
+	Yield BindYield     // off 192
 }
 
 // BindMachine mirrors NdecBindMachine through the scalar core prefix. Native
 // frames and private state occupy the same allocation immediately afterward.
 type BindMachine struct {
 	BindBridge                // off 0
-	Core       BindCoreHeader // off 208
+	Core       BindCoreHeader // off 224
 }
 
 // BindContext holds borrowed per-call inputs. Types and TypeMeta remain owned
@@ -159,6 +159,11 @@ type BindContext struct {
 	// needs no count: the builder is its only writer, so every index it stamps
 	// on a field is in range.
 	Polys *BindPolyTable // off 56
+	// SrcAliasDelta is the byte distance from Src to the caller-owned buffer
+	// that zero-copy aliases reference. A direct padded input carries zero; a
+	// copied input is byte-identical over [0, SrcLen), so each aliased span
+	// rebases by this delta into the caller's backing.
+	SrcAliasDelta uintptr // off 64
 }
 
 // BindAllocator exposes Go-owned memory to C. C advances cursors and installs
@@ -268,10 +273,10 @@ type BindCoreHeader struct {
 
 // UnmarshalRecord defers Go callbacks and RawMessage publication. Target must
 // address scannable storage because the drain may publish heap pointers there.
-// Arg0 and Arg1 identify an immutable Src span for JSON, RawMessage, and
-// interface slots, or a StrArena span for TextUnmarshaler and the base64
-// []byte record; Backing selects the span's storage for the source-backed
-// kinds. Both backing stores remain valid until the Go drain consumes the
+// Arg0 and Arg1 identify an immutable Src span for JSON, RawMessage, interface,
+// and zero-copy TextUnmarshaler slots, or a StrArena span for interned
+// TextUnmarshaler and the base64 []byte record; Backing selects the span's
+// storage. Both backing stores remain valid until the Go drain consumes the
 // record.
 type UnmarshalRecord struct {
 	Target  *byte   // off 0
@@ -288,8 +293,9 @@ const UnmarshalRecordSize = 24
 
 // Record backing selectors for UnmarshalRecord.Backing.
 const (
-	BindRecordBackingSource  = 0 // offsets into Ctx.Src
-	BindRecordBackingScratch = 1 // offsets into the streaming engine's raw scratch
+	BindRecordBackingSource   = 0 // offsets into Ctx.Src
+	BindRecordBackingScratch  = 1 // offsets into the streaming engine's raw scratch
+	BindRecordBackingStrArena = 2 // offsets into the string arena
 )
 
 // BindFrame must match the native container frame byte for byte. A frame saves
@@ -569,7 +575,8 @@ type BindWindowScanCtx struct {
 const (
 	BindOptDisallowUnknown uint32 = 1 << 0
 	// BindOptZeroCopyStr aliases escape-free string bodies in the caller-owned
-	// padded source instead of interning them into str_arena. Escaped bodies
+	// source instead of interning them into str_arena. SrcAliasDelta rebases
+	// each alias when the scan input is an internal copy. Escaped bodies
 	// and tape-mediated content still decode through the arena.
 	BindOptZeroCopyStr uint32 = 1 << 1
 	// BindOptUseNumber decodes any/interface{} numbers as json.Number instead
@@ -606,10 +613,10 @@ var (
 	_ = [1]struct{}{}[unsafe.Sizeof(BindType{})-16]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindField{})-16]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindSlotClass{})-48]
-	_ = [1]struct{}{}[unsafe.Sizeof(BindContext{})-64]
+	_ = [1]struct{}{}[unsafe.Sizeof(BindContext{})-72]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindAllocator{})-120]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindYield{})-32]
-	_ = [1]struct{}{}[unsafe.Sizeof(BindMachine{})-296]
+	_ = [1]struct{}{}[unsafe.Sizeof(BindMachine{})-304]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindCoreHeader{})-80]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindFrame{})-32]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindMapRegionHeader{})-32]

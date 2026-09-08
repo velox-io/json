@@ -17,7 +17,6 @@ import (
 //                    cost of allocating every buffer from scratch. B/op is
 //                    the full first-parse reservation, the regression guard
 //                    for the counted sizing bound and the seed.
-//   VeloxZeroCopy    padded input with escape-free strings aliasing the source
 //   VeloxValue       root Value through Unmarshal (bind-path tape build)
 //   VeloxValueStrict VeloxValue with the strict scan armed
 //   FastJson_*       fastjson controls, reusing and owning the parser
@@ -40,18 +39,6 @@ func benchDomUnpooled(b *testing.B, data []byte) {
 	for b.Loop() {
 		p := dom.NewParser()
 		if _, err := p.Parse(data); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func benchDomZeroCopy(b *testing.B, data []byte) {
-	padded := dom.Pad(data)
-	b.SetBytes(int64(len(data)))
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		if _, err := dom.ParsePadded(padded, dom.WithZeroCopy()); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -118,9 +105,6 @@ func Benchmark_Dom_KubePodsCompact_VeloxParse(b *testing.B) { benchDom(b, LoadPo
 func Benchmark_Dom_KubePodsCompact_VeloxUnpooled(b *testing.B) {
 	benchDomUnpooled(b, LoadPodsCompactJSON())
 }
-func Benchmark_Dom_KubePodsCompact_VeloxZeroCopy(b *testing.B) {
-	benchDomZeroCopy(b, LoadPodsCompactJSON())
-}
 func Benchmark_Dom_KubePodsCompact_VeloxValue(b *testing.B) { benchDomValue(b, LoadPodsCompactJSON()) }
 func Benchmark_Dom_KubePodsCompact_VeloxValueStrict(b *testing.B) {
 	benchDomValueStrict(b, LoadPodsCompactJSON())
@@ -134,34 +118,33 @@ func Benchmark_Dom_KubePodsCompact_FastJson_Owned(b *testing.B) {
 
 // --- Medium: small mixed document, the per-parse fixed-cost regime ---
 
-func Benchmark_Dom_Medium_VeloxParse(b *testing.B)       { benchDom(b, MediumJSON) }
-func Benchmark_Dom_Medium_VeloxUnpooled(b *testing.B)    { benchDomUnpooled(b, MediumJSON) }
-func Benchmark_Dom_Medium_VeloxZeroCopy(b *testing.B)    { benchDomZeroCopy(b, MediumJSON) }
-func Benchmark_Dom_Medium_VeloxValue(b *testing.B)       { benchDomValue(b, MediumJSON) }
-func Benchmark_Dom_Medium_VeloxValueStrict(b *testing.B) { benchDomValueStrict(b, MediumJSON) }
-func Benchmark_Dom_Medium_FastJson_Reuse(b *testing.B)   { benchFastJSONReuse(b, MediumJSON) }
-func Benchmark_Dom_Medium_FastJson_Owned(b *testing.B)   { benchFastJSONOwned(b, MediumJSON) }
+func Benchmark_Dom_Medium_VeloxParse(b *testing.B)    { benchDom(b, MediumJSON) }
+func Benchmark_Dom_Medium_VeloxUnpooled(b *testing.B) { benchDomUnpooled(b, MediumJSON) }
+func Benchmark_Dom_Medium_VeloxValue(b *testing.B)    { benchDomValue(b, MediumJSON) }
+func Benchmark_Dom_Medium_VeloxValueStrict(b *testing.B) {
+	benchDomValueStrict(b, MediumJSON)
+}
+func Benchmark_Dom_Medium_FastJson_Reuse(b *testing.B) { benchFastJSONReuse(b, MediumJSON) }
+func Benchmark_Dom_Medium_FastJson_Owned(b *testing.B) { benchFastJSONOwned(b, MediumJSON) }
 
 // --- Twitter: large string-heavy document, the arena-reservation regime ---
 
-func Benchmark_Dom_Twitter_VeloxParse(b *testing.B)       { benchDom(b, TwitterJSON) }
-func Benchmark_Dom_Twitter_VeloxUnpooled(b *testing.B)    { benchDomUnpooled(b, TwitterJSON) }
-func Benchmark_Dom_Twitter_VeloxZeroCopy(b *testing.B)    { benchDomZeroCopy(b, TwitterJSON) }
-func Benchmark_Dom_Twitter_VeloxValue(b *testing.B)       { benchDomValue(b, TwitterJSON) }
-func Benchmark_Dom_Twitter_VeloxValueStrict(b *testing.B) { benchDomValueStrict(b, TwitterJSON) }
-func Benchmark_Dom_Twitter_FastJson_Reuse(b *testing.B)   { benchFastJSONReuse(b, TwitterJSON) }
-func Benchmark_Dom_Twitter_FastJson_Owned(b *testing.B)   { benchFastJSONOwned(b, TwitterJSON) }
+func Benchmark_Dom_Twitter_VeloxParse(b *testing.B)    { benchDom(b, TwitterJSON) }
+func Benchmark_Dom_Twitter_VeloxUnpooled(b *testing.B) { benchDomUnpooled(b, TwitterJSON) }
+func Benchmark_Dom_Twitter_VeloxValue(b *testing.B)    { benchDomValue(b, TwitterJSON) }
+func Benchmark_Dom_Twitter_VeloxValueStrict(b *testing.B) {
+	benchDomValueStrict(b, TwitterJSON)
+}
+func Benchmark_Dom_Twitter_FastJson_Reuse(b *testing.B) { benchFastJSONReuse(b, TwitterJSON) }
+func Benchmark_Dom_Twitter_FastJson_Owned(b *testing.B) { benchFastJSONOwned(b, TwitterJSON) }
 
-// --- EscapeHeavyCompact: string decoding and the ZC escape boundary ---
+// --- EscapeHeavyCompact: string decoding and the escape boundary ---
 
 func Benchmark_Dom_EscapeHeavyCompact_VeloxParse(b *testing.B) {
 	benchDom(b, LoadEscapeHeavyCompactJSON())
 }
 func Benchmark_Dom_EscapeHeavyCompact_VeloxUnpooled(b *testing.B) {
 	benchDomUnpooled(b, LoadEscapeHeavyCompactJSON())
-}
-func Benchmark_Dom_EscapeHeavyCompact_VeloxZeroCopy(b *testing.B) {
-	benchDomZeroCopy(b, LoadEscapeHeavyCompactJSON())
 }
 func Benchmark_Dom_EscapeHeavyCompact_VeloxValue(b *testing.B) {
 	benchDomValue(b, LoadEscapeHeavyCompactJSON())

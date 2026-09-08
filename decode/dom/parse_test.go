@@ -31,7 +31,7 @@ func mustParseTapeZC(t *testing.T, src string) value.Value {
 	p := parserPool.Get().(*Parser)
 	defer parserPool.Put(p)
 	padded := Pad([]byte(src))
-	v, err := p.ParsePadded(padded, WithZeroCopy())
+	v, err := p.ParsePadded(padded, WithZeroCopy(true))
 	if err != nil {
 		t.Fatalf("ParsePadded(%q) zero-copy: %v", src, err)
 	}
@@ -371,16 +371,16 @@ func TestValueStringAtObjectKeys(t *testing.T) {
 
 // --- Value.RawStringAt (StrModeZeroCopy) ---
 
-// TestParseRejectsZeroCopyWithoutPadded pins that zero-copy is a
-// ParsePadded-only contract: Parse copies src into the Parser's reusable
-// buffer, so zero-copy payloads would be corrupted by the next parse.
-func TestParseRejectsZeroCopyWithoutPadded(t *testing.T) {
+// TestParseRejectsExplicitZeroCopy pins that zero-copy is a ParsePadded-only
+// contract: Parse scans an internal copy of src through reusable scratch, so
+// an explicit WithZeroCopy(true) demand is rejected instead of honored.
+func TestParseRejectsExplicitZeroCopy(t *testing.T) {
 	p := NewParser()
-	if _, err := p.Parse([]byte(`{"a":"b"}`), WithZeroCopy()); !errors.Is(err, ErrZeroCopyNeedsPadded) {
-		t.Errorf("Parser.Parse: got %v, want ErrZeroCopyNeedsPadded", err)
+	if _, err := p.Parse([]byte(`{"a":"b"}`), WithZeroCopy(true)); !errors.Is(err, ErrZeroCopyUnsupported) {
+		t.Errorf("Parser.Parse: got %v, want ErrZeroCopyUnsupported", err)
 	}
-	if _, err := Parse([]byte(`{"a":"b"}`), WithZeroCopy()); !errors.Is(err, ErrZeroCopyNeedsPadded) {
-		t.Errorf("Parse: got %v, want ErrZeroCopyNeedsPadded", err)
+	if _, err := Parse([]byte(`{"a":"b"}`), WithZeroCopy(true)); !errors.Is(err, ErrZeroCopyUnsupported) {
+		t.Errorf("Parse: got %v, want ErrZeroCopyUnsupported", err)
 	}
 }
 
@@ -398,7 +398,7 @@ func TestParseCopyModePublishesNoSrc(t *testing.T) {
 }
 
 func TestParsePaddedZeroCopyFlagsDoc(t *testing.T) {
-	v, err := ParsePadded(Pad([]byte(`{"a":"b"}`)), WithZeroCopy())
+	v, err := ParsePadded(Pad([]byte(`{"a":"b"}`)), WithZeroCopy(true))
 	if err != nil {
 		t.Fatalf("ParsePadded: %v", err)
 	}
@@ -411,6 +411,29 @@ func TestParsePaddedZeroCopyFlagsDoc(t *testing.T) {
 	sv := v.Get("a")
 	if s, ok := sv.Str(); !ok || s != "b" {
 		t.Errorf("Str = %q, %v; want b, true", s, ok)
+	}
+}
+
+// TestParsePaddedRejectsCorruptTail pins the sentinel check across the whole
+// pad: every one of the PaddingSize tail bytes is verified, and a buffer
+// without spare capacity past len is rejected.
+func TestParsePaddedRejectsCorruptTail(t *testing.T) {
+	padded := Pad([]byte(`{"a":"b"}`))
+	if _, err := ParsePadded(padded, WithZeroCopy(true)); err != nil {
+		t.Fatalf("clean pad: %v", err)
+	}
+	n := len(padded)
+	tail := padded[:n+PaddingSize] // window over the sentinel region
+	for i := 0; i < PaddingSize; i++ {
+		saved := tail[n+i]
+		tail[n+i] = 0x21
+		if _, err := ParsePadded(padded); err == nil {
+			t.Fatalf("tail byte %d: corrupt pad accepted", i)
+		}
+		tail[n+i] = saved
+	}
+	if _, err := ParsePadded(padded[:n:n]); err == nil {
+		t.Fatal("missing pad capacity accepted")
 	}
 }
 

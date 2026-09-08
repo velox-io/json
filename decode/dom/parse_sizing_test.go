@@ -13,7 +13,7 @@ func parseSized(t *testing.T, src string, zc bool) (Value, *Parser) {
 	var v Value
 	var err error
 	if zc {
-		v, err = p.ParsePadded(Pad([]byte(src)), WithZeroCopy())
+		v, err = p.ParsePadded(Pad([]byte(src)), WithZeroCopy(true))
 	} else {
 		v, err = p.Parse([]byte(src))
 	}

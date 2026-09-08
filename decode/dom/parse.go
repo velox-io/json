@@ -34,14 +34,17 @@ const (
 // type shared with bind and package vjson.
 type ParseOption = option.Option
 
-func WithZeroCopy() ParseOption { return option.WithZeroCopy() }
+func WithZeroCopy(enabled bool) ParseOption { return option.WithZeroCopy(enabled) }
 
 func WithStrictScan() ParseOption { return option.WithStrictScan() }
 
 // resolveOpts resolves opts into the string mode and the scan strictness.
+// Zero-copy stays an explicit demand here: the default copies through the
+// parser's arenas, because a zero-copy Value is navigation-only and binds the
+// caller to preserving the source.
 func resolveOpts(opts []ParseOption) (mode StrMode, strictScan bool) {
 	cfg := option.Apply(opts)
-	if cfg.ZeroCopy {
+	if cfg.ZeroCopy == option.ZeroCopyOn {
 		mode = StrModeZeroCopy
 	}
 	return mode, cfg.StrictScan
@@ -127,13 +130,15 @@ func Pad(data []byte) []byte {
 	return out[:n:need]
 }
 
-// ErrZeroCopyNeedsPadded aliases option.ErrZeroCopyNeedsPadded: dom.Parse
-// rejects WithZeroCopy because it copies through reusable source scratch.
-var ErrZeroCopyNeedsPadded = option.ErrZeroCopyNeedsPadded
+// ErrZeroCopyUnsupported aliases option.ErrZeroCopyUnsupported: dom.Parse
+// rejects an explicit WithZeroCopy(true) demand because it scans an internal
+// copy of src through reusable scratch.
+var ErrZeroCopyUnsupported = option.ErrZeroCopyUnsupported
 
-// Parse returns a navigation Value using copy mode and lax scanning by default.
-// ParsePadded owns the zero-copy contract because Parse uses reusable source
-// scratch. Monotonic arena carves remain valid through the Value lifetime.
+// Parse returns a navigation Value using copy mode and lax scanning by
+// default. It scans an internal copy of src, so an explicit WithZeroCopy(true)
+// is rejected with ErrZeroCopyUnsupported; ParsePadded owns the zero-copy
+// contract. Monotonic arena carves remain valid through the Value lifetime.
 func Parse(src []byte, opts ...ParseOption) (Value, error) {
 	if !nativendec.Available {
 		return Value{}, decode.ErrNoNative
@@ -145,15 +150,16 @@ func Parse(src []byte, opts ...ParseOption) (Value, error) {
 
 // ParsePadded runs the native DOM parser over a caller-padded buffer and
 // returns a navigation Value viewing the produced tape. opts select string
-// handling.
+// handling and scan strictness; the defaults are copy mode and the lax scan.
 //
 // paddedSrc must carry at least PaddingSize bytes of 0x20 padding past its
 // length; use Pad to construct it. The parser reads up to 64 bytes past the
 // actual JSON end.
 //
-// In zero-copy mode, escape-free strings and Doc.Src alias paddedSrc. The Doc
-// keeps its backing reachable; the caller preserves its bytes and backing
-// allocation through the lifetime of every derived Value. Typed binding accepts
+// WithZeroCopy(true) makes escape-free strings and Doc.Src alias paddedSrc.
+// The Doc keeps its backing reachable; the caller preserves its bytes and
+// backing allocation through the lifetime of every derived Value, and the
+// Value is navigation-only (typed binding rejects it). Typed binding accepts
 // arena-backed Values.
 func ParsePadded(paddedSrc []byte, opts ...ParseOption) (Value, error) {
 	if !nativendec.Available {
@@ -173,7 +179,7 @@ func (p *Parser) Parse(src []byte, opts ...ParseOption) (Value, error) {
 	}
 	mode, strictScan := resolveOpts(opts)
 	if mode == StrModeZeroCopy {
-		return Value{}, ErrZeroCopyNeedsPadded
+		return Value{}, ErrZeroCopyUnsupported
 	}
 	// Copy src into paddedSrcBuf with DOMScanPad bytes of 0x20 sentinel
 	// past srcLen so the SIMD scanner can read past the actual end. The
@@ -186,9 +192,9 @@ func (p *Parser) Parse(src []byte, opts ...ParseOption) (Value, error) {
 	return p.parseTapePadded(srcView[:n:srcNeed], mode, strictScan)
 }
 
-// ParsePadded uses p's reusable scratch and a caller-padded buffer. In zero-copy
-// mode the Doc roots paddedSrc, and callers preserve its bytes and backing
-// allocation through every derived Value's lifetime.
+// ParsePadded uses p's reusable scratch and a caller-padded buffer. Under
+// WithZeroCopy(true) the Doc roots paddedSrc, and callers preserve its bytes
+// and backing allocation through every derived Value's lifetime.
 func (p *Parser) ParsePadded(paddedSrc []byte, opts ...ParseOption) (Value, error) {
 	if err := checkPadded(paddedSrc); err != nil {
 		return Value{}, err
@@ -200,14 +206,22 @@ func (p *Parser) ParsePadded(paddedSrc []byte, opts ...ParseOption) (Value, erro
 // checkPadded verifies the caller-supplied padded buffer carries at least
 // DOMScanPad bytes of capacity past len, all 0x20.
 func checkPadded(padded []byte) error {
-	if cap(padded)-len(padded) < nativendec.ScanPadding {
+	n := len(padded)
+	if cap(padded)-n < nativendec.ScanPadding {
 		return fmt.Errorf("dom: padded buffer must have at least %d bytes of capacity past len", nativendec.ScanPadding)
 	}
-	tail := padded[len(padded) : len(padded)+nativendec.ScanPadding]
-	for _, b := range tail {
-		if b != 0x20 {
-			return errors.New("dom: padded buffer tail must be all 0x20")
-		}
+	w := (*[nativendec.ScanPadding / 8]uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(padded)), uintptr(n)))
+	const sp = uint64(0x2020202020202020)
+	acc := w[0] ^ sp
+	acc |= w[1] ^ sp
+	acc |= w[2] ^ sp
+	acc |= w[3] ^ sp
+	acc |= w[4] ^ sp
+	acc |= w[5] ^ sp
+	acc |= w[6] ^ sp
+	acc |= w[7] ^ sp
+	if acc != 0 {
+		return errors.New("dom: padded buffer tail must be all 0x20")
 	}
 	return nil
 }

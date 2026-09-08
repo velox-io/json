@@ -37,12 +37,14 @@ func (e *TapeBindUnsupportedError) Error() string {
 
 // ErrZeroCopyValue reports that typed binding would extend a zero-copy Value's
 // source immutability and reuse restrictions into the output.
-var ErrZeroCopyValue = errors.New("vjson: cannot bind a zero-copy Value; re-parse without option.WithZeroCopy")
+var ErrZeroCopyValue = errors.New("vjson: cannot bind a zero-copy Value; re-parse without option.WithZeroCopy(true)")
 
-// ErrZeroCopyTypedTree reports that the destination tree carries value.Value
-// or poly fields. Their content flows through the tape machinery, which stays
-// arena-backed, so zero-copy binds typed trees only.
-var ErrZeroCopyTypedTree = errors.New("vjson: WithZeroCopy supports typed trees only; value.Value and poly fields stay arena-backed")
+// ErrZeroCopyTypedTree reports that an explicit WithZeroCopy(true) demand hit
+// a destination tree carrying value.Value or poly fields. Their content flows
+// through the tape machinery, which stays arena-backed, so zero-copy binds
+// typed trees only; the default silently falls back to the copying parse on
+// those trees.
+var ErrZeroCopyTypedTree = errors.New("vjson: WithZeroCopy(true) supports typed trees only; value.Value and poly fields stay arena-backed")
 
 // mkBindErr translates the native yield payload. srcBase is the document
 // offset of src[0], zero for the contiguous engine's whole-document view and

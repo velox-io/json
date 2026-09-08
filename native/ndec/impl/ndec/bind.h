@@ -752,10 +752,26 @@ object_field_value: {
     /* `,string` accepts only a JSON string and reparses its content as the target scalar. */
     if (cur_struct_field->flags & BIND_FF_QUOTED) {
       if (ch == '"') {
-        const uint8_t *qd = str_p;
-        int32_t qn        = ndec_str_parse(SRC_PTR() + 1, str_p, NULL, 0);
-        if (qn < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-        if (bind_write_quoted_scalar(&str_p, qd, (uint32_t)qn, child_type->kind, body, m->c.atof) < 0)
+        const uint8_t *qd;
+        uint32_t qn;
+        /* Under the zero-copy opt an escape-free body borrows the source span:
+         * its content equals the decoded form, and every quoted walker treats
+         * the two identically. Escaped and oversized bodies still decode
+         * through str_arena. */
+        if (m->b.ctx.opt_flags & BIND_OPT_ZERO_COPY_STR) {
+          uint32_t zbp;
+          int32_t zst = ndec_str_parse_zc_scan(SRC_PTR() + 1, &qn, &zbp, 0);
+          if (zst == 1) {
+            qd = SRC_PTR() + 1;
+            goto quoted_body;
+          }
+        }
+        qd           = str_p;
+        int32_t qn_i = ndec_str_parse(SRC_PTR() + 1, str_p, NULL, 0);
+        if (qn_i < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+        qn = (uint32_t)qn_i;
+      quoted_body:
+        if (bind_write_quoted_scalar(&str_p, qd, qn, child_type->kind, body, m->c.atof) < 0)
           BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
         SRC_ADVANCE();
         goto object_continue;
@@ -1844,10 +1860,10 @@ any_value: {
     if (UNLIKELY(use_number)) {
       (void)dv;
       uint32_t num_len = (uint32_t)(_end - (SRC_PTR()));
-      /* The validated token aliases the caller-owned source under the
+      /* The validated token aliases the caller-owned backing under the
        * zero-copy opt; otherwise the text is preserved in str_arena. */
       if (m->b.ctx.opt_flags & BIND_OPT_ZERO_COPY_STR) {
-        bind_write_str_header(data, SRC_PTR(), num_len);
+        bind_write_str_header(data, SRC_PTR() - m->b.ctx.src_alias_delta, num_len);
       } else {
         uint8_t *num_data = str_p;
         __builtin_memcpy(num_data, SRC_PTR(), num_len);
@@ -1925,10 +1941,11 @@ any_value: {
 
 /* Deferred values are staged until FLUSH_UNMARSHAL or document end.
  * Unmarshaler and RawMessage records carry the raw JSON span as source
- * offsets, or as raw-scratch offsets when the value crossed a window edge; a
- * TextUnmarshaler record and a base64 []byte record carry decoded string
- * bytes from str_arena. JSON null bypasses TextUnmarshaler but remains part
- * of the raw span for the other deferred kinds. */
+ * offsets, or as raw-scratch offsets when the value crossed a window edge;
+ * a TextUnmarshaler record and a base64 []byte record carry the string body,
+ * borrowed from the source under the zero-copy opt or interned from
+ * str_arena. JSON null bypasses TextUnmarshaler but remains part of the raw
+ * span for the other deferred kinds. */
 deferred_value: {
   uint8_t *deferred_slot      = m->c.stash.deferred_yield.slot;
   const BindType *deferred_ct = m->c.stash.deferred_yield.type;
@@ -1965,14 +1982,27 @@ deferred_value: {
     rec->arg0    = start_off;
     rec->arg1    = end_off;
   } else {
-    /* TextUnmarshaler receives decoded string bytes from str_arena. */
+    /* TextUnmarshaler and base64 []byte read decoded string bytes. Under the
+     * zero-copy opt an escape-free body borrows the source span; escaped and
+     * oversized bodies intern into str_arena behind the strarena label. */
     if (ch != '"') BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
-    const uint8_t *str_data;
-    uint32_t str_len;
-    if (bind_intern_str(&str_p, SRC_PTR(), &str_data, &str_len) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-    rec->backing = BIND_RECORD_BACKING_SOURCE;
-    rec->arg0    = (uint32_t)(str_data - m->b.alloc.str_arena);
-    rec->arg1    = str_len;
+    uint32_t zlen, zbp;
+    int32_t zst =
+        (m->b.ctx.opt_flags & BIND_OPT_ZERO_COPY_STR) ? ndec_str_parse_zc_scan(SRC_PTR() + 1, &zlen, &zbp, 0) : 0;
+    if (zst == 1) {
+      uint32_t body_off = (uint32_t)(SRC_PTR() + 1 - src);
+      rec->backing      = BIND_RECORD_BACKING_SOURCE;
+      rec->arg0         = body_off;
+      rec->arg1         = body_off + zlen;
+    } else {
+      const uint8_t *str_data;
+      uint32_t str_len;
+      if (bind_intern_str(&str_p, SRC_PTR(), &str_data, &str_len) < 0)
+        BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+      rec->backing = BIND_RECORD_BACKING_STRARENA;
+      rec->arg0    = (uint32_t)(str_data - m->b.alloc.str_arena);
+      rec->arg1    = str_len;
+    }
     SRC_ADVANCE();
   }
 

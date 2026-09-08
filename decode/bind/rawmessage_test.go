@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+	"unsafe"
 )
 
 // RawMessage diff tests. Compare bind.Unmarshal against encoding/json for
@@ -180,13 +181,34 @@ func TestBindRawMessage_InMap(t *testing.T) {
 	}
 }
 
-func TestBindRawMessage_ByteIndependence(t *testing.T) {
+// Under the zero-copy default a decoded RawMessage spans the caller's input,
+// with cap clamped so appends stay off the caller's memory.
+func TestBindRawMessage_AliasesInputByDefault(t *testing.T) {
 	type Msg struct {
 		Data json.RawMessage `json:"data"`
 	}
 	input := []byte(`{"data":{"key":"value"}}`)
 	var msg Msg
 	if err := Unmarshal(input, &msg); err != nil {
+		t.Fatal(err)
+	}
+	if !inSpan(unsafe.Pointer(unsafe.SliceData(msg.Data)), input) {
+		t.Fatalf("default RawMessage %s does not alias the input", msg.Data)
+	}
+	if c := cap(msg.Data); c != len(msg.Data) {
+		t.Errorf("RawMessage cap %d exceeds len %d; appends would reach the caller's buffer", c, len(msg.Data))
+	}
+}
+
+// WithZeroCopy(false) restores byte independence: the RawMessage owns its
+// bytes, so mutating the input afterwards must not change it.
+func TestBindRawMessage_ByteIndependence(t *testing.T) {
+	type Msg struct {
+		Data json.RawMessage `json:"data"`
+	}
+	input := []byte(`{"data":{"key":"value"}}`)
+	var msg Msg
+	if err := Unmarshal(input, &msg, WithZeroCopy(false)); err != nil {
 		t.Fatal(err)
 	}
 	saved := append([]byte(nil), msg.Data...)
@@ -309,15 +331,15 @@ func TestBindRawMessage_ReusesCapacity(t *testing.T) {
 	}
 }
 
-// A decoded RawMessage must own its bytes, so mutating the input afterwards
-// must not change it.
+// A RawMessage decoded with WithZeroCopy(false) owns its bytes, so mutating
+// the input afterwards must not change it.
 func TestBindRawMessage_BytesAreCopied(t *testing.T) {
 	type Msg struct {
 		D json.RawMessage `json:"d"`
 	}
 	input := []byte(`{"d":{"a":1}}`)
 	var got Msg
-	if err := Unmarshal(input, &got); err != nil {
+	if err := Unmarshal(input, &got, WithZeroCopy(false)); err != nil {
 		t.Fatal(err)
 	}
 	before := string(got.D)

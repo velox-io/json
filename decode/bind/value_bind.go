@@ -23,7 +23,9 @@ import (
 // rejects unsupported target positions before native execution. Tape, Src, and
 // the published StrArena extent are read-only. Ordinary strings may alias
 // Doc.StrArena; conversions that synthesize strings append to an owned arena.
-// This path consumes an existing tape, so WithStrictScan leaves binding unchanged.
+// This path consumes an existing tape rather than caller bytes, so
+// WithZeroCopy(true) is rejected with option.ErrZeroCopyUnsupported and
+// WithStrictScan leaves binding unchanged.
 func UnmarshalValue[T any](v value.Value, out T, opts ...UnmarshalOption) error {
 	rt := reflect.TypeFor[T]()
 	var ptr unsafe.Pointer
@@ -63,8 +65,8 @@ func UnmarshalValue[T any](v value.Value, out T, opts ...UnmarshalOption) error 
 	defer putParser(sh, p)
 	// The walk reads a Value doc rather than a caller-padded buffer, so its
 	// output cannot alias caller-owned input.
-	if cfg := applyOpts(p, opts); cfg.ZeroCopy {
-		return option.ErrZeroCopyNeedsPadded
+	if cfg := applyOpts(p, opts); cfg.ZeroCopy == option.ZeroCopyOn {
+		return option.ErrZeroCopyUnsupported
 	}
 	return p.unmarshalValue(v, &desc, ptr)
 }
@@ -86,8 +88,8 @@ func (p *Parser) UnmarshalValue(v value.Value, dst any, opts ...UnmarshalOption)
 	}
 	// The walk reads a Value doc rather than a caller-padded buffer, so its
 	// output cannot alias caller-owned input.
-	if cfg := applyOpts(p, opts); cfg.ZeroCopy {
-		return option.ErrZeroCopyNeedsPadded
+	if cfg := applyOpts(p, opts); cfg.ZeroCopy == option.ZeroCopyOn {
+		return option.ErrZeroCopyUnsupported
 	}
 	return p.unmarshalValue(v, &desc, dstPtr)
 }
