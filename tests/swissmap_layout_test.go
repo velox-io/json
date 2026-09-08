@@ -16,6 +16,14 @@ func TestSwissMapLayoutFlags(t *testing.T) {
 	t.Logf("SwissMapStrIntLayoutOK  = %v", gort.SwissMapStrIntLayoutOK)
 	t.Logf("SwissMapStrInt64LayoutOK= %v", gort.SwissMapStrInt64LayoutOK)
 	t.Logf("SwissMapSplitGroup      = %v", gort.SwissMapSplitGroup)
+	t.Logf("SwissMapLargeLayoutOK   = %v", gort.SwissMapLargeLayoutOK)
+
+	// On a swiss-map runtime the large-map probe must pass whenever the
+	// small-map probes do: a false here means the runtime's directory or
+	// table structure diverged from what the native traversal assumes.
+	if gort.SwissMapLayoutOK && !gort.SwissMapLargeLayoutOK {
+		t.Error("large-map layout probe failed while small-map probes passed")
+	}
 }
 
 // TestSwissMapSplitGroupCorrectness verifies that map marshal produces

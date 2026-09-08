@@ -930,14 +930,17 @@ func seqOpcode(elemTI *EncTypeInfo) uint16 {
 	return 0
 }
 
+// canSwissMapInC reports whether the specialized map opcodes can walk this
+// variant. They traverse both small and large maps in C, so every variant
+// needs the small-map probe for its type plus the shared large-map guard.
 func canSwissMapInC(variant typ.MapVariant) bool {
 	switch variant {
 	case typ.MapVariantStrStr:
-		return SwissMapLayoutOK
+		return SwissMapLayoutOK && SwissMapLargeLayoutOK
 	case typ.MapVariantStrInt:
-		return SwissMapStrIntLayoutOK
+		return SwissMapStrIntLayoutOK && SwissMapLargeLayoutOK
 	case typ.MapVariantStrInt64:
-		return SwissMapStrInt64LayoutOK
+		return SwissMapStrInt64LayoutOK && SwissMapLargeLayoutOK
 	}
 	return false
 }

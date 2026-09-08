@@ -13,6 +13,10 @@ var SwissMapStrIntLayoutOK = false
 
 var SwissMapStrInt64LayoutOK = false
 
+var SwissMapLargeLayoutOK = false
+
+var SwissMapSplitGroup = false
+
 func init() {
 	s := make([]byte, 1, 2)
 	sh := (*SliceHeader)(unsafe.Pointer(&s))

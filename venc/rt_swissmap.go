@@ -12,6 +12,7 @@ import (
 var SwissMapLayoutOK = gort.SwissMapLayoutOK
 var SwissMapStrIntLayoutOK = gort.SwissMapStrIntLayoutOK
 var SwissMapStrInt64LayoutOK = gort.SwissMapStrInt64LayoutOK
+var SwissMapLargeLayoutOK = gort.SwissMapLargeLayoutOK
 
 var swissMapGlobalFlags uint32
 
