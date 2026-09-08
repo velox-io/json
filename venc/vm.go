@@ -3,8 +3,8 @@ package venc
 import (
 	"fmt"
 	"maps"
+	"math/bits"
 	"reflect"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -254,16 +254,16 @@ type VjExecCtx struct {
 	// Hot registers.
 	// BufCur is uintptr (not unsafe.Pointer) because the VM may advance it to
 	// one-past-end (BufCur == BufEnd), which is not a valid GC pointer.
-	BufCur          uintptr        //   0: current write position (NOT GC-traced; may be one-past-end)
-	BufEnd          uintptr        //   8: one past last writable byte (NOT GC-traced)
-	OpsPtr          unsafe.Pointer //  16: &Blueprint.Ops[0] (current active byte stream)
-	PC              int32          //  24: current byte offset into ops
-	_padPC          int32          //  28: alignment padding
-	CurBase         unsafe.Pointer //  32: current struct/elem base address
-	VMState         uint64         //  40: packed state register (see VMState layout)
-	IfaceCachePtr   unsafe.Pointer //  48: *VjIfaceCacheEntry sorted array
-	IfaceCacheCount int32          //  56: number of entries
-	_padIface       int32          //  60: alignment padding
+	BufCur         uintptr        //   0: current write position (NOT GC-traced; may be one-past-end)
+	BufEnd         uintptr        //   8: one past last writable byte (NOT GC-traced)
+	OpsPtr         unsafe.Pointer //  16: &Blueprint.Ops[0] (current active byte stream)
+	PC             int32          //  24: current byte offset into ops
+	_padPC         int32          //  28: alignment padding
+	CurBase        unsafe.Pointer //  32: current struct/elem base address
+	VMState        uint64         //  40: packed state register (see VMState layout)
+	IfaceHashSlots unsafe.Pointer //  48: *VjIfaceCacheEntry open-addressed slot array
+	IfaceHashShift int32          //  56: slot index = hash >> shift
+	_padIface      int32          //  60: alignment padding
 
 	// Less-hot indent and yield state.
 	IndentTpl       unsafe.Pointer //  64: precomputed indent template
@@ -296,33 +296,99 @@ var _ [32]byte = [unsafe.Sizeof(VjIfaceCacheEntry{})]byte{}
 var _ [0]byte = [unsafe.Offsetof(VjIfaceCacheEntry{}.BodyOpsPtr) - 16]byte{}
 
 type ifaceCacheSnapshot struct {
-	entries []VjIfaceCacheEntry
+	slots []VjIfaceCacheEntry
+	shift uint8 // slot index = hash >> shift; capacity = 1 << (64-shift)
+	count int
+}
+
+// ifaceHashIdx matches the native vj_iface_cache_lookup hash: the high
+// bits of a multiply-shift hash over the type pointer (>=8-byte aligned).
+func ifaceHashIdx(typePtr unsafe.Pointer, shift uint8) int {
+	const mult = 0x9E3779B97F4A7C15
+	h := (uint64(uintptr(typePtr)) >> 3) * mult
+	return int(h >> shift)
+}
+
+// find returns the slot index of typePtr, or -1 on miss.
+func (s *ifaceCacheSnapshot) find(typePtr unsafe.Pointer) int {
+	if len(s.slots) == 0 {
+		return -1
+	}
+	idx := ifaceHashIdx(typePtr, s.shift)
+	for {
+		e := &s.slots[idx]
+		if e.TypePtr == typePtr {
+			return idx
+		}
+		if e.TypePtr == nil {
+			return -1
+		}
+		if idx++; idx == len(s.slots) {
+			idx = 0
+		}
+	}
 }
 
 func (s *ifaceCacheSnapshot) lookup(typePtr unsafe.Pointer) *VjIfaceCacheEntry {
-	idx := s.lookupIndex(typePtr)
-	if idx < 0 {
-		return nil
+	if idx := s.find(typePtr); idx >= 0 {
+		return &s.slots[idx]
 	}
-	return &s.entries[idx]
+	return nil
 }
 
-func (s *ifaceCacheSnapshot) lookupIndex(typePtr unsafe.Pointer) int {
-	tp := uintptr(typePtr)
-	lo, hi := 0, len(s.entries)-1
-	for lo <= hi {
-		mid := (lo + hi) >> 1
-		midTP := uintptr(s.entries[mid].TypePtr)
-		if midTP == tp {
-			return mid
-		}
-		if midTP < tp {
-			lo = mid + 1
-		} else {
-			hi = mid - 1
+// place inserts entry into the first empty slot of its probe run. The
+// caller guarantees the type is absent and the table is not full.
+func (s *ifaceCacheSnapshot) place(entry VjIfaceCacheEntry) {
+	idx := ifaceHashIdx(entry.TypePtr, s.shift)
+	for s.slots[idx].TypePtr != nil {
+		if idx++; idx == len(s.slots) {
+			idx = 0
 		}
 	}
-	return -1
+	s.slots[idx] = entry
+}
+
+// withEntry returns a snapshot carrying one more entry. When capacity
+// suffices, existing entries keep their slots and the new entry probes
+// into a copy; otherwise the table rebuilds at double capacity.
+func (s *ifaceCacheSnapshot) withEntry(entry VjIfaceCacheEntry) *ifaceCacheSnapshot {
+	if (s.count+1)*2 > len(s.slots) {
+		entries := make([]VjIfaceCacheEntry, 0, s.count+1)
+		for i := range s.slots {
+			if s.slots[i].TypePtr != nil {
+				entries = append(entries, s.slots[i])
+			}
+		}
+		entries = append(entries, entry)
+		return buildIfaceTable(entries)
+	}
+	next := &ifaceCacheSnapshot{
+		slots: make([]VjIfaceCacheEntry, len(s.slots)),
+		shift: s.shift,
+		count: s.count + 1,
+	}
+	copy(next.slots, s.slots)
+	next.place(entry)
+	return next
+}
+
+// buildIfaceTable lays entries into a fresh table sized for load factor
+// <= 0.5. Capacity stays >= 32, keeping the shift far from the 64-bit
+// edge where h >> shift would be undefined.
+func buildIfaceTable(entries []VjIfaceCacheEntry) *ifaceCacheSnapshot {
+	tableCap := 32
+	for tableCap < 2*len(entries) {
+		tableCap <<= 1
+	}
+	snap := &ifaceCacheSnapshot{
+		slots: make([]VjIfaceCacheEntry, tableCap),
+		shift: uint8(64 - bits.Len64(uint64(tableCap-1))),
+		count: len(entries),
+	}
+	for _, e := range entries {
+		snap.place(e)
+	}
+	return snap
 }
 
 var globalIfaceCache struct {
@@ -447,22 +513,15 @@ func insertIfaceCache(typePtr unsafe.Pointer, bp *Blueprint, tag uint8, flags ui
 		entry.OpsPtr = unsafe.Pointer(&bp.Ops[0])
 	}
 
-	newEntries := make([]VjIfaceCacheEntry, len(cur.entries)+1)
-	copy(newEntries, cur.entries)
-	newEntries[len(cur.entries)] = entry
-	sort.Slice(newEntries, func(i, j int) bool {
-		return uintptr(newEntries[i].TypePtr) < uintptr(newEntries[j].TypePtr)
-	})
-
 	// Register ops before publishing so SWITCH_OPS can always resolve the active Blueprint.
 	registerBlueprintOps(bp)
 
-	globalIfaceCache.current.Store(&ifaceCacheSnapshot{entries: newEntries})
+	globalIfaceCache.current.Store(cur.withEntry(entry))
 }
 
 // insertIfaceCacheBody attaches a body-only Blueprint to an existing entry
 // (or inserts a new one carrying only the body). The snapshot is
-// copy-on-write: in-flight VMs keep reading the array they were handed.
+// copy-on-write: in-flight VMs keep reading the table they were handed.
 func insertIfaceCacheBody(typePtr unsafe.Pointer, bodyBP *Blueprint) {
 	globalIfaceCache.mu.Lock()
 	defer globalIfaceCache.mu.Unlock()
@@ -470,27 +529,20 @@ func insertIfaceCacheBody(typePtr unsafe.Pointer, bodyBP *Blueprint) {
 	bodyPtr := unsafe.Pointer(&bodyBP.Ops[0])
 
 	cur := globalIfaceCache.current.Load()
-	if idx := cur.lookupIndex(typePtr); idx >= 0 {
-		if cur.entries[idx].BodyOpsPtr == bodyPtr {
+	if idx := cur.find(typePtr); idx >= 0 {
+		if cur.slots[idx].BodyOpsPtr == bodyPtr {
 			return
 		}
-		newEntries := make([]VjIfaceCacheEntry, len(cur.entries))
-		copy(newEntries, cur.entries)
-		newEntries[idx].BodyOpsPtr = bodyPtr
 		registerBlueprintOps(bodyBP)
-		globalIfaceCache.current.Store(&ifaceCacheSnapshot{entries: newEntries})
+		slots := make([]VjIfaceCacheEntry, len(cur.slots))
+		copy(slots, cur.slots)
+		slots[idx].BodyOpsPtr = bodyPtr
+		globalIfaceCache.current.Store(&ifaceCacheSnapshot{slots: slots, shift: cur.shift, count: cur.count})
 		return
 	}
 
-	entry := VjIfaceCacheEntry{TypePtr: typePtr, BodyOpsPtr: bodyPtr}
-	newEntries := make([]VjIfaceCacheEntry, len(cur.entries)+1)
-	copy(newEntries, cur.entries)
-	newEntries[len(cur.entries)] = entry
-	sort.Slice(newEntries, func(i, j int) bool {
-		return uintptr(newEntries[i].TypePtr) < uintptr(newEntries[j].TypePtr)
-	})
 	registerBlueprintOps(bodyBP)
-	globalIfaceCache.current.Store(&ifaceCacheSnapshot{entries: newEntries})
+	globalIfaceCache.current.Store(cur.withEntry(VjIfaceCacheEntry{TypePtr: typePtr, BodyOpsPtr: bodyPtr}))
 }
 
 // bodyBlueprintCache holds body-only Blueprints keyed by rtype pointer, so
@@ -518,9 +570,9 @@ func initPrimitiveIfaceCache() {
 		{reflect.TypeFor[string](), uint8(opString)},
 	}
 
-	table := make([]VjIfaceCacheEntry, 0, len(primitives)+8)
+	entries := make([]VjIfaceCacheEntry, 0, len(primitives)+8)
 	for _, e := range primitives {
-		table = append(table, VjIfaceCacheEntry{
+		entries = append(entries, VjIfaceCacheEntry{
 			TypePtr: rtypePtr(e.t),
 			Tag:     e.tag,
 		})
@@ -529,7 +581,7 @@ func initPrimitiveIfaceCache() {
 	// A boxed value.Value encodes through the native tape walk: the tag
 	// routes OP_INTERFACE into the walk instead of the fail-closed
 	// primitive encoder.
-	table = append(table, VjIfaceCacheEntry{
+	entries = append(entries, VjIfaceCacheEntry{
 		TypePtr: rtypePtr(reflect.TypeFor[value.Value]()),
 		Tag:     uint8(opValue),
 	})
@@ -550,7 +602,7 @@ func initPrimitiveIfaceCache() {
 			entry.OpsPtr = unsafe.Pointer(&bp.Ops[0])
 			registerBlueprintOps(bp)
 		}
-		table = append(table, entry)
+		entries = append(entries, entry)
 	}
 
 	compositeMaps := []reflect.Type{
@@ -568,13 +620,10 @@ func initPrimitiveIfaceCache() {
 			entry.OpsPtr = unsafe.Pointer(&bp.Ops[0])
 			registerBlueprintOps(bp)
 		}
-		table = append(table, entry)
+		entries = append(entries, entry)
 	}
 
-	sort.Slice(table, func(i, j int) bool {
-		return uintptr(table[i].TypePtr) < uintptr(table[j].TypePtr)
-	})
-	globalIfaceCache.current.Store(&ifaceCacheSnapshot{entries: table})
+	globalIfaceCache.current.Store(buildIfaceTable(entries))
 }
 
 func activeBlueprint(ctx *VjExecCtx, rootBP *Blueprint) *Blueprint {

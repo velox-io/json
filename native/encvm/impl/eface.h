@@ -3,7 +3,7 @@
  *
  * Split along the hot/cold line:
  *
- *  - vj_iface_cache_lookup: binary search of the sorted iface cache.
+ *  - vj_iface_cache_lookup: open-addressed hash lookup of the iface cache.
  *    INLINE in the VM (small, hot for any-heavy loads).
  *  - vj_iface_encode_primitive: the primitive encode switch.  NOINLINE:
  *    its cases fold the itoa/ftoa/escape chains, which is the bulk of the
@@ -26,20 +26,22 @@
 #include "itoa.h"
 #include "strfn.h"
 
-/* Binary search the sorted cache by type pointer.
+/* Open-addressed hash lookup of the iface cache by type pointer.
+ * The slot index is the high bits of a multiply-shift hash; collisions
+ * probe linearly within the power-of-two capacity. A NULL table misses.
  * Returns the matching entry, NULL on miss. */
-INLINE const VjIfaceCacheEntry *vj_iface_cache_lookup(const VjIfaceCacheEntry *cache, int32_t cache_count,
+INLINE const VjIfaceCacheEntry *vj_iface_cache_lookup(const VjIfaceCacheEntry *slots, int32_t shift,
                                                       const void *type_ptr) {
-  int32_t lo = 0, hi = cache_count - 1;
-  while (lo <= hi) {
-    int32_t mid         = (lo + hi) >> 1;
-    const void *mid_ptr = cache[mid].type_ptr;
-    if (mid_ptr == type_ptr) return &cache[mid];
-    if ((uintptr_t)mid_ptr < (uintptr_t)type_ptr) lo = mid + 1;
-    else
-      hi = mid - 1;
+  if (UNLIKELY(slots == NULL)) return NULL;
+  uint64_t h    = ((uint64_t)(uintptr_t)type_ptr >> 3) * 0x9E3779B97F4A7C15ULL;
+  uint32_t mask = (uint32_t)((1ULL << (64 - shift)) - 1);
+  uint32_t idx  = (uint32_t)(h >> shift);
+  for (;;) {
+    const VjIfaceCacheEntry *e = &slots[idx];
+    if (e->type_ptr == type_ptr) return e;
+    if (e->type_ptr == NULL) return NULL;
+    idx = (idx + 1) & mask;
   }
-  return NULL;
 }
 
 /* Encode one pre-checked primitive value.

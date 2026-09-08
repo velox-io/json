@@ -72,9 +72,9 @@ func (es *encodeState) execVM(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 	ctx.VMState = vmstateBuildInitial(es.flags | swissMapGlobalFlags)
 
 	snap := loadIfaceCacheSnapshot()
-	if len(snap.entries) > 0 {
-		ctx.IfaceCachePtr = unsafe.Pointer(&snap.entries[0])
-		ctx.IfaceCacheCount = int32(len(snap.entries))
+	if len(snap.slots) > 0 {
+		ctx.IfaceHashSlots = unsafe.Pointer(&snap.slots[0])
+		ctx.IfaceHashShift = int32(snap.shift)
 	}
 
 	kpSnap := loadKeyPoolSnapshot()
@@ -164,9 +164,9 @@ func (es *encodeState) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(uns
 					return err
 				}
 				snap := loadIfaceCacheSnapshot()
-				if len(snap.entries) > 0 {
-					ctx.IfaceCachePtr = unsafe.Pointer(&snap.entries[0])
-					ctx.IfaceCacheCount = int32(len(snap.entries))
+				if len(snap.slots) > 0 {
+					ctx.IfaceHashSlots = unsafe.Pointer(&snap.slots[0])
+					ctx.IfaceHashShift = int32(snap.shift)
 				}
 				// A newly compiled Blueprint may have extended the shared key pool.
 				kpSnap := loadKeyPoolSnapshot()

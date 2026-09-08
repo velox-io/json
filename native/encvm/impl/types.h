@@ -545,10 +545,13 @@ typedef struct VjExecCtx {
   /* Packed VM state; see VMState layout in types.h. */
   uint64_t vmstate; /*  40: packed state register */
 
-  /* Interface cache (hot: checked on every interface{} field) */
-  const VjIfaceCacheEntry *iface_cache_ptr; /*  48: sorted array */
-  int32_t iface_cache_count;                /*  56: entry count */
-  int32_t _pad_iface;                       /*  60: alignment padding */
+  /* Interface cache (hot: checked on every interface{} field).
+   * Open-addressed hash table keyed by the type pointer, linear probing.
+   * Slot index = high bits of a multiply-shift hash; capacity is a power
+   * of two (>= 32), so 64 - shift = log2(capacity). */
+  const VjIfaceCacheEntry *iface_hash_slots; /*  48: slot array */
+  int32_t iface_hash_shift;                  /*  56: slot index = hash >> shift */
+  int32_t _pad_iface;                        /*  60: alignment padding */
 
   /* ===== Cache Line 1: Less-Hot State (64-95) ===== */
 
@@ -578,8 +581,8 @@ _Static_assert(offsetof(VjExecCtx, ops_ptr) == 16, "ops_ptr offset");
 _Static_assert(offsetof(VjExecCtx, pc) == 24, "pc offset");
 _Static_assert(offsetof(VjExecCtx, cur_base) == 32, "cur_base offset");
 _Static_assert(offsetof(VjExecCtx, vmstate) == 40, "vmstate offset");
-_Static_assert(offsetof(VjExecCtx, iface_cache_ptr) == 48, "iface_cache_ptr offset");
-_Static_assert(offsetof(VjExecCtx, iface_cache_count) == 56, "iface_cache_count offset");
+_Static_assert(offsetof(VjExecCtx, iface_hash_slots) == 48, "iface_hash_slots offset");
+_Static_assert(offsetof(VjExecCtx, iface_hash_shift) == 56, "iface_hash_shift offset");
 _Static_assert(offsetof(VjExecCtx, indent_tpl) == 64, "indent_tpl offset");
 _Static_assert(offsetof(VjExecCtx, indent_depth) == 72, "indent_depth offset");
 _Static_assert(offsetof(VjExecCtx, indent_step) == 74, "indent_step offset");

@@ -952,7 +952,7 @@ vj_op_unfold: {
     type_ptr = *(const void **)((const uint8_t *)type_ptr + 8);
   }
 
-  const VjIfaceCacheEntry *e = vj_iface_cache_lookup(ctx->iface_cache_ptr, ctx->iface_cache_count, type_ptr);
+  const VjIfaceCacheEntry *e = vj_iface_cache_lookup(ctx->iface_hash_slots, ctx->iface_hash_shift, type_ptr);
   if (UNLIKELY(e == NULL || e->body_ops == NULL)) {
     /* Miss (or body not yet compiled): yield for Go compilation. No key
      * exists, so nothing has been written. */
@@ -1442,12 +1442,12 @@ vj_op_interface: {
     VM_NEXT_SHORT();
   }
 
-  /* Non-nil: resolve through the cache (inline binary search), pre-check
+  /* Non-nil: resolve through the cache (inline hash lookup), pre-check
    * every failure condition, and only then write the key: no speculative
    * key write, no undo state.  The bulky primitive encode switch lives in
    * vj_iface_encode_primitive (eface.h, NOINLINE). */
   VM_CHECK(op->key_len + 1 + 330 + VM_INDENT_PAD(indent_depth) + VM_KEY_SPACE);
-  const VjIfaceCacheEntry *e = vj_iface_cache_lookup(ctx->iface_cache_ptr, ctx->iface_cache_count, type_ptr);
+  const VjIfaceCacheEntry *e = vj_iface_cache_lookup(ctx->iface_hash_slots, ctx->iface_hash_shift, type_ptr);
   if (UNLIKELY(e == NULL)) {
     /* Cache miss: yield for compilation. No key written. */
     ctx->yield_type_ptr = type_ptr;
