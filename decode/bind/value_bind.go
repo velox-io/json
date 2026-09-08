@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"unsafe"
 
+	"github.com/velox-io/json/decode/option"
 	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/internal/valueabi"
 	"github.com/velox-io/json/jerr"
@@ -60,7 +61,11 @@ func UnmarshalValue[T any](v value.Value, out T, opts ...UnmarshalOption) error 
 	}
 	p := getParser(sh)
 	defer putParser(sh, p)
-	applyOpts(p, opts)
+	// The walk reads a Value doc rather than a caller-padded buffer, so its
+	// output cannot alias caller-owned input.
+	if cfg := applyOpts(p, opts); cfg.ZeroCopy {
+		return option.ErrZeroCopyNeedsPadded
+	}
 	return p.unmarshalValue(v, &desc, ptr)
 }
 
@@ -79,7 +84,11 @@ func (p *Parser) UnmarshalValue(v value.Value, dst any, opts ...UnmarshalOption)
 	if !desc.HasTape() {
 		return jerr.NewSyntaxErrorWrap("vjson: unexpected end of input", 0, io.ErrUnexpectedEOF)
 	}
-	applyOpts(p, opts)
+	// The walk reads a Value doc rather than a caller-padded buffer, so its
+	// output cannot alias caller-owned input.
+	if cfg := applyOpts(p, opts); cfg.ZeroCopy {
+		return option.ErrZeroCopyNeedsPadded
+	}
 	return p.unmarshalValue(v, &desc, dstPtr)
 }
 

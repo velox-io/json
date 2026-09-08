@@ -34,12 +34,18 @@ func WithDisallowUnknownFields() UnmarshalOption { return option.WithDisallowUnk
 
 func WithStrictScan() UnmarshalOption { return option.WithStrictScan() }
 
-// applyOpts translates opts into the C-side opt flag bits.
-func applyOpts(p *Parser, opts []UnmarshalOption) {
+func WithZeroCopy() UnmarshalOption { return option.WithZeroCopy() }
+
+// applyOpts translates opts into the C-side opt flag bits and returns the
+// resolved config so each entry can enforce its input-model gate.
+func applyOpts(p *Parser, opts []UnmarshalOption) option.Config {
 	cfg := option.Apply(opts)
 	p.optFlags = 0
 	if cfg.UseNumber {
 		p.optFlags |= ndec.BindOptUseNumber
+	}
+	if cfg.ZeroCopy {
+		p.optFlags |= ndec.BindOptZeroCopyStr
 	}
 	if cfg.DisallowUnknown {
 		p.optFlags |= ndec.BindOptDisallowUnknown
@@ -50,6 +56,7 @@ func applyOpts(p *Parser, opts []UnmarshalOption) {
 	if cfg.SkipLenient {
 		p.optFlags |= ndec.BindOptSkipLenient
 	}
+	return cfg
 }
 
 // Unmarshal parses JSON data into the value pointed to by v.
@@ -90,7 +97,9 @@ func Unmarshal[T any](data []byte, v T, opts ...UnmarshalOption) error {
 	}
 	p := getParser(sh)
 	defer putParser(sh, p)
-	applyOpts(p, opts)
+	if cfg := applyOpts(p, opts); cfg.ZeroCopy {
+		return option.ErrZeroCopyNeedsPadded
+	}
 	return p.unmarshal(data, ptr)
 }
 
@@ -122,6 +131,11 @@ func Pad(data []byte) []byte {
 // paddedData must carry at least PaddingSize bytes of 0x20 padding past its
 // length; use Pad to construct it. The native parser reads up to 64 bytes
 // past the actual JSON end.
+//
+// WithZeroCopy makes escape-free strings alias paddedData. Decoded values
+// keep its backing reachable; the caller preserves its bytes while any decoded
+// value remains reachable. Trees carrying value.Value or poly fields are
+// rejected with ErrZeroCopyTypedTree.
 func UnmarshalPadded[T any](paddedData []byte, v T, opts ...UnmarshalOption) error {
 	rt := reflect.TypeFor[T]()
 	var ptr unsafe.Pointer
@@ -161,7 +175,9 @@ func UnmarshalPadded[T any](paddedData []byte, v T, opts ...UnmarshalOption) err
 	}
 	p := getParser(sh)
 	defer putParser(sh, p)
-	applyOpts(p, opts)
+	if cfg := applyOpts(p, opts); cfg.ZeroCopy && (p.tt.HasValueField || p.tt.HasPolyField) {
+		return ErrZeroCopyTypedTree
+	}
 	return p.unmarshalPadded(paddedData, ptr)
 }
 
@@ -295,7 +311,9 @@ func (p *Parser) Unmarshal(data []byte, dst any, opts ...UnmarshalOption) error 
 	if len(data) == 0 {
 		return jerr.NewSyntaxErrorWrap("vjson: unexpected end of input", 0, io.ErrUnexpectedEOF)
 	}
-	applyOpts(p, opts)
+	if cfg := applyOpts(p, opts); cfg.ZeroCopy {
+		return option.ErrZeroCopyNeedsPadded
+	}
 	return p.unmarshal(data, dstPtr)
 }
 
@@ -305,6 +323,9 @@ func (p *Parser) Unmarshal(data []byte, dst any, opts ...UnmarshalOption) error 
 // paddedData must carry at least PaddingSize bytes of 0x20 padding past its
 // length; use Pad to construct it. The parser reads up to 64 bytes past the
 // actual JSON end.
+//
+// WithZeroCopy makes escape-free strings alias paddedData; trees carrying
+// value.Value or poly fields are rejected with ErrZeroCopyTypedTree.
 func (p *Parser) UnmarshalPadded(paddedData []byte, dst any, opts ...UnmarshalOption) error {
 	rt := reflect.TypeOf(dst)
 	if rt == nil || rt.Kind() != reflect.Pointer {
@@ -320,7 +341,9 @@ func (p *Parser) UnmarshalPadded(paddedData []byte, dst any, opts ...UnmarshalOp
 	if err := checkPadded(paddedData); err != nil {
 		return err
 	}
-	applyOpts(p, opts)
+	if cfg := applyOpts(p, opts); cfg.ZeroCopy && (p.tt.HasValueField || p.tt.HasPolyField) {
+		return ErrZeroCopyTypedTree
+	}
 	return p.unmarshalPadded(paddedData, dstPtr)
 }
 

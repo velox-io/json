@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"unsafe"
 
+	"github.com/velox-io/json/decode/option"
 	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/internal/valueabi"
 	"github.com/velox-io/json/jerr"
@@ -312,7 +313,11 @@ func (p *Parser) UnmarshalFeed(r io.Reader, dst any, opts ...UnmarshalOption) er
 	if dstPtr == nil {
 		return &InvalidUnmarshalError{Type: rt}
 	}
-	applyOpts(p, opts)
+	// Feed windows relocate between native runs, so published strings cannot
+	// alias the input.
+	if cfg := applyOpts(p, opts); cfg.ZeroCopy {
+		return option.ErrZeroCopyNeedsPadded
+	}
 	return p.unmarshalFeed(r, dstPtr)
 }
 

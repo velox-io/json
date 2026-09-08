@@ -568,6 +568,10 @@ type BindWindowScanCtx struct {
 // Option bits must match BIND_OPT_* in bind_bridge.h.
 const (
 	BindOptDisallowUnknown uint32 = 1 << 0
+	// BindOptZeroCopyStr aliases escape-free string bodies in the caller-owned
+	// padded source instead of interning them into str_arena. Escaped bodies
+	// and tape-mediated content still decode through the arena.
+	BindOptZeroCopyStr uint32 = 1 << 1
 	// BindOptUseNumber decodes any/interface{} numbers as json.Number instead
 	// of float64. The number text is copied into str_arena and the eface is
 	// tagged with BindAnyMeta.NumberType.

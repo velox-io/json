@@ -1445,7 +1445,7 @@ map_key: {
   /* Reserve the slot only after the key structural is confirmed, so an input
    * yield at the window edge replays map_key without double reservation. */
   map_region->next_entry_off = next_entry_off + stride;
-  if (bind_visit_str(&str_p, key, slot) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (uint32_t)(key - src));
+  if (BIND_VISIT_STR(m, key, slot) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (uint32_t)(key - src));
   SRC_EXPECT(':');
   goto map_value;
 }
@@ -1843,11 +1843,17 @@ any_value: {
     if (UNLIKELY(is_non_delim(*_end))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     if (UNLIKELY(use_number)) {
       (void)dv;
-      uint32_t num_len  = (uint32_t)(_end - (SRC_PTR()));
-      uint8_t *num_data = str_p;
-      __builtin_memcpy(num_data, SRC_PTR(), num_len);
-      str_p += num_len;
-      bind_write_str_header(data, num_data, num_len);
+      uint32_t num_len = (uint32_t)(_end - (SRC_PTR()));
+      /* The validated token aliases the caller-owned source under the
+       * zero-copy opt; otherwise the text is preserved in str_arena. */
+      if (m->b.ctx.opt_flags & BIND_OPT_ZERO_COPY_STR) {
+        bind_write_str_header(data, SRC_PTR(), num_len);
+      } else {
+        uint8_t *num_data = str_p;
+        __builtin_memcpy(num_data, SRC_PTR(), num_len);
+        str_p += num_len;
+        bind_write_str_header(data, num_data, num_len);
+      }
     } else {
       if (UNLIKELY(!__builtin_isfinite(dv))) BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
       *(double *)data = dv;
@@ -1864,7 +1870,7 @@ any_value: {
     }
     uint8_t *data = sc->block + sc->offset;
     sc->offset += sc->elem_size;
-    if (bind_visit_str(&str_p, SRC_PTR(), data) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+    if (BIND_VISIT_STR(m, SRC_PTR(), data) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     *(const void **)any_slot       = am->string_type;
     *(const void **)(any_slot + 8) = data;
     SRC_ADVANCE();
@@ -2353,7 +2359,7 @@ root_scalar: {
       }
       BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_POS(), 0);
     }
-    if (bind_visit_str(&str_p, SRC_PTR(), cur_dst) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+    if (BIND_VISIT_STR(m, SRC_PTR(), cur_dst) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     SRC_ADVANCE();
     goto document_end;
   }

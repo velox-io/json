@@ -112,7 +112,10 @@ enum {
 /* Go writes these options in NdecBindContext.opt_flags before entry. */
 enum {
   BIND_OPT_DISALLOW_UNKNOWN = 1u << 0,
-  BIND_OPT_USE_NUMBER       = 1u << 2,
+  // Alias escape-free string bodies in the caller-owned source. Requires a
+  // padded caller buffer; Go entries reject the bit on every other input model.
+  BIND_OPT_ZERO_COPY_STR = 1u << 1,
+  BIND_OPT_USE_NUMBER    = 1u << 2,
   // Enable scan-time tape sizing only for types that can emit tape content.
   BIND_OPT_SIZE_TAPE = 1u << 3,
   // Budget the two-word dual-view prologue of each qualifying merged tape.

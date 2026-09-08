@@ -38,9 +38,12 @@ type Value = value.Value
 type Raw = value.Raw
 
 // WithZeroCopy aliases option.WithZeroCopy: escape-free strings alias the
-// source buffer instead of being copied into strArena. Honored by
-// ParsePadded only; Parse rejects it, and zero-copy Values are
-// navigation-only (UnmarshalValue returns bind.ErrZeroCopyValue).
+// padded source buffer instead of being copied into strArena. Honored by
+// ParsePadded and UnmarshalPadded; every entry that copies or relocates its
+// input rejects it with ErrZeroCopyNeedsPadded. Zero-copy Values are
+// navigation-only (UnmarshalValue returns bind.ErrZeroCopyValue), and
+// UnmarshalPadded rejects trees carrying value.Value or poly fields with
+// bind.ErrZeroCopyTypedTree.
 func WithZeroCopy() Option { return option.WithZeroCopy() }
 
 // ParseOption aliases Option, retained for source compatibility with code

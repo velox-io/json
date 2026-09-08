@@ -127,9 +127,9 @@ func Pad(data []byte) []byte {
 	return out[:n:need]
 }
 
-// ErrZeroCopyNeedsPadded reports that zero-copy strings require a caller-owned
-// ParsePadded buffer. Parse uses reusable source scratch.
-var ErrZeroCopyNeedsPadded = errors.New("dom: WithZeroCopy requires ParsePadded with a caller-owned buffer")
+// ErrZeroCopyNeedsPadded aliases option.ErrZeroCopyNeedsPadded: dom.Parse
+// rejects WithZeroCopy because it copies through reusable source scratch.
+var ErrZeroCopyNeedsPadded = option.ErrZeroCopyNeedsPadded
 
 // Parse returns a navigation Value using copy mode and lax scanning by default.
 // ParsePadded owns the zero-copy contract because Parse uses reusable source

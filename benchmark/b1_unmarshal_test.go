@@ -493,10 +493,11 @@ func Benchmark_Unmarshal_KubePodsCompact_Velox(b *testing.B) {
 }
 
 // =============================================================================
-// KubePods Padded: caller-padded buffer via UnmarshalPadded. Exercises the
-// UnmarshalPadded entry point (currently still copies through padBuf; the
-// contract is in place for future zero-copy work). Same payload as KubePods
-// and KubePodsCompact, pre-padded once outside the loop.
+// KubePods Padded: caller-padded buffer via UnmarshalPadded. The Padded
+// benchmarks measure the padded entry point; the ZeroCopy variants alias
+// escape-free strings into the caller's buffer instead of copying them into
+// the string arena. Same payload as KubePods and KubePodsCompact,
+// pre-padded once outside the loop.
 // =============================================================================
 
 var kubePodsPadded = vjson.Pad(KubePodsJSON)
@@ -531,6 +532,30 @@ func Benchmark_Unmarshal_KubePodsCompact_Velox_Padded_StrictScan(b *testing.B) {
 	for b.Loop() {
 		var pl KubePodList
 		if err := vjson.UnmarshalPadded(kubePodsCompactPadded, &pl, strictScan); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Unmarshal_KubePods_Velox_Padded_ZeroCopy(b *testing.B) {
+	b.SetBytes(int64(len(kubePodsPadded)))
+	b.ReportAllocs()
+	zeroCopy := vjson.WithZeroCopy()
+	for b.Loop() {
+		var pl KubePodList
+		if err := vjson.UnmarshalPadded(kubePodsPadded, &pl, zeroCopy); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Unmarshal_KubePodsCompact_Velox_Padded_ZeroCopy(b *testing.B) {
+	b.SetBytes(int64(len(kubePodsCompactPadded)))
+	b.ReportAllocs()
+	zeroCopy := vjson.WithZeroCopy()
+	for b.Loop() {
+		var pl KubePodList
+		if err := vjson.UnmarshalPadded(kubePodsCompactPadded, &pl, zeroCopy); err != nil {
 			b.Fatal(err)
 		}
 	}

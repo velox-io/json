@@ -55,8 +55,15 @@ func drainDeferredRecords(p *Parser, m *ndec.BindMachine) error {
 				// json.RawMessage is []byte. Appending into the destination in
 				// place keeps the slice header off the heap and reuses any capacity
 				// already there, which is also what RawMessage.UnmarshalJSON does.
-				dst := (*[]byte)(unsafe.Pointer(rec.Target))
-				*dst = append((*dst)[:0], data...)
+				// Under the zero-copy opt a source-backed span aliases the caller
+				// buffer, with cap clamped so appends stay off the caller's memory.
+				if p.optFlags&ndec.BindOptZeroCopyStr != 0 && rec.Backing == ndec.BindRecordBackingSource {
+					dst := (*[]byte)(unsafe.Pointer(rec.Target))
+					*dst = data[:len(data):len(data)]
+				} else {
+					dst := (*[]byte)(unsafe.Pointer(rec.Target))
+					*dst = append((*dst)[:0], data...)
+				}
 			}
 		case vbind.KindTextUnmarshaler:
 			hooks := p.tt.UnmarshalHooks[rec.TypeIdx]
@@ -166,7 +173,9 @@ func unmarshalRawInto(p *Parser, data []byte, rt reflect.Type, ptr unsafe.Pointe
 	}
 	sp := getParser(sh)
 	defer putParser(sh, sp)
-	sp.optFlags = p.optFlags
+	// The sub-parse copies its input through a reusable pad buffer, so the
+	// zero-copy alias must not propagate.
+	sp.optFlags = p.optFlags &^ ndec.BindOptZeroCopyStr
 	return sp.unmarshal(data, ptr)
 }
 

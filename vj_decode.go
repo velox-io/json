@@ -53,6 +53,15 @@ func UnmarshalValue[T any](v Value, out T, opts ...Option) (err error) {
 // navigation-only Values whose document was parsed with WithZeroCopy.
 var ErrZeroCopyValue = bind.ErrZeroCopyValue
 
+// ErrZeroCopyNeedsPadded aliases option.ErrZeroCopyNeedsPadded: entries whose
+// input is copied through an internal buffer or relocated across windows
+// reject WithZeroCopy.
+var ErrZeroCopyNeedsPadded = option.ErrZeroCopyNeedsPadded
+
+// ErrZeroCopyTypedTree aliases bind.ErrZeroCopyTypedTree: UnmarshalPadded
+// rejects WithZeroCopy on trees carrying value.Value or poly fields.
+var ErrZeroCopyTypedTree = bind.ErrZeroCopyTypedTree
+
 // Pad returns a buffer holding data followed by PaddingSize bytes of 0x20
 // scan sentinel, suitable for UnmarshalPadded and ParsePadded.
 func Pad(data []byte) []byte { return bind.Pad(data) }
@@ -61,9 +70,11 @@ func Pad(data []byte) []byte { return bind.Pad(data) }
 // paddedData must carry at least PaddingSize bytes of 0x20 padding past its
 // length; use Pad to construct it.
 //
-// UnmarshalPadded is the entry point for future zero-copy string
-// optimizations. The current implementation still copies through an internal
-// buffer; the contract is in place so callers can opt in early.
+// WithZeroCopy makes escape-free strings alias paddedData: decoded values
+// keep its backing reachable, and the caller preserves its bytes while any
+// decoded value remains reachable. Escaped strings still decode through the
+// internal string arena, and trees carrying value.Value or poly fields are
+// rejected with ErrZeroCopyTypedTree.
 func UnmarshalPadded[T any](paddedData []byte, v T, opts ...Option) (err error) {
 	err = bind.UnmarshalPadded(paddedData, v, opts...)
 	return
