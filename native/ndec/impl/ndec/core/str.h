@@ -355,9 +355,9 @@ INLINE uint32_t ndec_str_mask_ctz(ndec_str_mask m) {
  * per-step bounds checks.
  *
  * Returns the decoded body length, or -1 on malformed escape. dst[ret] is the
- * terminating quote. The SIMD store carries it for disjoint source and
- * destination; scalar exits store it explicitly. Published strings commit
- * ret + 1 bytes, while scratch callers may overwrite the result in place.
+ * terminating quote. An escape-free scan's store carries it; the escape walk
+ * lands its shifted sentinel explicitly. Published strings commit ret + 1
+ * bytes, while scratch callers may overwrite the result in place.
  *
  * esc_seen (NULL allowed) receives 1 when any escape was decoded. An esc_seen
  * of 0 means the body is verbatim source text: no backslash preceded the
@@ -369,23 +369,6 @@ INLINE int32_t ndec_str_parse(const uint8_t *src, uint8_t *dst, int *esc_seen, i
   uint8_t *di       = dst;
 
 #if NDEC_STR_CHUNK
-#if defined(__ARM_NEON)
-  /* On NEON, an escape in the first chunk selects the scalar decoder for the
-   * remaining body; later escapes stay in the SIMD loop. Under validate a
-   * non-ASCII first chunk selects it too so UTF-8 validation runs. */
-  {
-    ndec_str_mask bs, qt;
-    int hi;
-    ndec_str_chunk_scan(si, di, &bs, &qt, &hi);
-    if (((bs - 1) & qt) != 0) {
-      if (UNLIKELY(validate && hi)) return ndec_str_decode_scalar(si, dst, di, esc_seen, validate);
-      return (int32_t)ndec_str_mask_ctz(qt);
-    }
-    if (UNLIKELY(bs != 0 || (validate && hi))) return ndec_str_decode_scalar(si, dst, di, esc_seen, validate);
-    si += NDEC_STR_CHUNK;
-    di += NDEC_STR_CHUNK;
-  }
-#endif
   for (;;) {
     ndec_str_mask bs, qt;
     int hi;
@@ -400,21 +383,59 @@ INLINE int32_t ndec_str_parse(const uint8_t *src, uint8_t *dst, int *esc_seen, i
       if (UNLIKELY(validate && hi)) return ndec_str_decode_scalar(si, dst, di, esc_seen, validate);
       return (int32_t)(di - dst + ndec_str_mask_ctz(qt));
     }
-    if (UNLIKELY(bs != 0)) {
-      uint32_t bp = ndec_str_mask_ctz(bs);
-      si += bp + 1; /* skip past the `\` */
-      di += bp;
-      if (ndec_str_handle_escape(&si, &di, NULL) < 0) return -1;
-      if (esc_seen) *esc_seen = 1;
-      continue;
-    }
+    /* Under validate a high-bit chunk needs the UTF-8 replacing decoder.
+     * Plain chunks copy verbatim and the walk's escapes produce valid UTF-8
+     * by construction, so the seam stays a per-chunk bail. */
     if (UNLIKELY(validate && hi)) {
-      /* The chunk store already copied these bytes; the scalar decoder
-       * rewrites them from the chunk start with UTF-8 validation. */
       return ndec_str_decode_scalar(si, dst, di, esc_seen, validate);
     }
-    si += NDEC_STR_CHUNK;
-    di += NDEC_STR_CHUNK;
+    if (LIKELY(bs == 0)) {
+      si += NDEC_STR_CHUNK;
+      di += NDEC_STR_CHUNK;
+      continue;
+    }
+    /* Escape walk: the chunk's masks hold every remaining event position, so
+     * each escape decodes without rescanning the chunk. The pre-escape span
+     * was stored at valid offsets; each escape shifts the rest one slot left,
+     * so every later span copies down explicitly. An escape whose bytes
+     * straddle the chunk end consumes them and the next scan picks up after
+     * it. */
+    const uint8_t *ss = si;
+    uint32_t off      = ndec_str_mask_ctz(bs);
+    si += off;
+    di += off;
+    while (off < (uint32_t)NDEC_STR_CHUNK) {
+      /* si points at a `\`. */
+      uint8_t mapped = ndec_str_simple_escape_table[si[1]];
+      if (LIKELY(mapped != 0)) {
+        *di++ = mapped;
+        si += 2;
+      } else {
+        si++;
+        if (ndec_str_handle_escape(&si, &di, NULL) < 0) return -1;
+      }
+      /* Flag only escapes that decoded, as the scalar decoder does, so a
+       * malformed tail leaves esc_seen clear on the -1 path. */
+      if (esc_seen) *esc_seen = 1;
+      off = (uint32_t)(si - ss);
+      if (off >= (uint32_t)NDEC_STR_CHUNK) break;
+      ndec_str_mask rbs = bs >> off;
+      ndec_str_mask rqt = qt >> off;
+      uint32_t nq       = rqt ? off + ndec_str_mask_ctz(rqt) : (uint32_t)NDEC_STR_CHUNK;
+      uint32_t nb       = rbs ? off + ndec_str_mask_ctz(rbs) : (uint32_t)NDEC_STR_CHUNK;
+      if (nq < nb) {
+        /* The close quote precedes the next escape: copy the final span and
+         * place the quote sentinel at its shifted position. */
+        while (si < ss + nq)
+          *di++ = *si++;
+        *di = '"';
+        return (int32_t)(di - dst);
+      }
+      const uint8_t *stop = ss + nb; /* nb == chunk end when no escape remains */
+      while (si < stop)
+        *di++ = *si++;
+      off = (uint32_t)(si - ss);
+    }
   }
 #else
   /* Scalar-only fallback (no SIMD). Stage1's close-quote contract still
@@ -504,10 +525,9 @@ INLINE int32_t ndec_str_parse_zc_scan(const uint8_t *src, uint32_t *out_len, uin
 }
 
 /* Continue from the first escaped byte reported by ndec_str_parse_zc_scan.
- * The DOM string copier is the sole caller and runs the raw policy, so
- * high-bit bytes copy verbatim and only escapes decode. The result is the
- * decoded length or -1 for malformed input, and dst[result] carries the quote
- * sentinel on success. */
+ * Callers run the raw policy, so high-bit bytes copy verbatim and only
+ * escapes decode. The result is the decoded length or -1 for malformed
+ * input, and dst[result] carries the quote sentinel on success. */
 INLINE int32_t ndec_str_parse_zc_continue(const uint8_t *src, uint8_t *dst, uint32_t prefix_bp) {
   __builtin_memcpy(dst, src, prefix_bp);
   const uint8_t *si = src + prefix_bp + 1; /* skip the `\` */
@@ -515,21 +535,6 @@ INLINE int32_t ndec_str_parse_zc_continue(const uint8_t *src, uint8_t *dst, uint
   if (ndec_str_handle_escape(&si, &di, NULL) < 0) return -1;
 
 #if NDEC_STR_CHUNK
-#if defined(__ARM_NEON)
-  /* On NEON, another escape in the first continuation chunk selects the
-   * scalar decoder; later escapes stay in the SIMD loop. */
-  {
-    ndec_str_mask bs, qt;
-    int hi;
-    ndec_str_chunk_scan(si, di, &bs, &qt, &hi);
-    if (((bs - 1) & qt) != 0) {
-      return (int32_t)(di - dst) + (int32_t)ndec_str_mask_ctz(qt);
-    }
-    if (UNLIKELY(bs != 0)) return ndec_str_decode_scalar(si, dst, di, NULL, 0);
-    si += NDEC_STR_CHUNK;
-    di += NDEC_STR_CHUNK;
-  }
-#endif
   for (;;) {
     ndec_str_mask bs, qt;
     int hi;
@@ -537,15 +542,50 @@ INLINE int32_t ndec_str_parse_zc_continue(const uint8_t *src, uint8_t *dst, uint
     if (((bs - 1) & qt) != 0) {
       return (int32_t)(di - dst) + (int32_t)ndec_str_mask_ctz(qt);
     }
-    if (UNLIKELY(bs != 0)) {
-      uint32_t bp = ndec_str_mask_ctz(bs);
-      si += bp + 1;
-      di += bp;
-      if (ndec_str_handle_escape(&si, &di, NULL) < 0) return -1;
+    if (LIKELY(bs == 0)) {
+      si += NDEC_STR_CHUNK;
+      di += NDEC_STR_CHUNK;
       continue;
     }
-    si += NDEC_STR_CHUNK;
-    di += NDEC_STR_CHUNK;
+    /* Escape walk: the chunk's masks hold every remaining event position, so
+     * each escape decodes without rescanning the chunk. The pre-escape span
+     * was stored at valid offsets; each escape shifts the rest one slot left,
+     * so every later span copies down explicitly. An escape whose bytes
+     * straddle the chunk end consumes them and the next scan picks up after
+     * it. */
+    const uint8_t *ss = si;
+    uint32_t off      = ndec_str_mask_ctz(bs);
+    si += off;
+    di += off;
+    while (off < (uint32_t)NDEC_STR_CHUNK) {
+      /* si points at a `\`. */
+      uint8_t mapped = ndec_str_simple_escape_table[si[1]];
+      if (LIKELY(mapped != 0)) {
+        *di++ = mapped;
+        si += 2;
+      } else {
+        si++;
+        if (ndec_str_handle_escape(&si, &di, NULL) < 0) return -1;
+      }
+      off = (uint32_t)(si - ss);
+      if (off >= (uint32_t)NDEC_STR_CHUNK) break;
+      ndec_str_mask rbs = bs >> off;
+      ndec_str_mask rqt = qt >> off;
+      uint32_t nq       = rqt ? off + ndec_str_mask_ctz(rqt) : (uint32_t)NDEC_STR_CHUNK;
+      uint32_t nb       = rbs ? off + ndec_str_mask_ctz(rbs) : (uint32_t)NDEC_STR_CHUNK;
+      if (nq < nb) {
+        /* The close quote precedes the next escape: copy the final span and
+         * place the quote sentinel at its shifted position. */
+        while (si < ss + nq)
+          *di++ = *si++;
+        *di = '"';
+        return (int32_t)(di - dst);
+      }
+      const uint8_t *stop = ss + nb; /* nb == chunk end when no escape remains */
+      while (si < stop)
+        *di++ = *si++;
+      off = (uint32_t)(si - ss);
+    }
   }
 #else
   return ndec_str_decode_scalar(si, dst, di, NULL, 0);

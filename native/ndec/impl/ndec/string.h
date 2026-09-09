@@ -54,21 +54,16 @@ INLINE int bind_visit_str(uint8_t **str_pp, const uint8_t *open_quote, uint8_t *
   return 0;
 }
 
-/* Decode an escaped or oversized body into str_arena. The inline visitor
- * defers here only after seeing a backslash or a body over the 24-bit scan
- * cap, so this rescans and then decodes through the two-stage path. */
-NOINLINE int bind_visit_str_zc_decode(uint8_t **str_pp, const uint8_t *open_quote, uint8_t *dst) {
-  uint32_t len, bp;
-  int32_t st = ndec_str_parse_zc_scan(open_quote + 1, &len, &bp, 0);
-  if (st == 2) {
-    uint8_t *data = *str_pp;
-    int32_t n     = ndec_str_parse_zc_continue(open_quote + 1, data, bp);
-    if (UNLIKELY(n < 0)) return -1;
-    *str_pp = data + n + 1;
-    bind_write_str_header(dst, data, (uint32_t)n);
-    return 0;
-  }
-  return bind_visit_str(str_pp, open_quote, dst);
+/* Decode an escaped body into str_arena. The inline visitor defers here with
+ * the first backslash offset from its scan, so this decodes through the
+ * two-stage path without rescanning the prefix. */
+NOINLINE int bind_visit_str_zc_decode(uint8_t **str_pp, const uint8_t *open_quote, uint8_t *dst, uint32_t bp) {
+  uint8_t *data = *str_pp;
+  int32_t n     = ndec_str_parse_zc_continue(open_quote + 1, data, bp);
+  if (UNLIKELY(n < 0)) return -1;
+  *str_pp = data + n + 1;
+  bind_write_str_header(dst, data, (uint32_t)n);
+  return 0;
 }
 
 /* Bind a string under BIND_OPT_ZERO_COPY_STR. An escape-free body aliases the
@@ -84,7 +79,8 @@ INLINE int bind_visit_str_zc(uint8_t **str_pp, const uint8_t *open_quote, uint8_
     bind_write_str_header(dst, open_quote + 1 - alias_delta, len);
     return 0;
   }
-  return bind_visit_str_zc_decode(str_pp, open_quote, dst);
+  if (UNLIKELY(st < 0)) return bind_visit_str(str_pp, open_quote, dst);
+  return bind_visit_str_zc_decode(str_pp, open_quote, dst, bp);
 }
 
 /* String visitor for typed destinations. The per-call zero-copy opt selects
