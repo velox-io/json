@@ -239,9 +239,12 @@
   <g class="val-g" id="vl-Marshal_MapAny-Sonic">
     <a href="#vl-Marshal_MapAny-Sonic"><rect x="750.5" y="168.0" width="8.0" height="280.0" rx="2" fill="#4161a5" opacity="0.8"><title>Sonic: 2.27× latency (55.2µs), 30.1KB B/op (2.25× mem), 181 allocs/op (25.9× allocs)</title></rect><rect x="750.5" y="168" width="8.0" height="14" fill="url(#cut-fade)" pointer-events="none"/></a>
     <a class="val-off" href="#vl-Marshal_MapAny-Sonicx"><rect x="750.5" y="168.0" width="8.0" height="280.0" rx="2" fill="#4161a5" opacity="0.8"><title>Sonic: 2.27× latency (55.2µs), 30.1KB B/op (2.25× mem), 181 allocs/op (25.9× allocs)</title></rect><rect x="750.5" y="168" width="8.0" height="14" fill="url(#cut-fade)" pointer-events="none"/></a>
-    <rect id="vl-Marshal_MapAny-Sonicx" x="754.5" y="158.0" width="1" height="1" fill="none" pointer-events="none"/>
-    <rect class="val-bg" x="721.0" y="154.0" width="66.9" height="13.5" pointer-events="none"/>
-    <text x="754.5" y="164.0" class="bar-val" text-anchor="middle">2.27<tspan class="bar-val-delta" fill="#e74c3c">↓2.27×</tspan></text>
+    <rect id="vl-Marshal_MapAny-Sonicx" x="754.5" y="148.0" width="1" height="1" fill="none" pointer-events="none"/>
+    <line x1="754.5" y1="156.0" x2="754.5" y2="168.0" stroke="#555" stroke-width="0.6" stroke-dasharray="1.5 2" opacity="0.45" pointer-events="none"/>
+    <line x1="751.5" y1="156.0" x2="757.5" y2="156.0" stroke="#555" stroke-width="0.6" opacity="0.45" pointer-events="none"/>
+    <line x1="751.5" y1="168.0" x2="757.5" y2="168.0" stroke="#555" stroke-width="0.6" opacity="0.45" pointer-events="none"/>
+    <rect class="val-bg" x="721.0" y="144.0" width="66.9" height="13.5" pointer-events="none"/>
+    <text x="754.5" y="154.0" class="bar-val" text-anchor="middle">2.27<tspan class="bar-val-delta" fill="#e74c3c">↓2.27×</tspan></text>
   </g>
   <rect x="812.5" y="261.3" width="8.0" height="186.7" rx="2" fill="#79d4fd" opacity="0.8"><title>JSONv2: 1× latency (559.0µs), 272.0KB B/op (1× mem), 1 allocs/op (1× allocs)</title></rect>
   <g class="val-g" id="vl-Marshal_JSONBenchCanadaGeometry-Velox">
@@ -1559,7 +1562,7 @@
   <g class="echo-g" id="echo-vl-Marshal_TwitterTyped-Sonic"><rect class="val-bg" x="633.0" y="308.2" width="66.9" height="13.5" pointer-events="none"/><text x="666.5" y="318.2" class="bar-val" text-anchor="middle">0.68<tspan class="bar-val-delta" fill="#27ae60">↑1.47×</tspan></text></g>
   <g class="echo-g" id="echo-vl-Marshal_MapAny-Velox"><rect class="val-bg" x="737.4" y="397.1" width="60.3" height="13.5" pointer-events="none"/><text x="767.5" y="407.1" class="bar-val" text-anchor="middle">0.2<tspan class="bar-val-delta" fill="#27ae60">↑4.92×</tspan></text></g>
   <g class="echo-g" id="echo-vl-Marshal_MapAny-GoJSON"><rect class="val-bg" x="708.0" y="154.0" width="66.9" height="13.5" pointer-events="none"/><text x="741.5" y="164.0" class="bar-val" text-anchor="middle">1.89<tspan class="bar-val-delta" fill="#e74c3c">↓1.89×</tspan></text></g>
-  <g class="echo-g" id="echo-vl-Marshal_MapAny-Sonic"><rect class="val-bg" x="721.0" y="154.0" width="66.9" height="13.5" pointer-events="none"/><text x="754.5" y="164.0" class="bar-val" text-anchor="middle">2.27<tspan class="bar-val-delta" fill="#e74c3c">↓2.27×</tspan></text></g>
+  <g class="echo-g" id="echo-vl-Marshal_MapAny-Sonic"><rect class="val-bg" x="721.0" y="144.0" width="66.9" height="13.5" pointer-events="none"/><text x="754.5" y="154.0" class="bar-val" text-anchor="middle">2.27<tspan class="bar-val-delta" fill="#e74c3c">↓2.27×</tspan></text></g>
   <g class="echo-g" id="echo-vl-Marshal_JSONBenchCanadaGeometry-Velox"><rect class="val-bg" x="825.4" y="360.5" width="60.3" height="13.5" pointer-events="none"/><text x="855.5" y="370.5" class="bar-val" text-anchor="middle">0.4<tspan class="bar-val-delta" fill="#27ae60">↑2.51×</tspan></text></g>
   <g class="echo-g" id="echo-vl-Marshal_JSONBenchCanadaGeometry-GoJSON"><rect class="val-bg" x="796.0" y="258.0" width="66.9" height="13.5" pointer-events="none"/><text x="829.5" y="268.0" class="bar-val" text-anchor="middle">0.95<tspan class="bar-val-delta" fill="#27ae60">↑1.05×</tspan></text></g>
   <g class="echo-g" id="echo-vl-Marshal_JSONBenchCanadaGeometry-Sonic"><rect class="val-bg" x="815.6" y="230.1" width="53.7" height="13.5" pointer-events="none"/><text x="842.5" y="240.1" class="bar-val" text-anchor="middle">1.1<tspan class="bar-val-delta" fill="#e74c3c">↓1.1×</tspan></text></g>

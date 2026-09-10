@@ -642,29 +642,36 @@ func renderChart(b *strings.Builder, xl xGeometry, plotTop int, baseline string,
 			}
 			val := strings.TrimSuffix(fmtRatio(p.Lat), "×")
 			halfW := float64(len(val))*2 + 1
-			offset := 3.0
-			ly := float64(plotTop) - 4
-			if !l.cut {
-				for {
-					circleHit := labelOverlapsCircle(gi, l.yTop, offset, cx, halfW)
-					labelHit := false
-					for _, bx := range placed {
-						if cx-halfW < bx.x1 && bx.x0 < cx+halfW &&
-							l.yTop-offset-7 < bx.y1 && bx.y0 < l.yTop-offset {
-							labelHit = true
-							break
-						}
-					}
-					if !circleHit && !labelHit {
-						break
-					}
-					if l.yTop-offset-8 <= float64(plotTop) {
-						break
-					}
-					offset += 10
-				}
-				ly = l.yTop - offset
+			// Cut bars have their effective top at plotTop; the extra
+			// baseOff keeps the initial label clear of the paper fade,
+			// and the lifted cap stacks up to three cut labels into
+			// the band above the plot.
+			baseOff := 3.0
+			liftCap := float64(plotTop)
+			if l.cut {
+				baseOff = 4.0
+				liftCap = float64(plotTop) - 32
 			}
+			offset := baseOff
+			for {
+				circleHit := labelOverlapsCircle(gi, l.yTop, offset, cx, halfW)
+				labelHit := false
+				for _, bx := range placed {
+					if cx-halfW < bx.x1 && bx.x0 < cx+halfW &&
+						l.yTop-offset-7 < bx.y1 && bx.y0 < l.yTop-offset {
+						labelHit = true
+						break
+					}
+				}
+				if !circleHit && !labelHit {
+					break
+				}
+				if l.yTop-offset-8 <= liftCap {
+					break
+				}
+				offset += 10
+			}
+			ly := l.yTop - offset
 			placed = append(placed, labelBox{cx - halfW, cx + halfW, ly - 7, ly})
 			id := fmt.Sprintf("vl-%s-%s", g.Key, p.Lib)
 			fmt.Fprintf(b, `  <g class="val-g" id="%s">`+"\n", id)
@@ -672,7 +679,7 @@ func renderChart(b *strings.Builder, xl xGeometry, plotTop int, baseline string,
 			// A lifted label drifts from its bar; connect the two with a
 			// thin dashed I-beam at the bar center. It carries no pointer
 			// events so clicks pass through to the bar anchors.
-			if offset > 3 {
+			if offset > baseOff {
 				fmt.Fprintf(b, `    <line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="%s" stroke-width="0.6" stroke-dasharray="1.5 2" opacity="0.45" pointer-events="none"/>`+"\n",
 					cx, ly+2, cx, l.yTop, ColorText)
 				fmt.Fprintf(b, `    <line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="%s" stroke-width="0.6" opacity="0.45" pointer-events="none"/>`+"\n",
