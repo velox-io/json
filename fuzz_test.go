@@ -578,6 +578,71 @@ func FuzzMarshalNoCrash(f *testing.F) {
 	})
 }
 
+// FuzzRoundtrip: decode/encode self-consistency.
+//
+// Unmarshal into any, Marshal the value back, then re-parse the output with
+// both encoding/json and vjson. The decoded value must survive the trip
+// unchanged. This composes the scanner and the encoder on value shapes that
+// constructor-based fuzzers cannot produce: decoded strings carrying raw
+// control bytes, text-derived floats, duplicate-key collapse, deep nesting.
+// Complements the stdlib differentials: those anchor each half against the
+// reference, this anchors the composition.
+//
+// The stdlib re-parse is a required gate: the lax scan accepts raw control
+// bytes, so only a strict parser certifies that the encoder escaped them.
+// Comparison happens at the value level via deepEqualJSON, so map key order
+// in the marshaled output is irrelevant.
+func FuzzRoundtrip(f *testing.F) {
+	seeds := []string{
+		`null`, `true`, `false`, `0`, `-0`, `-1.5`, `1e10`, `1e-320`,
+		`9100000000000000.999`, `100.0000000000800`,
+		`""`, `"hello"`, `"tab\tquote\"back\\slash"`,
+		`"\u0041"`, `"\uD83D\uDE00"`, `"\uD800"`,
+		`{}`, `[]`, `{"a":1,"a":2}`, `{"nested":{"x":[1,{"y":null}]}}`,
+		" \t\n[ 1 , 2 ] ",
+		string([]byte{'"', 0x01, '"'}),
+		`{"k":"` + string([]byte{0xff}) + `"}`,
+	}
+	for _, s := range seeds {
+		f.Add([]byte(s))
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var v1 any
+		if Unmarshal(data, &v1) != nil {
+			return
+		}
+
+		out, err := Marshal(v1)
+		if err != nil {
+			t.Errorf("Marshal of decoded value failed\ninput: %q\nvalue: %#v\nerror: %v", data, v1, err)
+			return
+		}
+
+		var v2 any
+		if err := json.Unmarshal(out, &v2); err != nil {
+			t.Errorf("Marshal output rejected by encoding/json\ninput: %q\noutput: %q\nerror: %v", data, out, err)
+			return
+		}
+
+		var v3 any
+		if err := Unmarshal(out, &v3); err != nil {
+			t.Errorf("vjson cannot re-parse its own output\ninput: %q\noutput: %q\nerror: %v", data, out, err)
+			return
+		}
+
+		// Raw passthrough decode keeps malformed bytes while default encode
+		// corrects them to U+FFFD: the documented divergence, skip compare.
+		if !utf8.Valid(data) {
+			return
+		}
+		if !deepEqualJSON(v1, v2) || !deepEqualJSON(v1, v3) {
+			t.Errorf("roundtrip mismatch\ninput:  %q\noutput: %q\ndecoded:   %#v\nstdlib:    %#v\nredecoded: %#v",
+				data, out, v1, v2, v3)
+		}
+	})
+}
+
 // Marshal fuzz helpers
 
 // fuzzReader consumes bytes from a fuzz input to deterministically build
