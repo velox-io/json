@@ -74,14 +74,19 @@ These string limits apply to `Value`, not to ordinary Go `string` fields decoded
 
 ## Zero-copy decoding
 
-`Unmarshal` is zero-copy by default: escape-free strings alias the caller's input buffer, skipping the per-string copies through the internal arena. Escaped strings still decode through the arena. The caller must preserve the input's bytes while any decoded value remains reachable:
+`Unmarshal` is zero-copy by default: escape-free strings alias the caller's input buffer. Escaped strings are copied because their decoded bytes differ from the input. The caller must preserve the input's bytes while any decoded value remains reachable:
 
 ```go
 var pod KubePodList
 err := json.Unmarshal(src, &pod) // pod's clean strings alias src
 ```
 
-Pass `json.WithZeroCopy(false)` when the destination must own its bytes, for example when the input buffer is reused after decoding.
+Pass `json.WithZeroCopy(false)` when the destination must own its bytes, for example when the input buffer is reused after decoding:
+
+```go
+var pod KubePodList
+err := json.Unmarshal(src, &pod, json.WithZeroCopy(false)) // pod owns its strings
+```
 
 ## Extensions
 
