@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"unicode/utf8"
 )
@@ -187,7 +188,7 @@ func FuzzUnmarshalStruct(f *testing.F) {
 					return // UTF-8 divergence: vjson preserves raw bytes, stdlib replaces with U+FFFD
 				}
 				if hasCaseFoldKey(data, "name", "age", "score", "active", "tags", "meta") {
-					return // ndec has no ASCII-fold; case-only key divergence is expected
+					return // ndec is case-sensitive only; folded key divergence is expected
 				}
 				t.Errorf("struct mismatch\ninput:  %q\nvjson:  %+v\nstdlib: %+v",
 					data, vjResult, stdResult)
@@ -251,7 +252,7 @@ func FuzzUnmarshalNested(f *testing.F) {
 					return // UTF-8 divergence: vjson preserves raw bytes, stdlib replaces with U+FFFD
 				}
 				if hasCaseFoldKeyNested(data, "items", "value", "inner", "name") {
-					return // ndec has no ASCII-fold; case-only key divergence is expected
+					return // ndec is case-sensitive only; folded key divergence is expected
 				}
 				t.Errorf("nested mismatch\ninput:  %q\nvjson:  %+v\nstdlib: %+v",
 					data, vjResult, stdResult)
@@ -729,38 +730,22 @@ func deepEqualJSON(a, b any) bool {
 
 // Case-insensitive key divergence detection.
 //
-// encoding/json falls back to ASCII case folding when no exact field-name
-// match exists. ndec deliberately does not implement this fold (cold-path
-// maintenance burden, no hot-path benefit). The
-// differential fuzzers therefore produce false positives on any input whose
-// JSON object key differs from a struct tag only by ASCII case. These helpers
-// detect such keys so the fuzzers can skip the DeepEqual check, mirroring the
-// existing UTF-8 divergence skip.
+// encoding/json falls back to Unicode case folding when no exact field-name
+// match exists (foldName, documented as identical to strings.EqualFold; the
+// fold orbits reach beyond ASCII, e.g. ſ U+017F folds to s and K U+212A
+// KELVIN SIGN folds to k). ndec deliberately implements only exact matching:
+// case-insensitive lookup is unsupported by design (cold-path maintenance
+// burden, no hot-path benefit). The differential fuzzers therefore produce
+// false positives on any input whose JSON object key differs from a struct
+// tag under case folding, ASCII or not. These helpers detect such keys so the
+// fuzzers can skip the DeepEqual check, mirroring the existing UTF-8
+// divergence skip.
 
-// asciiFoldEqual reports whether a and b are equal under ASCII case folding
-// (A-Z ↔ a-z), matching encoding/json's simpleLetterEqualFold for ASCII-letter
-// tags. Returns false if either string has a non-ASCII byte: stdlib does not
-// fold non-ASCII keys against ASCII tags, so neither do we.
-func asciiFoldEqual(a, b string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := 0; i < len(a); i++ {
-		ca, cb := a[i], b[i]
-		if ca >= 0x80 || cb >= 0x80 {
-			return false
-		}
-		if ca >= 'A' && ca <= 'Z' {
-			ca += 0x20
-		}
-		if cb >= 'A' && cb <= 'Z' {
-			cb += 0x20
-		}
-		if ca != cb {
-			return false
-		}
-	}
-	return true
+// foldEqual reports whether a and b are equal under Unicode case folding,
+// exactly matching encoding/json's foldName semantics
+// (foldName(x) == foldName(y) ⇔ strings.EqualFold(x, y)).
+func foldEqual(a, b string) bool {
+	return strings.EqualFold(a, b)
 }
 
 func exactKeyMatch(k string, tags []string) bool {
@@ -773,7 +758,7 @@ func exactKeyMatch(k string, tags []string) bool {
 }
 
 // hasCaseFoldKey reports whether data contains a top-level JSON object key
-// that does not exactly match any of tags but matches one under ASCII case
+// that does not exactly match any of tags but matches one under Unicode case
 // folding. Only top-level keys are checked: sufficient for flat structs, and
 // map keys (e.g. FuzzStruct.Meta) are excluded since stdlib does not fold them.
 func hasCaseFoldKey(data []byte, tags ...string) bool {
@@ -786,7 +771,7 @@ func hasCaseFoldKey(data []byte, tags ...string) bool {
 			continue
 		}
 		for _, t := range tags {
-			if asciiFoldEqual(k, t) {
+			if foldEqual(k, t) {
 				return true
 			}
 		}
@@ -796,10 +781,11 @@ func hasCaseFoldKey(data []byte, tags ...string) bool {
 
 // hasCaseFoldKeyNested is the recursive variant for structs with nested struct
 // fields. It walks every object key at every nesting level and checks against
-// the union of tags. Conservative: a key at one level may match a tag from a
-// different level and trigger a skip even when stdlib would not fold at that
-// level. Only safe for structs without map[string]T fields (map keys would
-// false-positive); FuzzUnmarshalNested qualifies.
+// the union of tags under Unicode case folding. Conservative: a key at one
+// level may match a tag from a different level and trigger a skip even when
+// stdlib would not fold at that level. Only safe for structs without
+// map[string]T fields (map keys would false-positive); FuzzUnmarshalNested
+// qualifies.
 //
 // The walk is over the token stream, not over a decoded any. Decoding to
 // map[string]any collapses duplicate keys, so a later `"inner":{}` would erase
@@ -842,7 +828,7 @@ func hasCaseFoldKeyNested(data []byte, tags ...string) bool {
 				f.wantKey = false
 				if !exactKeyMatch(t, tags) {
 					for _, tag := range tags {
-						if asciiFoldEqual(t, tag) {
+						if foldEqual(t, tag) {
 							return true
 						}
 					}
