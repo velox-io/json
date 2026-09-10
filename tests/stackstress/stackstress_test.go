@@ -21,7 +21,6 @@ import (
 
 	vjson "github.com/velox-io/json"
 	"github.com/velox-io/json/native/encvm"
-	"github.com/velox-io/json/native/ndec"
 )
 
 // semanticMismatch compares two JSON documents by decoding both into any
@@ -332,9 +331,6 @@ func ifaceReentryCase() Case {
 }
 
 func TestStackStress_FloatPrecisionBind(t *testing.T) {
-	if !ndec.Available {
-		t.Skip("native decoder not available on this platform")
-	}
 	Sweep(t, floatPrecisionCase())
 }
 
@@ -346,16 +342,13 @@ func TestStackStress_MarshalIndentStructStrings(t *testing.T) {
 }
 
 func TestStackStress_TapeWalkValueRemarshal(t *testing.T) {
-	if !ndec.Available || !encvm.Available {
+	if !encvm.Available {
 		t.Skip("native parser or encoder not available on this platform")
 	}
 	Sweep(t, tapeWalkCase())
 }
 
 func TestStackStress_CompactIndent(t *testing.T) {
-	if !ndec.Available {
-		t.Skip("native decoder not available on this platform")
-	}
 	Sweep(t, fmtCase())
 }
 
@@ -367,9 +360,6 @@ func TestStackStress_LargeStringsMarshal(t *testing.T) {
 }
 
 func TestStackStress_LargeStringsUnmarshal(t *testing.T) {
-	if !ndec.Available {
-		t.Skip("native decoder not available on this platform")
-	}
 	Sweep(t, largeStringsUnmarshalCase())
 }
 
@@ -381,8 +371,8 @@ func TestStackStress_InterfaceReentry(t *testing.T) {
 }
 
 func TestStackStress_ConcurrentSweepGC(t *testing.T) {
-	if !ndec.Available || !encvm.Available {
-		t.Skip("native decoder or encoder not available on this platform")
+	if !encvm.Available {
+		t.Skip("native encoder not available on this platform")
 	}
 	cases := []Case{
 		floatPrecisionCase(),

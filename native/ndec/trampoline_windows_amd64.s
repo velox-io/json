@@ -1,9 +1,5 @@
 #include "textflag.h"
 
-// stackReserve commits Go stack space before the deeper bind entry.
-TEXT ·stackReserve(SB), $1280-0
-    RET
-
 // Each trampoline passes the context in CX and reserves the 32-byte Win64
 // shadow space before calling C.
 // func vjNdecDOMParseCounted(ctx unsafe.Pointer)

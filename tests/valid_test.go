@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	vjson "github.com/velox-io/json"
-	"github.com/velox-io/json/native/ndec"
 )
 
 // validCases are inputs whose validity is the same for any JSON implementation.
@@ -201,9 +200,6 @@ func TestValid_TrailingJunk(t *testing.T) {
 // They run only when the native entry is linked; the shared suites above
 // stay within the common contract.
 func TestValid_NativeStdlibParity(t *testing.T) {
-	if !ndec.Available {
-		t.Skip("native ndec not linked")
-	}
 	valid := []string{
 		`1e900`,  // exponent overflow: grammar-valid, no value parsed
 		`-1e900`, // negative overflow

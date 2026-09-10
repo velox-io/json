@@ -140,9 +140,6 @@ var ErrZeroCopyUnsupported = option.ErrZeroCopyUnsupported
 // is rejected with ErrZeroCopyUnsupported; ParsePadded owns the zero-copy
 // contract. Monotonic arena carves remain valid through the Value lifetime.
 func Parse(src []byte, opts ...ParseOption) (Value, error) {
-	if !nativendec.Available {
-		return Value{}, decode.ErrNoNative
-	}
 	p := parserPool.Get().(*Parser)
 	defer parserPool.Put(p)
 	return p.Parse(src, opts...)
@@ -162,9 +159,6 @@ func Parse(src []byte, opts ...ParseOption) (Value, error) {
 // Value is navigation-only (typed binding rejects it). Typed binding accepts
 // arena-backed Values.
 func ParsePadded(paddedSrc []byte, opts ...ParseOption) (Value, error) {
-	if !nativendec.Available {
-		return Value{}, decode.ErrNoNative
-	}
 	p := parserPool.Get().(*Parser)
 	defer parserPool.Put(p)
 	return p.ParsePadded(paddedSrc, opts...)

@@ -100,7 +100,11 @@ func TestIfaceCacheTableBodyAttachKeepsSlots(t *testing.T) {
 	copy(before, snap.slots)
 
 	target := ptrs[7]
-	bodyOps := unsafe.Pointer(uintptr(0xdeadbeef))
+	// BodyOpsPtr is only compared here, never dereferenced, but it still has
+	// to be a real aligned address: a fabricated uintptr trips vet and the
+	// checkptr instrumentation under -race and -asan.
+	var bodyOpsBacking uintptr
+	bodyOps := unsafe.Pointer(&bodyOpsBacking)
 	idx := snap.find(target)
 	if idx < 0 {
 		t.Fatal("target type not found")

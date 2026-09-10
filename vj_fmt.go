@@ -2,7 +2,6 @@ package vjson
 
 import (
 	"bytes"
-	stdjson "encoding/json"
 	"math"
 	"runtime"
 	"sync"
@@ -28,9 +27,6 @@ func Indent(dst *bytes.Buffer, src []byte, prefix, indent string) error {
 var fmtStatePool = sync.Pool{New: func() any { return new([ndec.FmtStateSize]byte) }}
 
 func reformat(dst *bytes.Buffer, src []byte, compact bool, prefix, indent string) error {
-	if !ndec.Available {
-		return reformatStd(dst, src, compact, prefix, indent)
-	}
 	if len(src) > math.MaxUint32 {
 		return jerr.NewSyntaxError("json: document exceeds the 4GB limit", 0)
 	}
@@ -93,13 +89,6 @@ func reformat(dst *bytes.Buffer, src []byte, compact bool, prefix, indent string
 			return fmtErr(int(ctx.Err), int(ctx.ErrPos))
 		}
 	}
-}
-
-func reformatStd(dst *bytes.Buffer, src []byte, compact bool, prefix, indent string) error {
-	if compact {
-		return stdjson.Compact(dst, src)
-	}
-	return stdjson.Indent(dst, src, prefix, indent)
 }
 
 func fmtErr(code, pos int) error {

@@ -1,21 +1,33 @@
-//go:build !((darwin && arm64) || (linux && amd64) || (linux && arm64) || (windows && amd64))
+//go:build (darwin && arm64) || (linux && amd64) || (linux && arm64) || (windows && amd64)
 
 package ndec
 
 import "unsafe"
 
-// Stubs for platforms lacking a generated native object.
-// Available remains false, directing callers to supported paths.
-func vjNdecDOMParseCounted(ctx unsafe.Pointer) { panic("ndec: native decoder not linked") }
+//go:noescape
+//go:nosplit
+func vjNdecDOMParseCounted(ctx unsafe.Pointer)
 
-func vjNdecDOMBuild(ctx unsafe.Pointer) { panic("ndec: native decoder not linked") }
+//go:noescape
+//go:nosplit
+func vjNdecDOMBuild(ctx unsafe.Pointer)
 
-func vjNdecBindParse(ctx unsafe.Pointer) { panic("ndec: native decoder not linked") }
+//go:noescape
+//go:nosplit
+func vjNdecBindParse(ctx unsafe.Pointer)
 
-func vjNdecBindParseStream(ctx unsafe.Pointer) { panic("ndec: native decoder not linked") }
+//go:noescape
+//go:nosplit
+func vjNdecFmtParse(ctx unsafe.Pointer)
 
-func vjNdecWindowScan(ctx unsafe.Pointer) { panic("ndec: native decoder not linked") }
+//go:noescape
+//go:nosplit
+func vjNdecBindParseStream(ctx unsafe.Pointer)
 
-func vjNdecFmtParse(ctx unsafe.Pointer) { panic("ndec: native decoder not linked") }
+//go:noescape
+//go:nosplit
+func vjNdecWindowScan(ctx unsafe.Pointer)
 
-func vjNdecValid(ctx unsafe.Pointer) { panic("ndec: native decoder not linked") }
+//go:noescape
+//go:nosplit
+func vjNdecValid(ctx unsafe.Pointer)

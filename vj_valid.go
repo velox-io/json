@@ -15,7 +15,7 @@ import (
 //
 // Equivalent to encoding/json.Valid.
 func Valid(data []byte) bool {
-	if nativendec.Available && len(data) <= maxValidNativeLen {
+	if len(data) <= maxValidNativeLen {
 		return validNative(data)
 	}
 	return stdjson.Valid(data)
