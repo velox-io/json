@@ -8,26 +8,26 @@ GoJSON, JSONv2.
 Add or refresh a machine from the repo root:
 
 ```bash
-make benchviz CPU_SLUG=amd-epyc7k62
+make benchviz
 ```
 
-## linux-amd64-amd-epyc7k62
+## linux-amd64
 
 | suite | chart | raw |
 | --- | --- | --- |
-| Unmarshal | [unmarshal-1.svg](linux-amd64-amd-epyc7k62/unmarshal-1.svg) | [unmarshal-1.txt](linux-amd64-amd-epyc7k62/unmarshal-1.txt) |
-| Marshal | [marshal-1.svg](linux-amd64-amd-epyc7k62/marshal-1.svg) | [marshal-1.txt](linux-amd64-amd-epyc7k62/marshal-1.txt) |
+| Unmarshal | [unmarshal.svg](linux-amd64/unmarshal-2.svg) | [unmarshal.txt](linux-amd64/unmarshal-2.txt) |
+| Marshal | [marshal.svg](linux-amd64/marshal-2.svg) | [marshal.txt](linux-amd64/marshal-2.txt) |
 
-![](linux-amd64-amd-epyc7k62/unmarshal-1.svg)
-![](linux-amd64-amd-epyc7k62/marshal-1.svg)
+![](linux-amd64/unmarshal-2.svg)
+![](linux-amd64/marshal-2.svg)
 
-## darwin-arm64-apple-m4-pro
+## darwin-arm64
 
 | suite | chart | raw |
 | --- | --- | --- |
-| Unmarshal | [unmarshal-1.svg](darwin-arm64-apple-m4-pro/unmarshal-1.svg) | [unmarshal-1.txt](darwin-arm64-apple-m4-pro/unmarshal-1.txt) |
-| Marshal | [marshal-1.svg](darwin-arm64-apple-m4-pro/marshal-1.svg) | [marshal-1.txt](darwin-arm64-apple-m4-pro/marshal-1.txt) |
+| Unmarshal | [unmarshal.svg](darwin-arm64/unmarshal-2.svg) | [unmarshal.txt](darwin-arm64/unmarshal-2.txt) |
+| Marshal | [marshal.svg](darwin-arm64/marshal-2.svg) | [marshal.txt](darwin-arm64/marshal-2.txt) |
 
-![](darwin-arm64-apple-m4-pro/unmarshal-1.svg)
-![](darwin-arm64-apple-m4-pro/marshal-1.svg)
+![](darwin-arm64/unmarshal-2.svg)
+![](darwin-arm64/marshal-2.svg)
 

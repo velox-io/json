@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Isolated Benchmark Runner
+# Benchmark Runner
 #
-# Runs each library's benchmarks in its own go test process to avoid
-# cross-library interference (GC pressure, cache pollution, thermal throttling).
+# Runs all libraries' benchmarks in a single go test process, via a combined
+# bench regex Benchmark_<filter>.*_(<lib1>|<lib2>|...)$, so every library
+# shares the same process state; one process per library lands on a different
+# randomized layout and skews cross-library comparison.
 # Output is standard go test -bench format, compatible with benchviz pipeline.
 #
 # Usage: scripts/bench.sh [options]
@@ -11,8 +13,9 @@
 #   -c, --count N          -count=N for go test (default: 3)
 #   -t, --benchtime T      -benchtime=T (default: go test default)
 #   -b, --binary PATH      Use precompiled test binary instead of go test
+#   -k, --skip RE          Skip benchmarks whose names match RE (default: none)
 #   -C, --cpu N            Pin to CPU core N (Linux only; macOS warns and skips)
-#   -w, --warmup           Run a warmup pass per library before real measurement
+#   -w, --warmup           Run a warmup pass before real measurement
 #   -o, --output FILE      Write to file in addition to stdout (default: stdout only)
 #   --no-benchmem          Disable -benchmem (omit B/op and allocs/op from output)
 
@@ -28,13 +31,14 @@ LIBS="Sonic,GoJSON,JSONv2,Velox"
 COUNT=3
 BENCHTIME="3s"
 PIN_CPU=""
+SKIP=""
 WARMUP=false
 OUTPUT=""
 BENCHMEM=true
 BINARY=""
 
 usage() {
-    sed -n '2,17p' "$0" | sed 's/^# \?//'
+    sed -n '2,20p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 
@@ -45,6 +49,7 @@ while [[ $# -gt 0 ]]; do
         -c|--count)    COUNT="$2";    shift 2 ;;
         -t|--benchtime) BENCHTIME="$2"; shift 2 ;;
         -b|--binary)   BINARY="$2";   shift 2 ;;
+        -k|--skip)     SKIP="$2";     shift 2 ;;
         -C|--cpu)      PIN_CPU="$2";  shift 2 ;;
         -w|--warmup)   WARMUP=true;   shift ;;
         -o|--output)   OUTPUT="$2";   shift 2 ;;
@@ -95,6 +100,7 @@ if [[ -n "$BINARY" ]]; then
     FLAG_BENCHMEM="-test.benchmem"
     FLAG_COUNT="-test.count"
     FLAG_BENCHTIME="-test.benchtime"
+    FLAG_SKIP="-test.skip"
 else
     run_bench() {
         $PIN go test "$@"
@@ -104,6 +110,7 @@ else
     FLAG_BENCHMEM="-benchmem"
     FLAG_COUNT="-count"
     FLAG_BENCHTIME="-benchtime"
+    FLAG_SKIP="-skip"
     # cd into benchmark dir for go test mode
     cd "$BENCH_DIR"
 fi
@@ -126,14 +133,22 @@ if [[ -z "$BINARY" ]]; then
     DOT_ARG="."
 fi
 
-# Capture header (goos/goarch/pkg/cpu) from a quick dry run.
-# For precompiled binary, we need to run at least one real benchmark to get the header
-# (the binary only emits header lines when benchmarks actually match).
-_header_bench="${FLAG_BENCH}=^$"
-if [[ -n "$BINARY" ]]; then
-    _header_bench="${FLAG_BENCH}=Benchmark_${FILTER}.*_${LIB_ARRAY[0]}\$"
+# Combined bench regex selecting the library suffix (see header). The FILTER
+# prefix keeps its old contract (Benchmark_<filter>.*_<lib>$), so '.' and
+# multi-segment filters like (Unmarshal)_(Tiny|...) still work.
+libs_re="${LIB_ARRAY[*]}"
+libs_re="${libs_re// /|}"
+bench_re="Benchmark_${FILTER}.*_(${libs_re})\$"
+
+# Skip arg, only when set
+SKIP_ARG=()
+if [[ -n "$SKIP" ]]; then
+    SKIP_ARG=("${FLAG_SKIP}=${SKIP}")
 fi
-HEADER=$(run_bench "${FLAG_RUN}=^$" "$_header_bench" "${FLAG_BENCHTIME}=1x" $DOT_ARG "${FLAG_COUNT}=1" 2>&1 \
+
+# Capture header (goos/goarch/pkg/cpu) from a 1x dry run: header lines are
+# only emitted when at least one benchmark actually matches.
+HEADER=$(run_bench "${FLAG_RUN}=^$" "${FLAG_BENCH}=${bench_re}" "${FLAG_BENCHTIME}=1x" "${FLAG_COUNT}=1" ${SKIP_ARG[@]+"${SKIP_ARG[@]}"} $DOT_ARG 2>&1 \
     | grep -E '^(goos:|goarch:|pkg:|cpu:)' || true)
 
 # Write header once
@@ -142,24 +157,18 @@ HEADER=$(run_bench "${FLAG_RUN}=^$" "$_header_bench" "${FLAG_BENCHTIME}=1x" $DOT
     echo ""
 } >> "$TMPFILE"
 
-for lib in "${LIB_ARRAY[@]}"; do
-    # Construct bench regex: filter AND library suffix
-    # Match: Benchmark_<filter>.*_<lib>$
-    bench_re="Benchmark_${FILTER}.*_${lib}\$"
+echo "--- Running: ${bench_re} (skip: ${SKIP:-none}) count=${COUNT} benchtime=${BENCHTIME:-default}" >&2
 
-    echo "--- Running benchmarks for: $lib" >&2
+# Optional warmup (output discarded)
+if $WARMUP; then
+    run_bench "${FLAG_RUN}=^$" "${FLAG_BENCH}=${bench_re}" "${FLAG_BENCHTIME}=100ms" "${FLAG_COUNT}=1" ${SKIP_ARG[@]+"${SKIP_ARG[@]}"} $DOT_ARG >/dev/null 2>&1 || true
+fi
 
-    # Optional warmup (output discarded)
-    if $WARMUP; then
-        run_bench "${FLAG_RUN}=^$" "${FLAG_BENCH}=${bench_re}" "${FLAG_BENCHTIME}=100ms" "${FLAG_COUNT}=1" $DOT_ARG >/dev/null 2>&1 || true
-    fi
+# Real run: capture only benchmark lines and PASS/ok lines
+run_bench "${FLAG_RUN}=^$" "${FLAG_BENCH}=${bench_re}" $BENCHMEM_ARG "${FLAG_COUNT}=${COUNT}" $BENCHTIME_ARG ${SKIP_ARG[@]+"${SKIP_ARG[@]}"} $DOT_ARG 2>&1 \
+    | grep -E '^(Benchmark_|ok |PASS)' >> "$TMPFILE" || true
 
-    # Real run: capture only benchmark lines and PASS/ok lines
-    run_bench "${FLAG_RUN}=^$" "${FLAG_BENCH}=${bench_re}" $BENCHMEM_ARG "${FLAG_COUNT}=${COUNT}" $BENCHTIME_ARG $DOT_ARG 2>&1 \
-        | grep -E '^(Benchmark_|ok |PASS)' >> "$TMPFILE" || true
-
-    echo "" >> "$TMPFILE"
-done
+echo "" >> "$TMPFILE"
 
 # Output results
 if [[ -n "$OUTPUT" ]]; then

@@ -218,9 +218,9 @@ CPU_SLUG ?=
 BENCHVIZ_DIR ?= docs/benchmarks/$(GOOS)-$(GOARCH)$(if $(CPU_SLUG),-$(CPU_SLUG))
 BENCHVIZ_SUITES ?= Unmarshal Marshal
 BENCHVIZ_LIBS ?=
-BENCHVIZ_TIME ?= 5s
+BENCHVIZ_TIME ?= 10s
 BENCHVIZ_COUNT ?= 2
-BENCHVIZ_EXCLUDE ?= Compact
+BENCHVIZ_SKIP ?= Compact
 
 bench-build:
 	mkdir -p $(dir $(BENCH_BIN))
@@ -228,7 +228,7 @@ bench-build:
 
 benchviz: bench-build
 	bash scripts/benchviz.sh -b $(BENCH_BIN) -d '$(BENCHVIZ_DIR)' -s '$(BENCHVIZ_SUITES)' \
-		-t $(BENCHVIZ_TIME) -c $(BENCHVIZ_COUNT) -x '$(BENCHVIZ_EXCLUDE)' \
+		-t $(BENCHVIZ_TIME) -c $(BENCHVIZ_COUNT) --skip '$(BENCHVIZ_SKIP)' \
 		$(if $(BENCHVIZ_LIBS),-l '$(BENCHVIZ_LIBS)');
 
 # Compare libraries with benchstat

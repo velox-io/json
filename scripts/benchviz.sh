@@ -1,21 +1,20 @@
 #!/usr/bin/env bash
 # Benchmark visualization pipeline behind `make benchviz`.
 #
-# Runs one suite at a time (Unmarshal, Marshal) through scripts/bench.sh, then
-# renders each with benchviz. Every run writes <suite>-<N>.txt and
-# <suite>-<N>.svg into the output directory, where N is the next free index in
-# that directory, so a run always produces a matched unmarshal/marshal pair and
-# never overwrites an earlier one.
+# Runs one suite at a time (Unmarshal, Marshal) through scripts/bench.sh, with
+# all libraries in a single process, then renders each with benchviz. Every run
+# writes <suite>-<N>.txt and <suite>-<N>.svg into the output directory, where N
+# is the next free index in that directory, so a run always produces a matched
+# unmarshal/marshal pair and never overwrites an earlier one.
 #
 # Usage: scripts/benchviz.sh [options]
 #   -b, --binary PATH   Precompiled benchmark binary (required)
 #   -d, --dir DIR       Output directory (default: docs/benchmarks/<goos>-<goarch>)
 #   -s, --suites LIST   Space-separated suite filters (default: "Unmarshal Marshal")
 #   -l, --libs LIBS     Comma-separated libraries (default: bench.sh default)
-#   -t, --benchtime T   -benchtime=T (default: 5s)
+#   -t, --benchtime T   -benchtime=T (default: 10s)
 #   -c, --count N       -count=N (default: 2)
-#   -x, --exclude RE    Regexp of group names to drop from the charts
-#   --no-warmup         Skip the per-library warmup pass
+#   --skip RE           Regexp of benchmark names to skip (default: none)
 
 set -euo pipefail
 
@@ -27,13 +26,12 @@ BINARY=""
 OUTDIR=""
 SUITES="Unmarshal Marshal"
 LIBS=""
-BENCHTIME="5s"
+BENCHTIME="10s"
 COUNT=2
-EXCLUDE=""
-WARMUP=true
+SKIP=""
 
 usage() {
-    sed -n '2,18p' "$0" | sed 's/^# \?//'
+    sed -n '2,17p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 
@@ -45,8 +43,7 @@ while [[ $# -gt 0 ]]; do
         -l|--libs)      LIBS="$2";      shift 2 ;;
         -t|--benchtime) BENCHTIME="$2"; shift 2 ;;
         -c|--count)     COUNT="$2";     shift 2 ;;
-        -x|--exclude)   EXCLUDE="$2";   shift 2 ;;
-        --no-warmup)    WARMUP=false;   shift ;;
+        --skip)         SKIP="$2";      shift 2 ;;
         -h|--help)      usage 0 ;;
         *)              echo "Unknown option: $1" >&2; usage 1 ;;
     esac
@@ -77,14 +74,9 @@ if [[ -n "$LIBS" ]]; then
     LIBS_ARG=(-l "$LIBS")
 fi
 
-WARMUP_ARG=()
-if $WARMUP; then
-    WARMUP_ARG=(-w)
-fi
-
-EXCLUDE_ARG=()
-if [[ -n "$EXCLUDE" ]]; then
-    EXCLUDE_ARG=(-exclude "$EXCLUDE")
+SKIP_ARG=()
+if [[ -n "$SKIP" ]]; then
+    SKIP_ARG=(--skip "$SKIP")
 fi
 
 # Next free run index: one past the highest <suite>-<N>.* already in the
@@ -115,10 +107,10 @@ for suite in "${SUITE_ARRAY[@]}"; do
 
     echo "=== $suite: benchmarking (benchtime=$BENCHTIME count=$COUNT) -> $txt" >&2
     bash "$SCRIPT_DIR/bench.sh" -b "$BINARY" -f "$suite" -t "$BENCHTIME" -c "$COUNT" \
-        ${WARMUP_ARG[@]+"${WARMUP_ARG[@]}"} ${LIBS_ARG[@]+"${LIBS_ARG[@]}"} -o "$txt" >/dev/null
+        ${LIBS_ARG[@]+"${LIBS_ARG[@]}"} ${SKIP_ARG[@]+"${SKIP_ARG[@]}"} -o "$txt" >/dev/null
 
     echo "=== $suite: rendering -> $svg" >&2
-    (cd "$BENCH_DIR" && go run ./benchviz/ -format svg ${EXCLUDE_ARG[@]+"${EXCLUDE_ARG[@]}"} < "$txt" > "$svg")
+    (cd "$BENCH_DIR" && go run ./benchviz/ -format svg < "$txt" > "$svg")
 done
 
 echo "Results in: $OUTDIR ($IDX)" >&2

@@ -4,8 +4,8 @@ Velox is a high-performance JSON library for Go.
 
 ## Performance
 
-![](docs/benchmarks/linux-amd64-amd-epyc7k62/unmarshal-1.svg)
-![](docs/benchmarks/linux-amd64-amd-epyc7k62/marshal-1.svg)
+![](docs/benchmarks/linux-amd64/unmarshal-2.svg)
+![](docs/benchmarks/linux-amd64/marshal-2.svg)
 
 [docs/benchmarks](docs/benchmarks).
 
@@ -135,7 +135,7 @@ See [ROADMAP.md](ROADMAP.md) for planned work.
 
 ## Acknowledgements
 
-Thanks to the [simdjson](https://github.com/simdjson/simdjson) contributors for their work on high-performance JSON parsing.
+Thanks to the [simdjson](https://github.com/simdjson/simdjson) for the work on high-performance JSON parsing.
 
 ## License
 
