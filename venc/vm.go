@@ -254,13 +254,16 @@ type VjExecCtx struct {
 	// Hot registers.
 	// BufCur is uintptr (not unsafe.Pointer) because the VM may advance it to
 	// one-past-end (BufCur == BufEnd), which is not a valid GC pointer.
-	BufCur         uintptr        //   0: current write position (NOT GC-traced; may be one-past-end)
-	BufEnd         uintptr        //   8: one past last writable byte (NOT GC-traced)
-	OpsPtr         unsafe.Pointer //  16: &Blueprint.Ops[0] (current active byte stream)
-	PC             int32          //  24: current byte offset into ops
-	_padPC         int32          //  28: alignment padding
-	CurBase        unsafe.Pointer //  32: current struct/elem base address
-	VMState        uint64         //  40: packed state register (see VMState layout)
+	BufCur  uintptr        //   0: current write position (NOT GC-traced; may be one-past-end)
+	BufEnd  uintptr        //   8: one past last writable byte (NOT GC-traced)
+	OpsPtr  unsafe.Pointer //  16: &Blueprint.Ops[0] (current active byte stream)
+	PC      int32          //  24: current byte offset into ops
+	_padPC  int32          //  28: alignment padding
+	CurBase unsafe.Pointer //  32: current struct/elem base address
+	VMState uint64         //  40: packed state register (see VMState layout)
+	// IfaceHashSlots anchors the bound snapshot: the traced field keeps the
+	// slot array live for the ctx's lifetime, so in-flight tables survive
+	// concurrent copy-on-write publishes.
 	IfaceHashSlots unsafe.Pointer //  48: *VjIfaceCacheEntry open-addressed slot array
 	IfaceHashShift int32          //  56: slot index = hash >> shift
 	_padIface      int32          //  60: alignment padding
@@ -391,6 +394,9 @@ func buildIfaceTable(entries []VjIfaceCacheEntry) *ifaceCacheSnapshot {
 	return snap
 }
 
+// globalIfaceCache is published copy-on-write: a Store replaces the global
+// reference, and each in-flight VM keeps reading the table it was handed,
+// held live by its ctx's traced IfaceHashSlots until the run completes.
 var globalIfaceCache struct {
 	current atomic.Pointer[ifaceCacheSnapshot]
 	mu      sync.Mutex

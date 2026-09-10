@@ -71,6 +71,9 @@ func (es *encodeState) execVM(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 
 	ctx.VMState = vmstateBuildInitial(es.flags | swissMapGlobalFlags)
 
+	// These stores anchor the snapshots for the whole run: the traced ctx
+	// fields keep the bound arrays live across concurrent copy-on-write
+	// publishes.
 	snap := loadIfaceCacheSnapshot()
 	if len(snap.slots) > 0 {
 		ctx.IfaceHashSlots = unsafe.Pointer(&snap.slots[0])
