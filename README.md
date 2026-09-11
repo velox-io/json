@@ -35,7 +35,26 @@ Deliberate differences:
 - Golang Version: 1.24+
 - Platform: `darwin/arm64`, `linux/amd64`, `linux/arm64`, `windows/amd64`.
 
-## `json.Value`
+
+## Zero-copy decoding
+
+`Unmarshal` is zero-copy by default: escape-free strings alias the caller's input buffer. Escaped strings are copied because their decoded bytes differ from the input. The caller must preserve the input's bytes while any decoded value remains reachable:
+
+```go
+var pod KubePodList
+err := json.Unmarshal(src, &pod) // pod's clean strings alias src
+```
+
+Pass `json.WithZeroCopy(false)` when the destination must own its bytes, for example when the input buffer is reused after decoding:
+
+```go
+var pod KubePodList
+err := json.Unmarshal(src, &pod, json.WithZeroCopy(false)) // pod owns its strings
+```
+
+## Extensions
+
+### `json.Value`
 
 Velox provides `Value` for dynamic JSON and partial-access workloads where binding the entire document to a predefined Go type or `map[string]any` would be unnecessary. It is a tape-backed view for navigating parsed JSON directly:
 
@@ -67,71 +86,175 @@ err := json.Unmarshal(src, &envelope)
 
 Tape-backed values have two representation limits:
 
-- the JSON document must be smaller than 4 GiB because source offsets are 32-bit;
-- each decoded string or object key must be smaller than 16 MiB because string lengths are 24-bit.
+- The JSON document must be smaller than 4 GiB;
 
-These string limits apply to `Value`, not to ordinary Go `string` fields decoded directly by `Unmarshal`.
+- Decoded string or object key must be smaller than 16 MiB
 
-## Zero-copy decoding
+  > [!TIP]
+  > The string length limits apply to `Value`, not to ordinary Go `string` fields.
 
-`Unmarshal` is zero-copy by default: escape-free strings alias the caller's input buffer. Escaped strings are copied because their decoded bytes differ from the input. The caller must preserve the input's bytes while any decoded value remains reachable:
+### Reserve unknown keys
 
-```go
-var pod KubePodList
-err := json.Unmarshal(src, &pod) // pod's clean strings alias src
-```
-
-Pass `json.WithZeroCopy(false)` when the destination must own its bytes, for example when the input buffer is reused after decoding:
+A `Value` field tagged `json:",embed"` collects every key not matched by a named field:
 
 ```go
-var pod KubePodList
-err := json.Unmarshal(src, &pod, json.WithZeroCopy(false)) // pod owns its strings
+type Foo struct {
+    Name string    `json:"name"`
+    Exts json.Value `json:",embed"` // unmatched keys land here
+}
 ```
 
-## Extensions
+### Polymorphic decoding
 
-- **Reserve unknown keys.**
+Some payloads name their own type: a `type` member decides whether `data` holds a user or a product. Velox resolves that choice while scanning, so one pass produces the right Go value instead of a `json.RawMessage` you decode yourself. Two selectors are available:
 
-  A `Value` field tagged `json:",embed"` collects every key not matched by a named field:
+- `vjson:"variant=<disc>"` picks the case from a sibling string field.
+- `vjson:"kindof"` picks the case from the JSON value's own kind.
 
-  ```go
-  type Foo struct {
-      Name string    `json:"name"`
-      Exts json.Value `json:",embed"` // unmatched keys land here
-  }
-  ```
+#### Selecting by a discriminator
 
-- **Polymorphic decoding.** 
+The discriminator is a string field of the same struct; the variant field is `any` (or an interface) and holds the decoded case:
 
-  1. A `vjson:"variant=<disc>"` field binds to the concrete Go type selected by a discriminator field.
+```go
+type EventEnvelope struct {
+    Type string `json:"type"`                       // the discriminator
+    Data any    `json:"data" vjson:"variant=type"`  // whose type it selects
+}
 
-  2. A `vjson:"kindof"` field selects the case by the JSON value's kind.
+type User struct {
+    Name string `json:"name"`
+    Role string `json:"role"`
+}
 
-  ```go
-  type EventEnvelope struct {
-      Type string `json:"type"`
-      Data any    `json:"data" vjson:"variant=type"` // "user"→User, "product"→Product
-  }
+type Product struct {
+    Title string `json:"title"`
+    Price int    `json:"price"`
+}
+```
 
-  type User struct {
-  	Name string `json:"name"`
-  	Role string `json:"role"`
-  }
+The case table is a struct type: each field is one case, and its type is what gets decoded. Register it once, before the first parse of the host type:
 
-  type Product struct {
-  	Title string `json:"title"`
-  	Price int    `json:"price"`
-  }
+```go
+func init() {
+    vjson.DefineVariantCases[EventEnvelope, struct {
+        _ User    `case:"user"`    // "user"    → User
+        _ Product `case:"product"` // "product" → Product
+    }]()
+}
+```
 
-  func init() {
-	vjson.DefineVariantCases[EventEnvelope, struct {
-		user    User
-		product Product
-	}]()
-  }
-  ```
+The case value is the descriptor field's name, so `User User` declares the case `"User"`. Use a blank field with a `case:"..."` tag when the discriminator value is not a Go identifier, as above. A blank field without a tag is the default case, used when no case matches; without one, an unmatched value is an error.
+
+The call site stays an ordinary `Unmarshal` into the host. Afterwards `env.Data` holds the selected case as its concrete Go type:
+
+```go
+var env EventEnvelope
+err := json.Unmarshal([]byte(`{"type":"user","data":{"name":"Alice","role":"admin"}}`), &env)
+// env.Type == "user", env.Data == User{Name: "Alice", Role: "admin"}
+```
+
+Consume it with the usual Go idiom for a value of varying type:
+
+```go
+switch v := env.Data.(type) {
+case User:
+    fmt.Println(v.Name, v.Role)
+case Product:
+    fmt.Println(v.Title, v.Price)
+}
+```
+
+The discriminator may appear after the value it selects: the scan buffers the value and resolves it when the host object closes. A discriminator carried by the input always wins over whatever the destination already held.
+
+#### Selecting by JSON kind
+
+When there is no discriminator, the value's first token is the answer. Declare the kinds you accept and their Go types:
+
+```go
+type Response struct {
+    Data any `json:"data" vjson:"kindof"`
+}
+
+func init() {
+    vjson.DefineKindofCases[Response, struct {
+        bool   bool
+        number float64
+        string string
+        array  []User
+        object User
+    }]()
+}
+```
+
+`{"data":42.5}` yields `float64(42.5)`, `{"data":{"name":"Alice"}}` yields a `User`, and `{"data":null}` leaves the field nil. A kind you did not declare is an error. This is the tool for schemaless members, for example an error field that is a string in one response and an object in another.
+
+#### Unfolding the case into the host
+
+`json:",embed"` turns the variant into an inline one: instead of consuming one named member, the selected case's fields become members of the host object itself.
+
+```go
+type K8sObject struct {
+    Kind   string `json:"kind"`
+    Object any    `json:",embed" vjson:"variant=kind"`
+}
+
+func init() {
+    vjson.DefineVariantCases[K8sObject, struct {
+        _ PodObject     `case:"Pod"`     // contributes podSpec + podStatus
+        _ ServiceObject `case:"Service"`
+    }]()
+}
+```
+
+`{"kind":"Pod","podSpec":{...},"podStatus":{...}}` selects `PodObject` and binds `podSpec` and `podStatus` into it, one discriminator driving several host fields at once. Inline cases must be structs, and a host has at most one inline variant.
+
+#### Multiple polymorphic fields
+
+A host may carry several sibling variants, each with its own discriminator and its own case set. Register an axis by its Go field name:
+
+```go
+vjson.DefineVariantCasesAt[K8sObject, struct {
+    _ KubeletReport   `case:"kubelet"`
+    _ SchedulerReport `case:"scheduler"`
+}]("Report")
+```
+
+`DefineVariantCases` is the host-wide fallback used by every axis that has no field-specific registration.
+
+As an alternative to registration, a host may declare its descriptor as the parameter of a `JSONVariantCases` method (or `JSONKindofCases` for kindof). The method is never called; it only carries the type. Pick one form per host, not both.
 
 Example detail: [partial](examples/unmarshal/partial), [poly](examples/unmarshal/poly).
+
+### Stream
+
+A `vjson.Stream[T]` field consumes a large array element by element instead of materializing it as `[]T`. Declare it with the array's JSON key, register an `OnRead` handler before `Unmarshal`, and the parser hands the handler the elements as it reaches them:
+
+```go
+type Response struct {
+    Users   vjson.Stream[User] `json:"users"`
+    Message string             `json:"message"`
+}
+
+var resp Response
+resp.Users.OnRead(func(users stream.Scope[User]) error { // stream.Scope[T] from github.com/velox-io/json/stream
+    for item := range users.Iter() {
+        if err := item.Decode(); err != nil { // binds one element
+            return err
+        }
+        u := item.Target()
+        fmt.Println(u.ID, u.Name)
+    }
+    return nil
+})
+
+if err := json.Unmarshal(src, &resp); err != nil {
+    return err
+}
+fmt.Println(resp.Message) // fields around the stream bind as usual
+```
+
+Peak memory is one batch of elements rather than the whole array. Streaming here is element level, not byte level.
+Example detail: [stream](examples/unmarshal/stream).
 
 ## Roadmap
 
