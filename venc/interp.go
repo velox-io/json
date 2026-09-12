@@ -294,6 +294,20 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 				pc += 16
 			}
 
+		case opSkipIfZeroGo:
+			// The omitzero closure runs inline here: the interpreter is
+			// already in Go, so no yield is needed.
+			fb, ok := bp.Fallbacks[int(pc)]
+			if !ok {
+				return fmt.Errorf("venc: interp: opSkipIfZeroGo at PC=%d with no fallback info", pc)
+			}
+			ext := opExtAt(ops, pc)
+			if fb.OmitZeroFn(unsafe.Add(base, fb.Offset)) {
+				pc += ext.OperandA // jump forward past the emission
+			} else {
+				pc += 16
+			}
+
 		case opCall:
 			ext := opExtAt(ops, pc)
 			if depth >= VJ_MAX_STACK_DEPTH {
@@ -685,6 +699,13 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 				continue
 			}
 
+			if fb.TagFlags&EncTagFlagOmitZero != 0 && fb.OmitZeroFn != nil {
+				if fb.OmitZeroFn(fieldPtr) {
+					pc += 8
+					continue
+				}
+			}
+
 			if fb.TagFlags&EncTagFlagOmitEmpty != 0 && fb.IsZeroFn != nil {
 				if fb.IsZeroFn(fieldPtr) {
 					pc += 8
@@ -779,6 +800,12 @@ func interpIsZero(ptr unsafe.Pointer, tag int32) bool {
 		return *(*float64)(ptr) == 0
 	case opString:
 		return *(*string)(ptr) == ""
+	case zctOZSlice, zctOZRaw:
+		// Slice kinds are zero for omitzero only when nil.
+		return (*gort.SliceHeader)(ptr).Data == nil
+	case zctOZMap:
+		// Map is zero for omitzero only when nil.
+		return *(*unsafe.Pointer)(ptr) == nil
 	default:
 		switch typ.ElemTypeKind(tag) {
 		case typ.KindSlice:

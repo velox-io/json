@@ -13,6 +13,7 @@ const (
 	EncTypeFlagHasTextMarshalFn = typ.TypeFlagHasTextMarshalFn
 	EncTagFlagQuoted            = typ.TagFlagQuoted
 	EncTagFlagOmitEmpty         = typ.TagFlagOmitEmpty
+	EncTagFlagOmitZero          = typ.TagFlagOmitZero
 )
 
 type EncodeFn func(es *encodeState, ptr unsafe.Pointer) error
@@ -104,6 +105,14 @@ type EncFieldInfo struct {
 	KeyBytes       []byte // compact `"name":`
 	KeyBytesIndent []byte // indented `"name": `
 	IsZeroFn       func(ptr unsafe.Pointer) bool
+
+	// OmitZeroFn is the `omitzero` check (IsZero method binding or pure
+	// reflect walk); nil for value.Value and stream.Stream fields.
+	OmitZeroFn func(ptr unsafe.Pointer) bool
+
+	// OmitZeroMethod records that OmitZeroFn came from an IsZero method
+	// binding, which only Go can run.
+	OmitZeroMethod bool
 }
 
 type EncStructInfo struct {

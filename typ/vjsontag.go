@@ -25,24 +25,66 @@ const VJSONTagKey = "vjson"
 // at build time.
 const EmbedOption = "embed"
 
-// hasEmbedOption reports whether a field's `json` tag carries the embed option.
-// The name is not consulted: `json:"x,embed"` is a conflict the caller reports,
-// not a reason to treat the option as absent.
-func hasEmbedOption(tag reflect.StructTag) bool {
-	raw, ok := tag.Lookup("json")
-	if !ok {
-		return false
+// jsonOptions is the parsed option set of a field's `json` tag.
+type jsonOptions struct {
+	omitEmpty bool
+	omitZero  bool
+	quoted    bool
+	embed     bool
+}
+
+// onlyEmbed reports whether the option list is empty or carries nothing but
+// the embed option.
+func (o jsonOptions) onlyEmbed() bool {
+	return o == jsonOptions{} || o == jsonOptions{embed: true}
+}
+
+// jsonOptionCanonical returns the canonical spelling a misspelled option
+// normalizes to, or "" when the option is no near-miss of a known one.
+// Normalization is lowercasing plus underscore removal, so "omitEmpty" and
+// "omit_zero" both map to their canonical spelling. The rejection itself is
+// a velox-only diagnostic; encoding/json activates options by exact match
+// and treats every other spelling as inert.
+func jsonOptionCanonical(opt string) string {
+	switch strings.ReplaceAll(strings.ToLower(opt), "_", "") {
+	case "omitempty":
+		return "omitempty"
+	case "omitzero":
+		return "omitzero"
+	case "string":
+		return "string"
+	case "embed":
+		return "embed"
 	}
-	_, opts, hasOpts := strings.Cut(raw, ",")
-	if !hasOpts {
-		return false
-	}
-	for opt := range strings.SplitSeq(opts, ",") {
-		if strings.TrimSpace(opt) == EmbedOption {
-			return true
+	return ""
+}
+
+// parseJSONTag splits a `json` tag value into its name and option set.
+// Options are matched exactly, as the standard library does, so a
+// space-padded option is absent rather than active. Misspelled appearances
+// of known options are collected for the caller to reject; unrecognized
+// options are ignored, which the standard library reserves for future
+// meaning.
+func parseJSONTag(raw string) (name string, opts jsonOptions, mutants []string) {
+	name, optList, _ := strings.Cut(raw, ",")
+	for opt := range strings.SplitSeq(optList, ",") {
+		switch opt {
+		case "":
+		case "omitempty":
+			opts.omitEmpty = true
+		case "omitzero":
+			opts.omitZero = true
+		case "string":
+			opts.quoted = true
+		case "embed":
+			opts.embed = true
+		default:
+			if canon := jsonOptionCanonical(opt); canon != "" {
+				mutants = append(mutants, opt)
+			}
 		}
 	}
-	return false
+	return name, opts, mutants
 }
 
 // ReserveUnknownName is the JSON name given to a value.Value field carrying

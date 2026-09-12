@@ -95,6 +95,8 @@ func buildSizeStruct(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 		sizeFn    func(ptr unsafe.Pointer) int
 		omitEmpty bool
 		isZeroFn  func(ptr unsafe.Pointer) bool
+		omitZero  bool
+		ozFn      func(ptr unsafe.Pointer) bool
 	}
 
 	sizers := make([]fieldSizer, 0, len(si.Fields))
@@ -104,10 +106,12 @@ func buildSizeStruct(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 		fi := &si.Fields[i]
 		overhead := len(fi.KeyBytes) + 1 // key + comma
 		omit := fi.TagFlags&EncTagFlagOmitEmpty != 0
+		oz := fi.TagFlags&EncTagFlagOmitZero != 0 && fi.OmitZeroFn != nil
 
 		// A stream field's emptiness is producer-driven and its whole-struct
 		// IsZeroFn says nothing about the write side, so it never registers a
-		// sizer: charge the static empty-array floor and move on.
+		// sizer: charge the static empty-array floor and move on. Stream does
+		// not participate in omitzero either.
 		if fi.Type.Kind == typ.KindStream {
 			if !omit {
 				fixedTotal += overhead + 2
@@ -120,14 +124,16 @@ func buildSizeStruct(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 			// Can't dynamically predict this field (depth exceeded, custom marshal, etc.)
 			// Use static estimate instead of giving up the whole struct.
 			staticHint := computeHintBytes(fi.Type, depth+1)
-			if !omit {
+			if !omit && !oz {
 				fixedTotal += overhead + staticHint
 			} else {
 				sizers = append(sizers, fieldSizer{
 					offset:    fi.Offset,
 					overhead:  overhead + staticHint,
-					omitEmpty: true,
+					omitEmpty: omit,
 					isZeroFn:  fi.IsZeroFn,
+					omitZero:  oz,
+					ozFn:      fi.OmitZeroFn,
 				})
 			}
 			continue
@@ -144,18 +150,20 @@ func buildSizeStruct(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 			fixedFieldSize = 12
 		}
 
-		if fixedFieldSize > 0 && !omit {
+		if fixedFieldSize > 0 && !omit && !oz {
 			fixedTotal += overhead + fixedFieldSize
 			continue
 		}
 
-		if fixedFieldSize > 0 && omit {
+		if fixedFieldSize > 0 && (omit || oz) {
 			fixed := overhead + fixedFieldSize
 			sizers = append(sizers, fieldSizer{
 				offset:    fi.Offset,
 				overhead:  fixed,
-				omitEmpty: true,
+				omitEmpty: omit,
 				isZeroFn:  fi.IsZeroFn,
+				omitZero:  oz,
+				ozFn:      fi.OmitZeroFn,
 			})
 			continue
 		}
@@ -167,6 +175,8 @@ func buildSizeStruct(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 			sizeFn:    fn,
 			omitEmpty: omit,
 			isZeroFn:  fi.IsZeroFn,
+			omitZero:  oz,
+			ozFn:      fi.OmitZeroFn,
 		})
 	}
 
@@ -180,6 +190,9 @@ func buildSizeStruct(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 		for i := range sizers {
 			s := &sizers[i]
 			fieldPtr := unsafe.Add(ptr, s.offset)
+			if s.omitZero && s.ozFn != nil && s.ozFn(fieldPtr) {
+				continue // omitzero zero field → omitted entirely
+			}
 			if s.omitEmpty && s.isZeroFn != nil && s.isZeroFn(fieldPtr) {
 				continue // omitempty zero field → omitted entirely
 			}

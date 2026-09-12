@@ -17,17 +17,35 @@ Velox focuses on **binding-style** conversion between JSON and typed Go values (
 
 Velox follows `encoding/json` semantics on the common path:
 
-- field tags: custom names, `-`, `,string`, `,omitempty`
+- field tags: custom names, `-`, `,string`, `,omitempty`, `,omitzero`
 - anonymous (embedded) structs, pointers, `json.Number`, `json.RawMessage`
 - `json.Marshaler`/`json.Unmarshaler` and `encoding.TextMarshaler`/`TextUnmarshaler`
 - boxing into `any` (`[]any`, `map[string]any`)
 - unmarshal errors can be inspected with `errors.As` against the `encoding/json` error types
+
+`omitzero` follows Go 1.24 `encoding/json` semantics: a field is skipped when
+its value is zero, as decided by an `IsZero() bool` method if the field type or
+its pointer implements one, otherwise by `reflect.Value.IsZero`. Unlike
+`omitempty`, a nil slice or map is zero while an empty non-nil one is not.
+`value.Value` and `stream.Stream` fields are always emitted.
+
+```go
+type Event struct {
+    Name string    `json:"name"`
+    At   time.Time `json:"at,omitzero"` // zero time → key absent
+    Tags []string  `json:"tags,omitzero"` // nil → absent; empty non-nil → "tags":[]
+}
+```
 
 Deliberate differences:
 
 - **Case-sensitive field matching.**
 
   For performance, Velox deliberately matches field names by exact bytes rather than performing the case-insensitive matching supported by `encoding/json`.
+
+- **Strict tag-option parsing.**
+
+  A misspelled option such as `omitEmpty` or `omit_zero` fails the type's build with a message naming the canonical spelling, where `encoding/json` v1 silently ignores it. An embedded field whose tag carries options (other than `embed`) is likewise rejected rather than promoted with the options dropped.
 
 
 ### Requirements
@@ -106,7 +124,7 @@ type Foo struct {
 
 ### Polymorphic decoding
 
-Some payloads name their own type: a `type` member decides whether `data` holds a user or a product. Velox resolves that choice while scanning, so one pass produces the right Go value instead of a `json.RawMessage` you decode yourself. Two selectors are available:
+JSON has no sum types, but payloads often encode them: a discriminator field names the type and a sibling field carries the matching variant. Velox resolves that choice while scanning, so one pass produces the right Go value instead of a `json.RawMessage` you decode yourself. Two selectors are available:
 
 - `vjson:"variant=<disc>"` picks the case from a sibling string field.
 - `vjson:"kindof"` picks the case from the JSON value's own kind.

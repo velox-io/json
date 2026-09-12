@@ -1,8 +1,5 @@
 // Package bind decodes JSON into Go values described by a vbind.TypeTree
 // using the native full-buffered binder.
-//
-// NewParser is for repeated decodes of one type; package Unmarshal pools
-// parsers by destination type for one-shot calls.
 package bind
 
 import (
@@ -24,8 +21,7 @@ import (
 	"github.com/velox-io/json/vbind"
 )
 
-// UnmarshalOption is an alias for option.Option, the unified functional-option
-// type shared with dom and package vjson.
+// UnmarshalOption is an alias for option.Option
 type UnmarshalOption = option.Option
 
 func WithUseNumber() UnmarshalOption { return option.WithUseNumber() }
@@ -37,9 +33,9 @@ func WithStrictScan() UnmarshalOption { return option.WithStrictScan() }
 func WithZeroCopy(enabled bool) UnmarshalOption { return option.WithZeroCopy(enabled) }
 
 // applyOpts translates opts into the C-side opt flag bits and returns the
-// resolved config so each entry can enforce its input-model gate. The
-// zero-copy bit is entry-resolved: resolveZeroCopy arms it for contiguous
-// drives, and every other drive stays copying.
+// resolved config so each entry can enforce its input-model gate. The zero-copy
+// bit is entry-resolved: resolveZeroCopy arms it for contiguous drives, and
+// every other drive stays copying.
 func applyOpts(p *Parser, opts []UnmarshalOption) option.Config {
 	cfg := option.Apply(opts)
 	p.optFlags = 0
@@ -58,12 +54,11 @@ func applyOpts(p *Parser, opts []UnmarshalOption) option.Config {
 	return cfg
 }
 
-// resolveZeroCopy maps the caller's string-backing choice onto a contiguous
-// drive, whose input is caller bytes and therefore aliasable. The default
-// aliases escape-free strings into that input. Trees carrying value.Value or
-// poly fields keep the copying parse under the default, because their content
-// flows through the tape machinery and stays arena-backed; an explicit demand
-// on those trees is rejected instead of silently downgraded.
+// resolveZeroCopy maps the caller's string-backing choice onto a contiguous drive,
+// whose input is caller bytes and therefore aliasable. The default aliases escape-free
+// strings into that input. TypeTree carrying value.Value or poly fields keep the copying
+// parse under the default, because their content flows through the tape machinery and
+// stays arena-backed. An explicit demand on those typetree is rejected instead of silently downgraded.
 func resolveZeroCopy(p *Parser, cfg option.Config) error {
 	if p.tt.HasValueField || p.tt.HasPolyField {
 		if cfg.ZeroCopy == option.ZeroCopyOn {
@@ -77,16 +72,8 @@ func resolveZeroCopy(p *Parser, cfg option.Config) error {
 	return nil
 }
 
-// Unmarshal parses JSON data into the value pointed to by v.
-// v must be a non-nil pointer, directly or via an interface{}.
-//
-// Escape-free strings alias data's backing by default: the input is scanned
-// through an internal padded copy, and each aliased span rebases into the
-// caller-owned original, so the caller preserves data's bytes while any
-// decoded value remains reachable. WithZeroCopy(false) selects the copying
-// parse. Trees carrying value.Value or poly fields stay arena-backed under
-// the default and are rejected with ErrZeroCopyTypedTree when zero-copy is
-// demanded explicitly.
+// Unmarshal parses JSON data into the value pointed to by v. v must be a non-nil
+// pointer, directly or via an interface{}.
 func Unmarshal[T any](data []byte, v T, opts ...UnmarshalOption) error {
 	rt := reflect.TypeFor[T]()
 	var ptr unsafe.Pointer
@@ -130,7 +117,7 @@ func Unmarshal[T any](data []byte, v T, opts ...UnmarshalOption) error {
 }
 
 // Pad returns a buffer holding data followed by PaddingSize bytes of 0x20
-// scan sentinel, suitable for UnmarshalPadded.
+// scan sentinel.
 //
 // If data has at least PaddingSize bytes of spare capacity past its length,
 // Pad reuses data's backing array and writes the padding in place. Otherwise
@@ -157,14 +144,6 @@ func Pad(data []byte) []byte {
 // paddedData must carry at least PaddingSize bytes of 0x20 padding past its
 // length; use Pad to construct it. The native parser reads up to 64 bytes
 // past the actual JSON end.
-//
-// Escape-free strings alias paddedData by default: decoded values keep its
-// backing reachable, and the caller preserves its bytes while any decoded
-// value remains reachable. Escaped strings still decode through the internal
-// string arena, and WithZeroCopy(false) selects the copying parse. Trees
-// carrying value.Value or poly fields stay arena-backed under the default and
-// are rejected with ErrZeroCopyTypedTree when zero-copy is demanded
-// explicitly.
 func UnmarshalPadded[T any](paddedData []byte, v T, opts ...UnmarshalOption) error {
 	rt := reflect.TypeFor[T]()
 	var ptr unsafe.Pointer
@@ -211,7 +190,6 @@ func UnmarshalPadded[T any](paddedData []byte, v T, opts ...UnmarshalOption) err
 }
 
 // shape is the immutable binding plan and parser pool for one Go root type.
-// TypeTree flags describe the graph features used by per-call arena sizing.
 type shape struct {
 	tt          *vbind.TypeTree
 	ctxTemplate ndec.BindContext
@@ -290,10 +268,7 @@ func newParserFromShape(sh *shape) *Parser {
 	return p
 }
 
-// RefreshAllocatorStats is a test-only hook for the vbind SlotClass stats
-// facility. It refreshes the live Batch snapshot from this Parser's Allocator
-// so FormatStats can report the steady-state Batch. No-op when stats are
-// disabled.
+// RefreshAllocatorStats is a test-only hook for the vbind SlotClass stats facility.
 func (p *Parser) RefreshAllocatorStats() {
 	vbind.RefreshFinalBatch(p.alloc)
 }
@@ -304,14 +279,12 @@ func (p *Parser) SnapshotOffsets() vbind.OffsetSnapshot {
 	return p.alloc.SnapshotOffsets()
 }
 
-// ConsumedSince returns per-class slot consumption since the snapshot.
-// Test-only hook.
+// ConsumedSince returns per-class slot consumption since the snapshot. Test-only hook.
 func (p *Parser) ConsumedSince(s vbind.OffsetSnapshot) []uint32 {
 	return p.alloc.ConsumedSince(s)
 }
 
-// RetainedCount reports the Allocator's current staged-backing count.
-// Test-only hook.
+// RetainedCount reports the Allocator's current staged-backing count. Test-only hook.
 func (p *Parser) RetainedCount() int {
 	return p.alloc.RetainedCount()
 }
@@ -326,19 +299,13 @@ func (p *Parser) FinalOffsets() []uint32 {
 }
 
 // FinalSlotState returns the live MuBlock/Cap/Limit/Offset for each SlotClass.
-// Test-only hook for debugging EWMA convergence; requires -tags vbindstats,
-// otherwise all four slices are nil.
+// Test-only hook for debugging EWMA convergence.
 func (p *Parser) FinalSlotState() (muBlock, cap, limit, offset []uint32) {
 	return vbind.LiveSlotState(p.alloc)
 }
 
 // Unmarshal parses data into dst. dst must be a non-nil *T matching the type
-// the Parser was created for; the hot path does not recheck that contract.
-//
-// Escape-free strings alias data's backing by default through the internal
-// padded copy; WithZeroCopy(false) selects the copying parse. Trees carrying
-// value.Value or poly fields stay arena-backed under the default and are
-// rejected with ErrZeroCopyTypedTree when zero-copy is demanded explicitly.
+// the Parser was created for, the hot path does not recheck that contract.
 func (p *Parser) Unmarshal(data []byte, dst any, opts ...UnmarshalOption) error {
 	rt := reflect.TypeOf(dst)
 	if rt == nil || rt.Kind() != reflect.Pointer {
@@ -359,15 +326,6 @@ func (p *Parser) Unmarshal(data []byte, dst any, opts ...UnmarshalOption) error 
 
 // UnmarshalPadded parses paddedData into dst. dst must be a non-nil *T
 // matching the Parser's type.
-//
-// paddedData must carry at least PaddingSize bytes of 0x20 padding past its
-// length; use Pad to construct it. The parser reads up to 64 bytes past the
-// actual JSON end.
-//
-// Escape-free strings alias paddedData by default; WithZeroCopy(false)
-// selects the copying parse. Trees carrying value.Value or poly fields stay
-// arena-backed under the default and are rejected with ErrZeroCopyTypedTree
-// when zero-copy is demanded explicitly.
 func (p *Parser) UnmarshalPadded(paddedData []byte, dst any, opts ...UnmarshalOption) error {
 	rt := reflect.TypeOf(dst)
 	if rt == nil || rt.Kind() != reflect.Pointer {
@@ -394,16 +352,19 @@ var shapeCache rtcache.Cache[*shape]
 // parserReserve retains surplus parsers by root type across sync.Pool eviction.
 var parserReserve = rtcache.NewObjPool(parserFootprint, 0, 0)
 
-// parserFootprint reports the retained bytes of a pooled Parser, for the
-// reserve's admission and budget accounting.
+// setParserReserveEnabled toggles the resident parser floor and clears it when
+// disabled. It is a test hook for observing parser reclamation.
+func setParserReserveEnabled(on bool) { parserReserve.SetEnabled(on) }
+
+// parserFootprint reports the retained bytes of a pooled Parser, for the reserve's
+// admission and budget accounting.
 func parserFootprint(p *Parser) int {
 	return len(p.machine) + len(p.atofBuf) + cap(p.padBuf) + cap(p.structural)*4 +
 		p.alloc.Footprint()
 }
 
-// getParser borrows a Parser for this shape and counts it as in flight, so
-// putParser can tell whether the pool has surplus to spare. Callers must pair it
-// with putParser.
+// getParser borrows a Parser for this shape and counts it as in flight, so putParser can
+// tell whether the pool has surplus to spare. Callers must pair it with putParser.
 func getParser(sh *shape) *Parser {
 	if bypassParserCache {
 		return sh.parserPool.Get().(*Parser)
@@ -412,8 +373,8 @@ func getParser(sh *shape) *Parser {
 	return sh.parserPool.Get().(*Parser)
 }
 
-// putParser reserves p only when another parser for this shape remains in
-// flight. This preserves one parser in the per-shape pool for the fast path.
+// putParser reserves p only when another parser for this shape remains in flight.
+// This preserves one parser in the per-shape pool for the fast path.
 func putParser(sh *shape, p *Parser) {
 	if bypassParserCache {
 		sh.parserPool.Put(p)
@@ -424,10 +385,6 @@ func putParser(sh *shape, p *Parser) {
 	}
 	sh.parserPool.Put(p)
 }
-
-// SetParserReserveEnabled toggles the resident parser floor and clears it when
-// disabled. It is a test hook for observing parser reclamation.
-func SetParserReserveEnabled(on bool) { parserReserve.SetEnabled(on) }
 
 // shapeFor returns the canonical shape for t within this process.
 func shapeFor(t reflect.Type) (*shape, error) {
@@ -466,9 +423,8 @@ func buildShape(rtp uintptr, t reflect.Type) (*shape, error) {
 	return sh, nil
 }
 
-// scanPad is the 0x20 fill written past src so the SIMD scanner can read
-// past srcLen without faulting: 0x20 (space) can never open or close a
-// token, so reads into the pad are inert.
+// scanPad is the 0x20 fill written past src so the SIMD scanner can read past srcLen without
+// faulting: 0x20 (space) can never open or close a token, so reads into the pad are inert.
 var scanPad = func() [ndec.BindScanPad]byte {
 	var p [ndec.BindScanPad]byte
 	for i := range p {
@@ -477,9 +433,8 @@ var scanPad = func() [ndec.BindScanPad]byte {
 	return p
 }()
 
-// padInputInto returns data backed by p.padBuf with BindScanPad bytes of
-// scan padding in capacity. Reusing padBuf avoids allocating on same-type
-// steady-state parses.
+// padInputInto returns data backed by p.padBuf with BindScanPad bytes of scan padding in capacity.
+// Reusing padBuf avoids allocating on same-type steady-state parses.
 func (p *Parser) padInputInto(data []byte) []byte {
 	n := len(data)
 	need := n + ndec.BindScanPad
@@ -498,7 +453,6 @@ func (p *Parser) padInputInto(data []byte) []byte {
 
 // syncStructural sizes the structural-index scan buffer for this parse
 // (srcLen+64 u32 slots) and syncs the base/cap into the Alloc ABI view.
-// The buffer is pooled on the Parser; cap grows monotonically across parses.
 //
 // A regrow orphans the current backing, whose only GC root is *structural;
 // DropStructuralViews clears the machine's views into it while that root is
@@ -517,8 +471,8 @@ func syncStructural(m *ndec.BindMachine, structural *[]uint32, srcLen int) {
 }
 
 // syncStrArena ensures the string arena has room for this parse and syncs
-// the writable view's base/cap into the Alloc ABI view. The arena is
-// pooled on the Allocator; cursor is amortized across parses.
+// the writable view's base/cap into the Alloc ABI view. The arena is pooled
+// on the Allocator, cursor is amortized across parses.
 func syncStrArena(alloc *vbind.Allocator, allocABI *ndec.BindAllocator, srcLen int) {
 	alloc.EnsureStrArena(srcLen)
 	allocABI.StrArena = (*byte)(unsafe.SliceData(alloc.StrArena))
@@ -532,6 +486,10 @@ func sealFailedStrArena(alloc *vbind.Allocator, m *ndec.BindMachine) {
 		alloc.CommitStrArena(int(used))
 	}
 }
+
+// maxSeamDistance is the 31-bit word distance encoded by each seam field. It
+// must match TAPE_SEAM_MASK in the native tape ABI and seamMask in value.
+const maxSeamDistance = 0x7FFFFFFF
 
 // syncTapeArena installs a fresh ABI view with TapeUsed reset. Its capacity is
 // limited to the 31-bit seam distance so unchecked seam writes remain
@@ -548,10 +506,6 @@ func syncTapeArena(alloc *vbind.Allocator, allocABI *ndec.BindAllocator, words i
 	return nil
 }
 
-// maxSeamDistance is the 31-bit word distance encoded by each seam field. It
-// must match TAPE_SEAM_MASK in the native tape ABI and seamMask in value.
-const maxSeamDistance = 0x7FFFFFFF
-
 // syncDoc installs the Doc pointer native writes into each Value descriptor.
 // publishDoc fills its arena views after native determines their extents. Those
 // views retain the same bases used to encode tape and string offsets.
@@ -562,8 +516,8 @@ func syncDoc(allocABI *ndec.BindAllocator) *valueabi.Doc {
 }
 
 // publishDoc exposes the source and arena extents whose bases native encoded.
-// Tape is stored last to publish the completed document. Feed docs never
-// borrow the source, because windows relocate between native runs.
+// Tape is stored last to publish the completed document. Feed docs never borrow
+// the source, because windows relocate between native runs.
 func publishDoc(p *Parser, doc *valueabi.Doc, m *ndec.BindMachine) {
 	if doc == nil {
 		return
@@ -577,8 +531,8 @@ func (p *Parser) unmarshal(data []byte, rootDst unsafe.Pointer) error {
 	return p.unmarshalPadded(p.padInputInto(data), rootDst, data)
 }
 
-// checkPadded verifies the caller-supplied padded buffer meets the scan
-// sentinel contract: at least BindScanPad bytes of capacity past len, all 0x20.
+// checkPadded verifies the caller-supplied padded buffer meets the scan sentinel contract:
+// at least BindScanPad bytes of capacity past len, all 0x20.
 func checkPadded(paddedData []byte) error {
 	n := len(paddedData)
 	if cap(paddedData)-n < ndec.BindScanPad {

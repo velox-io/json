@@ -8,6 +8,8 @@ func init() {
 	Available = true
 }
 
+func stackReserve()
+
 //go:noescape
 //go:nosplit
 func vjVMExecFull(ctx unsafe.Pointer)
@@ -21,7 +23,10 @@ func vjVMExecFast(ctx unsafe.Pointer)
 func vjVMExecCompact(ctx unsafe.Pointer)
 
 // VMExec calls the full-mode native encoder.
-func VMExec(ctx unsafe.Pointer) { vjVMExecFull(ctx) }
+func VMExec(ctx unsafe.Pointer) {
+	stackReserve()
+	vjVMExecFull(ctx)
+}
 
 // VMExecFast calls the fast-mode native encoder.
 func VMExecFast(ctx unsafe.Pointer) { vjVMExecFast(ctx) }

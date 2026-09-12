@@ -78,7 +78,7 @@ func lower(insts []IRInst) (ops []byte, fallbacks map[int]*fbInfo, annotations m
 
 func resolveOperands(inst *IRInst, selfOff int, labelOffsets map[Label]int, a, b *int32) {
 	switch inst.Op {
-	case opSkipIfZero:
+	case opSkipIfZero, opSkipIfZeroGo:
 		if inst.Target != InvalidLabel {
 			targetOff := mustResolve(labelOffsets, inst.Target, "SKIP_IF_ZERO")
 			*a = int32(targetOff - selfOff)
@@ -134,7 +134,7 @@ func resolveOperands(inst *IRInst, selfOff int, labelOffsets map[Label]int, a, b
 
 func isLongOp(op uint16) bool {
 	switch op {
-	case opSkipIfZero, opCall, opPtrDeref,
+	case opSkipIfZero, opSkipIfZeroGo, opCall, opPtrDeref,
 		opSliceBegin, opSliceEnd,
 		opArrayBegin,
 		opSeqFloat64, opSeqInt, opSeqInt64, opSeqString,

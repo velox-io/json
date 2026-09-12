@@ -228,6 +228,9 @@ INLINE void vj_exec(VjExecCtx *ctx)
 
       /* inline variant unfold (49) */
       [OP_UNFOLD] = DT_ENTRY(vj_op_unfold),
+
+      /* omitzero via Go closure (50) */
+      [OP_SKIP_IF_ZERO_GO] = DT_ENTRY(vj_op_skip_if_zero_go),
   };
 
 #undef DT_ENTRY
@@ -1562,6 +1565,17 @@ vj_op_yield: {
   VM_TRACE_YIELD(op->op_type);
   VJ_ST_SET_YIELD(vmstate, VJ_YIELD_FALLBACK);
   /* The 'first' flag is preserved in vmstate; Go reads it directly. */
+  VM_SAVE_AND_RETURN(VJ_EXIT_YIELD);
+}
+
+/* omitzero whose check is Go code: an IsZero method binding, or a struct/
+ * array reflect walk. Yield before any write; the Go handler runs the
+ * field's OmitZeroFn and advances pc by operand_a (skip the emission) or 16
+ * (continue into it). The 'first' flag and buffer are untouched. Placed with
+ * the cold yield handlers so its code displaces no hot dispatch region. */
+vj_op_skip_if_zero_go: {
+  VM_TRACE_YIELD(op->op_type);
+  VJ_ST_SET_YIELD(vmstate, VJ_YIELD_OMIT_ZERO);
   VM_SAVE_AND_RETURN(VJ_EXIT_YIELD);
 }
 

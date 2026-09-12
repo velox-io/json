@@ -46,13 +46,11 @@ type Config struct {
 	SkipLenient bool
 }
 
-// Option is value-in/value-out (not func(*Config)) so Apply never passes a
-// pointer to its local Config into an indirect call: c stays stack-resident
-// regardless of how many opts are applied.
+// Option is the unified functional-option type shared with dom and bind.
 type Option func(Config) Config
 
 // WithZeroCopy selects the string backing. Unmarshal and UnmarshalPadded
-// alias escape-free strings into the caller-owned input by default:
+// alias escape-free strings into the caller-owned input by default.
 // WithZeroCopy(false) selects the copying parse, and WithZeroCopy(true) is an
 // explicit demand that entries whose input cannot alias reject with
 // ErrZeroCopyUnsupported.

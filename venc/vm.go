@@ -74,6 +74,8 @@ const (
 	opValueSpread uint16 = 48
 
 	opUnfold uint16 = 49
+
+	opSkipIfZeroGo uint16 = 50
 )
 
 func kindToOpcode(k typ.ElemTypeKind) uint16 {
@@ -105,6 +107,17 @@ const (
 	yieldFallback   uint32 = 1
 	yieldIfaceMiss  uint32 = 2
 	yieldMapHandoff uint32 = 3
+	yieldOmitZero   uint32 = 4
+)
+
+// omitzero nil-only ZeroCheckTags, mirror of native types.h (28..30). The
+// omitempty tags below 22 double as ElemTypeKind values; these sit above the
+// kind range and select the nil-only checks. Untyped so they serve as both
+// VjOpExt.OperandB (int32) and the interpreter's uint16 switch.
+const (
+	zctOZSlice = 28
+	zctOZMap   = 29
+	zctOZRaw   = 30
 )
 
 // fbInfo.Reason values: Go-side only diagnostic codes for trace output.
@@ -122,6 +135,7 @@ const (
 	fbReasonSpread                     // reserve-unknown spread beyond native bounds or via pointer hops
 	fbReasonUnfold                     // inline variant unfold via pointer hops or over the offset limit
 	fbReasonStream                     // stream.Stream[T] producer activation (lazy member prefix)
+	fbReasonOmitZero                   // omitzero check whose IsZero closure runs in Go
 )
 
 // opFlagIfaceField mirrors native VJ_OP_FLAG_IFACE_FIELD: the unfold field's
@@ -192,6 +206,10 @@ type fbInfo struct {
 	TagFlags typ.TagFlag                   // field-level tag flags (omitempty, quoted)
 	KeyBytes []byte                        // precomputed `"name":` bytes
 	IsZeroFn func(ptr unsafe.Pointer) bool // omitempty zero check
+
+	// OmitZeroFn is the omitzero check for OP_SKIP_IF_ZERO_GO yields and for
+	// fallback fields carrying the omitzero tag.
+	OmitZeroFn func(ptr unsafe.Pointer) bool
 
 	// PtrPath is non-empty for a field promoted across an embedded pointer.
 	// Offset is then relative to the base the hops reach rather than to the

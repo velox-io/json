@@ -1,5 +1,8 @@
 #include "textflag.h"
 
+TEXT ·stackReserve(SB), $256-0
+    RET
+
 // func vjNdecDOMParseCounted(ctx unsafe.Pointer)
 // C: void ndec_dom_parse_counted(NdecDomContext *ctx)
 TEXT ·vjNdecDOMParseCounted(SB), NOSPLIT, $0-8

@@ -8,6 +8,8 @@ func init() {
 	Available = true
 }
 
+func stackReserve()
+
 //go:noescape
 //go:nosplit
 func vjVMExecFull(ctx unsafe.Pointer)
@@ -19,8 +21,6 @@ func vjVMExecFast(ctx unsafe.Pointer)
 //go:noescape
 //go:nosplit
 func vjVMExecCompact(ctx unsafe.Pointer)
-
-func stackReserve()
 
 // The exec chains (inlined itoa and escape bodies) exceed the 800B
 // nosplit budget on Win64, so every entry grows the goroutine stack

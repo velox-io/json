@@ -115,16 +115,26 @@ enum OpType {
   /* Inline variant unfold (49) */
   OP_UNFOLD = 49, /* json:",embed" interface field: run the concrete struct's
                    * body-only Blueprint inline (no braces, no key) */
+
+  /* omitzero via Go closure (50): method binding or struct/array reflect walk */
+  OP_SKIP_IF_ZERO_GO = 50, /* yield to Go; handler runs the field's OmitZeroFn
+                            * and advances pc by operand_a (skip) or 16 (emit) */
 };
 
-/* Dispatch table size, compact: covers all opcodes 0..49 (50 entries). */
-#define OP_DISPATCH_COUNT 50
+/* Dispatch table size, compact: covers all opcodes 0..50 (51 entries). */
+#define OP_DISPATCH_COUNT 51
 
 /* ================================================================
- *  ZeroCheckTag: omitempty zero-value check tags
+ *  ZeroCheckTag: omit-check tags for OP_SKIP_IF_ZERO's operand_b
  *
- *  Encoded in OP_SKIP_IF_ZERO's operand_b field.
- *  Values = Go ElemTypeKind (1-based); Go casts directly.
+ *  Values 1..21 mirror Go ElemTypeKind (1-based); Go casts directly.
+ *  22 and 23 are C-only tags (ZCT_BYTE_SLICE is dead on the emit side;
+ *  ZCT_FALLBACK deliberately collides with KindIface so a non-empty
+ *  interface field never skips natively, the Go fallback checks it).
+ *  24..27 stay clear of the ElemTypeKind values that flow as raw kinds.
+ *  28..30 are the omitzero nil-only variants: an empty-but-non-nil slice,
+ *  map, or RawMessage is a zero reflect value but not an empty one, so
+ *  omitempty and omitzero need distinct checks for those kinds.
  * ================================================================ */
 
 enum ZeroCheckTag {
@@ -151,6 +161,11 @@ enum ZeroCheckTag {
   ZCT_NUMBER      = 21,
   ZCT_BYTE_SLICE  = 22,
   ZCT_FALLBACK    = 23,
+
+  /* omitzero, nil-only variants */
+  ZCT_OZ_SLICE    = 28, /* slice is zero only when data == NULL */
+  ZCT_OZ_MAP      = 29, /* map is zero only when the pointer is NULL */
+  ZCT_OZ_RAW      = 30, /* json.RawMessage is zero only when data == NULL */
 };
 
 /* ================================================================
@@ -239,9 +254,19 @@ static inline int vj_is_zero(const uint8_t *ptr, uint16_t zct) {
     /* GoSwissMap.used is at offset 0, uint64_t */
     return *(const uint64_t *)mp == 0;
   }
+  case ZCT_OZ_SLICE:
+  case ZCT_OZ_RAW: {
+    /* Slice kinds are "zero" for omitzero only when nil: an empty
+     * non-nil slice has a non-NULL data pointer. */
+    return ((const GoSlice *)ptr)->data == NULL;
+  }
+  case ZCT_OZ_MAP: {
+    /* Map is "zero" for omitzero only when nil. */
+    return *(const void *const *)ptr == NULL;
+  }
   case ZCT_STRUCT: {
-    /* Struct is never considered "zero" for omitempty by stdlib.
-     * The Go fallback handles struct omitempty via IsZeroFn. */
+    /* A struct field is never elided by a native skip: encoding/json
+     * omitempty has no struct case, and omitzero routes through Go. */
     return 0;
   }
   case ZCT_FALLBACK:
@@ -492,6 +517,7 @@ enum VjYieldReason {
   VJ_YIELD_FALLBACK    = 1, /* custom marshaler / unsupported */
   VJ_YIELD_IFACE_MISS  = 2, /* interface cache miss */
   VJ_YIELD_MAP_HANDOFF = 3, /* map encoding handoff to Go */
+  VJ_YIELD_OMIT_ZERO   = 4, /* omitzero check via Go closure */
 };
 
 /* ================================================================

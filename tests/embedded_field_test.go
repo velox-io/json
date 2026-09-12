@@ -540,17 +540,19 @@ func TestEmbedded_InlinePromotion(t *testing.T) {
 	}
 }
 
-// TestEmbedded_EmptyNameTagPromotes checks an anonymous embedded field tagged
-// json:",omitempty" (empty name). stdlib treats an empty name as a promotion
-// (subfields lifted to the current level) rather than a named field, so only a
-// non-empty name should take the named-field path.
+// TestEmbedded_EmptyNameTagPromotes checks anonymous embedded fields with an
+// empty-name `json` tag. stdlib treats an empty name as a promotion (subfields
+// lifted to the current level) rather than a named field; only a non-empty
+// name takes the named-field path. An empty-name tag carrying options is
+// rejected instead: embedding has no member of its own, so the options could
+// never apply (encoding/json v2 rejects the same shape).
 func TestEmbedded_EmptyNameTagPromotes(t *testing.T) {
 	type emptyNameEmbed struct {
 		Name string `json:"name,omitempty"`
 	}
 	type outer struct {
-		emptyNameEmbed `json:",omitempty"`
-		Extra          string `json:"extra,omitempty"`
+		emptyNameEmbed `json:","` //nolint:staticcheck // empty name, no options
+		Extra          string     `json:"extra,omitempty"`
 	}
 	obj := outer{
 		emptyNameEmbed: emptyNameEmbed{Name: "promoted"},
@@ -569,6 +571,25 @@ func TestEmbedded_EmptyNameTagPromotes(t *testing.T) {
 	}
 	if parsed["extra"] != "y" {
 		t.Errorf("expected extra=y, got %v", parsed["extra"])
+	}
+}
+
+// TestEmbedded_EmptyNameTagWithOptionsRejected pins that an anonymous
+// embedded field whose empty-name tag carries options fails the build rather
+// than promoting with the options silently dropped.
+func TestEmbedded_EmptyNameTagWithOptionsRejected(t *testing.T) {
+	type optEmbed struct {
+		Name string `json:"name,omitempty"`
+	}
+	type outer struct {
+		optEmbed `json:",omitempty"`
+	}
+	// stdlib promotes here; the rejection is a deliberate difference.
+	if _, err := json.Marshal(outer{}); err != nil {
+		t.Fatalf("stdlib rejected the shape too, contrast gone: %v", err)
+	}
+	if _, err := vjson.Marshal(outer{}); err == nil {
+		t.Fatalf("expected vjson to reject options on an embedded field, got success")
 	}
 }
 

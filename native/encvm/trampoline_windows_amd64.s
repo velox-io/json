@@ -16,7 +16,7 @@
 
 #include "textflag.h"
 
-TEXT ·stackReserve(SB), $1280-0
+TEXT ·stackReserve(SB), $384-0
 	RET
 
 // ---- Full mode ----

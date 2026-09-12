@@ -142,6 +142,9 @@ NOINLINE OPTNONE static void vj_trace_yield(VjTraceBuf *tb, uint16_t op_type, in
   case OP_BYTE_SLICE:
     label = "YIELD(byte_slice)";
     break;
+  case OP_SKIP_IF_ZERO_GO:
+    label = "YIELD(omit_zero)";
+    break;
   default:
     label = "YIELD(other)";
     break;

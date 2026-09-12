@@ -672,8 +672,8 @@ func TestRawMessageGC_UnmarshalOnlyConcurrent(t *testing.T) {
 	// The reserve would keep the Parser rooted across GC, removing the
 	// use-after-free window this test reproduces. Disable it so the Parser is
 	// once again reachable only through sync.Pool, as the comment above assumes.
-	SetParserReserveEnabled(false)
-	defer SetParserReserveEnabled(true)
+	setParserReserveEnabled(false)
+	defer setParserReserveEnabled(true)
 
 	type Msg struct {
 		Type string `json:"type"`

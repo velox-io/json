@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
-	"strings"
 	"sync"
 	"unsafe"
 
@@ -456,6 +455,32 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 			// a declaration that is in scope at the label.
 			promote := false
 
+			// The json tag is parsed once, before the embedded classification:
+			// the anonymous and `,embed` paths and namedField below consume
+			// the same name and option set.
+			var (
+				jopts        jsonOptions
+				jmutants     []string
+				jsonTagName  string
+				jsonTagDrops bool
+			)
+			if raw, ok := rf.Tag.Lookup("json"); ok && raw != "" {
+				if raw == "-" {
+					jsonTagDrops = true
+				} else {
+					jsonTagName, jopts, jmutants = parseJSONTag(raw)
+				}
+			}
+
+			// Embedding leaves a field no member of its own, so its tag can
+			// carry no option beside `embed`.
+			if jopts.embed && !jopts.onlyEmbed() {
+				rejects = append(rejects, fmt.Sprintf(
+					"struct %s field %s: `json:%q` gives an embedded field options besides `%s`; embedding has no member of its own, so drop the options",
+					st, rf.Name, rf.Tag.Get("json"), EmbedOption))
+				continue
+			}
+
 			if rf.Anonymous {
 				ft := rf.Type
 				isPtr := ft.Kind() == reflect.Pointer
@@ -463,32 +488,33 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 					ft = ft.Elem()
 				}
 				if ft.Kind() == reflect.Struct {
-					// if an anonymous field has a JSON tag with an explicit name (e.g. json:"addr"),
-					// treat it as a named field instead of promoting its children.
-					// Fields with json:",omitempty" (empty name) promote.
-					// json:"-" excludes the entire embedded field (no promotion of its children either).
-					if tag := rf.Tag.Get("json"); tag != "" {
-						if tag == "-" {
-							continue
-						}
-						name := tag
-						if before, _, ok := strings.Cut(tag, ","); ok {
-							name = before
-						}
-						if name != "" {
-							goto namedField
-						}
+					// An explicit name makes an embedded field a named member.
+					// `json:"-"` excludes the entire embedded field, promotion
+					// of its children included. An empty name promotes, and the
+					// tag may then carry no option at all: `embed` is implied
+					// by Go embedding itself.
+					if jsonTagDrops {
+						continue
+					}
+					if jsonTagName != "" {
+						goto namedField
+					}
+					if !jopts.onlyEmbed() || len(jmutants) > 0 {
+						rejects = append(rejects, fmt.Sprintf(
+							"struct %s field %s: `json:%q` gives an embedded field options besides `%s`; embedding has no member of its own, so drop the options",
+							st, rf.Name, rf.Tag.Get("json"), EmbedOption))
+						continue
 					}
 					promote = true
 				}
-			} else if hasEmbedOption(rf.Tag) {
+			} else if jopts.embed {
 				// `json:",embed"` promotes a named field's content exactly as Go
 				// embedding promotes a named field's content into the host.
 				//
 				// An explicit name contradicts embedding, which occupies no
 				// name of its own; checked here because a struct promotes
 				// during the BFS and never reaches namedField.
-				if name, _, _ := strings.Cut(rf.Tag.Get("json"), ","); name != "" {
+				if jsonTagName != "" {
 					rejects = append(rejects, fmt.Sprintf(
 						"struct %s field %s: `json:%q` gives an embedded field an explicit JSON name; embedding occupies no name, so drop one of the two",
 						st, rf.Name, rf.Tag.Get("json")))
@@ -544,34 +570,31 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 			}
 
 			jsonName := rf.Name
-			omitEmpty := false
-			quoted := false
-			embed := hasEmbedOption(rf.Tag)
-			if tag := rf.Tag.Get("json"); tag != "" {
-				if tag == "-" {
-					// `json:"-"` drops the field, so any velox-only option on it is
-					// dead. Silence would be wrong here specifically: pairing the
-					// dash with a vjson option was how reserve-unknown used to be
-					// spelled, so a struct carrying the retired spelling would lose
-					// its unknown keys with no diagnostic at all.
-					if vj := ParseVJSONTag(rf.Tag); vj.Present {
-						rejects = append(rejects, fmt.Sprintf(
-							"struct %s field %s has `json:\"-\"` together with `vjson:%q`; the field is excluded, so the option cannot apply. Reserving unknown keys is now spelled `json:\",%s\"` on a value.Value field",
-							st, rf.Name, rf.Tag.Get(VJSONTagKey), EmbedOption))
-					}
-					continue
+			if jsonTagDrops {
+				// `json:"-"` drops the field, so any velox-only option on it is
+				// dead. Silence would be wrong here specifically: pairing the
+				// dash with a vjson option was how reserve-unknown used to be
+				// spelled, so a struct carrying the retired spelling would lose
+				// its unknown keys with no diagnostic at all.
+				if vj := ParseVJSONTag(rf.Tag); vj.Present {
+					rejects = append(rejects, fmt.Sprintf(
+						"struct %s field %s has `json:\"-\"` together with `vjson:%q`; the field is excluded, so the option cannot apply. Reserving unknown keys is now spelled `json:\",%s\"` on a value.Value field",
+						st, rf.Name, rf.Tag.Get(VJSONTagKey), EmbedOption))
 				}
-				if before, opts, ok := strings.Cut(tag, ","); ok {
-					jsonName = before
-					omitEmpty = strings.Contains(opts, "omitempty")
-					quoted = strings.Contains(opts, "string")
-				} else {
-					jsonName = tag
-				}
-				if jsonName == "" {
-					jsonName = rf.Name
-				}
+				continue
 			}
+			for _, m := range jmutants {
+				rejects = append(rejects, fmt.Sprintf(
+					"struct %s field %s has misspelled `json` option %q; specify `%s` instead",
+					st, rf.Name, m, jsonOptionCanonical(m)))
+			}
+			if jsonTagName != "" {
+				jsonName = jsonTagName
+			}
+			omitEmpty := jopts.omitEmpty
+			omitZero := jopts.omitZero
+			quoted := jopts.quoted
+			embed := jopts.embed
 
 			fieldUT := partialUniTypeOf(rf.Type, building)
 
@@ -640,6 +663,9 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 			if omitEmpty {
 				tagFlags |= TagFlagOmitEmpty
 			}
+			if omitZero {
+				tagFlags |= TagFlagOmitZero
+			}
 			if quoted {
 				tagFlags |= TagFlagQuoted
 			}
@@ -650,6 +676,7 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 				tagFlags |= TagFlagEmbed
 			}
 
+			ozFn, ozMethod := makeOmitZeroFn(rf.Type, fieldUT)
 			sf := StructField{
 				FieldType:      fieldUT,
 				TagFlags:       tagFlags,
@@ -662,6 +689,8 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 				KeyBytes:       encodeKeyBytes(jsonName),
 				KeyBytesIndent: encodeKeyBytesIndent(jsonName),
 				IsZeroFn:       makeIsZero(rf.Type),
+				OmitZeroFn:     ozFn,
+				OmitZeroMethod: ozMethod,
 			}
 			// Value is a struct (tape-backed) but, like encoding/json's
 			// treatment of struct types, omitempty must NOT elide it: a zero
@@ -792,38 +821,176 @@ func makeIsZero(t reflect.Type) func(unsafe.Pointer) bool {
 		}
 	case reflect.Pointer, reflect.Interface:
 		return func(ptr unsafe.Pointer) bool { return *(*unsafe.Pointer)(ptr) == nil }
+	default:
+		// Structs, arrays, and the remaining kinds are never "empty" for
+		// omitempty: encoding/json's isEmptyValue has no case for them, so a
+		// zero struct field is emitted as {} rather than omitted.
+		return nil
+	}
+}
+
+// makeReflectZeroFn mirrors reflect.Value.IsZero semantics for t: numbers,
+// bool, and uintptr compare against zero, floats compare semantically (so
+// -0.0 is zero), strings and json.Number are zero when empty, complex values
+// when both parts are zero, reference kinds (slice, map, pointer, interface,
+// chan, func, unsafe.Pointer) only when nil, arrays element-wise, and structs
+// by recursing over every field including unexported ones, excluding blank
+// `_` fields. It never consults IsZero methods: omitzero honors them only at
+// the tagged field itself, never inside the recursion.
+func makeReflectZeroFn(t reflect.Type) func(unsafe.Pointer) bool {
+	switch t.Kind() {
+	case reflect.Bool:
+		return func(ptr unsafe.Pointer) bool { return !*(*bool)(ptr) }
+	case reflect.Int:
+		return func(ptr unsafe.Pointer) bool { return *(*int)(ptr) == 0 }
+	case reflect.Int8:
+		return func(ptr unsafe.Pointer) bool { return *(*int8)(ptr) == 0 }
+	case reflect.Int16:
+		return func(ptr unsafe.Pointer) bool { return *(*int16)(ptr) == 0 }
+	case reflect.Int32:
+		return func(ptr unsafe.Pointer) bool { return *(*int32)(ptr) == 0 }
+	case reflect.Int64:
+		return func(ptr unsafe.Pointer) bool { return *(*int64)(ptr) == 0 }
+	case reflect.Uint, reflect.Uintptr:
+		return func(ptr unsafe.Pointer) bool { return *(*uintptr)(ptr) == 0 }
+	case reflect.Uint8:
+		return func(ptr unsafe.Pointer) bool { return *(*uint8)(ptr) == 0 }
+	case reflect.Uint16:
+		return func(ptr unsafe.Pointer) bool { return *(*uint16)(ptr) == 0 }
+	case reflect.Uint32:
+		return func(ptr unsafe.Pointer) bool { return *(*uint32)(ptr) == 0 }
+	case reflect.Uint64:
+		return func(ptr unsafe.Pointer) bool { return *(*uint64)(ptr) == 0 }
+	case reflect.Float32:
+		return func(ptr unsafe.Pointer) bool { return *(*float32)(ptr) == 0 }
+	case reflect.Float64:
+		return func(ptr unsafe.Pointer) bool { return *(*float64)(ptr) == 0 }
+	case reflect.Complex64:
+		return func(ptr unsafe.Pointer) bool { return *(*complex64)(ptr) == 0 }
+	case reflect.Complex128:
+		return func(ptr unsafe.Pointer) bool { return *(*complex128)(ptr) == 0 }
+	case reflect.String:
+		return func(ptr unsafe.Pointer) bool { return len(*(*string)(ptr)) == 0 }
+	case reflect.Slice, reflect.Map, reflect.Pointer, reflect.Interface,
+		reflect.Chan, reflect.Func, reflect.UnsafePointer:
+		return func(ptr unsafe.Pointer) bool { return *(*unsafe.Pointer)(ptr) == nil }
+	case reflect.Array:
+		n := t.Len()
+		if n == 0 {
+			return func(unsafe.Pointer) bool { return true }
+		}
+		elemFn := makeReflectZeroFn(t.Elem())
+		elemSize := t.Elem().Size()
+		return func(ptr unsafe.Pointer) bool {
+			for i := uintptr(0); i < uintptr(n); i++ {
+				if !elemFn(unsafe.Add(ptr, i*elemSize)) {
+					return false
+				}
+			}
+			return true
+		}
 	case reflect.Struct:
-		return makeStructIsZero(t)
+		type fieldCheck struct {
+			offset uintptr
+			fn     func(unsafe.Pointer) bool
+		}
+		var checks []fieldCheck
+		for i := range t.NumField() {
+			sf := t.Field(i)
+			if sf.Name == "_" {
+				continue
+			}
+			checks = append(checks, fieldCheck{sf.Offset, makeReflectZeroFn(sf.Type)})
+		}
+		if len(checks) == 0 {
+			// Every field is blank (or the struct is empty), so only the zero
+			// value exists.
+			return func(unsafe.Pointer) bool { return true }
+		}
+		return func(ptr unsafe.Pointer) bool {
+			for _, c := range checks {
+				if !c.fn(unsafe.Add(ptr, c.offset)) {
+					return false
+				}
+			}
+			return true
+		}
 	default:
 		return nil
 	}
 }
 
-func makeStructIsZero(t reflect.Type) func(unsafe.Pointer) bool {
-	type fieldCheck struct {
-		offset uintptr
-		fn     func(unsafe.Pointer) bool
+type isZeroer interface{ IsZero() bool }
+
+var isZeroerType = reflect.TypeFor[isZeroer]()
+
+// makeOmitZeroFn binds the omitzero check for a struct field of type t.
+//
+// A field whose type, or pointer-to-type, statically implements isZeroer
+// defers to that method, nil-guarded for the pointer and interface kinds,
+// exactly as encoding/json does; method reports that binding so the encoder
+// can route the check through Go while keeping the emission native. Every
+// other type gets the pure-reflect walk. value.Value and stream.Stream
+// fields do not participate in omitzero.
+func makeOmitZeroFn(t reflect.Type, ut *UniType) (fn func(unsafe.Pointer) bool, method bool) {
+	switch ut.Kind {
+	case KindValue, KindStream:
+		return nil, false
 	}
-	var checks []fieldCheck
-	for i := range t.NumField() {
-		sf := t.Field(i)
-		if !sf.IsExported() {
-			continue
-		}
-		fn := makeIsZero(sf.Type)
-		if fn != nil {
-			checks = append(checks, fieldCheck{sf.Offset, fn})
-		}
-	}
-	if len(checks) == 0 {
-		return nil
-	}
-	return func(ptr unsafe.Pointer) bool {
-		for _, c := range checks {
-			if !c.fn(unsafe.Add(ptr, c.offset)) {
-				return false
+
+	switch {
+	case t.Kind() == reflect.Interface && t.Implements(isZeroerType):
+		// The dynamic value decides, so the call goes through reflect: the
+		// field's own itab binds its static interface, not isZeroer. The
+		// elem-nil-pointer guard keeps a typed nil from panicking the call.
+		return func(ptr unsafe.Pointer) bool {
+			rv := reflect.NewAt(t, ptr).Elem()
+			return rv.IsNil() ||
+				(rv.Elem().Kind() == reflect.Pointer && rv.Elem().IsNil()) ||
+				rv.Interface().(isZeroer).IsZero()
+		}, true
+	case t.Kind() == reflect.Pointer && t.Implements(isZeroerType):
+		itab := fieldReceiverItab(t)
+		return func(ptr unsafe.Pointer) bool {
+			p := *(*unsafe.Pointer)(ptr)
+			if p == nil {
+				return true
 			}
-		}
-		return true
+			return isZeroerCall(itab, p)
+		}, true
+	case t.Implements(isZeroerType):
+		itab := fieldReceiverItab(t)
+		return func(ptr unsafe.Pointer) bool {
+			return isZeroerCall(itab, ptr)
+		}, true
+	case reflect.PointerTo(t).Implements(isZeroerType):
+		// Pointer-receiver method: the receiver is the field's address.
+		itab := fieldAddrReceiverItab(t)
+		return func(ptr unsafe.Pointer) bool {
+			return isZeroerCall(itab, ptr)
+		}, true
 	}
+	return makeReflectZeroFn(t), false
+}
+
+// fieldReceiverItab extracts the itab for calling an isZeroer whose receiver
+// is the t-typed value at the field.
+func fieldReceiverItab(t reflect.Type) unsafe.Pointer {
+	sentinel := reflect.New(t)
+	iface := sentinel.Elem().Interface().(isZeroer)
+	return gort.ExtractItab(unsafe.Pointer(&iface))
+}
+
+// fieldAddrReceiverItab extracts the itab for calling an isZeroer whose
+// receiver is the field's address (*t).
+func fieldAddrReceiverItab(t reflect.Type) unsafe.Pointer {
+	sentinel := reflect.New(t)
+	iface := sentinel.Interface().(isZeroer)
+	return gort.ExtractItab(unsafe.Pointer(&iface))
+}
+
+func isZeroerCall(itab, data unsafe.Pointer) bool {
+	var z isZeroer
+	*(*gort.GoIface)(unsafe.Pointer(&z)) = gort.GoIface{Tab: itab, Data: data}
+	return z.IsZero()
 }

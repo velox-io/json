@@ -68,6 +68,7 @@ const (
 	TagFlagQuoted         TagFlag = 1 << iota // `,string` tag
 	TagFlagOmitEmpty                          // `omitempty` tag
 	TagFlagReserveUnknown                     // `json:",embed"` on a value.Value: reserve all unmatched keys
+	TagFlagOmitZero                           // `omitzero` tag
 
 	// TagFlagEmbed marks a field whose `json:",embed"` cannot be resolved by
 	// offset arithmetic here, because which fields it promotes is a run-time
@@ -184,6 +185,18 @@ type StructField struct {
 	KeyBytes       []byte                        // compact `"name":`
 	KeyBytesIndent []byte                        // indented `"name": `
 	IsZeroFn       func(ptr unsafe.Pointer) bool // omitempty check
+
+	// OmitZeroFn is the `omitzero` check: an IsZero method binding when the
+	// field type (or its pointer) implements isZeroer, otherwise a pure
+	// reflect-IsZero walk. It is nil for value.Value and stream.Stream
+	// fields, which do not participate in omitzero.
+	OmitZeroFn func(ptr unsafe.Pointer) bool
+
+	// OmitZeroMethod records that OmitZeroFn came from an IsZero method
+	// binding. The encoder routes method checks through Go and keeps the
+	// emission native; the reflect walk may run natively where a kind-level
+	// check exists.
+	OmitZeroMethod bool
 }
 
 // SliceTypeInfo describes a slice.

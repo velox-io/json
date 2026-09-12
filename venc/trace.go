@@ -41,6 +41,7 @@ var fbReasonLabels = [...]string{
 	fbReasonOverflow:      "overflow",
 	fbReasonViaPtr:        "via_ptr",
 	fbReasonStream:        "stream",
+	fbReasonOmitZero:      "omit_zero",
 }
 
 func expandFallbackReasons(data []byte) []byte {
@@ -239,6 +240,7 @@ var opcodeName = map[uint16]string{
 	opValue:         "VALUE",
 	opValueSpread:   "VALUE_SPREAD",
 	opUnfold:        "UNFOLD",
+	opSkipIfZeroGo:  "SKIP_IF_ZERO_GO",
 }
 
 func dumpBlueprint(bp *Blueprint) {

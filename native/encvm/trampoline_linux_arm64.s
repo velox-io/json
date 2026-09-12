@@ -11,6 +11,9 @@
 
 #include "textflag.h"
 
+TEXT ·stackReserve(SB), $256-0
+    RET
+
 // ---- Full mode ----
 
 // func vjVMExecFull(ctx unsafe.Pointer)

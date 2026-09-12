@@ -212,6 +212,13 @@ func (es *encodeState) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(uns
 					return err
 				}
 
+			case yieldOmitZero:
+				// The skip-go op may live in a child or body Blueprint reached via
+				// SWITCH_OPS or UNFOLD, so resolve the active one.
+				if err := es.handleOmitZeroYield(ctx, activeBlueprint(ctx, bp)); err != nil {
+					return err
+				}
+
 			default:
 				return fmt.Errorf("venc: unknown yield reason %d", vmstateGetYield(ctx.VMState))
 			}
@@ -331,6 +338,26 @@ func unfoldStructTI(rtype reflect.Type) (*EncTypeInfo, error) {
 	return ti, nil
 }
 
+// handleOmitZeroYield serves an OP_SKIP_IF_ZERO_GO yield: the field's
+// omitzero closure is Go code (an IsZero method binding, or a struct/array
+// reflect walk), so the VM handed control back before writing anything. A
+// zero value jumps past the whole emission (operand_a, the same relative
+// encoding OP_SKIP_IF_ZERO uses); otherwise execution continues at the next
+// op and the emission stays native.
+func (es *encodeState) handleOmitZeroYield(ctx *VjExecCtx, bp *Blueprint) error {
+	fb, ok := bp.Fallbacks[int(ctx.PC)]
+	if !ok {
+		return fmt.Errorf("venc: omitzero yield at PC=%d with no fallback info", ctx.PC)
+	}
+	ext := opExtAt(bp.Ops, ctx.PC)
+	if fb.OmitZeroFn(unsafe.Add(ctx.CurBase, fb.Offset)) {
+		ctx.PC += ext.OperandA
+	} else {
+		ctx.PC += 16
+	}
+	return nil
+}
+
 func (es *encodeState) handleFallbackYield(ctx *VjExecCtx, bp *Blueprint) error {
 	isFirst := vmstateGetFirst(ctx.VMState)
 
@@ -370,6 +397,13 @@ func (es *encodeState) handleFallbackYield(ctx *VjExecCtx, bp *Blueprint) error 
 	// below.
 	if fb.TI.Kind == typ.KindStream {
 		return es.streamFromYield(ctx, fb, fieldPtr, isFirst)
+	}
+
+	if fb.TagFlags&EncTagFlagOmitZero != 0 && fb.OmitZeroFn != nil {
+		if fb.OmitZeroFn(fieldPtr) {
+			ctx.PC += 8
+			return nil
+		}
 	}
 
 	if fb.TagFlags&EncTagFlagOmitEmpty != 0 && fb.IsZeroFn != nil {
@@ -528,6 +562,9 @@ func (es *encodeState) unfoldFromYield(ctx *VjExecCtx, fb *fbInfo, isFirst bool)
 				continue
 			}
 			fptr = unsafe.Add(hopBase, uintptr(fi.Offset))
+		}
+		if fi.TagFlags&EncTagFlagOmitZero != 0 && fi.OmitZeroFn != nil && fi.OmitZeroFn(fptr) {
+			continue
 		}
 		if fi.TagFlags&EncTagFlagOmitEmpty != 0 && fi.IsZeroFn != nil && fi.IsZeroFn(fptr) {
 			continue

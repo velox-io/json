@@ -40,13 +40,14 @@ type fieldContext struct {
 
 func fieldFBInfo(fi *EncFieldInfo, fc fieldContext, reason int32) *fbInfo {
 	return &fbInfo{
-		TI:       fi.Type,
-		Offset:   fc.FieldOff,
-		Reason:   reason,
-		TagFlags: fi.TagFlags,
-		KeyBytes: fi.KeyBytes,
-		IsZeroFn: fi.IsZeroFn,
-		PtrPath:  fi.PtrPath,
+		TI:         fi.Type,
+		Offset:     fc.FieldOff,
+		Reason:     reason,
+		TagFlags:   fi.TagFlags,
+		KeyBytes:   fi.KeyBytes,
+		IsZeroFn:   fi.IsZeroFn,
+		OmitZeroFn: fi.OmitZeroFn,
+		PtrPath:    fi.PtrPath,
 	}
 }
 
@@ -191,6 +192,10 @@ func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 		fieldOff := baseOff + fi.Offset
 
 		needsOmitempty := fi.TagFlags&EncTagFlagOmitEmpty != 0
+		// value.Value and stream.Stream carry no OmitZeroFn, so omitzero on
+		// them is a silent no-op.
+		needsOmitZero := fi.TagFlags&EncTagFlagOmitZero != 0 && fi.OmitZeroFn != nil
+		ozMethod := needsOmitZero && fi.OmitZeroMethod
 
 		// A reserve-unknown Value spreads its collected members inline. The
 		// op is keyless: the field has no JSON name of its own. Placement is
@@ -299,8 +304,13 @@ func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 		// time.Time has native VM support; other marshal hooks → fallback.
 		if fi.Type.TypeFlags&(EncTypeFlagHasMarshalFn|EncTypeFlagHasTextMarshalFn) != 0 {
 			if isTimeType(fi.Type) {
-				if needsOmitempty {
-					emitSkipIfZero(b, fieldOff, 16+8, fi.Type.Kind)
+				// time.Time implements isZeroer, so omitzero always binds the
+				// method; the RFC3339 emission itself stays native.
+				if needsOmitZero {
+					emitOmitZeroGo(b, fieldOff, fi, fc, func() {
+						emitTime(b, fi.Type, fc, fieldFBInfo(fi, fc, fbReasonMarshaler))
+					})
+					continue
 				}
 				emitTime(b, fi.Type, fc, fieldFBInfo(fi, fc, fbReasonMarshaler))
 				continue
@@ -316,7 +326,17 @@ func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 		// `,string` tag: only int/int64 stays native.
 		if fi.TagFlags&EncTagFlagQuoted != 0 {
 			if fi.Type.Kind == typ.KindInt || fi.Type.Kind == typ.KindInt64 {
-				if needsOmitempty {
+				if ozMethod {
+					emitOmitZeroGo(b, fieldOff, fi, fc, func() {
+						if needsOmitempty {
+							emitSkipIfZero(b, fieldOff, 16+8, fi.Type.Kind)
+						}
+						emitQuotedInt(b, fi.Type.Kind, fc)
+					})
+					continue
+				}
+				// For int kinds the omitempty and omitzero checks coincide.
+				if needsOmitempty || needsOmitZero {
 					emitSkipIfZero(b, fieldOff, 16+8, fi.Type.Kind)
 				}
 				emitQuotedInt(b, fi.Type.Kind, fc)
@@ -336,7 +356,17 @@ func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 			typ.KindFloat32, typ.KindFloat64,
 			typ.KindString,
 			typ.KindNumber:
-			if needsOmitempty {
+			if ozMethod {
+				emitOmitZeroGo(b, fieldOff, fi, fc, func() {
+					if needsOmitempty {
+						emitSkipIfZero(b, fieldOff, 16+8, fi.Type.Kind)
+					}
+					emitPrimitive(b, fi.Type.Kind, fc)
+				})
+				continue
+			}
+			// For these kinds the omitempty and omitzero checks coincide.
+			if needsOmitempty || needsOmitZero {
 				emitSkipIfZero(b, fieldOff, 16+8, fi.Type.Kind)
 			}
 			emitPrimitive(b, fi.Type.Kind, fc)
@@ -349,92 +379,76 @@ func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 				emitFieldFallback(b, fc, fieldFBInfo(fi, fc, fbReasonUnknown))
 				continue
 			}
-			if needsOmitempty {
-				afterLabel := b.allocLabel()
-				b.emit(IRInst{
-					Op:       opSkipIfZero,
-					FieldOff: uint16(fieldOff),
-					Target:   afterLabel,
-					OperandB: int32(fi.Type.Kind),
+			// omitempty never elides a struct; omitzero consults the field's
+			// closure (IsZero method or all-fields reflect walk) in Go.
+			if needsOmitZero {
+				emitOmitZeroGo(b, fieldOff, fi, fc, func() {
+					emitNestedStruct(b, fi.Type, fc)
 				})
-				emitNestedStruct(b, fi.Type, fc)
-				b.defineLabel(afterLabel)
-			} else {
-				emitNestedStruct(b, fi.Type, fc)
+				continue
 			}
+			emitNestedStruct(b, fi.Type, fc)
 
 		case typ.KindPointer:
-			if needsOmitempty {
-				afterLabel := b.allocLabel()
-				b.emit(IRInst{
-					Op:       opSkipIfZero,
-					FieldOff: uint16(fieldOff),
-					Target:   afterLabel,
-					OperandB: int32(typ.KindPointer),
+			if ozMethod {
+				emitOmitZeroGo(b, fieldOff, fi, fc, func() {
+					emitPointerChecked(b, fi.Type, fc, omitCheckTag(fi, needsOmitempty, false))
 				})
-				emitPointer(b, fi.Type, fc)
-				b.defineLabel(afterLabel)
-			} else {
-				emitPointer(b, fi.Type, fc)
+				continue
 			}
+			emitPointerChecked(b, fi.Type, fc, omitCheckTag(fi, needsOmitempty, needsOmitZero))
 
 		case typ.KindSlice:
 			si := fi.Type.ResolveSlice()
 			// []byte stays native via OP_BYTE_SLICE.
 			if si.ElemType.Kind == typ.KindUint8 && si.ElemSize == 1 {
-				if needsOmitempty {
-					emitSkipIfZero(b, fieldOff, 16+8, typ.KindSlice)
+				if ozMethod {
+					emitOmitZeroGo(b, fieldOff, fi, fc, func() {
+						emitByteSliceChecked(b, fc, omitCheckTag(fi, needsOmitempty, false))
+					})
+					continue
 				}
-				emitByteSlice(b, fc)
+				emitByteSliceChecked(b, fc, omitCheckTag(fi, needsOmitempty, needsOmitZero))
 				continue
 			}
-			if needsOmitempty {
-				afterLabel := b.allocLabel()
-				b.emit(IRInst{
-					Op:       opSkipIfZero,
-					FieldOff: uint16(fieldOff),
-					Target:   afterLabel,
-					OperandB: int32(typ.KindSlice),
+			if ozMethod {
+				emitOmitZeroGo(b, fieldOff, fi, fc, func() {
+					emitSliceChecked(b, fi.Type, fc, omitCheckTag(fi, needsOmitempty, false))
 				})
-				emitSlice(b, fi.Type, fc)
-				b.defineLabel(afterLabel)
-			} else {
-				emitSlice(b, fi.Type, fc)
+				continue
 			}
+			emitSliceChecked(b, fi.Type, fc, omitCheckTag(fi, needsOmitempty, needsOmitZero))
 
 		case typ.KindArray:
 			ai := fi.Type.ResolveArray()
-			// [N]byte still goes through the Go base64 path.
+			// [N]byte still goes through the Go base64 path; its omitzero
+			// check rides the fallback site rather than a second yield.
 			if ai.ElemType.Kind == typ.KindUint8 && ai.ElemSize == 1 {
 				emitFieldFallback(b, fc, fieldFBInfo(fi, fc, fbReasonByteArray))
+				continue
+			}
+			if needsOmitZero {
+				emitOmitZeroGo(b, fieldOff, fi, fc, func() {
+					emitArray(b, fi.Type, fc)
+				})
 				continue
 			}
 			emitArray(b, fi.Type, fc)
 
 		case typ.KindMap:
 			mi := fi.Type.ResolveMap()
-			if needsOmitempty {
-				afterLabel := b.allocLabel()
-				b.emit(IRInst{
-					Op:       opSkipIfZero,
-					FieldOff: uint16(fieldOff),
-					Target:   afterLabel,
-					OperandB: int32(typ.KindMap),
+			if ozMethod {
+				emitOmitZeroGo(b, fieldOff, fi, fc, func() {
+					emitMapChecked(b, fi.Type, fc, mi, omitCheckTag(fi, needsOmitempty, false))
 				})
-				if canSwissMapInC(mi.MapKind) {
-					emitMapSwiss(b, fi.Type, fc)
-				} else {
-					emitMap(b, fi.Type, fc)
-				}
-				b.defineLabel(afterLabel)
-			} else if canSwissMapInC(mi.MapKind) {
-				emitMapSwiss(b, fi.Type, fc)
-			} else {
-				emitMap(b, fi.Type, fc)
+				continue
 			}
+			emitMapChecked(b, fi.Type, fc, mi, omitCheckTag(fi, needsOmitempty, needsOmitZero))
 
 		case typ.KindAny:
-			if needsOmitempty {
+			// Nil is the only zero and the only empty value; `any` has no
+			// static method set, so a method binding is impossible here.
+			if needsOmitempty || needsOmitZero {
 				emitSkipIfZero(b, fieldOff, 16+8, typ.KindAny)
 			}
 			emitInterface(b, fc)
@@ -446,7 +460,12 @@ func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 			emitFieldFallback(b, fc, fieldFBInfo(fi, fc, fbReasonIface))
 
 		default:
-			if needsOmitempty {
+			// json.RawMessage lands here as a single-op fallback. Its
+			// omitempty check is len==0; omitzero is nil-only, so an
+			// empty-but-non-nil value differs between the two tags.
+			if fi.Type.Kind == typ.KindRawMessage && needsOmitZero && !needsOmitempty {
+				emitSkipIfZeroTag(b, fieldOff, 16+8, zctOZRaw)
+			} else if needsOmitempty {
 				emitSkipIfZero(b, fieldOff, 16+8, fi.Type.Kind)
 			}
 			emitFieldFallback(b, fc, fieldFBInfo(fi, fc, fbReasonUnknown))
@@ -740,12 +759,136 @@ func emitValue(b *irBuilder, fc fieldContext, fb *fbInfo) {
 }
 
 func emitSkipIfZero(b *irBuilder, fieldOff uintptr, skipBytes int, kind typ.ElemTypeKind) {
+	emitSkipIfZeroTag(b, fieldOff, skipBytes, int32(kind))
+}
+
+// emitSkipIfZeroTag emits the static-form SKIP_IF_ZERO: the skipped region is
+// the 16-byte check op plus skipBytes-16 of emission. tag is a ZeroCheckTag,
+// either an ElemTypeKind (omitempty semantics) or an omitzero nil-only tag.
+func emitSkipIfZeroTag(b *irBuilder, fieldOff uintptr, skipBytes int, tag int32) {
 	b.emit(IRInst{
 		Op:       opSkipIfZero,
 		FieldOff: uint16(fieldOff),
 		OperandA: int32(skipBytes),
-		OperandB: int32(kind),
+		OperandB: tag,
 	})
+}
+
+// ozKindTag selects the SKIP_IF_ZERO tag for a reflect-mode omitzero field:
+// the nil-only variants where the kind's omitempty semantics differ (empty
+// counts as empty, not as zero), the kind itself where they coincide.
+func ozKindTag(kind typ.ElemTypeKind) int32 {
+	switch kind {
+	case typ.KindSlice:
+		return zctOZSlice
+	case typ.KindMap:
+		return zctOZMap
+	case typ.KindRawMessage:
+		return zctOZRaw
+	}
+	return int32(kind)
+}
+
+// omitCheckTag picks the SKIP_IF_ZERO tag for a reflect-mode field: 0 when
+// no omit tag applies, the kind's omitempty tag when omitempty is present
+// (its len==0 check subsumes nil), and the omitzero nil-only tag otherwise.
+func omitCheckTag(fi *EncFieldInfo, needsOmitempty, needsOmitZero bool) int32 {
+	switch {
+	case needsOmitempty:
+		return int32(fi.Type.Kind)
+	case needsOmitZero:
+		return ozKindTag(fi.Type.Kind)
+	}
+	return 0
+}
+
+// emitPointerChecked wraps the pointer emission in a label-form SKIP_IF_ZERO
+// when tag is non-zero. Nil is the only zero and the only empty value, so
+// both tags share the same check.
+func emitPointerChecked(b *irBuilder, ti *EncTypeInfo, fc fieldContext, tag int32) {
+	if tag == 0 {
+		emitPointer(b, ti, fc)
+		return
+	}
+	afterLabel := b.allocLabel()
+	b.emit(IRInst{
+		Op:       opSkipIfZero,
+		FieldOff: uint16(fc.FieldOff),
+		Target:   afterLabel,
+		OperandB: tag,
+	})
+	emitPointer(b, ti, fc)
+	b.defineLabel(afterLabel)
+}
+
+// emitByteSliceChecked emits the static SKIP_IF_ZERO before the []byte op
+// when tag is non-zero.
+func emitByteSliceChecked(b *irBuilder, fc fieldContext, tag int32) {
+	if tag != 0 {
+		emitSkipIfZeroTag(b, fc.FieldOff, 16+8, tag)
+	}
+	emitByteSlice(b, fc)
+}
+
+// emitSliceChecked wraps the slice emission in a label-form SKIP_IF_ZERO
+// when tag is non-zero.
+func emitSliceChecked(b *irBuilder, ti *EncTypeInfo, fc fieldContext, tag int32) {
+	if tag == 0 {
+		emitSlice(b, ti, fc)
+		return
+	}
+	afterLabel := b.allocLabel()
+	b.emit(IRInst{
+		Op:       opSkipIfZero,
+		FieldOff: uint16(fc.FieldOff),
+		Target:   afterLabel,
+		OperandB: tag,
+	})
+	emitSlice(b, ti, fc)
+	b.defineLabel(afterLabel)
+}
+
+// emitMapChecked wraps the map emission in a label-form SKIP_IF_ZERO when
+// tag is non-zero.
+func emitMapChecked(b *irBuilder, ti *EncTypeInfo, fc fieldContext, mi *EncMapInfo, tag int32) {
+	if tag == 0 {
+		if canSwissMapInC(mi.MapKind) {
+			emitMapSwiss(b, ti, fc)
+		} else {
+			emitMap(b, ti, fc)
+		}
+		return
+	}
+	afterLabel := b.allocLabel()
+	b.emit(IRInst{
+		Op:       opSkipIfZero,
+		FieldOff: uint16(fc.FieldOff),
+		Target:   afterLabel,
+		OperandB: tag,
+	})
+	if canSwissMapInC(mi.MapKind) {
+		emitMapSwiss(b, ti, fc)
+	} else {
+		emitMap(b, ti, fc)
+	}
+	b.defineLabel(afterLabel)
+}
+
+// emitOmitZeroGo wraps emit in an OP_SKIP_IF_ZERO_GO check: the field's
+// omitzero closure is Go code (an IsZero method binding, or a struct/array
+// reflect walk), so the VM yields before writing anything and resumes past
+// the emission (zero) or at its start (non-zero). The emission itself stays
+// native.
+func emitOmitZeroGo(b *irBuilder, fieldOff uintptr, fi *EncFieldInfo, fc fieldContext, emit func()) {
+	after := b.allocLabel()
+	b.emit(IRInst{
+		Op:       opSkipIfZeroGo,
+		FieldOff: uint16(fieldOff),
+		Target:   after,
+		Fallback: fieldFBInfo(fi, fc, fbReasonOmitZero),
+	})
+	emit()
+	b.defineLabel(after)
 }
 
 func emitTypeBody(b *irBuilder, elemTI *EncTypeInfo) {
