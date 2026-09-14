@@ -88,11 +88,20 @@ func mkBindErr(p *Parser, m *ndec.BindMachine, src []byte, srcBase uint64) error
 		}
 		return &UnmarshalTypeError{Value: "unknown_field", Type: rt, Offset: int64(pos)}
 	case ndec.BindErrUnsupportedTag:
-		return jerr.NewSyntaxError("bind: field tag option not yet supported", int(pos))
+		return jerr.NewSyntaxError("bind: unsupported target type on this bind path", int(pos))
 	case ndec.BindErrVariantUnknownDisc, ndec.BindErrVariantMissingDisc:
 		return mkVariantErr(p, m, kind, pos)
 	case ndec.BindErrKindofUnregistered:
 		return mkKindofErr(p, m, pos)
+	case ndec.BindErrKindofColdCase:
+		msg := "case target type not supported (use a concrete type or any)"
+		if kind := kindofName(m.Yield.Arg1); kind != "" {
+			msg = "case " + kind + " target type not supported (use a concrete type or any)"
+		}
+		return &KindofError{Host: bindErrorHost(p, m), Message: msg, Pos: int64(pos)}
+	case ndec.BindErrVariantColdCase:
+		return &VariantError{Host: bindErrorHost(p, m), VariantIdx: uint16(m.Yield.Arg1),
+			Message: "case target type not supported (use a concrete type or any)", Pos: int64(pos)}
 	default:
 		return jerr.NewSyntaxError("bind: native error", int(pos))
 	}
@@ -179,9 +188,10 @@ func truncateForErr(s string) string {
 	return s[:max] + "...(truncated)"
 }
 
-// VariantError reports a variant resolution failure (unknown or missing
-// discriminator value). Raised by the C-side tape-bind sub-routine when it
-// cannot resolve a case from the discriminator.
+// VariantError reports a variant resolution failure: an unknown or missing
+// discriminator value, or a selected case whose target type the binder cannot
+// construct. Raised by the C-side tape-bind sub-routine when it cannot resolve
+// a case from the discriminator.
 type VariantError struct {
 	Host       string // host Go type name (empty if not derivable)
 	VariantIdx uint16 // variant's index into TypeTree.Polys
@@ -197,8 +207,9 @@ func (e *VariantError) Error() string {
 }
 
 // KindofError reports a kindof resolution failure: the JSON value's kind has no
-// registered case. The JSON path may report the field value's source offset;
-// tape and phase2 paths report no position.
+// registered case, or the selected case's target type is one the binder cannot
+// construct. The JSON path may report the field value's source offset; tape and
+// phase2 paths report no position.
 type KindofError struct {
 	Host    string // host Go type name (empty if not derivable)
 	Message string

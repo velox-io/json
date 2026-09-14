@@ -1351,7 +1351,9 @@ func (b *builder) checkVariantCaseTypes(fieldFlags uint32, path string) *TapeBin
 		}
 		caseTypeIdx := pt.CaseTypeIdx(caseIdx)
 		ct := b.types[caseTypeIdx]
-		if (ct.flags&bindFlagCold != 0) && ct.Kind != KindPointer && ct.Kind != KindValue {
+		// An any-target case is the passthrough: the field binds with the
+		// default any boxing instead of a published case interface.
+		if (ct.flags&bindFlagCold != 0) && ct.Kind != KindPointer && ct.Kind != KindValue && ct.Kind != KindAny {
 			return &TapeBindUnsupportedPos{Path: path, TypeIdx: caseTypeIdx, Reason: reason}
 		}
 		if pos := b.walkVariantCaseIntoType(caseTypeIdx, path+".case"); pos != nil {

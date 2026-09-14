@@ -719,11 +719,13 @@ object_field_value: {
         AUX_LAZY_ALLOC(m, BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0));
         goto object_field_tape;
       }
+      if (site == POLY_SITE_ANY) goto object_field_value_any;
       goto poly_field_bind;
     }
 
     /* Direct Value output may split a surrounding merged tape. The next merged
      * write detects the arena gap and spans it by widening the standing seam. */
+  object_field_value_any:
     if (BIND_IS_ANY(child_type->kind)) {
       BIND_DISPATCH_ANY(child_type, body);
     }
@@ -1012,6 +1014,26 @@ phase2_poly_bind: {
       return;
     }
   }
+  const BindType *case_type = &m->b.ctx.types[pc.case_type_idx];
+  /* An any-target case descends as the field's own any type straight into the
+   * field eface: the walk's any dispatch writes the default boxing there. */
+  if (case_type->kind == BIND_KIND_ANY) {
+    PHASE2_DESCEND(m, target, case_type, pc.case_type_idx, ax->a.start, ax->val_at, ax->val_end, TAPE_VIEW_A,
+                   BIND_PHASE_VARIANT_REBIND_RESUME);
+  }
+  if ((case_type->flags & BIND_FLAG_COLD) && case_type->kind != BIND_KIND_PTR &&
+      case_type->kind != BIND_KIND_VALUE) {
+    __BIND_SAVE_LOCALS(m);
+    m->c.phase                = BIND_PHASE_DOCUMENT_END;
+    m->b.yield.pending_action = BIND_YIELD_ERROR;
+    if (f->flags & BIND_FF_KINDOF) {
+      BIND_ERROR_PAYLOAD(m, BIND_ERR_KINDOF_COLD_CASE, poly_kind_of_tape_tag((uint8_t)(word >> 56)),
+                         BIND_ERROR_NO_POS, cur_dst);
+    } else {
+      BIND_ERROR_PAYLOAD(m, BIND_ERR_VARIANT_COLD_CASE, poly_idx, BIND_ERROR_NO_POS, cur_dst);
+    }
+    return;
+  }
   if (poly_case_slot_full(m, &pc)) {
     /* Resume here because ax->walk already points past this entry. Restore the
      * field from stash and rederive the case without moving either cursor. */
@@ -1100,8 +1122,13 @@ phase2_case_bind: {
   /* Tape binding supports cold cases only when tape data can materialize them
    * without reconstructing source bytes. */
   if ((case_type->flags & BIND_FLAG_COLD) && case_type->kind != BIND_KIND_PTR &&
-      case_type->kind != BIND_KIND_VALUE)
-    BIND_YIELD_ERR_NO_POS(m, BIND_ERR_UNSUPPORTED_TAG, 0);
+      case_type->kind != BIND_KIND_VALUE) {
+    __BIND_SAVE_LOCALS(m);
+    m->c.phase                = BIND_PHASE_DOCUMENT_END;
+    m->b.yield.pending_action = BIND_YIELD_ERROR;
+    BIND_ERROR_PAYLOAD(m, BIND_ERR_VARIANT_COLD_CASE, iv_idx, BIND_ERROR_NO_POS, cur_dst);
+    return;
+  }
   if (poly_case_slot_full(m, &pc)) {
     __BIND_SAVE_LOCALS(m);
     m->c.phase                = BIND_PHASE_TAPE_BIND_CLOSE_DRAIN_RETRY;
@@ -2494,7 +2521,14 @@ t_document_start: {
       }
       TAPE_BIND_VALUE_FIELD(m, cur_dst, BIND_PHASE_TAPE_BIND_VALUE_RESUME_ROOT);
     }
-    if (BIND_IS_ANY(cur_type.kind) || BIND_IS_DEFERRED_VALUE(cur_type.kind) || cur_type.kind == BIND_KIND_NUMBER) {
+    /* An any root reaches here only through a poly case descent whose target
+     * is any: the destination eface takes the default any boxing. Genuine any
+     * roots are rejected at build time, and a *any case unwraps into this
+     * branch after the pointer chain above. */
+    if (BIND_IS_ANY(cur_type.kind)) {
+      TAPE_BIND_DISPATCH_ANY(cur_dst);
+    }
+    if (BIND_IS_DEFERRED_VALUE(cur_type.kind) || cur_type.kind == BIND_KIND_NUMBER) {
       goto t_unsupported;
     }
     if (tag == (TAPE_NULL_VAL >> 56)) {
@@ -2619,9 +2653,21 @@ t_object_field_value: {
     if (pc.case_idx < 0) goto t_route_field_to_variant;
 
     const BindType *case_type = &m->b.ctx.types[pc.case_type_idx];
+    /* An any-target case keeps the field's own type and destination, so the
+     * cold gate below dispatches the default any boxing into the field eface. */
+    if (case_type->kind == BIND_KIND_ANY) goto t_field_value_cold_gate;
     if ((case_type->flags & BIND_FLAG_COLD) && case_type->kind != BIND_KIND_PTR &&
-        case_type->kind != BIND_KIND_VALUE)
-      goto t_unsupported;
+        case_type->kind != BIND_KIND_VALUE) {
+      __TAPE_BIND_SAVE_LOCALS(m);
+      m->c.phase                = BIND_PHASE_DOCUMENT_END;
+      m->b.yield.pending_action = BIND_YIELD_ERROR;
+      if (cur_struct_field->flags & BIND_FF_KINDOF) {
+        BIND_ERROR_PAYLOAD(m, BIND_ERR_KINDOF_COLD_CASE, poly_kind_of_tape_tag(tag), BIND_ERROR_NO_POS, cur_dst);
+      } else {
+        BIND_ERROR_PAYLOAD(m, BIND_ERR_VARIANT_COLD_CASE, poly_idx, BIND_ERROR_NO_POS, cur_dst);
+      }
+      return;
+    }
     if (poly_case_slot_full(m, &pc)) {
       __TAPE_BIND_SAVE_LOCALS(m);
       m->c.stash.field_value.field = (uint8_t *)cur_struct_field;

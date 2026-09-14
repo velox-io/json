@@ -33,9 +33,10 @@ var (
 )
 
 // DefineVariantCases registers D as T's fallback case set. D must be a descriptor
-// struct mapping discriminator values to concrete Go types. Registration is
-// process-wide and must precede parsing T. Repeating the same registration is
-// idempotent; a conflicting descriptor panics.
+// struct mapping discriminator values to concrete Go types. A case typed `any`
+// selects the default any boxing, so it is legal only on `any` variant fields.
+// Registration is process-wide and must precede parsing T. Repeating the same
+// registration is idempotent; a conflicting descriptor panics.
 func DefineVariantCases[T any, D any]() {
 	host := reflect.TypeFor[T]()
 	desc := reflect.TypeFor[D]()
@@ -518,6 +519,12 @@ func (b *builder) buildOneVariantTable(hostUT *typ.UniType, hostIdx uint32, si *
 		}
 		if streamHost, ok := findStreamField(c.Target, nil); ok {
 			return fmt.Errorf("vbind: variant %s case %d (%s) target type %s contains stream.Stream[T] field at %s; stream fields cannot appear in a variant case target (per-element yield conflicts with discriminator-driven dispatch). Stream[T]'s element type may itself contain variant fields; only the case-target direction is restricted", host, i, caseLabel, c.Target, streamHost)
+		}
+		// The any-target passthrough (default any boxing for this case) applies
+		// to `any` fields only: an interface field needs a concrete case whose
+		// type implements it, and the default boxing never does.
+		if isIface && c.Target == reflect.TypeFor[any]() {
+			return fmt.Errorf("vbind: variant %s case %d (%s) targets any on interface field %s; use a concrete type implementing the interface", host, i, caseLabel, si.Fields[variantFieldIdx].JSONName)
 		}
 		targetUT := typ.UniTypeOf(c.Target)
 		var typeIdx uint32

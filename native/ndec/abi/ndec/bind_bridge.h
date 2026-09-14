@@ -571,6 +571,11 @@ enum {
   BIND_ERR_VARIANT_MISSING_DISC = 37,
   /* arg1 is the stable kind ordinal: bool, number, string, array, or object. */
   BIND_ERR_KINDOF_UNREGISTERED = 38,
+  /* A case target whose kind the binder cannot construct (Unmarshaler,
+   * RawMessage, ...). arg1 is the kind ordinal for kindof and the poly table
+   * index for a variant. */
+  BIND_ERR_KINDOF_COLD_CASE  = 39,
+  BIND_ERR_VARIANT_COLD_CASE = 40,
 };
 
 /*
