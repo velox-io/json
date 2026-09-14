@@ -60,7 +60,6 @@ func extractFromPE(path string) (*ExtractResult, error) {
 	// Build blob: .text + padding + .rdata
 	blob := make([]byte, len(textData))
 	copy(blob, textData)
-	codeExtent := uint64(len(textData))
 
 	var rdataVA uint32
 	var rdataBlobOffset uint64
@@ -98,8 +97,6 @@ func extractFromPE(path string) (*ExtractResult, error) {
 	return &ExtractResult{
 		Blob:        blob,
 		Syms:        syms,
-		CodeExtent:  codeExtent,
-		BlobExtent:  uint64(len(blob)),
 		IsARM64:     false,
 		COFFMachine: machine,
 	}, nil

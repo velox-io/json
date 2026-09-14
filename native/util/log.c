@@ -15,6 +15,36 @@
 
 #include "log.h"
 
+#if defined(VJ_LOG_SYSCALL_RUNTIME)
+/* write(2) syscall number of the OS the blob runs on, read by
+ * vj_raw_write_stderr (log.h). The arch-canonical blob is built for linux,
+ * so the default is the linux number; the loader patches it per host OS
+ * before sealing the mapping (see native/execblob WordPatch). Production
+ * builds never log, but the symbol must exist in every build so the
+ * patcher can always resolve it. The loader's write is invisible to the
+ * compiler (it is the only reader in production builds, and that reader
+ * is Go code outside this translation unit), so LTO sees an unread global
+ * and would otherwise discard it; __attribute__((used)) pins it as a
+ * root for the dead-global elimination pass.
+ *
+ * const volatile with HIDDEN visibility, not a plain extern: const lands the
+ * word in .rodata, which prelink merges into .text, so the blob stays a
+ * single SHF_ALLOC section; volatile forces every read through memory,
+ * because the loader's one write (inside the mapping's writable window) is
+ * invisible to C semantics and LTO would otherwise fold the load into the
+ * build-time constant; hidden visibility keeps the access a direct
+ * PC-relative load. A default-visibility extern compiles to a GOT
+ * indirection, whose entry lives outside the extracted .text and faults at
+ * runtime (see prelink-obj). */
+#if defined(__aarch64__)
+__attribute__((used)) HIDDEN const volatile long vj_log_write_nr = 64;
+#elif defined(__x86_64__)
+__attribute__((used)) HIDDEN const volatile long vj_log_write_nr = 1;
+#else
+#error "vj_log_write_nr: unsupported architecture"
+#endif
+#endif /* VJ_LOG_SYSCALL_RUNTIME */
+
 #ifdef VJ_LOG_ENABLED
 
 NOINLINE int vj_fprintf_stderr(const char *fmt, ...) {

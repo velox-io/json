@@ -109,9 +109,19 @@ To get the best performance across different usage patterns, Velox compiles thre
 
 The appropriate variant is selected automatically at runtime based on the caller's options. Most of the time it's the Fast variant — it even skips HTML escaping of `<>&` in strings, which isn't needed in many JSON use cases.
 
-The C VM currently supports four platforms: darwin/arm64, linux/amd64, linux/arm64, and windows/amd64. On unsupported platforms, Velox automatically falls back to a pure Go marshal path — fully functional, just without native acceleration.
+The marshal C VM runs on every OS on amd64/arm64; on other architectures,
+Velox automatically falls back to a pure Go marshal path — fully functional,
+just without native acceleration. The decode VM and the lookup module run
+the same way.
 
-Build artifacts for each platform are precompiled `.syso` files that link directly into the Go binary. Users don't need a C compiler installed.
+Build artifacts are precompiled and shipped with the module, so users need no
+C compiler. Every native module (marshal VM, decode VM, lookup) ships as an
+embedded arch-canonical ELF image (`encvm_<arch>.elf`, `ndec_<arch>.elf`,
+`vlib_<arch>.elf`, one per architecture) that `native/execblob` maps into
+executable memory at startup, keeping them invisible to every linker and
+letting one artifact serve every OS on that architecture. The marshal VM's
+image merges its three mode specializations (fast/compact/full) into one
+blob.
 
 
 ## Final Thoughts

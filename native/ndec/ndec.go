@@ -2,9 +2,6 @@ package ndec
 
 import "unsafe"
 
-// stackReserve grows the Go stack before entering the deepest native bind chain.
-func stackReserve()
-
 func DomParseCountedRun(ctx unsafe.Pointer) {
 	vjNdecDOMParseCounted(ctx)
 }

@@ -1,12 +1,14 @@
 /*
  * encvm entry point.
  *
- * Defines VJ_VM_EXEC_FN_NAME (e.g. vj_vm_exec_full_neon), then
- * includes encvm.h which emits the VM body as that public symbol.
+ * Defines VJ_VM_EXEC_FN_NAME (e.g. vj_vm_exec_full), then includes encvm.h
+ * which emits the VM body as that public symbol.
  *
- * Compile once per mode (full/compact/fast) × ISA (neon/avx2). */
-
-/* Build configuration validation */
+ * Compile once per mode (full/compact/fast); the modes are linked into one
+ * arch-canonical blob whose entry names carry no ISA segment, since every
+ * arch ships exactly one ISA variant.
+ *
+ * Build configuration validation */
 #if !defined(OS)
 #error "OS must be defined (linux, darwin, or windows)"
 #endif
@@ -45,16 +47,15 @@
 #error "MODE is not defined"
 #endif
 
-/* Two-level expansion so VJ_MODE_TAG is expanded before pasting. */
-#define VJ_VM_EXEC_NAME2(mode, isa) vj_vm_exec_##mode##_##isa
-#define VJ_VM_EXEC_NAME(mode, isa)  VJ_VM_EXEC_NAME2(mode, isa)
+/* Two-level expansion so VJ_MODE_TAG is expanded before pasting. The entry
+ * name carries no ISA segment: the blob is arch-canonical and each arch
+ * builds exactly one ISA variant, so the Go trampolines call stable,
+ * arch-independent names. */
+#define VJ_VM_EXEC_NAME2(mode) vj_vm_exec_##mode
+#define VJ_VM_EXEC_NAME(mode)  VJ_VM_EXEC_NAME2(mode)
 
 #ifndef VJ_VM_EXEC_FN_NAME
-#if defined(ISA_NEON)
-#define VJ_VM_EXEC_FN_NAME VJ_VM_EXEC_NAME(VJ_MODE_TAG, neon)
-#elif defined(ISA_AVX2)
-#define VJ_VM_EXEC_FN_NAME VJ_VM_EXEC_NAME(VJ_MODE_TAG, avx2)
-#endif
+#define VJ_VM_EXEC_FN_NAME VJ_VM_EXEC_NAME(VJ_MODE_TAG)
 #endif
 
 #include "encvm.h"

@@ -71,7 +71,7 @@ INLINE uint64_t ndec_clear_lowest_bit(uint64_t v) {
  * structural bit of a chunk.
  */
 INLINE int ndec_ctz64_empty(uint64_t v, uint32_t *out_idx) {
-#if defined(__x86_64__) && defined(__BMI__) && !defined(_MSC_VER)
+#if defined(__x86_64__) && defined(__BMI__)
   uint64_t idx;
   int carry;
   __asm__("tzcntq %2, %0" : "=r"(idx), "=@ccc"(carry) : "r"(v) : "cc");

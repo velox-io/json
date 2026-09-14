@@ -328,8 +328,9 @@ func extractFromMachO(path string) (*ExtractResult, error) {
 		return nil, err
 	}
 
-	// Determine code and data extents within __TEXT
-	codeExtent, dataExtent := findTextExtent(textSeg)
+	// Determine the data extent within __TEXT (end of the last section);
+	// the blob spans it plus any extra segments.
+	_, dataExtent := findTextExtent(textSeg)
 
 	// Determine blob extent: max VA end across __TEXT and extra segments
 	blobExtent := dataExtent
@@ -399,12 +400,10 @@ func extractFromMachO(path string) (*ExtractResult, error) {
 	}
 
 	return &ExtractResult{
-		Blob:       blob,
-		Syms:       syms,
-		CodeExtent: codeExtent,
-		BlobExtent: blobExtent,
-		IsARM64:    true, // Mach-O path is always ARM64
-		BuildVer:   buildVer,
+		Blob:     blob,
+		Syms:     syms,
+		IsARM64:  true, // Mach-O path is always ARM64
+		BuildVer: buildVer,
 	}, nil
 }
 

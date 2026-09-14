@@ -45,14 +45,26 @@
 
 #include <stdarg.h>
 
-/* Raw write syscall */
+/* Raw write syscall.
+ *
+ * VJ_LOG_SYSCALL_RUNTIME (set by the build for arch-canonical blobs, see
+ * SYSO_ARCH_ONLY in scripts/gen-natives.sh) switches the write(2) syscall
+ * number from a compile-time constant to the vj_log_write_nr global. Such a
+ * blob is built for linux and consumed by every OS on its arch, so no
+ * compile-time constant is correct everywhere; the loader patches the
+ * global per host OS while the mapping is still writable (see
+ * native/execblob WordPatch). */
 
 #if defined(__aarch64__)
 
-#if defined(__APPLE__)
+#if defined(VJ_LOG_SYSCALL_RUNTIME)
+/* The number comes from vj_log_write_nr; see the shared selection below. */
+#elif defined(__APPLE__)
 #define VJ_SYS_WRITE 4
 #elif defined(__linux__)
 #define VJ_SYS_WRITE 64
+#else
+#error "vj_raw_syscall3: no write syscall number for this target"
 #endif
 
 static inline long vj_raw_syscall3(long num, long a1, long a2, long a3) {
@@ -67,10 +79,14 @@ static inline long vj_raw_syscall3(long num, long a1, long a2, long a3) {
 
 #elif defined(__x86_64__)
 
-#if defined(__APPLE__)
+#if defined(VJ_LOG_SYSCALL_RUNTIME)
+/* The number comes from vj_log_write_nr; see the shared selection below. */
+#elif defined(__APPLE__)
 #define VJ_SYS_WRITE 0x2000004
 #elif defined(__linux__)
 #define VJ_SYS_WRITE 1
+#else
+#error "vj_raw_syscall3: no write syscall number for this target"
 #endif
 
 static inline long vj_raw_syscall3(long num, long a1, long a2, long a3) {
@@ -83,8 +99,19 @@ static inline long vj_raw_syscall3(long num, long a1, long a2, long a3) {
 #error "vj_raw_syscall3: unsupported architecture"
 #endif
 
+#if defined(VJ_LOG_SYSCALL_RUNTIME)
+/* HIDDEN on the declaration too, so every reader compiles a direct
+ * PC-relative access instead of a GOT indirection (see log.c). */
+extern HIDDEN const volatile long vj_log_write_nr;
+#define VJ_LOG_WRITE_NR() vj_log_write_nr
+#elif defined(VJ_SYS_WRITE)
+#define VJ_LOG_WRITE_NR() VJ_SYS_WRITE
+#else
+#error "VJ_LOG_SYSCALL_RUNTIME requires an arch above to define it"
+#endif
+
 static inline void vj_raw_write_stderr(const char *buf, int len) {
-  vj_raw_syscall3(VJ_SYS_WRITE, 2, (long)buf, (long)len);
+  vj_raw_syscall3(VJ_LOG_WRITE_NR(), 2, (long)buf, (long)len);
 }
 
 /* Number formatting (stack-only, right-aligned) */

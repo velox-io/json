@@ -51,7 +51,7 @@ Deliberate differences:
 ### Requirements
 
 - Golang Version: 1.24+
-- Platform: `darwin/arm64`, `linux/amd64`, `linux/arm64`, `windows/amd64`.
+- Platform: `linux/amd64`, `linux/arm64`, `windows/amd64`, `windows/arm64`, `darwin/amd64`, `darwin/arm64`.
 
 
 ## Zero-copy decoding

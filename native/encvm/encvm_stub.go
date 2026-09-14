@@ -1,14 +1,18 @@
-//go:build vj_noencvm || !((darwin && arm64) || (linux && amd64) || (linux && arm64) || (windows && amd64))
+//go:build vj_noencvm || !(amd64 || arm64)
 
 package encvm
 
 import "unsafe"
 
 // Stub entries for builds without the native encoder VM: either the
-// vj_noencvm tag is set or the platform has no compiled objects.
-// Available stays false and VMExec must not be called.
-func VMExec(ctx unsafe.Pointer) { panic("encvm: native encoder not linked") }
+// vj_noencvm tag is set or the platform has no arch-canonical blob. The
+// trampoline declarations in encvm.go get panicking bodies here; Available
+// stays false and callers take the pure-Go encoder before ever reaching
+// these.
+func stackReserve() {}
 
-func VMExecFast(ctx unsafe.Pointer) { panic("encvm: native encoder not linked") }
+func vjVMExecFull(ctx unsafe.Pointer) { panic("encvm: native encoder not linked") }
 
-func VMExecCompact(ctx unsafe.Pointer) { panic("encvm: native encoder not linked") }
+func vjVMExecFast(ctx unsafe.Pointer) { panic("encvm: native encoder not linked") }
+
+func vjVMExecCompact(ctx unsafe.Pointer) { panic("encvm: native encoder not linked") }

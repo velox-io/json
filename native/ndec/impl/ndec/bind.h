@@ -304,11 +304,11 @@ NOINLINE static void ndec_bind_parse_inner(NdecBindMachine *m) {
   NdecCursor cursor  = m->cursor;
   const uint8_t *src = m->b.ctx.src;
 
-  BindFrame *frames                 = m->c.frames;
-  const BindType *types             = m->b.ctx.types;
-  int32_t depth                     = m->c.depth;
-  uint8_t *cur_dst                  = m->c.cur_dst;
-  BindType cur_type                 = m->c.cur_type;
+  BindFrame *frames     = m->c.frames;
+  const BindType *types = m->b.ctx.types;
+  int32_t depth         = m->c.depth;
+  uint8_t *cur_dst      = m->c.cur_dst;
+  BindType cur_type     = m->c.cur_type;
   /* Prevent SROA from promoting cur_type to SSA registers: nothing borrows
    * its address, and in this register-saturated machine the promotion
    * costs spill traffic. It also loses the uniform shape of the ~26

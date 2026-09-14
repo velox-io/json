@@ -5,14 +5,37 @@
 # or directly via `make -C native/vlib <target>` (common.mk supplies host
 # defaults).
 #
-# vlib sets SYSO_PREFIX=vlib in sources.sh, so the syso/dylib name drops the
-# mode/isa segments: vlib_${os}_${arch}.<ext>. Single mode (default), single
-# dylib. Five NOSPLIT trampolines (trampoline_<os>_<arch>.s) call into the
-# five exported ndec_lookup_* build-path symbols; ndec_lookup_find is inline
-# only and ndec_lookup_tier_name is exported but has no trampoline, so
-# neither appears in STACK_CHECK_ENTRIES.
+# vlib sets SYSO_PREFIX=vlib in sources.sh, so the artifact name drops the
+# mode/isa segments, and SYSO_ARCH_ONLY=1 drops the os segment too:
+# vlib_${arch}.elf, one blob per arch shared by every platform. The blob is
+# embedded by vlib_blob_*.go and mapped at runtime, never linked, so
+# SYSO_EXT=".elf" keeps the Go tool from picking it up as a host object.
+# The intermediate dylib derives from the artifact basename
+# (vlib_${arch}.${ext}); it is a build
+# artifact, not an input to Go. Single mode (default), single dylib. Five
+# NOSPLIT trampolines (trampoline_arm64.s, trampoline_amd64.s,
+# trampoline_windows_amd64.s) call through function pointers into the five
+# exported ndec_lookup_* build-path symbols; ndec_lookup_find is inline only
+# and ndec_lookup_tier_name is exported but has no trampoline, so neither
+# appears in STACK_CHECK_ENTRIES.
 
 REPO_ROOT ?= ../..
+
+# The blob is arch-canonical: one linux-built ELF serves every OS on that
+# arch (see sources.sh). Force TARGET_OS regardless of host or command line,
+# so a darwin or windows host build produces the same ELF container instead
+# of silently overwriting the shared blob with Mach-O / COFF, which execblob
+# cannot parse. Must precede the include: common.mk expands _EXT from
+# TARGET_OS at parse time. override wins even against command-line
+# assignments, which is exactly what a caller accidentally passing
+# TARGET_OS=darwin needs to lose to.
+override TARGET_OS := linux
+
+# Every build is a linux cross build now, so the musl sysroot is required
+# whenever the host is not linux. Mirror the top-level Makefile's default so
+# `make -C native/vlib gen-all-platforms` works without wrapper variables.
+LINUX_SYSROOT ?= $(shell test -d /opt/linux/sysroot && echo /opt/linux/sysroot || echo "")
+
 include ../common.mk
 
 SOURCES := native/vlib/sources.sh
@@ -20,33 +43,33 @@ SOURCES := native/vlib/sources.sh
 MODE  := default
 MODES := default
 
-# Platforms this module ships a trampoline .s for.
-SUPPORTED_PLATFORMS := darwin/arm64 linux/amd64 linux/arm64 windows/amd64
+# Platforms this module runs a build for. Every other platform consumes one of
+# these two blobs: darwin/arm64 shares vlib_arm64.elf because AAPCS64 and
+# Apple arm64 pass integer arguments identically, and darwin/amd64 plus
+# windows/amd64 share vlib_amd64.elf through the Win64 to System V bridge in
+# trampoline_windows_amd64.s (see SYSO_ARCH_ONLY in sources.sh).
+#
+# The artifact name carries no os, so the canonical build must run with
+# TARGET_OS=linux. Building it elsewhere overwrites the shared blob with that
+# platform's object format, which the other consumers cannot parse.
+SUPPORTED_PLATFORMS := linux/amd64 linux/arm64
 
-# NOSPLIT trampoline targets (vlib_init_<os>_<arch>.go declares these five).
+# NOSPLIT trampoline targets (vlib_init.go declares these five).
 STACK_CHECK_ENTRIES := ndec_lookup_size_for ndec_lookup_scratch_size \
 	ndec_lookup_init ndec_lookup_get_tier ndec_lookup_footprint
 
-# SYSO_PREFIX=vlib -> naming is vlib_${os}_${arch}.<ext>, no mode/isa.
-DYLIB := $(REPO_ROOT)/build/prelink/vlib_$(TARGET_OS)_$(TARGET_ARCH).$(_EXT)
+# SYSO_ARCH_ONLY -> artifact is vlib_${arch}.elf, and the prelink intermediate
+# (base-0 DWARF companion for stackdepth and addr2line) derives from that same
+# basename: vlib_${arch}.${_EXT}. TARGET_OS is forced to linux above, so this
+# is always the .so from the canonical blob build.
+DYLIB := $(REPO_ROOT)/build/prelink/vlib_$(TARGET_ARCH).$(_EXT)
 
 # vlib's tier builders (window/gperf/hand/table) carry large scratch arrays.
 # Letting them inline into try_tier collapses the call chain; the merged frame
 # (656B on arm64) fits under 768B, well inside the 800B nosplit chain budget.
 # Overrides gen-natives.sh's arm64 default (500B); amd64 default (800B) is
 # already above this so the override is a no-op there.
-#
-# Win64 frames carry ~200B of ABI overhead (shadow space + XMM spills),
-# pushing ndec_lookup_init past the 800B nosplit budget; its Go wrapper
-# stack-reserves first, so the compile-time proxy threshold relaxes.
-ifeq ($(TARGET_OS),windows)
-STACK_WARN_SIZE ?= 900
-else
 STACK_WARN_SIZE ?= 768
-endif
-
-# Budget for the stackReserve-backed ndec_lookup_init chain on windows.
-WINDOWS_RESERVE_BUDGET ?= 1900
 
 .PHONY: gen gen-debug gen-pgo-instr-use stack-check stack-check-all gen-all-platforms
 
@@ -66,16 +89,7 @@ gen-pgo-instr-use:
 		$(SOURCES) "$(TARGET_OS)" "$(TARGET_ARCH)"
 
 stack-check:
-ifeq ($(TARGET_OS),windows)
-	@# ndec_lookup_init is stackReserve-backed and checks against
-	@# WINDOWS_RESERVE_BUDGET; the other four keep the nosplit budget.
-	@$(REPO_ROOT)/build/bin/stackdepth $(if $(TREE),-tree,-v) -budget $(STACK_BUDGET) "$(DYLIB)" \
-		ndec_lookup_size_for ndec_lookup_scratch_size ndec_lookup_get_tier ndec_lookup_footprint
-	@$(REPO_ROOT)/build/bin/stackdepth $(if $(TREE),-tree,-v) -budget $(WINDOWS_RESERVE_BUDGET) "$(DYLIB)" \
-		ndec_lookup_init
-else
 	@$(REPO_ROOT)/build/bin/stackdepth $(if $(TREE),-tree,-v) -budget $(STACK_BUDGET) "$(DYLIB)" $(STACK_CHECK_ENTRIES)
-endif
 
 # Single mode; identical to stack-check. Kept for symmetric interface with
 # encvm/ndec so stack-check-all can iterate MODES uniformly.
