@@ -382,13 +382,16 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
   __builtin_memset(ptr, 0, (size_t)slot_bytes);
 }
 
-/* The Value walk shares the main cursor. Stash the parent slot and type so the
- * parent destination, type, and count can resume after the walk.
+/* The Value walk shares the main cursor. Stash the parent slot so the parent
+ * destination can resume after the walk; the parent type and count ride their
+ * ordinary spill homes through __BIND_SAVE_LOCALS. The stashed type belongs to
+ * the deferred-record path alone and is deliberately left untouched here: the
+ * only type in scope is a register-live local, so publishing its address would
+ * hand a dangling pointer to whatever reads the stash next.
  */
 #define BIND_DISPATCH_VALUE(slot_)                                                                                \
   do {                                                                                                            \
     m->c.stash.deferred_yield.slot = (slot_);                                                                     \
-    m->c.stash.deferred_yield.type = (BindType *)&cur_type;                                                       \
     goto vd_dispatch_value;                                                                                       \
   } while (0)
 

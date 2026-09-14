@@ -575,3 +575,25 @@ func TestVariantAnyDefaultPassthrough(t *testing.T) {
 		t.Errorf("Data = %T(%v), want map[string]interface{}{n:1}", uv.Data, uv.Data)
 	}
 }
+
+// TestVariantAnyCaseErrorParity verifies a mismatch inside an any-target case
+// descent reports the case type rather than a cascading syntax error. The tape
+// path's value name stays "json" (tape offsets carry no source byte), so only
+// the error kind and type are compared.
+func TestVariantAnyCaseErrorParity(t *testing.T) {
+	var u variantAnyCaseHost
+	uerr := Unmarshal([]byte(`{"data":[1],"kind":"list"}`), &u)
+	var typErr *UnmarshalTypeError
+	if !errors.As(uerr, &typErr) || typErr.Type == nil || typErr.Type.String() != "[]string" {
+		t.Fatalf("Unmarshal err = %v, want *UnmarshalTypeError with type []string", uerr)
+	}
+	val, err := dom.Parse([]byte(`{"data":[1],"kind":"list"}`))
+	if err != nil {
+		t.Fatalf("dom.Parse: %v", err)
+	}
+	var uv variantAnyCaseHost
+	verr := UnmarshalValue(val, &uv)
+	if !errors.As(verr, &typErr) || typErr.Type == nil || typErr.Type.String() != "[]string" {
+		t.Fatalf("UnmarshalValue err = %v, want *UnmarshalTypeError with type []string", verr)
+	}
+}

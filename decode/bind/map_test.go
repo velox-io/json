@@ -201,6 +201,47 @@ func TestMapStringStruct_NullValue(t *testing.T) {
 	parity3[mapStrStruct](t, "nullval", `{"m":{"a":null,"b":{"x":5,"s":"b"}}}`)
 }
 
+// KV entry slots are reused once a map passes the per-region slot count, and
+// MapBuf itself is pooled across parses, so a null value must clear the whole
+// staged value area. Zeroing only the shapes that carry pointers let a scalar
+// or struct null publish the bytes of whichever entry last held that slot.
+// Small inputs never wrap a region, so these cases start above the boundary.
+func TestMapStringInt_NullValueAfterSlotReuse(t *testing.T) {
+	for _, n := range []int{31, 32, 100} {
+		var in strings.Builder
+		in.WriteString(`{"m":{`)
+		for i := range n {
+			in.WriteString(`"k` + strconv.Itoa(i) + `":7777,`)
+		}
+		in.WriteString(`"zz":null}}`)
+		parity3[mapStrInt](t, "nullval-reuse-"+strconv.Itoa(n), in.String())
+	}
+}
+
+func TestMapStringStruct_NullValueAfterSlotReuse(t *testing.T) {
+	for _, n := range []int{31, 32, 100} {
+		var in strings.Builder
+		in.WriteString(`{"m":{`)
+		for i := range n {
+			in.WriteString(`"k` + strconv.Itoa(i) + `":{"x":7,"s":"filler"},`)
+		}
+		in.WriteString(`"zz":null}}`)
+		parity3[mapStrStruct](t, "nullval-reuse-"+strconv.Itoa(n), in.String())
+	}
+}
+
+func TestMapStringString_NullValueAfterSlotReuse(t *testing.T) {
+	for _, n := range []int{31, 32, 100} {
+		var in strings.Builder
+		in.WriteString(`{"m":{`)
+		for i := range n {
+			in.WriteString(`"k` + strconv.Itoa(i) + `":"filler",`)
+		}
+		in.WriteString(`"zz":null}}`)
+		parity3[mapStrStr](t, "nullval-reuse-"+strconv.Itoa(n), in.String())
+	}
+}
+
 func TestMapStringPtrInt_Basic(t *testing.T) {
 	parity3[mapStrPtrInt](t, "basic", `{"m":{"a":1,"b":null,"c":3}}`)
 }

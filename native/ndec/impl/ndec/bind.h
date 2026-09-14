@@ -309,6 +309,15 @@ NOINLINE static void ndec_bind_parse_inner(NdecBindMachine *m) {
   int32_t depth                     = m->c.depth;
   uint8_t *cur_dst                  = m->c.cur_dst;
   BindType cur_type                 = m->c.cur_type;
+  /* Prevent SROA from promoting cur_type to SSA registers: nothing borrows
+   * its address, and in this register-saturated machine the promotion
+   * costs spill traffic. It also loses the uniform shape of the ~26
+   * bind_pop+kind dispatch restore sequences, which then miss
+   * tail-merging and each ~150 instruction copy is duplicated into the
+   * cold tail region. The removed stash line (m->c.stash.deferred_yield.type
+   * = (BindType *)&cur_type) was inadvertently acting as an optimization
+   * barrier here; PIN_STACK_HOME restores it explicitly. */
+  PIN_STACK_HOME(cur_type);
   uint32_t cur_count                = m->c.cur_count;
   void *cur_aux                     = m->c.cur_aux;
   uint8_t *str_p                    = (uint8_t *)((uintptr_t)m->b.alloc.str_arena + m->c.str_used);
@@ -496,7 +505,13 @@ document_start: {
     }
     if (BIND_IS_DEFERRED_VALUE(cur_type.kind)) {
       m->c.stash.deferred_yield.slot = cur_dst;
-      m->c.stash.deferred_yield.type = (BindType *)&cur_type;
+      /* The root type is a register-live local, so the stash cannot borrow its
+       * address: the record is written after the deferred raw scan, which may
+       * yield for input, and the native frame is gone by the time the resumed
+       * scan reads the type back. Publish the local to its spill home and point
+       * the stash there, the same stable storage every resume reloads. */
+      m->c.cur_type                  = cur_type;
+      m->c.stash.deferred_yield.type = &m->c.cur_type;
       if (m->b.alloc.deferred_drain_used + sizeof(UnmarshalRecord) > m->b.alloc.deferred_drain_cap) {
         __BIND_SAVE_LOCALS(m);
         m->c.phase                = BIND_PHASE_DEFERRED_RESUME;
@@ -2393,7 +2408,11 @@ root_scalar: {
   }
   if (BIND_IS_DEFERRED_VALUE(ct->kind)) {
     m->c.stash.deferred_yield.slot = (uint8_t *)cur_dst;
-    m->c.stash.deferred_yield.type = (BindType *)ct;
+    /* ct aliases the register-live local: publish it to its spill home before
+     * the stash borrows the address, mirroring document_start. A drain-cap
+     * flush below can return before deferred_value reads the stash back. */
+    m->c.cur_type                  = cur_type;
+    m->c.stash.deferred_yield.type = &m->c.cur_type;
     if (m->b.alloc.deferred_drain_used + sizeof(UnmarshalRecord) > m->b.alloc.deferred_drain_cap) {
       __BIND_SAVE_LOCALS(m);
       m->c.phase                = BIND_PHASE_DEFERRED_RESUME;
@@ -2406,7 +2425,8 @@ root_scalar: {
     if (ct->kind != BIND_KIND_STRING && ct->kind != BIND_KIND_NUMBER) {
       if (ct->kind == BIND_KIND_SLICE && ((const BindType *)ct->child)->kind == BIND_KIND_UINT8) {
         m->c.stash.deferred_yield.slot = (uint8_t *)cur_dst;
-        m->c.stash.deferred_yield.type = (BindType *)ct;
+        m->c.cur_type                  = cur_type;
+        m->c.stash.deferred_yield.type = &m->c.cur_type;
         if (m->b.alloc.deferred_drain_used + sizeof(UnmarshalRecord) > m->b.alloc.deferred_drain_cap) {
           __BIND_SAVE_LOCALS(m);
           m->c.phase                = BIND_PHASE_DEFERRED_RESUME;
@@ -3009,13 +3029,16 @@ t_array_value: {
     }
   }
 
+  /* Element mismatches abort immediately, matching the JSON path's element
+   * dispatch: the skip continuation resumes the object walk only, so an array
+   * or map element has no valid skip route. */
   if (LIKELY(child_type->kind == BIND_KIND_STRING)) {
     if (TAPE_IS_STRING_TAG(tag)) {
       tape_bind_write_string_header(word, body, m->b.alloc.str_arena, src);
       TAP_ADVANCE();
       goto t_array_continue;
     }
-    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
   }
 
   switch (child_type->kind) {
@@ -3030,7 +3053,7 @@ t_array_value: {
       TAP_ADVANCE();
       goto t_array_continue;
     }
-    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
   case BIND_KIND_INT:
   case BIND_KIND_INT8:
   case BIND_KIND_INT16:
@@ -3043,12 +3066,13 @@ t_array_value: {
   case BIND_KIND_UINT64:
   case BIND_KIND_FLOAT32:
   case BIND_KIND_FLOAT64: {
-    TAPE_BIND_NUMBER_ARM(m, child_type->kind, body, t_array_continue,
-                         TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape)));
+    TAPE_BIND_NUMBER_ARM(
+        m, child_type->kind, body, t_array_continue,
+        TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape)));
   }
   case BIND_KIND_STRUCT: {
     if (tag != (TAPE_START_OBJECT >> 56))
-      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
     uint32_t zero_size = m->b.ctx.type_meta[child_type->type_idx].size;
     __builtin_memset(body, 0, zero_size);
     TAP_ADVANCE();
@@ -3067,7 +3091,7 @@ t_array_value: {
   }
   case BIND_KIND_MAP: {
     if (tag != (TAPE_START_OBJECT >> 56))
-      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
     if (bind_push_array_or_slice(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       TAPE_BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
     cur_dst  = body;
@@ -3080,7 +3104,7 @@ t_array_value: {
     /* The parent is an array or slice, so its specialized frame preserves the
      * outer slot cursor while the nested element descends. */
     if (tag != (TAPE_START_ARRAY >> 56))
-      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
     if (bind_push_array_or_slice(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       TAPE_BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
     cur_dst   = body;
@@ -3096,7 +3120,7 @@ t_array_value: {
     goto t_array_begin;
   }
   case BIND_KIND_PTR:
-    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
   default:
     goto t_unsupported;
   }
@@ -3270,7 +3294,15 @@ t_map_value: {
     }
     if (tag == (TAPE_NULL_VAL >> 56)) {
       TAP_ADVANCE();
-      BIND_NULL_ZERO(body, m, child_type);
+      /* KV slots live in a pooled buffer that is never zeroed between parses,
+       * so a null must clear the whole value area rather than only the shapes
+       * BIND_NULL_ZERO covers: a scalar or struct slot would otherwise publish
+       * the bytes of whichever entry last occupied this offset. When body was
+       * redirected to a typed intermediate it is already zeroed above, and the
+       * intermediate may be narrower than the padded value area. */
+      if (body == orig_slot) {
+        __builtin_memset(body, 0, (size_t)region->stride - BIND_MAP_VAL_OFF);
+      }
       goto t_map_continue;
     }
   }
@@ -3281,7 +3313,7 @@ t_map_value: {
       TAP_ADVANCE();
       goto t_map_continue;
     }
-    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
   }
 
   switch (child_type->kind) {
@@ -3296,7 +3328,7 @@ t_map_value: {
       TAP_ADVANCE();
       goto t_map_continue;
     }
-    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
   case BIND_KIND_INT:
   case BIND_KIND_INT8:
   case BIND_KIND_INT16:
@@ -3309,12 +3341,13 @@ t_map_value: {
   case BIND_KIND_UINT64:
   case BIND_KIND_FLOAT32:
   case BIND_KIND_FLOAT64: {
-    TAPE_BIND_NUMBER_ARM(m, child_type->kind, body, t_map_continue,
-                         TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape)));
+    TAPE_BIND_NUMBER_ARM(
+        m, child_type->kind, body, t_map_continue,
+        TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape)));
   }
   case BIND_KIND_STRUCT: {
     if (tag != (TAPE_START_OBJECT >> 56))
-      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
     uint32_t zero_size = m->b.ctx.type_meta[child_type->type_idx].size;
     __builtin_memset(body, 0, zero_size);
     TAP_ADVANCE();
@@ -3335,7 +3368,7 @@ t_map_value: {
     /* Preserve the parent map frame before the nested map replaces cur_dst,
      * cur_type, and cur_aux. */
     if (tag != (TAPE_START_OBJECT >> 56))
-      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
     if (bind_push_map(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       TAPE_BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
     cur_dst  = body;
@@ -3348,7 +3381,7 @@ t_map_value: {
     /* Preserve the parent map frame while the nested array or slice owns the
      * current destination and type. */
     if (tag != (TAPE_START_ARRAY >> 56))
-      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
     if (bind_push_map(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       TAPE_BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
     cur_dst   = body;
@@ -3364,7 +3397,7 @@ t_map_value: {
     goto t_array_begin;
   }
   case BIND_KIND_PTR:
-    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
   default:
     goto t_unsupported;
   }

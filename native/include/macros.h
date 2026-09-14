@@ -67,6 +67,11 @@
 #define OPTNONE __attribute__((optnone))
 #endif
 
+/* Pin a local object to its stack slot, preventing SROA from promoting it
+ * to SSA registers. The empty asm only makes the address observable to the
+ * optimizer and emits no code. */
+#define PIN_STACK_HOME(obj) __asm__ volatile("" : "+m"(obj))
+
 #ifndef LIKELY
 #define LIKELY(x) __builtin_expect(!!(x), 1)
 #endif
