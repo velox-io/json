@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Download PGO artifacts from a GitHub Actions PGO run and install them:
-#   native/<module>/<module>_<mode>_<isa>_<os>-<arch>.syso   (replace committed)
+#   native/<module>/<module>_<arch>.elf                     (replace committed)
 #   .local/pgo-data/instr-<mode>-<os>-<arch>.profdata        (platform-suffixed)
 #
 # Usage:
@@ -73,6 +73,8 @@ echo "==> pgo-download-syso: repo=$REPO run=$RUN_ID"
 
 # ------------------------------------------------------------------
 # Download each pgo-<module>-<os>-<arch> artifact into the staging area.
+# Both modules ship arch-canonical ELF blobs (<module>_<arch>.elf), installed
+# by basename module prefix.
 # ------------------------------------------------------------------
 _filters=''
 case "${MODULE:-}" in
@@ -116,7 +118,7 @@ if [ "${ALLOW_FOREIGN:-0}" != "1" ]; then
   fi
 
   _unstamped=0
-  for _f in $(find "$_tmp" -name '*.syso'); do
+  for _f in $(find "$_tmp" \( -name '*.syso' -o -name '*.elf' \)); do
     # || true on each extraction: an unstamped file has no match and grep
     # exits 1, which pipefail would otherwise treat as fatal.
     _st_commit=$(grep -aoE 'commit=[0-9a-f]{40}|commit=unknown' "$_f" | head -1 | cut -d= -f2 || true)
@@ -189,11 +191,12 @@ if [ "${ALLOW_FOREIGN:-0}" != "1" ]; then
 fi
 
 # ------------------------------------------------------------------
-# Install: sysoes replace the committed artifacts, profdata lands under
-# .local/pgo-data with a platform suffix (names repeat across platforms).
+# Install: native artifacts (<module>_<arch>.elf blobs) replace the committed
+# ones, profdata lands under .local/pgo-data with a platform suffix (names
+# repeat across platforms).
 # ------------------------------------------------------------------
 mkdir -p native/encvm native/ndec .local/pgo-data
-for _f in $(find "$_tmp" -name '*.syso'); do
+for _f in $(find "$_tmp" \( -name '*.syso' -o -name '*.elf' \)); do
   _m=$(basename "$_f"); _m=${_m%%_*}
   cp -v "$_f" "native/$_m/"
 done

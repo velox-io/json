@@ -103,8 +103,9 @@ runs:
     shell: bash
     run: |
       # Modes are collected sequentially: mode copies share internal function
-      # names, so each mode needs its own workload run, merged profile
-      # (instr-<mode>.profdata) and syso rebuild (scripts/pgo-collect-instr.sh).
+      # names, so each mode needs its own workload run and merged profile
+      # (instr-<mode>.profdata); the final blob rebuild resolves each mode's
+      # own profile (scripts/pgo-collect-instr.sh).
       make pgo-instr-collect MODULE=${{ inputs.module }} MODES='${{ inputs.modes }}' \
         TARGET_OS=${{ inputs.target_os }} TARGET_ARCH=${{ inputs.target_arch }}
 
@@ -113,20 +114,17 @@ runs:
     shell: bash
     run: |
       set -eu
-      case "${{ inputs.target_arch }}" in
-        amd64) _isa=avx2 ;;
-        arm64) _isa=neon ;;
-        *) echo "::error::unsupported arch ${{ inputs.target_arch }}"; exit 1 ;;
-      esac
       _m=${{ inputs.module }}
       mkdir -p .local/pgo-data
       : > .local/pgo-data/artifact-paths.txt
+      # Both modules are arch-canonical: one ELF per arch, no mode/isa/os
+      # segments (see each module's sources.sh).
+      _syso="native/${_m}/${_m}_${{ inputs.target_arch }}.elf"
+      echo "$_syso" >> .local/pgo-data/artifact-paths.txt
       for _mode in ${{ inputs.modes }}; do
-        _syso="native/${_m}/${_m}_${_mode}_${_isa}_${{ inputs.target_os }}_${{ inputs.target_arch }}.syso"
         _prof=".local/pgo-data/instr-${_mode}.profdata"
         # Log to stderr: the group's stdout feeds $GITHUB_OUTPUT.
-        ls -la "$_syso" "$_prof" >&2
-        echo "$_syso" >> .local/pgo-data/artifact-paths.txt
+        ls -la "$_prof" >&2
         echo "$_prof" >> .local/pgo-data/artifact-paths.txt
       done
       {
@@ -156,7 +154,7 @@ runs:
           echo "- $(basename "$_p"): $(ls -la "$_p" 2>/dev/null | awk '{print $5}') bytes" >> $GITHUB_STEP_SUMMARY
         done < .local/pgo-data/artifact-paths.txt
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "After downloading the artifact, copy the .syso files to native/${{ inputs.module }}/ and commit them back to the main branch." >> $GITHUB_STEP_SUMMARY
+        echo "After downloading the artifact, copy the native artifacts to native/${{ inputs.module }}/ and commit them back to the main branch." >> $GITHUB_STEP_SUMMARY
       else
         echo "- PGO collection failed, see the logs above." >> $GITHUB_STEP_SUMMARY
       fi

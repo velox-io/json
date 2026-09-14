@@ -15,27 +15,11 @@ Velox focuses on **binding-style** conversion between JSON and typed Go values (
 
 ## Compatibility
 
-Velox follows `encoding/json` semantics on the common path:
-
 - field tags: custom names, `-`, `,string`, `,omitempty`, `,omitzero`
 - anonymous (embedded) structs, pointers, `json.Number`, `json.RawMessage`
 - `json.Marshaler`/`json.Unmarshaler` and `encoding.TextMarshaler`/`TextUnmarshaler`
 - boxing into `any` (`[]any`, `map[string]any`)
 - unmarshal errors can be inspected with `errors.As` against the `encoding/json` error types
-
-`omitzero` follows Go 1.24 `encoding/json` semantics: a field is skipped when
-its value is zero, as decided by an `IsZero() bool` method if the field type or
-its pointer implements one, otherwise by `reflect.Value.IsZero`. Unlike
-`omitempty`, a nil slice or map is zero while an empty non-nil one is not.
-`value.Value` and `stream.Stream` fields are always emitted.
-
-```go
-type Event struct {
-    Name string    `json:"name"`
-    At   time.Time `json:"at,omitzero"` // zero time → key absent
-    Tags []string  `json:"tags,omitzero"` // nil → absent; empty non-nil → "tags":[]
-}
-```
 
 Deliberate differences:
 
@@ -54,7 +38,7 @@ Deliberate differences:
 - Platform: `linux/amd64`, `linux/arm64`, `windows/amd64`, `windows/arm64`, `darwin/amd64`, `darwin/arm64`.
 
 
-## Zero-copy decoding
+## zero-copy
 
 `Unmarshal` is zero-copy by default: escape-free strings alias the caller's input buffer. Escaped strings are copied because their decoded bytes differ from the input. The caller must preserve the input's bytes while any decoded value remains reachable:
 
@@ -68,6 +52,20 @@ Pass `json.WithZeroCopy(false)` when the destination must own its bytes, for exa
 ```go
 var pod KubePodList
 err := json.Unmarshal(src, &pod, json.WithZeroCopy(false)) // pod owns its strings
+```
+
+## omitzero
+
+A field is skipped when its value is zero, as decided by an `IsZero() bool`
+method if the field type or its pointer implements one, otherwise by `reflect.Value.IsZero`.
+Unlike `omitempty`, a nil slice or map is zero while an empty non-nil one is not.
+
+```go
+type Event struct {
+    Name string    `json:"name"`
+    At   time.Time `json:"at,omitzero"` // zero time → key absent
+    Tags []string  `json:"tags,omitzero"` // nil → absent; empty non-nil → "tags":[]
+}
 ```
 
 ## Extensions

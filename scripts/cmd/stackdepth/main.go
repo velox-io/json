@@ -650,7 +650,7 @@ func loadPE(path string) (string, []*funcInfo, error) {
 // The map file lists symbols in two blocks: "Publics by Value" (global) and
 // "Static symbols" (local). Each symbol line looks like:
 //
-//	0001:00006d50       vj_vm_exec_fast_avx2       0000000180007d50     encvm_fast_windows_amd64_avx2.o
+//	0001:00006d50       vj_vm_exec_fast       0000000180007d50     encvm_fast_windows_amd64_avx2.o
 //
 // Fields: segment:offset, name, rva+base, object file. Segment 0001 is .text.
 // The .text CODE header line gives the code-only length (before merged .rdata

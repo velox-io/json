@@ -41,6 +41,12 @@ func LoadLogNDJSON() []byte {
 	return logJSONData
 }
 
+// SmallMapAnyJSON is a small flat map[string]any fixture: one database
+// audit log line (453B, 24 keys, mixed scalars plus one string array).
+const SmallMapAnyJSON = `{"cs":50,"timestamp":1755057964,"threadId":416,"checkRows":1430,"affectRows":0,"sentRows":1,"lockWaitTime":78,"cpuTime":2361447,"ioWaitTime":0,"nsTime":642463050,"trxLivingTime":2329,"execTime":2362,"errCode":0,"ruleNum":0,"host":"127.0.0.1","user":"tencentroot","dbName":"","policyName":"","sql":"show global variables like 'cdb_working_mode_enabled'","sqlType":"OTHER","trxId":0,"tableName":["performance_schema.global_variables"],"clientPort":51540}`
+
+var SmallMapAnyBytes = []byte(SmallMapAnyJSON)
+
 // Compact (whitespace-stripped) versions of all JSON test data, lazily initialized.
 var (
 	tinyCompactOnce sync.Once

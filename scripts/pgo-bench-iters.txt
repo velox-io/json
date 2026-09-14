@@ -1,0 +1,72 @@
+# Per-benchmark fixed iteration counts for instrumentation PGO collection.
+#
+# Each "Name=N" line fixes the exact iteration count pgo-collect-instr.sh runs
+# for that benchmark. This freezes the merged profile's workload weights: a
+# wall-clock budget made the per-benchmark iteration counts drift with machine
+# conditions, flipping LLVM layout decisions between otherwise identical
+# collections (measured ~3% on Benchmark_Unmarshal_KubePods_Velox).
+#
+# The table is committed, so the same tree collects a byte-identical profile
+# on every machine. Entries are calibrated against the INSTRUMENTED binary;
+# regenerate after adding or changing benchmarks:
+#
+#   PGO_ITERS_REGEN=1 make pgo-instr-collect MODULE=ndec
+#
+# Calibration target (default 6s per benchmark) preserves the historical
+# 3s x count=2 equal-time weighting semantics. To up-weight a workload,
+# raise its entry, re-collect, and gate the result (make pgo-gate MODULE=...).
+# Regen only touches entries matched by the active filters; entries for the
+# other module's benchmarks are preserved.
+Benchmark_Decoder_EmptyObj_Velox=13426
+Benchmark_Decoder_EscapeHeavy_Velox=3920
+Benchmark_Decoder_HalfBuf_Velox=637
+Benchmark_Decoder_KubePodsStream_Velox=873
+Benchmark_Decoder_Log_Velox=19
+Benchmark_Decoder_Small_Velox=8242
+Benchmark_Decoder_Spiky_Velox=381
+Benchmark_Decoder_ThirdBuf_Velox=480
+Benchmark_Decoder_Tiny_Velox=36997
+Benchmark_Decoder_TwitterSingle_Velox=1591
+Benchmark_Decoder_TwitterStream_Velox=177
+Benchmark_Marshal_EscapeHeavy_Velox=339405
+Benchmark_Marshal_JSONBenchCanadaGeometry_Velox=1258
+Benchmark_Marshal_JSONBenchCITMCatalog_Velox=3197
+Benchmark_Marshal_JSONBenchGolangSource_Velox=614
+Benchmark_Marshal_JSONBenchStringUnicode_Velox=165723
+Benchmark_Marshal_JSONBenchSyntheaFHIR_Velox=496
+Benchmark_Marshal_JSONBenchTwitterStatus_Velox=4326
+Benchmark_Marshal_KubePods_Velox=117594
+Benchmark_Marshal_MapAny_Velox=5342
+Benchmark_Marshal_Medium_Velox=976404
+Benchmark_Marshal_SmallMapAny_Velox=10993
+Benchmark_Marshal_Small_Velox=2134472
+Benchmark_Marshal_Tiny_Velox=7908264
+Benchmark_Marshal_TwitterTyped_Velox=8234
+Benchmark_Marshal_Twitter_Velox=7446
+Benchmark_PGOWorkload_Compact=132
+Benchmark_PGOWorkload_Full=88
+Benchmark_Unmarshal_EscapeHeavyCompact_Velox=205529
+Benchmark_Unmarshal_EscapeHeavy_Velox=199137
+Benchmark_Unmarshal_JSONBenchCanadaGeometry_Velox=1513
+Benchmark_Unmarshal_JSONBenchCITMCatalog_Velox=726
+Benchmark_Unmarshal_JSONBenchGolangSource_Velox=245
+Benchmark_Unmarshal_JSONBenchStringUnicode_Velox=178375
+Benchmark_Unmarshal_JSONBenchSyntheaFHIR_Velox=495
+Benchmark_Unmarshal_JSONBenchTwitterStatus_Velox=1551
+Benchmark_Unmarshal_KubePodsCompact_Velox=45616
+Benchmark_Unmarshal_KubePods_Velox=72535
+Benchmark_Unmarshal_MapAny_Velox=292
+Benchmark_Unmarshal_MediumCompact_Velox=353482
+Benchmark_Unmarshal_Medium_Velox=344135
+Benchmark_Unmarshal_SmallCompact_Velox=891398
+Benchmark_Unmarshal_SmallMapAny_Velox=2720
+Benchmark_Unmarshal_Small_Velox=863682
+Benchmark_Unmarshal_TinyCompact_Velox=4219409
+Benchmark_Unmarshal_Tiny_Velox=4219409
+Benchmark_Unmarshal_TwitterCompact_Velox=1818
+Benchmark_Unmarshal_TwitterTyped_Velox=1898
+Benchmark_Unmarshal_Twitter_Velox=1752
+Benchmark_Valid_EscapeHeavy_Velox=372024
+Benchmark_Valid_KubePods_Velox=91212
+Benchmark_Valid_Medium_Velox=709471
+Benchmark_Valid_Twitter_Velox=3211

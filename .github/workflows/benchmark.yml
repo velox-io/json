@@ -1,10 +1,8 @@
 name: Performance Regression Test
 
+# Manual only. Intended for a dedicated (self-hosted, low-noise) runner;
+# results from shared runners are too noisy to gate on.
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main, develop]
   workflow_dispatch:
     inputs:
       baseline_ref:
@@ -16,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: '1.26'
+  GO_VERSION: '1.27'
   BENCH_COUNT: 6
   # Fixed baseline ref for comparison. Update this when establishing a new
   # performance baseline (e.g. after a release or intentional perf change).
@@ -43,7 +41,7 @@ jobs:
     - name: Determine baseline ref
       id: baseline
       run: |
-        if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.baseline_ref }}" ]; then
+        if [ -n "${{ github.event.inputs.baseline_ref }}" ]; then
           echo "ref=${{ github.event.inputs.baseline_ref }}" >> $GITHUB_OUTPUT
         else
           echo "ref=${{ env.BENCH_BASELINE_REF }}" >> $GITHUB_OUTPUT
@@ -51,6 +49,7 @@ jobs:
 
     - name: Run baseline benchmarks
       run: |
+        set -o pipefail
         BASELINE_REF="${{ steps.baseline.outputs.ref }}"
         echo "Baseline ref: $BASELINE_REF"
 
@@ -69,21 +68,23 @@ jobs:
 
     - name: Run current benchmarks
       run: |
+        set -o pipefail
         cd benchmark && go test -bench="Velox$" -benchmem -benchtime=5s -count=${{ env.BENCH_COUNT }} . | tee bench-current.txt
 
     - name: Compare results
       id: compare
       run: |
+        set -o pipefail
         echo "=== Performance Comparison ===" >> $GITHUB_STEP_SUMMARY
-        benchstat benchmark/bench-baseline.txt benchmark/bench-current.txt | tee benchmark/comparison.txt >> $GITHUB_STEP_SUMMARY || true
+        benchstat benchmark/bench-baseline.txt benchmark/bench-current.txt | tee benchmark/comparison.txt >> $GITHUB_STEP_SUMMARY
 
         # Detect significant regressions (>10% slower).
         #
         # benchstat groups output by metric with header lines like:
-        #   │ sec/op │   — latency:    + means SLOWER  (regression)
-        #   │ B/op   │   — memory:     + means MORE    (regression)
-        #   │ allocs │   — allocs:     + means MORE    (regression)
-        #   │ B/s    │   — throughput: + means FASTER  (improvement, NOT regression)
+        #   │ sec/op │   latency:  + means SLOWER  (regression)
+        #   │ B/op   │   memory:   + means MORE    (regression)
+        #   │ allocs │   allocs:   + means MORE    (regression)
+        #   │ B/s    │   throughput: + means FASTER (improvement, NOT regression)
         #
         # We track the current section and only flag +XX% as regression in
         # sec/op, B/op, and allocs/op sections.
