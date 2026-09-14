@@ -478,3 +478,71 @@ func Benchmark_Marshal_MapAny_Velox(b *testing.B) {
 		}
 	}
 }
+
+// =============================================================================
+// SmallMapAny: small flat map[string]any (database audit log line, 24 keys).
+// Marshal counterpart of Unmarshal SmallMapAny: fixed per-call costs dominate
+// over per-byte encoding.
+// =============================================================================
+
+var (
+	smallMapAnyValueOnce sync.Once
+	smallMapAnyValue     map[string]any
+)
+
+func loadSmallMapAnyValue() *map[string]any {
+	smallMapAnyValueOnce.Do(func() {
+		if err := json.Unmarshal(SmallMapAnyBytes, &smallMapAnyValue); err != nil {
+			panic("load small map[string]any: " + err.Error())
+		}
+	})
+	return &smallMapAnyValue
+}
+
+func Benchmark_Marshal_SmallMapAny_Sonic(b *testing.B) {
+	v := loadSmallMapAnyValue()
+	b.SetBytes(marshalSize(v))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := sonic.Marshal(v); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Marshal_SmallMapAny_GoJSON(b *testing.B) {
+	v := loadSmallMapAnyValue()
+	b.SetBytes(marshalSize(v))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := gojson.Marshal(v); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Marshal_SmallMapAny_JSONv2(b *testing.B) {
+	v := loadSmallMapAnyValue()
+	b.SetBytes(marshalSize(v))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := jsonv2.Marshal(v); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Marshal_SmallMapAny_Velox(b *testing.B) {
+	v := loadSmallMapAnyValue()
+	b.SetBytes(marshalSize(v))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := vjson.Marshal(v); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

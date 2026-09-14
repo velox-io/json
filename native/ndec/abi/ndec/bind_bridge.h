@@ -264,7 +264,7 @@ _Static_assert(offsetof(BindMapRegionHeader, parent_slot) == 24, "BindMapRegionH
 #define BIND_MAP_REGION_HEADER_SIZE 32
 #define BIND_MAP_KEY_OFF            0  /* byte offset of key within an entry slot */
 #define BIND_MAP_VAL_OFF            16 /* byte offset of value within an entry slot */
-#define BIND_MAP_REGION_SLOTS       16
+#define BIND_MAP_REGION_SLOTS       32
 
 /*
  * Layout matches vbind.MapDrainInfo. Go owns and roots map_rtype. Deferred map
@@ -571,6 +571,11 @@ enum {
   BIND_ERR_VARIANT_MISSING_DISC = 37,
   /* arg1 is the stable kind ordinal: bool, number, string, array, or object. */
   BIND_ERR_KINDOF_UNREGISTERED = 38,
+  /* A case target whose kind the binder cannot construct (Unmarshaler,
+   * RawMessage, ...). arg1 is the kind ordinal for kindof and the poly table
+   * index for a variant. */
+  BIND_ERR_KINDOF_COLD_CASE  = 39,
+  BIND_ERR_VARIANT_COLD_CASE = 40,
 };
 
 /*

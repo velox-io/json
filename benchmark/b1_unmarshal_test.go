@@ -681,6 +681,56 @@ func Benchmark_Unmarshal_TwitterTyped_Velox(b *testing.B) {
 }
 
 // =============================================================================
+// SmallMapAny: small flat map[string]any: one database audit log line
+// (453B, 24 keys, mixed scalars plus one string array). The small-input
+// counterpart of MapAny: fixed per-call costs dominate over per-byte scan.
+// =============================================================================
+
+func Benchmark_Unmarshal_SmallMapAny_Sonic(b *testing.B) {
+	b.SetBytes(int64(len(SmallMapAnyBytes)))
+	b.ReportAllocs()
+	for b.Loop() {
+		var m map[string]any
+		if err := sonic.Unmarshal(SmallMapAnyBytes, &m); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Unmarshal_SmallMapAny_GoJSON(b *testing.B) {
+	b.SetBytes(int64(len(SmallMapAnyBytes)))
+	b.ReportAllocs()
+	for b.Loop() {
+		var m map[string]any
+		if err := gojson.Unmarshal(SmallMapAnyBytes, &m); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Unmarshal_SmallMapAny_JSONv2(b *testing.B) {
+	b.SetBytes(int64(len(SmallMapAnyBytes)))
+	b.ReportAllocs()
+	for b.Loop() {
+		var m map[string]any
+		if err := jsonv2.Unmarshal(SmallMapAnyBytes, &m); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func Benchmark_Unmarshal_SmallMapAny_Velox(b *testing.B) {
+	b.SetBytes(int64(len(SmallMapAnyBytes)))
+	b.ReportAllocs()
+	for b.Loop() {
+		var m map[string]any
+		if err := vjson.Unmarshal(SmallMapAnyBytes, &m); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// =============================================================================
 // MapAny: map[string]any – exercises the decodeAnyMap / decodeAnyVal path
 // (unmarshal counterpart of marshal's MapAny). Decodes KubePods JSON into
 // map[string]any for realistic nested data.

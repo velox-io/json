@@ -719,11 +719,13 @@ object_field_value: {
         AUX_LAZY_ALLOC(m, BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0));
         goto object_field_tape;
       }
+      if (site == POLY_SITE_ANY) goto object_field_value_any;
       goto poly_field_bind;
     }
 
     /* Direct Value output may split a surrounding merged tape. The next merged
      * write detects the arena gap and spans it by widening the standing seam. */
+  object_field_value_any:
     if (BIND_IS_ANY(child_type->kind)) {
       BIND_DISPATCH_ANY(child_type, body);
     }
@@ -1012,6 +1014,26 @@ phase2_poly_bind: {
       return;
     }
   }
+  const BindType *case_type = &m->b.ctx.types[pc.case_type_idx];
+  /* An any-target case descends as the field's own any type straight into the
+   * field eface: the walk's any dispatch writes the default boxing there. */
+  if (case_type->kind == BIND_KIND_ANY) {
+    PHASE2_DESCEND(m, target, case_type, pc.case_type_idx, ax->a.start, ax->val_at, ax->val_end, TAPE_VIEW_A,
+                   BIND_PHASE_VARIANT_REBIND_RESUME);
+  }
+  if ((case_type->flags & BIND_FLAG_COLD) && case_type->kind != BIND_KIND_PTR &&
+      case_type->kind != BIND_KIND_VALUE) {
+    __BIND_SAVE_LOCALS(m);
+    m->c.phase                = BIND_PHASE_DOCUMENT_END;
+    m->b.yield.pending_action = BIND_YIELD_ERROR;
+    if (f->flags & BIND_FF_KINDOF) {
+      BIND_ERROR_PAYLOAD(m, BIND_ERR_KINDOF_COLD_CASE, poly_kind_of_tape_tag((uint8_t)(word >> 56)),
+                         BIND_ERROR_NO_POS, cur_dst);
+    } else {
+      BIND_ERROR_PAYLOAD(m, BIND_ERR_VARIANT_COLD_CASE, poly_idx, BIND_ERROR_NO_POS, cur_dst);
+    }
+    return;
+  }
   if (poly_case_slot_full(m, &pc)) {
     /* Resume here because ax->walk already points past this entry. Restore the
      * field from stash and rederive the case without moving either cursor. */
@@ -1100,8 +1122,13 @@ phase2_case_bind: {
   /* Tape binding supports cold cases only when tape data can materialize them
    * without reconstructing source bytes. */
   if ((case_type->flags & BIND_FLAG_COLD) && case_type->kind != BIND_KIND_PTR &&
-      case_type->kind != BIND_KIND_VALUE)
-    BIND_YIELD_ERR_NO_POS(m, BIND_ERR_UNSUPPORTED_TAG, 0);
+      case_type->kind != BIND_KIND_VALUE) {
+    __BIND_SAVE_LOCALS(m);
+    m->c.phase                = BIND_PHASE_DOCUMENT_END;
+    m->b.yield.pending_action = BIND_YIELD_ERROR;
+    BIND_ERROR_PAYLOAD(m, BIND_ERR_VARIANT_COLD_CASE, iv_idx, BIND_ERROR_NO_POS, cur_dst);
+    return;
+  }
   if (poly_case_slot_full(m, &pc)) {
     __BIND_SAVE_LOCALS(m);
     m->c.phase                = BIND_PHASE_TAPE_BIND_CLOSE_DRAIN_RETRY;
@@ -2494,7 +2521,14 @@ t_document_start: {
       }
       TAPE_BIND_VALUE_FIELD(m, cur_dst, BIND_PHASE_TAPE_BIND_VALUE_RESUME_ROOT);
     }
-    if (BIND_IS_ANY(cur_type.kind) || BIND_IS_DEFERRED_VALUE(cur_type.kind) || cur_type.kind == BIND_KIND_NUMBER) {
+    /* An any root reaches here only through a poly case descent whose target
+     * is any: the destination eface takes the default any boxing. Genuine any
+     * roots are rejected at build time, and a *any case unwraps into this
+     * branch after the pointer chain above. */
+    if (BIND_IS_ANY(cur_type.kind)) {
+      TAPE_BIND_DISPATCH_ANY(cur_dst);
+    }
+    if (BIND_IS_DEFERRED_VALUE(cur_type.kind) || cur_type.kind == BIND_KIND_NUMBER) {
       goto t_unsupported;
     }
     if (tag == (TAPE_NULL_VAL >> 56)) {
@@ -2619,9 +2653,21 @@ t_object_field_value: {
     if (pc.case_idx < 0) goto t_route_field_to_variant;
 
     const BindType *case_type = &m->b.ctx.types[pc.case_type_idx];
+    /* An any-target case keeps the field's own type and destination, so the
+     * cold gate below dispatches the default any boxing into the field eface. */
+    if (case_type->kind == BIND_KIND_ANY) goto t_field_value_cold_gate;
     if ((case_type->flags & BIND_FLAG_COLD) && case_type->kind != BIND_KIND_PTR &&
-        case_type->kind != BIND_KIND_VALUE)
-      goto t_unsupported;
+        case_type->kind != BIND_KIND_VALUE) {
+      __TAPE_BIND_SAVE_LOCALS(m);
+      m->c.phase                = BIND_PHASE_DOCUMENT_END;
+      m->b.yield.pending_action = BIND_YIELD_ERROR;
+      if (cur_struct_field->flags & BIND_FF_KINDOF) {
+        BIND_ERROR_PAYLOAD(m, BIND_ERR_KINDOF_COLD_CASE, poly_kind_of_tape_tag(tag), BIND_ERROR_NO_POS, cur_dst);
+      } else {
+        BIND_ERROR_PAYLOAD(m, BIND_ERR_VARIANT_COLD_CASE, poly_idx, BIND_ERROR_NO_POS, cur_dst);
+      }
+      return;
+    }
     if (poly_case_slot_full(m, &pc)) {
       __TAPE_BIND_SAVE_LOCALS(m);
       m->c.stash.field_value.field = (uint8_t *)cur_struct_field;
@@ -2962,13 +3008,16 @@ t_array_value: {
     }
   }
 
+  /* Element mismatches abort immediately, matching the JSON path's element
+   * dispatch: the skip continuation resumes the object walk only, so an array
+   * or map element has no valid skip route. */
   if (LIKELY(child_type->kind == BIND_KIND_STRING)) {
     if (TAPE_IS_STRING_TAG(tag)) {
       tape_bind_write_string_header(word, body, m->b.alloc.str_arena, src);
       TAP_ADVANCE();
       goto t_array_continue;
     }
-    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
   }
 
   switch (child_type->kind) {
@@ -2983,7 +3032,7 @@ t_array_value: {
       TAP_ADVANCE();
       goto t_array_continue;
     }
-    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
   case BIND_KIND_INT:
   case BIND_KIND_INT8:
   case BIND_KIND_INT16:
@@ -2996,12 +3045,13 @@ t_array_value: {
   case BIND_KIND_UINT64:
   case BIND_KIND_FLOAT32:
   case BIND_KIND_FLOAT64: {
-    TAPE_BIND_NUMBER_ARM(m, child_type->kind, body, t_array_continue,
-                         TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape)));
+    TAPE_BIND_NUMBER_ARM(
+        m, child_type->kind, body, t_array_continue,
+        TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape)));
   }
   case BIND_KIND_STRUCT: {
     if (tag != (TAPE_START_OBJECT >> 56))
-      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
     uint32_t zero_size = m->b.ctx.type_meta[child_type->type_idx].size;
     __builtin_memset(body, 0, zero_size);
     TAP_ADVANCE();
@@ -3020,7 +3070,7 @@ t_array_value: {
   }
   case BIND_KIND_MAP: {
     if (tag != (TAPE_START_OBJECT >> 56))
-      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
     if (bind_push_array_or_slice(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       TAPE_BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
     cur_dst  = body;
@@ -3033,7 +3083,7 @@ t_array_value: {
     /* The parent is an array or slice, so its specialized frame preserves the
      * outer slot cursor while the nested element descends. */
     if (tag != (TAPE_START_ARRAY >> 56))
-      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
     if (bind_push_array_or_slice(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       TAPE_BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
     cur_dst   = body;
@@ -3049,7 +3099,7 @@ t_array_value: {
     goto t_array_begin;
   }
   case BIND_KIND_PTR:
-    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
   default:
     goto t_unsupported;
   }
@@ -3234,7 +3284,7 @@ t_map_value: {
       TAP_ADVANCE();
       goto t_map_continue;
     }
-    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
   }
 
   switch (child_type->kind) {
@@ -3249,7 +3299,7 @@ t_map_value: {
       TAP_ADVANCE();
       goto t_map_continue;
     }
-    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
   case BIND_KIND_INT:
   case BIND_KIND_INT8:
   case BIND_KIND_INT16:
@@ -3262,12 +3312,13 @@ t_map_value: {
   case BIND_KIND_UINT64:
   case BIND_KIND_FLOAT32:
   case BIND_KIND_FLOAT64: {
-    TAPE_BIND_NUMBER_ARM(m, child_type->kind, body, t_map_continue,
-                         TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape)));
+    TAPE_BIND_NUMBER_ARM(
+        m, child_type->kind, body, t_map_continue,
+        TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape)));
   }
   case BIND_KIND_STRUCT: {
     if (tag != (TAPE_START_OBJECT >> 56))
-      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
     uint32_t zero_size = m->b.ctx.type_meta[child_type->type_idx].size;
     __builtin_memset(body, 0, zero_size);
     TAP_ADVANCE();
@@ -3288,7 +3339,7 @@ t_map_value: {
     /* Preserve the parent map frame before the nested map replaces cur_dst,
      * cur_type, and cur_aux. */
     if (tag != (TAPE_START_OBJECT >> 56))
-      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
     if (bind_push_map(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       TAPE_BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
     cur_dst  = body;
@@ -3301,7 +3352,7 @@ t_map_value: {
     /* Preserve the parent map frame while the nested array or slice owns the
      * current destination and type. */
     if (tag != (TAPE_START_ARRAY >> 56))
-      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
     if (bind_push_map(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       TAPE_BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
     cur_dst   = body;
@@ -3317,7 +3368,7 @@ t_map_value: {
     goto t_array_begin;
   }
   case BIND_KIND_PTR:
-    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
   default:
     goto t_unsupported;
   }

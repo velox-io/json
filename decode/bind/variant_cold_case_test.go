@@ -3,6 +3,7 @@ package bind
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -14,17 +15,18 @@ import (
 // Cold-kind variant/kindof case types are rejected by the tape-bind
 // sub-routine. The fast path's inline dispatch only covers concrete kinds
 // (struct/slice/map/scalar/array); cold-kind cases (value.Value,
-// json.RawMessage, Any/Iface, Unmarshaler, ...) fall back to the cold path,
-// whose tape-bind rebind hits t_unsupported for any cold-kind case other than
-// Pointer (Pointer is unwrapped via the PTR chain). At build time,
+// json.RawMessage, Unmarshaler, ...) fall back to the cold path. An any-target
+// case is the exception: the field binds with the default any boxing, so it
+// works on every path (see the passthrough tests below). At build time,
 // checkVariantCaseTypes marks the type tree TapeBindUnsupported so
 // UnmarshalValue fails fast with TapeBindUnsupportedError before entering C;
-// Unmarshal reaches the same gate at runtime via BIND_ERR_UNSUPPORTED_TAG.
-// Inline variants add a build-time struct requirement on each case type.
+// Unmarshal reaches the same gate at runtime via BIND_ERR_KINDOF_COLD_CASE /
+// BIND_ERR_VARIANT_COLD_CASE. Inline variants add a build-time struct
+// requirement on each case type.
 //
-// These tests pin all three gates so a future change that lifts the
-// cold-kind restriction (e.g. a reserve-unknown value.Value case) deliberately
-// updates or removes them.
+// These tests pin the gates so a future change that lifts the cold-kind
+// restriction (e.g. a reserve-unknown value.Value case) deliberately updates
+// or removes them.
 
 // --- sibling variant, value.Value case (the natural reserve-unknown pattern) ---
 
@@ -113,14 +115,15 @@ func assertTapeBindUnsupported(t *testing.T, err error, wantReasonSub, wantPathS
 }
 
 // assertRuntimeUnsupported verifies the JSON bind path rejects the cold-kind
-// case at runtime. The C-side t_unsupported yields BIND_ERR_UNSUPPORTED_TAG,
-// which mkBindErr currently maps to "field tag option not yet supported"
-// (shared error code). Only the rejection is contracted; the message wording
-// may change if a dedicated cold-kind error code is introduced.
+// case at runtime with the dedicated cold-case error naming the target-type
+// restriction.
 func assertRuntimeUnsupported(t *testing.T, err error, label string) {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("%s: expected runtime unsupported error, got nil", label)
+	}
+	if !strings.Contains(err.Error(), "target type not supported") {
+		t.Errorf("%s: err=%q, want substring %q", label, err, "target type not supported")
 	}
 }
 
@@ -419,5 +422,178 @@ func TestUnmarshalValueRootValue_Null(t *testing.T) {
 	}
 	if out.Valid() {
 		t.Errorf("null root should produce invalid Value, got valid (%+v)", out)
+	}
+}
+
+// --- any-target case passthrough ---
+
+type kindofAnyCaseHost struct {
+	Data any `json:"data" vjson:"kindof"`
+}
+
+func init() {
+	vbind.DefineKindofCases[kindofAnyCaseHost, struct {
+		bool   any
+		number any
+		string any
+		array  any
+		object any
+	}]()
+}
+
+type variantAnyCaseHost struct {
+	Kind string `json:"kind"`
+	Data any    `json:"data" vjson:"variant=kind"`
+}
+
+func init() {
+	vbind.DefineVariantCases[variantAnyCaseHost, struct {
+		list []string
+	}]()
+}
+
+type variantAnyDefaultHost struct {
+	Kind string `json:"kind"`
+	Data any    `json:"data" vjson:"variant=kind"`
+}
+
+func init() {
+	vbind.DefineVariantCases[variantAnyDefaultHost, struct {
+		list []string
+		_    any
+	}]()
+}
+
+// TestKindofAnyCasePassthrough verifies an any-target case binds the field
+// with the default any boxing on both engines: each JSON kind produces the
+// same concrete representation a plain any field would.
+func TestKindofAnyCasePassthrough(t *testing.T) {
+	cases := []struct {
+		src  string
+		want any
+	}{
+		{`{"data":true}`, true},
+		{`{"data":1}`, float64(1)},
+		{`{"data":"s"}`, "s"},
+		{`{"data":[1,"a"]}`, []any{float64(1), "a"}},
+		{`{"data":{"k":1}}`, map[string]any{"k": float64(1)}},
+		{`{"data":null}`, nil},
+	}
+	for _, c := range cases {
+		var u kindofAnyCaseHost
+		if err := Unmarshal([]byte(c.src), &u); err != nil {
+			t.Fatalf("Unmarshal(%s): %v", c.src, err)
+		}
+		val, err := dom.Parse([]byte(c.src))
+		if err != nil {
+			t.Fatalf("dom.Parse(%s): %v", c.src, err)
+		}
+		var uv kindofAnyCaseHost
+		if err := UnmarshalValue(val, &uv); err != nil {
+			t.Fatalf("UnmarshalValue(%s): %v", c.src, err)
+		}
+		for i, h := range []kindofAnyCaseHost{u, uv} {
+			if fmt.Sprintf("%T:%v", h.Data, h.Data) != fmt.Sprintf("%T:%v", c.want, c.want) {
+				t.Errorf("path %d %s: Data = %T(%v), want %T(%v)", i, c.src, h.Data, h.Data, c.want, c.want)
+			}
+		}
+	}
+}
+
+// TestVariantAnyCasePassthrough exercises an any-target variant case through
+// the immediate dispatch (disc first), the phase2 descent (value before disc),
+// and the tape walk (UnmarshalValue).
+func TestVariantAnyCasePassthrough(t *testing.T) {
+	// The any target must be registered as a case to be selected; reuse a
+	// dedicated host so the lookup resolves to any rather than []string.
+	type host struct {
+		Kind string `json:"kind"`
+		Data any    `json:"data" vjson:"variant=kind"`
+	}
+	// Registration is process-wide and keyed by host type, so a local type is
+	// safe here.
+	vbind.DefineVariantCases[host, struct {
+		fallback any
+	}]()
+
+	for _, src := range []string{
+		`{"kind":"fallback","data":{"x":1}}`,
+		`{"data":[9],"kind":"fallback"}`,
+		`{"data":"str","kind":"fallback"}`,
+	} {
+		var u host
+		if err := Unmarshal([]byte(src), &u); err != nil {
+			t.Fatalf("Unmarshal(%s): %v", src, err)
+		}
+		val, err := dom.Parse([]byte(src))
+		if err != nil {
+			t.Fatalf("dom.Parse(%s): %v", src, err)
+		}
+		var uv host
+		if err := UnmarshalValue(val, &uv); err != nil {
+			t.Fatalf("UnmarshalValue(%s): %v", src, err)
+		}
+		for i, h := range []host{u, uv} {
+			var want any
+			switch {
+			case strings.Contains(src, `"x":1`):
+				want = map[string]any{"x": float64(1)}
+			case strings.Contains(src, `[9]`):
+				want = []any{float64(9)}
+			default:
+				want = "str"
+			}
+			if fmt.Sprintf("%T:%v", h.Data, h.Data) != fmt.Sprintf("%T:%v", want, want) {
+				t.Errorf("path %d %s: Data = %T(%v), want %T(%v)", i, src, h.Data, h.Data, want, want)
+			}
+			if h.Kind != "fallback" {
+				t.Errorf("%s: Kind = %q, want %q", src, h.Kind, "fallback")
+			}
+		}
+	}
+}
+
+// TestVariantAnyDefaultPassthrough verifies a default case typed any falls
+// back to the default any boxing for unmatched discriminator values.
+func TestVariantAnyDefaultPassthrough(t *testing.T) {
+	var u variantAnyDefaultHost
+	if err := Unmarshal([]byte(`{"kind":"nope","data":[7]}`), &u); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got, ok := u.Data.([]any); !ok || len(got) != 1 || got[0] != float64(7) {
+		t.Errorf("Data = %T(%v), want []interface{}([7])", u.Data, u.Data)
+	}
+	val, err := dom.Parse([]byte(`{"data":{"n":1},"kind":"nope"}`))
+	if err != nil {
+		t.Fatalf("dom.Parse: %v", err)
+	}
+	var uv variantAnyDefaultHost
+	if err := UnmarshalValue(val, &uv); err != nil {
+		t.Fatalf("UnmarshalValue: %v", err)
+	}
+	if got, ok := uv.Data.(map[string]any); !ok || got["n"] != float64(1) {
+		t.Errorf("Data = %T(%v), want map[string]interface{}{n:1}", uv.Data, uv.Data)
+	}
+}
+
+// TestVariantAnyCaseErrorParity verifies a mismatch inside an any-target case
+// descent reports the case type rather than a cascading syntax error. The tape
+// path's value name stays "json" (tape offsets carry no source byte), so only
+// the error kind and type are compared.
+func TestVariantAnyCaseErrorParity(t *testing.T) {
+	var u variantAnyCaseHost
+	uerr := Unmarshal([]byte(`{"data":[1],"kind":"list"}`), &u)
+	var typErr *UnmarshalTypeError
+	if !errors.As(uerr, &typErr) || typErr.Type == nil || typErr.Type.String() != "[]string" {
+		t.Fatalf("Unmarshal err = %v, want *UnmarshalTypeError with type []string", uerr)
+	}
+	val, err := dom.Parse([]byte(`{"data":[1],"kind":"list"}`))
+	if err != nil {
+		t.Fatalf("dom.Parse: %v", err)
+	}
+	var uv variantAnyCaseHost
+	verr := UnmarshalValue(val, &uv)
+	if !errors.As(verr, &typErr) || typErr.Type == nil || typErr.Type.String() != "[]string" {
+		t.Fatalf("UnmarshalValue err = %v, want *UnmarshalTypeError with type []string", verr)
 	}
 }

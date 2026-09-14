@@ -163,9 +163,9 @@ enum ZeroCheckTag {
   ZCT_FALLBACK    = 23,
 
   /* omitzero, nil-only variants */
-  ZCT_OZ_SLICE    = 28, /* slice is zero only when data == NULL */
-  ZCT_OZ_MAP      = 29, /* map is zero only when the pointer is NULL */
-  ZCT_OZ_RAW      = 30, /* json.RawMessage is zero only when data == NULL */
+  ZCT_OZ_SLICE = 28, /* slice is zero only when data == NULL */
+  ZCT_OZ_MAP   = 29, /* map is zero only when the pointer is NULL */
+  ZCT_OZ_RAW   = 30, /* json.RawMessage is zero only when data == NULL */
 };
 
 /* ================================================================

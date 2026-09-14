@@ -295,7 +295,7 @@ func (p *Parser) unmarshalValue(v value.Value, desc *valueabi.Descriptor, rootDs
 		}
 	}
 	if m.Alloc.MapBufUsed > 0 {
-		if err := drainAllMapSlots(m); err != nil {
+		if err := drainAllMapSlots(p, m); err != nil {
 			return err
 		}
 	}

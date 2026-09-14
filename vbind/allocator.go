@@ -23,8 +23,12 @@ const slotBlockInitial = SlotBatchMax >> 1
 // Recursive trees use smaller blocks to limit cross-parse backing chains.
 const defaultSlotBatchRecursive = 32
 
-// Each recursive group detaches its slot backings every slotDetachK Releases.
-// The generation cadence bounds cross-parse backing chains without sweeping rows.
+// Each recursive group detaches its directly-published slot backings every
+// slotDetachK Releases. The generation cadence bounds cross-parse backing
+// chains: a slice-header slot becomes an eface data word, so a pooled block
+// pins every parse it served until reset. Map classes are exempt: their slots
+// hold redundant copies of published *hmap, swept per Release instead, so map
+// blocks run to cursor exhaustion.
 const slotDetachK = 3
 
 // Native SIMD stores may overshoot the final decoded string. This tail keeps
@@ -242,14 +246,20 @@ func (a *Allocator) Release() {
 	}
 	a.retained = a.retained[:0]
 
-	// Recursive maps and slices can link sibling backings across parses. Each SCC
-	// detaches as one generation on a fixed cadence to bound that chain.
+	a.sweepMapSlots()
+
+	// Recursive slices link sibling backings across parses: a published slice
+	// header lives inside a pooled block and pins its element backing. Each SCC
+	// detaches those classes as one generation on a fixed cadence to bound that
+	// chain; map classes are swept above and keep serving until exhaustion.
 	for i := range a.groups {
 		g := &a.groups[i]
 		g.gen++
 		if g.gen%slotDetachK == 0 {
 			for _, r := range g.bumps {
-				r.reset()
+				if r.Flags&SlotIsMap == 0 {
+					r.reset()
+				}
 			}
 			for _, r := range g.batchs {
 				r.reset()
@@ -258,6 +268,30 @@ func (a *Allocator) Release() {
 	}
 
 	a.StageLive()
+}
+
+// sweepMapSlots nils consumed map header slots. The map class is consumed
+// only by native map open, which reads the prewired *hmap and copies it to the
+// destination, leaving this slot as the sole scannable root until the drain.
+// Once drains finish, the copy is redundant: the user graph roots every live
+// map, so the copy only pins dropped documents. *map pointee cells live in a
+// distinct class (see builder.registerSlotClass) and are never swept. Typed
+// nil stores keep the deletion barrier: the old hmap stays reachable through
+// the live staged block at sweep time. Unconsumed slots keep their prewired
+// hmaps, rooting the inner block until exhaustion, and an exhausted block
+// pins nothing. Never call mid-parse: before the drain the slot copy is the
+// only scannable root of a nested map, so ReleaseScoped must stay sweep-free.
+func (a *Allocator) sweepMapSlots() {
+	for i := range a.Slots {
+		sc := &a.Slots[i]
+		if sc.Flags&SlotIsMap == 0 || sc.Block == nil || sc.ElemSize == 0 {
+			continue
+		}
+		base := sc.Block
+		for off := uint32(0); off < sc.Offset; off += sc.ElemSize {
+			*(*unsafe.Pointer)(unsafe.Add(base, uintptr(off))) = nil
+		}
+	}
 }
 
 // RetainMark records the current retention height so a later ReleaseScoped can

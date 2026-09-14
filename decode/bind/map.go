@@ -17,7 +17,7 @@ func syncMapBuf(alloc *vbind.Allocator, allocABI *ndec.BindAllocator) {
 }
 
 func (p *Parser) serveFlushMap(m *ndec.BindMachine) error {
-	return drainAllMapSlots(m)
+	return drainAllMapSlots(p, m)
 }
 
 func mapRegionAt(bufBase unsafe.Pointer, off uint32) *ndec.BindMapRegionHeader {
@@ -27,6 +27,29 @@ func mapRegionAt(bufBase unsafe.Pointer, off uint32) *ndec.BindMapRegionHeader {
 func frameAt(frames *ndec.BindFrame, i int32) *ndec.BindFrame {
 	return (*ndec.BindFrame)(unsafe.Add(
 		unsafe.Pointer(frames), uintptr(i)*unsafe.Sizeof(ndec.BindFrame{})))
+}
+
+type inprogMove struct {
+	oldAddr unsafe.Pointer
+	newAddr unsafe.Pointer
+	stride  uintptr
+}
+
+type mapRegionMove struct {
+	oldOff    uint32
+	newOff    uint32
+	mapRegion *ndec.BindMapRegionHeader // pointer at new location (after memmove)
+}
+
+// mapDrainScratch backs drainAllMapSlots. One instance per Parser is safe:
+// FLUSH handling is synchronous and runs no user callbacks (deferred records
+// drain first, stream recursion enters through BindYieldInput), so drains
+// never nest.
+type mapDrainScratch struct {
+	offsets     []uint32 // region offsets, ascending
+	liveOffs    []uint32 // live region offsets, ascending
+	moves       []inprogMove
+	regionMoves []mapRegionMove
 }
 
 // drainAllMapSlots drains complete KV entries to each map's *hmap and compacts
@@ -42,7 +65,7 @@ func frameAt(frames *ndec.BindFrame, i int32) *ndec.BindFrame {
 //     live maps whose region moved during compaction.
 //  4. Fixes up frames[].Dst, other regions' ParentSlot, and Core.CurDst that
 //     point inside a moved in-prog entry.
-func drainAllMapSlots(m *ndec.BindMachine) error {
+func drainAllMapSlots(p *Parser, m *ndec.BindMachine) error {
 	if m.Alloc.MapBufUsed == 0 {
 		return nil
 	}
@@ -51,36 +74,43 @@ func drainAllMapSlots(m *ndec.BindMachine) error {
 	depth := m.Core.Depth
 	typeMetaBase := unsafe.Pointer(m.Ctx.TypeMeta)
 	typeMetaStride := unsafe.Sizeof(ndec.BindTypeMeta{})
+	s := &p.mapDrain
+	s.offsets = s.offsets[:0]
+	s.liveOffs = s.liveOffs[:0]
+	s.moves = s.moves[:0]
+	s.regionMoves = s.regionMoves[:0]
 
 	// Collect all region offsets by walking the buffer linearly.
 	// Regions are contiguous in [0, MapBufUsed); the walk reads each header's stride to compute the next region's offset.
-	offsets := make([]uint32, 0, ndec.BindMaxDepth+1)
 	for off := uint32(0); off < m.Alloc.MapBufUsed; {
 		r := mapRegionAt(bufBase, off)
-		offsets = append(offsets, off)
+		s.offsets = append(s.offsets, off)
 		off += uint32(ndec.BindMapRegionHeaderSize) + uint32(ndec.BindMapRegionSlots)*r.Stride
 	}
-	if len(offsets) == 0 {
+	if len(s.offsets) == 0 {
 		return nil
 	}
 
-	// Live region set from frames[0..maxLiveD] A frame is a live map iff Kind == KindMap and FrameMapRegion() != nil.
+	// Live region offsets from frames[0..depth]. A frame is a live map iff
+	// Kind == KindMap and FrameMapRegion() != nil. The linear region walk
+	// produced ascending offsets, so filtering preserves ascending order.
 	maxLiveD := depth
 	if maxLiveD <= 0 {
 		maxLiveD = -1
 	}
-	liveDepth := make(map[*ndec.BindMapRegionHeader]int32, maxLiveD+1)
-	for d := int32(0); d <= maxLiveD; d++ {
-		f := frameAt(frames, d)
-		if f.Kind == uint8(vbind.KindMap) {
-			if mapRegion := f.FrameMapRegion(); mapRegion != nil {
-				liveDepth[mapRegion] = d
+	for _, off := range s.offsets {
+		r := mapRegionAt(bufBase, off)
+		for d := int32(0); d <= maxLiveD; d++ {
+			f := frameAt(frames, d)
+			if f.Kind == uint8(vbind.KindMap) && f.FrameMapRegion() == r {
+				s.liveOffs = append(s.liveOffs, off)
+				break
 			}
 		}
 	}
 
 	// Step 1: drain complete entries for every region.
-	for _, off := range offsets {
+	for _, off := range s.offsets {
 		mapRegion := mapRegionAt(bufBase, off)
 		meta := (*ndec.BindTypeMeta)(unsafe.Add(typeMetaBase, uintptr(mapRegion.TypeIdx)*typeMetaStride))
 		info := (*vbind.MapDrainInfo)(meta.MapMeta().DrainInfo)
@@ -94,33 +124,18 @@ func drainAllMapSlots(m *ndec.BindMachine) error {
 		}
 	}
 
+	// No live map frames means no in-prog entries and no compaction targets:
+	// every region is closed and fully drained, so resetting the cursor is
+	// exactly what compaction would produce.
+	if len(s.liveOffs) == 0 {
+		m.Alloc.MapBufUsed = 0
+		return nil
+	}
+
 	// Step 2: compaction of live regions toward the buffer front. A moved
 	// in-prog entry's byte range is recorded for the fixup pass.
-	type inprogMove struct {
-		oldAddr unsafe.Pointer
-		newAddr unsafe.Pointer
-		stride  uintptr
-	}
-	type mapRegionMove struct {
-		oldOff    uint32
-		newOff    uint32
-		mapRegion *ndec.BindMapRegionHeader // pointer at new location (after memmove)
-	}
-	var moves []inprogMove
-	var mapRegionMoves []mapRegionMove
-
-	// Collect live region offsets. The linear walk already produced offsets in
-	// ascending order, so liveOffs is ascending without an explicit sort.
-	liveOffs := make([]uint32, 0, len(liveDepth))
-	for _, off := range offsets {
-		r := mapRegionAt(bufBase, off)
-		if _, ok := liveDepth[r]; ok {
-			liveOffs = append(liveOffs, off)
-		}
-	}
-
 	var writePos uint32 // byte offset in buffer
-	for _, oldOff := range liveOffs {
+	for _, oldOff := range s.liveOffs {
 		oldMapRegion := mapRegionAt(bufBase, oldOff)
 		stride := uintptr(oldMapRegion.Stride)
 		hasInprog := oldMapRegion.NextEntryOff > oldMapRegion.EntryCount*oldMapRegion.Stride
@@ -141,24 +156,20 @@ func drainAllMapSlots(m *ndec.BindMachine) error {
 			newEntry := unsafe.Add(unsafe.Pointer(newMapRegion), uintptr(newEntryOff))
 			if oldEntry != newEntry {
 				gort.Memmove(newEntry, oldEntry, stride)
-				moves = append(moves, inprogMove{oldAddr: oldEntry, newAddr: newEntry, stride: stride})
+				s.moves = append(s.moves, inprogMove{oldAddr: oldEntry, newAddr: newEntry, stride: stride})
 			}
 			newMapRegion.NextEntryOff = newMapRegion.Stride
 		} else {
 			newMapRegion.NextEntryOff = 0
 		}
 		newMapRegion.EntryCount = 0
-		mapRegionMoves = append(mapRegionMoves, mapRegionMove{oldOff: oldOff, newOff: newOff, mapRegion: newMapRegion})
+		s.regionMoves = append(s.regionMoves, mapRegionMove{oldOff: oldOff, newOff: newOff, mapRegion: newMapRegion})
 		writePos += ndec.BindMapRegionHeaderSize + ndec.BindMapRegionSlots*uint32(stride)
 	}
 	m.Alloc.MapBufUsed = writePos
 
 	// Step 3: write the new region pointers back into frames[d] (FrameMapRegion)
 	// for live maps whose region moved during compaction.
-	relocated := make(map[uint32]uint32, len(mapRegionMoves))
-	for _, rm := range mapRegionMoves {
-		relocated[rm.oldOff] = rm.newOff
-	}
 	for d := int32(0); d <= maxLiveD; d++ {
 		f := frameAt(frames, d)
 		if f.Kind != uint8(vbind.KindMap) {
@@ -169,19 +180,19 @@ func drainAllMapSlots(m *ndec.BindMachine) error {
 			continue
 		}
 		oldOff := uint32(uintptr(unsafe.Pointer(oldMapRegion)) - uintptr(bufBase))
-		newOff, ok := relocated[oldOff]
-		if !ok {
-			continue // should not happen for live regions
+		for _, rm := range s.regionMoves {
+			if rm.oldOff == oldOff {
+				f.SetFrameMapRegion(rm.mapRegion)
+				break
+			}
 		}
-		newMapRegion := mapRegionAt(bufBase, newOff)
-		f.SetFrameMapRegion(newMapRegion)
 	}
 
 	// Step 4: fixup pointers that referenced a moved in-prog entry. A parent
 	// map's ParentSlot, a struct/slice frame's Dst, and Core.CurDst may point
 	// into the Value area of an entry that just moved.
-	for k := range moves {
-		mv := &moves[k]
+	for k := range s.moves {
+		mv := &s.moves[k]
 		if mv.oldAddr == mv.newAddr {
 			continue
 		}
@@ -195,7 +206,7 @@ func drainAllMapSlots(m *ndec.BindMachine) error {
 			}
 		}
 		// Fixup live regions' ParentSlot (nested map whose parent entry moved).
-		for _, rm := range mapRegionMoves {
+		for _, rm := range s.regionMoves {
 			if ps := uintptr(rm.mapRegion.ParentSlot); ps >= oldStart && ps < oldEnd {
 				rm.mapRegion.ParentSlot = unsafe.Add(rm.mapRegion.ParentSlot, delta)
 			}

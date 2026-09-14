@@ -3,6 +3,7 @@ package vbind
 import (
 	"reflect"
 	"testing"
+	"unsafe"
 )
 
 // Mutual-recursion test types must be package-level: function-local type
@@ -144,7 +145,9 @@ func TestSCC_GroupAssignment(t *testing.T) {
 }
 
 // Recursive backings detach every slotDetachK releases to break cross parse
-// dependency chains. Nonrecursive bump slots retain their EWMA block.
+// dependency chains. Nonrecursive bump slots retain their EWMA block. Map
+// classes never detach: their slots hold redundant copies of published *hmap,
+// so Release sweeps the consumed range and the block runs to exhaustion.
 func TestDetachSCCGroup(t *testing.T) {
 	t.Run("BumpRecDetachesOnK", func(t *testing.T) {
 		type sccList struct {
@@ -248,6 +251,52 @@ func TestDetachSCCGroup(t *testing.T) {
 		}
 		if a.Slots[idx].Block != orig {
 			t.Errorf("non-rec bump Block changed across K+2 Releases: want %v got %v", orig, a.Slots[idx].Block)
+		}
+	})
+
+	t.Run("MapClassSweptNotDetached", func(t *testing.T) {
+		type sccAnyHolder struct {
+			V any
+		}
+		tt, err := TypeTreeOf(reflect.TypeFor[sccAnyHolder]())
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := NewAllocator(tt)
+		idx := -1
+		for i := range tt.Slots {
+			if tt.Slots[i].Flags&SlotIsMap != 0 {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			t.Fatal("no map slot found")
+		}
+		orig := a.Slots[idx].Block
+		if orig == nil {
+			t.Fatal("initial map Block nil")
+		}
+		// Consume one slot, mimicking a published root map.
+		consumed, err := a.Carve(int32(idx))
+		if err != nil {
+			t.Fatalf("Carve: %v", err)
+		}
+		for range slotDetachK + 2 {
+			a.Release()
+		}
+		if a.Slots[idx].Block != orig {
+			t.Fatalf("map Block changed across K+2 Releases: want %v got %v (map classes must not detach)", orig, a.Slots[idx].Block)
+		}
+		if p := *(*unsafe.Pointer)(consumed); p != nil {
+			t.Fatalf("consumed map slot still holds %v after Release, want nil (swept)", p)
+		}
+		next, err := a.Carve(int32(idx))
+		if err != nil {
+			t.Fatalf("Carve: %v", err)
+		}
+		if p := *(*unsafe.Pointer)(next); p == nil {
+			t.Fatal("unconsumed map slot lost its prewired hmap (sweep must stop at the cursor)")
 		}
 	})
 }

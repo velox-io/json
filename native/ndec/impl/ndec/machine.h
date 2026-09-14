@@ -844,12 +844,16 @@ NOINLINE static PolyCase poly_case_by_disc(const NdecBindMachine *m, uint16_t po
 /* Decide whether a poly field binds now, defers, or has no case. A variant may
  * defer until its discriminator is bound. Kindof already knows its final input
  * kind, so an unregistered kind fails without building tape. Cold cases always
- * defer because only tape bind can construct them. Phase 2 re-derives the pure
+ * defer because only tape bind can construct them, except an any target whose
+ * default boxing the field itself carries. Phase 2 re-derives the pure
  * selection instead of carrying case state across fields. */
 enum {
   POLY_SITE_BIND = 0,
   POLY_SITE_DEFER,
   POLY_SITE_NO_CASE,
+  /* An any-target case: the field takes the default any boxing rather than a
+   * case descent, because an eface type word must name a concrete type. */
+  POLY_SITE_ANY,
 };
 
 INLINE int poly_case_site(const NdecBindMachine *m, const BindField *f, const uint8_t *host, const uint8_t *str_p,
@@ -866,6 +870,7 @@ INLINE int poly_case_site(const NdecBindMachine *m, const BindField *f, const ui
     pc = poly_case_by_disc(m, poly_idx, host, str_p, &disc_bound);
     if (pc.case_idx < 0) return POLY_SITE_DEFER;
   }
+  if (m->b.ctx.types[pc.case_type_idx].kind == BIND_KIND_ANY) return POLY_SITE_ANY;
   return (m->b.ctx.types[pc.case_type_idx].flags & BIND_FLAG_COLD) ? POLY_SITE_DEFER : POLY_SITE_BIND;
 }
 

@@ -38,9 +38,10 @@ func kindofKindIndex(name string) int8 {
 }
 
 // DefineKindofCases registers D as the process-wide JSON kind case set for T.
-// D must be a descriptor struct mapping JSON kinds to concrete Go types.
-// Registration must precede parsing T. Repeating the same registration is
-// idempotent; a conflicting descriptor panics.
+// D must be a descriptor struct mapping JSON kinds to concrete Go types. A case
+// typed `any` selects the default any boxing for its kind, so it is legal only
+// on `any` kindof fields. Registration must precede parsing T. Repeating the
+// same registration is idempotent; a conflicting descriptor panics.
 func DefineKindofCases[T any, D any]() {
 	host := reflect.TypeFor[T]()
 	desc := reflect.TypeFor[D]()
@@ -189,6 +190,12 @@ func (b *builder) buildOneKindofTable(hostUT *typ.UniType, si *typ.StructTypeInf
 	caseRType := make([]unsafe.Pointer, polyKindCount)
 	caseSlotClass := make([]int32, polyKindCount)
 	for _, c := range cases {
+		// The any-target passthrough (default any boxing for this kind) applies
+		// to `any` fields only: an interface field needs a concrete case whose
+		// type implements it, and the default boxing never does.
+		if isIface && c.Target == reflect.TypeFor[any]() {
+			return fmt.Errorf("vbind: kindof descriptor %s case %s targets any on interface field %s.%s; use a concrete type implementing the interface", desc, kindofKindNames[c.KindIdx], host, si.Fields[kindofFieldIdx].JSONName)
+		}
 		targetUT := typ.UniTypeOf(c.Target)
 		typeIdx, err := b.collect(targetUT)
 		if err != nil {

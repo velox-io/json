@@ -217,6 +217,10 @@ type Parser struct {
 	padBuf     []byte
 	optFlags   uint32 // per-call BIND_OPT_* bits; OR'd into Ctx.OptFlags per call
 
+	// mapDrain backs drainAllMapSlots. One instance suffices because FLUSH
+	// handling is synchronous and runs no user callbacks, so drains never nest.
+	mapDrain mapDrainScratch
+
 	// streamScopes is the stack of active stream scopes.
 	streamScopes []streamScopeEntry
 
@@ -673,7 +677,7 @@ func (p *Parser) unmarshalPadded(src []byte, rootDst unsafe.Pointer, aliasSrc []
 	if m.Alloc.MapBufUsed > 0 {
 		// Object close may leave complete entries after the final
 		// BindYieldFlushMap, so completion drains the remainder.
-		if err := drainAllMapSlots(m); err != nil {
+		if err := drainAllMapSlots(p, m); err != nil {
 			sealFailedStrArena(alloc, m)
 			return err
 		}

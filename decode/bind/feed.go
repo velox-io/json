@@ -422,7 +422,7 @@ func (p *Parser) feedFinish(m *ndec.BindMachine, f *feedState) error {
 		}
 	}
 	if m.Alloc.MapBufUsed > 0 {
-		if err := drainAllMapSlots(m); err != nil {
+		if err := drainAllMapSlots(p, m); err != nil {
 			return err
 		}
 	}

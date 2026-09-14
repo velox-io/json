@@ -476,6 +476,13 @@ const (
 	BindErrVariantUnknownDisc uint32 = 36
 	BindErrVariantMissingDisc uint32 = 37
 	BindErrKindofUnregistered uint32 = 38
+
+	// BindErrKindofColdCase and BindErrVariantColdCase report a case target
+	// whose kind the binder cannot construct (Unmarshaler, RawMessage, ...).
+	// Arg1 is the JSON kind ordinal for kindof and the poly table index for a
+	// variant.
+	BindErrKindofColdCase  uint32 = 39
+	BindErrVariantColdCase uint32 = 40
 )
 
 // BindMachineSize is the shared allocation limit for the complete native
@@ -492,7 +499,7 @@ const (
 	// entry slots so both sides compute identical region boundaries.
 	BindMapRegionHeaderSize = 32
 	BindMapValOff           = 16
-	BindMapRegionSlots      = 16
+	BindMapRegionSlots      = 32
 )
 
 // BindMachineCursorOffset locates NdecBindMachine.cursor immediately after the
