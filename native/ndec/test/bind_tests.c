@@ -168,24 +168,28 @@ Test(bind_m1, map_basic_and_flush, .init = fx_setup) {
   fx_struct_done(fx, ts);
   fx_build(fx);
 
-  /* One region holds 16 entries, so 20 keys force a FLUSH_MAP and compaction. */
+  /* A region holds BIND_MAP_REGION_SLOTS entries, so overflowing it by a few
+   * keys forces a FLUSH_MAP and compaction. Derive the count from the constant:
+   * a literal silently stops forcing the flush when the slot count grows. */
+  const int n_keys = BIND_MAP_REGION_SLOTS + 4;
   HxOpts opts = {0};
   HxDriver d;
   hx_init(&d, fx, opts);
   Dst dst = {0};
 
-  char json[512];
+  char json[1024];
   int pos = snprintf(json, sizeof(json), "{\"counts\":{");
-  for (int i = 0; i < 20; i++)
+  for (int i = 0; i < n_keys; i++)
     pos += snprintf(json + pos, sizeof(json) - pos, "%s\"k%d\":%d", i ? "," : "", i, i * 3);
   pos += snprintf(json + pos, sizeof(json) - pos, "},\"objs\":{\"e\":{\"v\":7}}}");
+  cr_assert((size_t)pos < sizeof(json));
   cr_assert(hx_run_json(&d, json, (size_t)pos, ts, &dst, 0) == 0);
 
   HxMap *counts = (HxMap *)dst.counts;
   HxMap *objs = (HxMap *)dst.objs;
   cr_assert(counts != NULL && objs != NULL);
-  cr_assert(hx_map_len(counts) == 20);
-  for (int i = 0; i < 20; i++) {
+  cr_assert(hx_map_len(counts) == n_keys);
+  for (int i = 0; i < n_keys; i++) {
     char key[8];
     snprintf(key, sizeof(key), "k%d", i);
     const int64_t *v = (const int64_t *)hx_map_get(counts, key);

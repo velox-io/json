@@ -515,7 +515,7 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 		}
 		// Map staging owns its key bytes in str_arena.
 		b.writesStr[idx] = true
-		stride := uint32(16 + ((valSize + 7) &^ 7))
+		stride := MapValOff + ((valSize + 7) &^ 7)
 		kvStride := stride
 		valIsDeferred := b.mapValueNeedsIndirection(valIdx)
 		valSlotClass := int32(-1)
@@ -1125,12 +1125,24 @@ func (b *builder) attachMapDrainInfos() {
 // maxMapChainDepth must match native BIND_MAX_DEPTH because each active map
 // region corresponds to one level of the native bind frame stack.
 const maxMapChainDepth = 255
-const regionSlotsPerMap = 16
-const regionHeaderSize = 32
+
+// Map-region staging layout. These are the single Go definitions; bind_bridge.h
+// mirrors them as BIND_MAP_* and ndec aliases them as BindMap*, so every side
+// computes identical region boundaries.
+const (
+	// RegionSlotsPerMap is the entry-slot count each live region reserves.
+	RegionSlotsPerMap = 32
+	// RegionHeaderSize is the region header size (BindMapRegionHeader).
+	RegionHeaderSize = 32
+	// MapValOff is the value's byte offset within an entry slot. The key area
+	// is one 16-byte Go string header, so MapValOff doubles as the key-area
+	// size and stride base: stride = MapValOff + sizeof(V) padded to 8.
+	MapValOff = 16
+)
 
 // The capacity floor is the greatest total size of map regions simultaneously
 // live on one descent path. Each map type M contributes
-// regionHeaderSize + regionSlotsPerMap * stride(M) bytes per live region;
+// RegionHeaderSize + RegionSlotsPerMap * stride(M) bytes per live region;
 // recursive paths are capped by maxMapChainDepth.
 func (b *builder) sizeMapBuffer() uint32 {
 	if len(b.mapSites) == 0 {
@@ -1141,7 +1153,7 @@ func (b *builder) sizeMapBuffer() uint32 {
 	var maxRegionSize uint32
 	for i := range b.mapSites {
 		s := &b.mapSites[i]
-		rs := regionHeaderSize + regionSlotsPerMap*s.stride
+		rs := RegionHeaderSize + RegionSlotsPerMap*s.stride
 		regionSizeOf[s.idx] = rs
 		if rs > maxRegionSize {
 			maxRegionSize = rs
@@ -1196,7 +1208,7 @@ func (b *builder) sizeMapBuffer() uint32 {
 		return 0
 	})
 	if maxBytes == 0 {
-		maxBytes = regionHeaderSize + regionSlotsPerMap*16 // at least one minimal region
+		maxBytes = RegionHeaderSize + RegionSlotsPerMap*MapValOff // at least one minimal region
 	}
 	return maxBytes
 }

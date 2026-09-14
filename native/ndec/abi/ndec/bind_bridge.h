@@ -261,10 +261,10 @@ _Static_assert(offsetof(BindMapRegionHeader, type_idx) == 12, "BindMapRegionHead
 _Static_assert(offsetof(BindMapRegionHeader, hmap) == 16, "BindMapRegionHeader.hmap");
 _Static_assert(offsetof(BindMapRegionHeader, parent_slot) == 24, "BindMapRegionHeader.parent_slot");
 
-#define BIND_MAP_REGION_HEADER_SIZE 32
+#define BIND_MAP_REGION_HEADER_SIZE 32 /* vbind.RegionHeaderSize */
 #define BIND_MAP_KEY_OFF            0  /* byte offset of key within an entry slot */
-#define BIND_MAP_VAL_OFF            16 /* byte offset of value within an entry slot */
-#define BIND_MAP_REGION_SLOTS       16
+#define BIND_MAP_VAL_OFF            16 /* vbind.MapValOff */
+#define BIND_MAP_REGION_SLOTS       32 /* vbind.RegionSlotsPerMap */
 
 /*
  * Layout matches vbind.MapDrainInfo. Go owns and roots map_rtype. Deferred map

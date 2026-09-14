@@ -494,12 +494,13 @@ const (
 	BindScanPad     = 64 // 0x20 sentinel padding past src
 	BindMaxDepth    = 255
 
-	// These constants define the map-buffer byte layout shared with C. The value
-	// follows the Go string key header, and each region reserves a fixed number of
-	// entry slots so both sides compute identical region boundaries.
-	BindMapRegionHeaderSize = 32
-	BindMapValOff           = 16
-	BindMapRegionSlots      = 16
+	// Map-buffer byte layout, aliased from the single Go definitions in vbind.
+	// bind_bridge.h mirrors them as BIND_MAP_REGION_HEADER_SIZE, BIND_MAP_VAL_OFF,
+	// and BIND_MAP_REGION_SLOTS so both languages compute identical region
+	// boundaries.
+	BindMapRegionHeaderSize = vbind.RegionHeaderSize
+	BindMapValOff           = vbind.MapValOff
+	BindMapRegionSlots      = vbind.RegionSlotsPerMap
 )
 
 // BindMachineCursorOffset locates NdecBindMachine.cursor immediately after the

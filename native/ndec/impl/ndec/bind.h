@@ -1446,7 +1446,8 @@ map_open: {
   goto map_key;
 }
 
-/* A map region stores [16-byte string key | value] entries at stride intervals.
+/* A map region stores [16-byte string key | value] entries at stride intervals,
+ * BIND_MAP_REGION_SLOTS entries per region.
  * Reserving advances next_entry_off, but entry_count advances only after the
  * value subtree completes, so drain never publishes an in-progress entry. */
 map_key: {
@@ -1466,7 +1467,7 @@ map_key: {
   BindMapRegionHeader *map_region = (BindMapRegionHeader *)cur_aux;
   uint32_t next_entry_off         = map_region->next_entry_off;
   uint32_t stride                 = map_region->stride;
-  uint32_t region_entry_bytes     = stride << 4;
+  uint32_t region_entry_bytes     = BIND_MAP_REGION_SLOTS * stride;
 
   /* FLUSH drains complete entries and compacts the in-progress entry. Resume
    * rederives the relocated region before retrying its value. */
