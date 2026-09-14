@@ -120,8 +120,3 @@ func WithSkipErrors(fn func(err error) bool) DecoderOption { return bind.WithSki
 // WithExpectedSize hints the expected value size; it raises the initial
 // window to fit one value without regrowth.
 func WithExpectedSize(size int) DecoderOption { return bind.WithExpectedSize(size) }
-
-// DecodeValue is a generic convenience wrapper around [Decoder.Decode].
-func DecodeValue[T any](d *Decoder, v *T) error {
-	return bind.DecodeValue(d, v)
-}

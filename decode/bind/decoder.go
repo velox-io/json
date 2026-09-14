@@ -343,8 +343,3 @@ func (d *Decoder) Buffered() io.Reader {
 	copy(out, f.win[f.consumed:f.n])
 	return bytes.NewReader(out)
 }
-
-// DecodeValue reads the next JSON value into v.
-func DecodeValue[T any](d *Decoder, v *T) error {
-	return d.Decode(v)
-}
