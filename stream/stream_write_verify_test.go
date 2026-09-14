@@ -387,7 +387,7 @@ func TestStreamBridgeReadToWrite(t *testing.T) {
 			return nil
 		})
 		dec := vjson.NewDecoder(strings.NewReader(input))
-		return vjson.DecodeValue(dec, &in)
+		return dec.Decode(&in)
 	})
 
 	var buf bytes.Buffer
