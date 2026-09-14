@@ -23,9 +23,24 @@ const slotBlockInitial = SlotBatchMax >> 1
 // Recursive trees use smaller blocks to limit cross-parse backing chains.
 const defaultSlotBatchRecursive = 32
 
-// Each recursive group detaches its slot backings every slotDetachK Releases.
-// The generation cadence bounds cross-parse backing chains without sweeping rows.
+// Recursive classes detach every slotDetachK Releases. The cadence bounds
+// cross-parse backing chains: a pooled block pins every parse it served until
+// reset, and a typed region pins structurally bounded backings, so a fixed
+// cadence suffices.
 const slotDetachK = 3
+
+// The any-rooted classes detach on a document-byte budget instead: a published
+// eface data word retains the whole decoded document behind it, so the mass
+// pinned by an undetached block scales with input bytes. Charging decoded input
+// since the last detach keeps live retention near one budget regardless of
+// document size.
+const detachDebtBudget = 32 << 10
+
+// NoteParsedBytes charges one parse's input size against the budget policy;
+// Release converts the accumulated total into a detach decision.
+func (a *Allocator) NoteParsedBytes(srcLen int) {
+	a.detachDebt += uint64(srcLen)
+}
 
 // Native SIMD stores may overshoot the final decoded string. This tail keeps
 // those stores in bounds outside the per-string hot path. It also absorbs the
@@ -70,9 +85,23 @@ type Allocator struct {
 	// live holds backings native may keep carving from after a release point.
 	live []unsafe.Pointer
 
-	// groups contains only recursive slot classes. Release advances each group
-	// generation and detaches the whole group on its cadence without sweeping rows.
-	groups []recGroup
+	// byCadence and byBudget partition the detachable recursive slot classes by
+	// policy, fixed at construction. Release drops a whole set at once.
+	byCadence detachSet
+	byBudget  detachSet
+
+	// mapSweep holds the sweepable map slot classes, resolved at construction.
+	// Release sweeps this list instead of rescanning every class: the map
+	// classes are a small minority, and the predicate is a property of the
+	// template, so it is decided once rather than per Release. The pointers
+	// stay valid because Slots is allocated once and never reassigned.
+	mapSweep []*SlotClass
+
+	// cadenceLeft counts the Releases remaining before byCadence detaches.
+	cadenceLeft uint32
+
+	// detachDebt accumulates decoded input bytes since the last budget detach.
+	detachDebt uint64
 
 	// slotBatchMax is both the block ceiling and the standalone bypass threshold.
 	// Recursive trees default to a smaller value to limit retained backing chains.
@@ -87,12 +116,31 @@ type Allocator struct {
 	TapeArena []uint64
 }
 
-// A recursive group detaches as one generation unit. Typed overlay pointers
-// avoid scanning non-recursive slots or switching on mode during Release.
-type recGroup struct {
-	gen    uint32
+// A detach set drops its slot backings as one unit. Typed overlay pointers let
+// Release skip non-recursive slots and mode switching. Map classes join no set:
+// their slots hold redundant copies of published *hmap, swept per Release
+// instead, so map blocks run to cursor exhaustion.
+type detachSet struct {
 	bumps  []*RecBumpSlotClass
 	batchs []*RecBatchSlotClass
+}
+
+func (d *detachSet) reset() {
+	for _, r := range d.bumps {
+		r.reset()
+	}
+	for _, r := range d.batchs {
+		r.reset()
+	}
+}
+
+// detachSetFor selects the policy a recursive class follows. The builder marks
+// the any SCC's members, whose regions retain whole documents.
+func (a *Allocator) detachSetFor(tpl SlotTemplate) *detachSet {
+	if tpl.Flags&SlotAnyGroup != 0 {
+		return &a.byBudget
+	}
+	return &a.byCadence
 }
 
 // The parent block is a scannable array of map pointers, so each wired parent
@@ -136,7 +184,7 @@ func newBumpSlotClass(tpl SlotTemplate, initial uint32) BumpSlotClass {
 }
 
 // Recursive bump slots use Offset and Limit but reserve the shared overlay's
-// trailing state for the group generation instead of EWMA data.
+// trailing state for the SCC group ID instead of EWMA data.
 func newRecBumpSlotClass(tpl SlotTemplate) RecBumpSlotClass {
 	slotCount := tpl.Batch
 	r := RecBumpSlotClass{
@@ -194,8 +242,7 @@ func NewAllocator(tt *TypeTree, opts ...AllocOption) *Allocator {
 
 	a.MapBuf = make([]byte, mapBufCapFor(tt.MapBufMinBytes))
 
-	// Slot group IDs are one-based; the slice index is group ID minus one.
-	a.groups = make([]recGroup, tt.GroupCount)
+	a.cadenceLeft = slotDetachK
 
 	initial := a.slotBatchMax >> 1
 	a.Slots = make([]SlotClass, len(tt.Slots))
@@ -206,13 +253,22 @@ func NewAllocator(tt *TypeTree, opts ...AllocOption) *Allocator {
 		case slotRecBatch:
 			r := (*RecBatchSlotClass)(unsafe.Pointer(&a.Slots[i]))
 			*r = newRecBatchSlotClass(tpl)
-			a.groups[tpl.Group-1].batchs = append(a.groups[tpl.Group-1].batchs, r)
+			d := a.detachSetFor(tpl)
+			d.batchs = append(d.batchs, r)
 		case slotRecBump:
 			r := (*RecBumpSlotClass)(unsafe.Pointer(&a.Slots[i]))
 			*r = newRecBumpSlotClass(tpl)
-			a.groups[tpl.Group-1].bumps = append(a.groups[tpl.Group-1].bumps, r)
+			if tpl.Flags&SlotIsMap == 0 {
+				d := a.detachSetFor(tpl)
+				d.bumps = append(d.bumps, r)
+			}
 		default:
 			*(*BumpSlotClass)(unsafe.Pointer(&a.Slots[i])) = newBumpSlotClass(tpl, initial)
+		}
+		// Only a map class holds a consumed *hmap, and a zero ElemSize class has
+		// no entries, so the sweep list skips both.
+		if tpl.Flags&SlotIsMap != 0 && a.Slots[i].ElemSize != 0 {
+			a.mapSweep = append(a.mapSweep, &a.Slots[i])
 		}
 		// Release clears each fresh backing through a barriered pointer store after
 		// native may have published interior pointers from it.
@@ -242,22 +298,51 @@ func (a *Allocator) Release() {
 	}
 	a.retained = a.retained[:0]
 
-	// Recursive maps and slices can link sibling backings across parses. Each SCC
-	// detaches as one generation on a fixed cadence to bound that chain.
-	for i := range a.groups {
-		g := &a.groups[i]
-		g.gen++
-		if g.gen%slotDetachK == 0 {
-			for _, r := range g.bumps {
-				r.reset()
-			}
-			for _, r := range g.batchs {
-				r.reset()
-			}
-		}
+	a.sweepMapSlots()
+
+	// Recursive backings chain across parses: a published header inside a pooled
+	// block pins its element backing, and each element pins that parse's decoded
+	// content, so the block retains every parse it served. The cadence breaks
+	// that chain for structurally bounded backings; the budget breaks it for the
+	// any-rooted ones, whose eface-published regions retain whole documents.
+	if a.cadenceLeft--; a.cadenceLeft == 0 {
+		a.cadenceLeft = slotDetachK
+		a.byCadence.reset()
+	}
+	if a.detachDebt >= detachDebtBudget {
+		a.detachDebt = 0
+		a.byBudget.reset()
 	}
 
 	a.StageLive()
+}
+
+// sweepMapSlots nils consumed map header slots. The map class is consumed
+// only by native map open, which reads the prewired *hmap and copies it to the
+// destination, leaving this slot as the sole scannable root until the drain.
+// Once drains finish, the copy is redundant: the user graph roots every live
+// map, so the copy only pins dropped documents. *map pointee cells live in a
+// distinct class (see builder.registerSlotClass) and are never swept. Typed
+// nil stores keep the deletion barrier: the old hmap stays reachable through
+// the live staged block at sweep time. Unconsumed slots keep their prewired
+// hmaps, rooting the inner block until exhaustion, and an exhausted block
+// pins nothing. Never call mid-parse: before the drain the slot copy is the
+// only scannable root of a nested map, so ReleaseScoped must stay sweep-free.
+func (a *Allocator) sweepMapSlots() {
+	for _, sc := range a.mapSweep {
+		if sc.Block == nil {
+			continue
+		}
+		base := sc.Block
+		// The bound and stride are loop invariant, but the pointer store may alias
+		// the class fields, so the compiler must reload them every iteration
+		// unless they are copied out first.
+		end := uintptr(sc.Offset)
+		step := uintptr(sc.ElemSize)
+		for off := uintptr(0); off < end; off += step {
+			*(*unsafe.Pointer)(unsafe.Add(base, off)) = nil
+		}
+	}
 }
 
 // RetainMark records the current retention height so a later ReleaseScoped can

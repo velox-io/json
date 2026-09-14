@@ -18,12 +18,12 @@ type recSliceNode struct {
 }
 
 // TestRecursiveSliceAcrossDetach parses a recursive-slice document many times
-// crossing the slotDetachK cadence, verifying the RecBatch RecBatch path stays
+// crossing the slotDetachK cadence, verifying the RecBatch path stays
 // correct after each detach (fresh RecBatchMatrix installed on Release).
 func TestRecursiveSliceAcrossDetach(t *testing.T) {
 	data := []byte(`{"v":0,"c":[{"v":1,"c":[{"v":2,"c":[]}]},{"v":3,"c":[]}]}`)
 
-	// 30 iterations crosses slotDetachK=8 three times (detach at 8, 16, 24).
+	// 30 iterations crosses slotDetachK=3 ten times (detach at 3, 6, ...).
 	for i := range 30 {
 		var got recSliceNode
 		if err := Unmarshal(data, &got); err != nil {

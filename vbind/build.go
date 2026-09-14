@@ -18,11 +18,12 @@ import (
 // equal reflect.Type roots share one TypeTree for the whole process.
 func Build(root *typ.UniType) (*TypeTree, error) {
 	b := &builder{
-		seen:         make(map[*typ.UniType]uint32),
-		bySlot:       make(map[*typ.UniType]uint32),
-		bySliceSlot:  make(map[*typ.UniType]uint32),
-		byStreamSlot: make(map[*typ.UniType]uint32),
-		byPrimSlot:   make(map[reflect.Type]uint32),
+		seen:          make(map[*typ.UniType]uint32),
+		bySlot:        make(map[*typ.UniType]uint32),
+		byMapWordSlot: make(map[*typ.UniType]uint32),
+		bySliceSlot:   make(map[*typ.UniType]uint32),
+		byStreamSlot:  make(map[*typ.UniType]uint32),
+		byPrimSlot:    make(map[reflect.Type]uint32),
 	}
 	rootIdx, err := b.collect(root)
 	if err != nil {
@@ -102,7 +103,8 @@ type builder struct {
 	slots               []SlotTemplate
 	slotRecs            []slotRec // parallel to slots for backing dependency analysis
 	seen                map[*typ.UniType]uint32
-	bySlot              map[*typ.UniType]uint32 // pointer pointee and map header slots
+	bySlot              map[*typ.UniType]uint32 // pointer pointee slots for non-map pointees, plus map header slots
+	byMapWordSlot       map[*typ.UniType]uint32 // *map pointee cells stay distinct from prewired map header slots
 	bySliceSlot         map[*typ.UniType]uint32 // slice backing slots remain independent from pointee slots
 	byStreamSlot        map[*typ.UniType]uint32 // Stream[T] slice backings get a distinct SlotClass from []T: stream batch sizing and EWMA must not cross-contaminate with regular slice growth
 	byPrimSlot          map[reflect.Type]uint32
@@ -756,6 +758,24 @@ func (b *builder) resolveChildPointers() error {
 }
 
 func (b *builder) registerSlotClass(elem *typ.UniType) uint32 {
+	// A map-typed pointee is a bare published cell, never a prewired hmap
+	// source. Sharing the map class would put live user storage (the *map word
+	// a PTR unwrap hands out and map_open later fills) into the class whose
+	// consumed slots Release sweeps after drain.
+	if elem.Kind == typ.KindMap {
+		if idx, ok := b.byMapWordSlot[elem]; ok {
+			return idx
+		}
+		idx := uint32(len(b.slots))
+		b.slots = append(b.slots, SlotTemplate{
+			Batch:    4,
+			ElemSize: uint32(elem.Size),
+			RType:    elem.Ptr,
+		})
+		b.byMapWordSlot[elem] = idx
+		b.slotRecs = append(b.slotRecs, slotRec{kind: slotPointer, roots: []*typ.UniType{elem}})
+		return idx
+	}
 	if idx, ok := b.bySlot[elem]; ok {
 		return idx
 	}
@@ -945,6 +965,19 @@ func (b *builder) markSCCGroups() {
 		}
 	}
 	b.groupCount = uint32(groupID)
+
+	// The any type's two retain edges name the []any header and map[string]any
+	// hmap slot classes, so their SCC is the any group. Flagging every member
+	// slot lets the allocator pick a detach policy without a group table.
+	if len(b.anyMetas) > 0 {
+		am := &b.anyMetas[0]
+		anyGroups := [2]uint32{b.slots[am.SliceSlotClass].Group, b.slots[am.MapSlotClass].Group}
+		for i := range b.slots {
+			if g := b.slots[i].Group; g != 0 && (g == anyGroups[0] || g == anyGroups[1]) {
+				b.slots[i].Flags |= SlotAnyGroup
+			}
+		}
+	}
 }
 
 // Structs and arrays do not create backing boundaries, so traversal continues

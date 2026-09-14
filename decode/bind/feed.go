@@ -168,6 +168,13 @@ func (f *feedState) mountWindow(p *Parser, m *ndec.BindMachine) error {
 	m.Ctx.Src = unsafe.SliceData(f.win[:f.n])
 	m.Ctx.SrcLen = uint64(f.n)
 
+	// Charge this window against the detach budget. The streaming paths decode
+	// a document across windows rather than in one call, so the per-window
+	// bytes are the increment that corresponds to srcLen on the contiguous path;
+	// without it a long-lived Decoder would never reach the budget and its
+	// recursive backings would chain unbounded.
+	p.alloc.NoteParsedBytes(int(f.n))
+
 	base := unsafe.Pointer(m)
 	*(*uint64)(unsafe.Add(base, ndec.BindMachineWindowBaseOffset)) = f.base
 	*(*uint8)(unsafe.Add(base, ndec.BindMachineWindowFinalOffset)) = uint8(b2i(f.final))
@@ -422,7 +429,7 @@ func (p *Parser) feedFinish(m *ndec.BindMachine, f *feedState) error {
 		}
 	}
 	if m.Alloc.MapBufUsed > 0 {
-		if err := drainAllMapSlots(m); err != nil {
+		if err := drainAllMapSlots(p, m); err != nil {
 			return err
 		}
 	}

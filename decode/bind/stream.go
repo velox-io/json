@@ -210,7 +210,7 @@ func (d *streamScopeDriver) drainStaged() error {
 		}
 	}
 	if d.m.Alloc.MapBufUsed > 0 {
-		if err := drainAllMapSlots(d.m); err != nil {
+		if err := drainAllMapSlots(d.p, d.m); err != nil {
 			return err
 		}
 	}

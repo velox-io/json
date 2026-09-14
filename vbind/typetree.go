@@ -642,6 +642,12 @@ const (
 	// allocator prewires each slot, and the scannable parent block keeps every
 	// inner map allocation reachable through Block[i].
 	SlotIsMap SlotFlag = 1 << iota
+
+	// SlotAnyGroup marks the recursive classes of the SCC rooted in the universal
+	// any type. Their published regions retain whole decoded documents, so the
+	// allocator detaches them on a document-byte budget rather than the fixed
+	// release cadence every other recursive class follows.
+	SlotAnyGroup
 )
 
 // Scannable TypeTree slices keep builder owned arrays and variant lookup blobs

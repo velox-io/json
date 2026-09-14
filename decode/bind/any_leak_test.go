@@ -46,11 +46,12 @@ func buildAnyDoc(n int) []byte {
 	return []byte(b.String())
 }
 
-// TestAnyLeakBoundedAcrossParses verifies the v2 detach cadence keeps live
-// heap bounded across many parses of an any-heavy document. Without detach,
-// the SlotClass pool pins *hmap dirPtrs and []any backings across parses,
-// extending the backing dependency chain without bound; with detach, every
-// slotDetachK parses the group's backing is dropped, bounding the chain.
+// TestAnyLeakBoundedAcrossParses verifies the detach cadence keeps live heap
+// bounded across many parses of an any-heavy document. Without detach, the
+// SlotClass pool pins *hmap dirPtrs and []any backings across parses,
+// extending the backing dependency chain without bound; with detach, the
+// group's backing is dropped once a budget of document bytes has been parsed,
+// bounding the chain.
 func TestAnyLeakBoundedAcrossParses(t *testing.T) {
 	data := buildAnyDoc(256)
 
@@ -74,7 +75,7 @@ func TestAnyLeakBoundedAcrossParses(t *testing.T) {
 
 	// Steady state: the second batch must not exceed the first by more than a
 	// small tolerance. The v1 leak grew live heap into the GBs across parses;
-	// detach bounds it to ~slotDetachK parses' worth of backings.
+	// detach bounds it to roughly one budget's worth of retained documents.
 	if end > mid+50*1024*1024 {
 		t.Errorf("live heap unbounded across parses: mid=%d end=%d (delta=%d)", mid, end, end-mid)
 	}

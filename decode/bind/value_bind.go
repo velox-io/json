@@ -259,6 +259,10 @@ func (p *Parser) unmarshalValue(v value.Value, desc *valueabi.Descriptor, rootDs
 	// Route the machine at the cold-start seed phase.
 	m.Core.Phase = ndec.BindPhaseTapeBindRoot
 
+	// Tape words stand in for document size on this path: the source text is
+	// already consumed, and tape length is what scales with the bound graph.
+	p.alloc.NoteParsedBytes(len(doc.Tape) * 8)
+
 	defer func() {
 		p.alloc.Release() // Publish native writes, then stage reusable backings.
 		// Clear borrowed ABI pointers before the machine is reused. KeepAlive
@@ -295,7 +299,7 @@ func (p *Parser) unmarshalValue(v value.Value, desc *valueabi.Descriptor, rootDs
 		}
 	}
 	if m.Alloc.MapBufUsed > 0 {
-		if err := drainAllMapSlots(m); err != nil {
+		if err := drainAllMapSlots(p, m); err != nil {
 			return err
 		}
 	}

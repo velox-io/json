@@ -120,6 +120,11 @@ func PlanMapSlots(rtype unsafe.Pointer) MapSlotPlan {
 // each unit and publishes each unit's address into block[i]. One mapSeed() call
 // covers the whole batch instead of N per-map re-seeds.
 //
+// Every backing must come fresh from UnsafeNewArray, which zero-fills: only the
+// non-zero fields (seed, ctrl, dirPtr, the parent slot) are written here, and
+// the zero state of used/dirLen/flags/clearSeq and a nil dirPtr on the lazy
+// path is inherited from the allocation.
+//
 //   - Composite (plan.GroupOff > 0): dirPtr prewired to the in-block group.
 //   - Two-block (groupBlock != nil): dirPtr prewired to groupBlock[i].
 //   - Lazy (neither): dirPtr stays nil; runtime grows the group on first assign.
@@ -131,7 +136,6 @@ func InitMapSlots(block, inner, groupBlock unsafe.Pointer, esz uintptr, plan Map
 	seed := mapSeed()
 	for i := range batch {
 		unit := unsafe.Add(inner, uintptr(i)*plan.Stride)
-		*(*[48]byte)(unit) = [48]byte{}
 		*(*uintptr)(unsafe.Add(unit, mapSeedOff)) = seed
 		if plan.GroupOff > 0 {
 			// Composite: group is in-block at GroupOff.

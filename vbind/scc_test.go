@@ -3,6 +3,7 @@ package vbind
 import (
 	"reflect"
 	"testing"
+	"unsafe"
 )
 
 // Mutual-recursion test types must be package-level: function-local type
@@ -143,8 +144,12 @@ func TestSCC_GroupAssignment(t *testing.T) {
 	})
 }
 
-// Recursive backings detach every slotDetachK releases to break cross parse
-// dependency chains. Nonrecursive bump slots retain their EWMA block.
+// Recursive backings detach to break cross parse dependency chains. Recursive
+// classes detach every slotDetachK Releases on the release cadence; any-rooted
+// classes detach once detachDebtBudget document bytes have been charged via
+// NoteParsedBytes. Nonrecursive bump slots retain their EWMA block. Map classes
+// never detach: their slots hold redundant copies of published *hmap, so
+// Release sweeps the consumed range and the block runs to exhaustion.
 func TestDetachSCCGroup(t *testing.T) {
 	t.Run("BumpRecDetachesOnK", func(t *testing.T) {
 		type sccList struct {
@@ -222,6 +227,92 @@ func TestDetachSCCGroup(t *testing.T) {
 		}
 	})
 
+	t.Run("AnyGroupDetachesOnBudget", func(t *testing.T) {
+		type sccAnyHolder struct {
+			V any
+		}
+		tt, err := TypeTreeOf(reflect.TypeFor[sccAnyHolder]())
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := NewAllocator(tt)
+		idx := -1
+		for i := range tt.Slots {
+			if tt.Slots[i].Flags&SlotAnyGroup != 0 && tt.Slots[i].Mode == slotRecBatch {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			t.Fatal("no any-group RecBatch slot found")
+		}
+		orig := a.Slots[idx].Block
+		if orig == nil {
+			t.Fatal("initial any RecBatch Block nil")
+		}
+		// Charging is inert below the budget, so block reuse keeps paying off.
+		a.NoteParsedBytes(detachDebtBudget - 1)
+		a.Release()
+		if a.Slots[idx].Block != orig {
+			t.Fatal("Release under budget: any RecBatch Block changed, want retained")
+		}
+		// Reaching the budget must detach, on any Release count.
+		a.NoteParsedBytes(1)
+		a.Release()
+		if a.Slots[idx].Block == nil || a.Slots[idx].Block == orig {
+			t.Fatal("at budget: any RecBatch Block should be a fresh matrix")
+		}
+	})
+
+	t.Run("MixedTreeSplitsPolicies", func(t *testing.T) {
+		type mixedNode struct {
+			Next *mixedNode
+			V    any
+		}
+		tt, err := TypeTreeOf(reflect.TypeFor[mixedNode]())
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := NewAllocator(tt)
+		typedIdx, anyIdx := -1, -1
+		for i := range tt.Slots {
+			s := &tt.Slots[i]
+			if s.Group == 0 {
+				continue
+			}
+			if s.Flags&SlotAnyGroup != 0 {
+				if s.Mode == slotRecBatch && anyIdx < 0 {
+					anyIdx = i
+				}
+			} else if s.Mode != slotRecBatch && typedIdx < 0 {
+				typedIdx = i
+			}
+		}
+		if typedIdx < 0 || anyIdx < 0 {
+			t.Fatalf("missing slots: typedIdx=%d anyIdx=%d", typedIdx, anyIdx)
+		}
+		typedOrig, anyOrig := a.Slots[typedIdx].Block, a.Slots[anyIdx].Block
+		if typedOrig == nil || anyOrig == nil {
+			t.Fatal("initial rec Block nil")
+		}
+		// The budget alone detaches only the any-rooted classes; the typed ones
+		// keep the release cadence.
+		a.NoteParsedBytes(detachDebtBudget)
+		a.Release()
+		if a.Slots[typedIdx].Block != typedOrig {
+			t.Fatal("typed rec Block changed at budget, want release cadence")
+		}
+		if a.Slots[anyIdx].Block == nil || a.Slots[anyIdx].Block == anyOrig {
+			t.Fatal("any RecBatch Block should be a fresh matrix at budget")
+		}
+		// Two more Releases reach K and detach the typed group.
+		a.Release()
+		a.Release()
+		if a.Slots[typedIdx].Block != nil {
+			t.Fatal("after K Releases: typed rec Block should be nil (detached)")
+		}
+	})
+
 	t.Run("NonRecUnchanged", func(t *testing.T) {
 		type sccFlat struct {
 			Y []int
@@ -248,6 +339,53 @@ func TestDetachSCCGroup(t *testing.T) {
 		}
 		if a.Slots[idx].Block != orig {
 			t.Errorf("non-rec bump Block changed across K+2 Releases: want %v got %v", orig, a.Slots[idx].Block)
+		}
+	})
+
+	t.Run("MapClassSweptNotDetached", func(t *testing.T) {
+		type sccAnyHolder struct {
+			V any
+		}
+		tt, err := TypeTreeOf(reflect.TypeFor[sccAnyHolder]())
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := NewAllocator(tt)
+		idx := -1
+		for i := range tt.Slots {
+			if tt.Slots[i].Flags&SlotIsMap != 0 {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			t.Fatal("no map slot found")
+		}
+		orig := a.Slots[idx].Block
+		if orig == nil {
+			t.Fatal("initial map Block nil")
+		}
+		// Consume one slot, mimicking a published root map.
+		consumed, err := a.Carve(int32(idx))
+		if err != nil {
+			t.Fatalf("Carve: %v", err)
+		}
+		for range slotDetachK + 2 {
+			a.NoteParsedBytes(detachDebtBudget)
+			a.Release()
+		}
+		if a.Slots[idx].Block != orig {
+			t.Fatalf("map Block changed across detaches: want %v got %v (map classes must not detach)", orig, a.Slots[idx].Block)
+		}
+		if p := *(*unsafe.Pointer)(consumed); p != nil {
+			t.Fatalf("consumed map slot still holds %v after Release, want nil (swept)", p)
+		}
+		next, err := a.Carve(int32(idx))
+		if err != nil {
+			t.Fatalf("Carve: %v", err)
+		}
+		if p := *(*unsafe.Pointer)(next); p == nil {
+			t.Fatal("unconsumed map slot lost its prewired hmap (sweep must stop at the cursor)")
 		}
 	})
 }
