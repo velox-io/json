@@ -23,7 +23,9 @@ if ((& go env GOARCH) -eq "amd64") {
 # no declared parameters on purpose: unbound arguments (including flag-looking
 # ones like -tags) accumulate in the automatic $args variable, which splats
 # verbatim onto the native go command. A declared parameter named $Args would
-# shadow that mechanism and silently swallow tokens during binding.
+# shadow that mechanism and silently swallow tokens during binding. The race
+# flags are appended after the arguments because go requires -C, when present,
+# to be the first flag on the command line.
 function Invoke-GoTest {
     & go test @args
     if ($LASTEXITCODE -ne 0) {
@@ -31,10 +33,10 @@ function Invoke-GoTest {
         Write-Host "FAIL: go test $($args -join ' ')" -ForegroundColor Red
     }
     if ($RaceArgs.Count -gt 0) {
-        & go test @RaceArgs @args
+        & go test @args @RaceArgs
         if ($LASTEXITCODE -ne 0) {
             $script:failed = $true
-            Write-Host "FAIL: go test $($RaceArgs -join ' ') $($args -join ' ')" -ForegroundColor Red
+            Write-Host "FAIL: go test $($args -join ' ') $($RaceArgs -join ' ')" -ForegroundColor Red
         }
     }
 }
