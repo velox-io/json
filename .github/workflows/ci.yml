@@ -79,11 +79,16 @@ jobs:
       run: make test
 
   test-macos-amd64:
-    # execblob loads the arch-canonical linux-built amd64 ELF blob through
-    # the darwin/amd64 mmap path (native/execblob/execmap_darwin_amd64.go),
-    # so this is the only runner that exercises it.
-    name: Test (macOS AMD64, Go stable)
-    runs-on: macos-13
+    # GitHub retired the last Intel macOS hosted runner (macos-13) in December
+    # 2025, but the arm64 images ship Rosetta 2, so GOARCH=amd64 still builds
+    # and executes darwin/amd64 binaries under translation. execblob loads the
+    # arch-canonical linux-built amd64 ELF blob through the darwin/amd64 mmap
+    # path (native/execblob/execmap_darwin_amd64.go), so this is the only
+    # runner that exercises it.
+    name: Test (macOS AMD64 via Rosetta, Go stable)
+    runs-on: macos-latest
+    env:
+      GOARCH: amd64
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
@@ -162,7 +167,9 @@ jobs:
   # execblob support. Windows/amd64 runs gc-stress.sh through Git Bash (the
   # shell every windows-latest image ships): the script is invoked as `bash
   # scripts/gc-stress.sh` rather than relying on the executable bit, since
-  # NTFS carries no POSIX mode to preserve across checkout.
+  # NTFS carries no POSIX mode to preserve across checkout. macOS AMD64 runs
+  # on the arm64 image through Rosetta 2 (GOARCH=amd64), since GitHub retired
+  # the last Intel macOS runner image in December 2025.
   gc-soak:
     name: GC Soak (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
@@ -179,7 +186,8 @@ jobs:
         - name: macOS ARM64
           runner: macos-latest
         - name: macOS AMD64
-          runner: macos-13
+          runner: macos-latest
+          goarch: amd64
         - name: Windows AMD64
           runner: windows-latest
     steps:
@@ -205,12 +213,13 @@ jobs:
       env:
         GC_STRESS_LEGS: soak
         GC_STRESS_SOAK_MINUTES: 12
+        GOARCH: ${{ matrix.goarch }}
 
     - name: Upload GC soak logs
       if: failure()
       uses: actions/upload-artifact@v7
       with:
-        name: gc-soak-logs-${{ matrix.runner }}
+        name: gc-soak-logs-${{ matrix.name }}
         path: build/gc-stress/*.log
         retention-days: 30
 
@@ -232,7 +241,8 @@ jobs:
         - name: macOS ARM64
           runner: macos-latest
         - name: macOS AMD64
-          runner: macos-13
+          runner: macos-latest
+          goarch: amd64
         - name: Windows AMD64
           runner: windows-latest
     steps:
@@ -255,12 +265,13 @@ jobs:
       run: bash scripts/gc-stress.sh
       env:
         GC_STRESS_LEGS: cold pooled encode
+        GOARCH: ${{ matrix.goarch }}
 
     - name: Upload GC stress logs
       if: failure()
       uses: actions/upload-artifact@v7
       with:
-        name: gc-stress-logs-${{ matrix.runner }}
+        name: gc-stress-logs-${{ matrix.name }}
         path: build/gc-stress/*.log
         retention-days: 30
 
