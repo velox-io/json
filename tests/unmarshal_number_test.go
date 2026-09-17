@@ -3,6 +3,7 @@ package tests
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 
@@ -540,6 +541,51 @@ func TestNumber_Float64Overflow(t *testing.T) {
 				t.Errorf("vjson accepted overflow %q into float64 but encoding/json rejected it", tt.input)
 			}
 		})
+	}
+}
+
+// Float32 max boundary: tokens around math.MaxFloat32 must agree with
+// encoding/json on error presence and decoded value, both signs.
+func TestNumber_Float32MaxBoundary(t *testing.T) {
+	tests := []string{
+		// exactly math.MaxFloat32
+		"3.40282346638528859811704183484516925440e+38",
+
+		// rounds up to math.MaxFloat32
+		"3.402823469e+38",
+		"3.40282346e+38",
+		"3.40282347e+38",
+		"3.40282348e+38",
+		"3.4028235e+38",
+
+		// ties-to-even midpoint between MaxFloat32 and the next binade
+		"3.4028235677973366e+38",
+
+		// overflow for float32, rounds up to MaxFloat32 + 1
+		"3.402823567797337e+38",
+		"3.402823567797338e+38",
+		"3.4028236e+38",
+	}
+
+	for _, sign := range []string{"", "-"} {
+		for _, data := range tests {
+			input := sign + data
+			t.Run(input, func(t *testing.T) {
+				var vj, std float32
+				vjErr := vjson.Unmarshal([]byte(input), &vj)
+				stdErr := json.Unmarshal([]byte(input), &std)
+				if (vjErr != nil) != (stdErr != nil) {
+					t.Fatalf("error mismatch for %s: vjson=%v stdlib=%v", input, vjErr, stdErr)
+				}
+				if vjErr != nil {
+					return
+				}
+				if vj != std {
+					t.Errorf("value mismatch for %s: vjson=%g(%08x) stdlib=%g(%08x)",
+						input, vj, math.Float32bits(vj), std, math.Float32bits(std))
+				}
+			})
+		}
 	}
 }
 
