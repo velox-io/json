@@ -311,6 +311,7 @@ type slotProbeHost struct {
 }
 
 func TestStreamElementSlotIsBufferBase(t *testing.T) {
+	needNativeBinder(t)
 	checked := 0
 	streamSlotCheck = func(m *ndec.BindMachine, hdr *gort.SliceHeader, elemHasStream bool) {
 		if !elemHasStream || m.Core.Phase != ndec.BindPhaseArrayValueBegin {

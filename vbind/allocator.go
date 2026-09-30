@@ -2,6 +2,7 @@ package vbind
 
 import (
 	"errors"
+	"math/bits"
 	"unsafe"
 
 	"github.com/velox-io/json/gort"
@@ -660,6 +661,75 @@ func (a *Allocator) ServeSliceGrow(sc *SlotClass, hdr *gort.SliceHeader) error {
 		hdr.Cap = int(blockCap)
 	}
 	return nil
+}
+
+// OpenSlice, GrowSlice, and CloseSlice are the slice protocol of a binder
+// running in Go, the counterpart of native array_begin, the slice grow
+// check, and array_close. Both binders keep one ledger: an open charges the
+// whole borrowed bump tail, and the close returns what the slice left
+// unwritten.
+
+// OpenSlice gives the empty slice hdr of class sc its first backing.
+func (a *Allocator) OpenSlice(sc *SlotClass, hdr *gort.SliceHeader) {
+	if sc.Mode == slotRecBatch {
+		r := sc.RecBatch()
+		if bk, ok := r.take(0); ok {
+			*hdr = gort.SliceHeader{Data: bk, Cap: int(recBatchRowCap(0))}
+			return
+		}
+		*hdr = gort.SliceHeader{}
+		_ = r.ServeRefill(a, 0, hdr)
+		return
+	}
+	if sc.Offset == sc.Limit {
+		*hdr = gort.SliceHeader{}
+		_ = a.ServeSliceGrow(sc, hdr)
+		return
+	}
+	*hdr = gort.SliceHeader{Data: unsafe.Add(sc.Block, uintptr(sc.Offset)), Cap: int(sc.Cap - sc.Len)}
+	sc.Offset = sc.Limit
+}
+
+// GrowSlice moves the full slice hdr of class sc, whose Len equals its Cap,
+// to a larger backing. A RecBatch slice takes the row of the next power of
+// two, so a caller-sized capacity still lands in a slot that holds it.
+func (a *Allocator) GrowSlice(sc *SlotClass, hdr *gort.SliceHeader) {
+	if sc.Mode != slotRecBatch {
+		_ = a.ServeSliceGrow(sc, hdr)
+		return
+	}
+	r := sc.RecBatch()
+	next := uint32(1) << bits.Len32(uint32(hdr.Cap))
+	if next > RecBatchMaxCap {
+		_ = r.ServeBypass(a, next, hdr)
+		return
+	}
+	row := recBatchRowIdx(next)
+	bk, ok := r.take(row)
+	if !ok {
+		_ = r.ServeRefill(a, row, hdr)
+		return
+	}
+	old, oldCap := hdr.Data, hdr.Cap
+	if hdr.Len > 0 {
+		gort.Memmove(bk, old, uintptr(hdr.Len)*uintptr(sc.ElemSize))
+	}
+	hdr.Data, hdr.Cap = bk, int(next)
+	r.free(old, uint32(oldCap))
+}
+
+// CloseSlice returns the unwritten tail past the first n elements at data
+// when data borrowed the bump block still installed on sc. A failed bind
+// closes its open slices the same way, as their written elements stay
+// charged.
+func (a *Allocator) CloseSlice(sc *SlotClass, data unsafe.Pointer, n int) {
+	if sc.Mode != slotBump {
+		return
+	}
+	if off := uintptr(data) - uintptr(sc.Block); off < uintptr(sc.Limit) {
+		sc.Offset = uint32(off + uintptr(n)*uintptr(sc.ElemSize))
+		sc.Len += uint32(n)
+	}
 }
 
 // takeSpare removes and returns the smallest spare of sc holding at least n

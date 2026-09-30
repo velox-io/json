@@ -674,6 +674,7 @@ func TestFeedDeferredNullSemantics(t *testing.T) {
 // drain runs at the following input yield, before the missing-comma error,
 // so the hook observes the span directly.
 func TestFeedDeferredClampSpan(t *testing.T) {
+	needNativeBinder(t)
 	type clampDoc struct {
 		U feedUnmValue `json:"u"`
 	}

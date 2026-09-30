@@ -1,18 +1,12 @@
 package bind
 
 import (
-	"errors"
-	"strconv"
 	"unsafe"
 
 	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/native/ndec"
 	"github.com/velox-io/json/vbind"
 )
-
-func (p *Parser) serveFlushMap(m *ndec.BindMachine) error {
-	return drainAllMapSlots(p, m)
-}
 
 func mapRegionAt(bufBase unsafe.Pointer, off uint32) *ndec.BindMapRegionHeader {
 	return (*ndec.BindMapRegionHeader)(unsafe.Add(bufBase, uintptr(off)))
@@ -59,9 +53,11 @@ type mapDrainScratch struct {
 //     live maps whose region moved during compaction.
 //  4. Fixes up frames[].Dst, other regions' ParentSlot, and Core.CurDst that
 //     point inside a moved in-prog entry.
-func drainAllMapSlots(p *Parser, m *ndec.BindMachine) error {
+//
+// A key that fails conversion drops its entry; the failure goes to p.failed.
+func drainAllMapSlots(p *Parser, m *ndec.BindMachine) {
 	if m.Alloc.MapBufUsed == 0 {
-		return nil
+		return
 	}
 	bufBase := unsafe.Pointer(m.Alloc.MapBuf)
 	frames := ndec.FramesBase(m)
@@ -82,7 +78,7 @@ func drainAllMapSlots(p *Parser, m *ndec.BindMachine) error {
 		off += uint32(ndec.BindMapRegionHeaderSize) + uint32(ndec.BindMapRegionSlots)*r.Stride
 	}
 	if len(s.offsets) == 0 {
-		return nil
+		return
 	}
 
 	// Live region offsets from frames[0..depth]. A frame is a live map iff
@@ -113,7 +109,7 @@ func drainAllMapSlots(p *Parser, m *ndec.BindMachine) error {
 			entriesBase := unsafe.Add(unsafe.Pointer(mapRegion), ndec.BindMapRegionHeaderSize)
 			mapHdr := mapRegion.Hmap
 			if err := drainKVSlots(mapHdr, entriesBase, int(mapRegion.EntryCount), info, stride, uintptr(ndec.BindMapValOff)); err != nil {
-				return err
+				p.failed.noteKey(err)
 			}
 		}
 	}
@@ -123,7 +119,7 @@ func drainAllMapSlots(p *Parser, m *ndec.BindMachine) error {
 	// exactly what compaction would produce.
 	if len(s.liveOffs) == 0 {
 		m.Alloc.MapBufUsed = 0
-		return nil
+		return
 	}
 
 	// Step 2: compaction of live regions toward the buffer front. A moved
@@ -209,11 +205,11 @@ func drainAllMapSlots(p *Parser, m *ndec.BindMachine) error {
 			m.Core.CurDst = (*byte)(unsafe.Add(unsafe.Pointer(m.Core.CurDst), delta))
 		}
 	}
-
-	return nil
 }
 
-// drainKVSlots writes count staged KV entries into the runtime map.
+// drainKVSlots writes count staged KV entries into the runtime map. An entry
+// whose key fails conversion is dropped, and the first failure is returned
+// once the rest have landed.
 func drainKVSlots(mapHdr, entriesBase unsafe.Pointer, count int, info *vbind.MapDrainInfo, stride, valueOff uintptr) error {
 	keyKind := info.KeyKind
 	valSize := uintptr(info.ValSize)
@@ -262,11 +258,15 @@ func drainKVSlots(mapHdr, entriesBase unsafe.Pointer, count int, info *vbind.Map
 	}
 
 	var keyBuf [8]byte
+	var first error
 	for i := range count {
 		slot := unsafe.Add(entriesBase, uintptr(i)*stride)
 		key := *(*string)(slot)
-		if err := encodeIntKey(&keyBuf, keyKind, key); err != nil {
-			return err
+		if err := info.EncodeIntKey(&keyBuf, key); err != nil {
+			if first == nil {
+				first = err
+			}
+			continue
 		}
 		valSlot := unsafe.Add(slot, valueOff)
 		var valSrc unsafe.Pointer
@@ -278,7 +278,7 @@ func drainKVSlots(mapHdr, entriesBase unsafe.Pointer, count int, info *vbind.Map
 		elemInMap := gort.MapAssign(mapRType, mapHdr, unsafe.Pointer(&keyBuf[0]))
 		copyMapValue(elemInMap, valSrc, valSize)
 	}
-	return nil
+	return first
 }
 
 // copyMapValue fills storage returned by mapassign. These raw stores bypass the
@@ -298,62 +298,5 @@ func copyMapValue(dst, src unsafe.Pointer, valSize uintptr) {
 		case 8:
 			*(*uint64)(dst) = *(*uint64)(src)
 		}
-	}
-}
-
-func encodeIntKey(buf *[8]byte, keyKind vbind.Kind, keyStr string) error {
-	switch keyKind {
-	case vbind.KindInt, vbind.KindInt8, vbind.KindInt16, vbind.KindInt32, vbind.KindInt64:
-		bits := 64
-		switch keyKind {
-		case vbind.KindInt8:
-			bits = 8
-		case vbind.KindInt16:
-			bits = 16
-		case vbind.KindInt32:
-			bits = 32
-		}
-		v, err := strconv.ParseInt(keyStr, 10, bits)
-		if err != nil {
-			return errors.New("bind: map int key " + keyStr + ": " + err.Error())
-		}
-		switch keyKind {
-		case vbind.KindInt8:
-			*(*int8)(unsafe.Pointer(&buf[0])) = int8(v)
-		case vbind.KindInt16:
-			*(*int16)(unsafe.Pointer(&buf[0])) = int16(v)
-		case vbind.KindInt32:
-			*(*int32)(unsafe.Pointer(&buf[0])) = int32(v)
-		default:
-			*(*int64)(unsafe.Pointer(&buf[0])) = v
-		}
-		return nil
-	case vbind.KindUint, vbind.KindUint8, vbind.KindUint16, vbind.KindUint32, vbind.KindUint64:
-		bits := 64
-		switch keyKind {
-		case vbind.KindUint8:
-			bits = 8
-		case vbind.KindUint16:
-			bits = 16
-		case vbind.KindUint32:
-			bits = 32
-		}
-		v, err := strconv.ParseUint(keyStr, 10, bits)
-		if err != nil {
-			return errors.New("bind: map uint key " + keyStr + ": " + err.Error())
-		}
-		switch keyKind {
-		case vbind.KindUint8:
-			*(*uint8)(unsafe.Pointer(&buf[0])) = uint8(v)
-		case vbind.KindUint16:
-			*(*uint16)(unsafe.Pointer(&buf[0])) = uint16(v)
-		case vbind.KindUint32:
-			*(*uint32)(unsafe.Pointer(&buf[0])) = uint32(v)
-		default:
-			*(*uint64)(unsafe.Pointer(&buf[0])) = v
-		}
-		return nil
-	default:
-		return errors.New("bind: unsupported map key kind")
 	}
 }

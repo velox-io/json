@@ -357,6 +357,12 @@ func Benchmark_Unmarshal_JSONBenchCITMCatalog_Velox(b *testing.B) {
 	benchmarkJSONBenchUnmarshalVelox[jsonbench.CITMRoot](b, mustLoadJSONBenchCITMCatalogRaw())
 }
 
+func Benchmark_Unmarshal_JSONBenchCITMCatalog_VeloxStrict(b *testing.B) {
+	benchmarkJSONBenchUnmarshal(b, mustLoadJSONBenchCITMCatalogRaw(), func(data []byte, dst *jsonbench.CITMRoot) error {
+		return vjson.Unmarshal(data, dst, vjson.WithStrictScan())
+	})
+}
+
 func Benchmark_Unmarshal_JSONBenchGolangSource_Sonic(b *testing.B) {
 	benchmarkJSONBenchUnmarshalSonic[jsonbench.GolangRoot](b, mustLoadJSONBenchGolangSourceRaw())
 }
@@ -383,6 +389,12 @@ func Benchmark_Unmarshal_JSONBenchStringUnicode_JSONv2(b *testing.B) {
 
 func Benchmark_Unmarshal_JSONBenchStringUnicode_Velox(b *testing.B) {
 	benchmarkJSONBenchUnmarshalVelox[jsonbench.StringRoot](b, mustLoadJSONBenchStringUnicodeRaw())
+}
+
+func Benchmark_Unmarshal_JSONBenchStringUnicode_VeloxStrict(b *testing.B) {
+	benchmarkJSONBenchUnmarshal(b, mustLoadJSONBenchStringUnicodeRaw(), func(data []byte, dst *jsonbench.StringRoot) error {
+		return vjson.Unmarshal(data, dst, vjson.WithStrictScan())
+	})
 }
 
 func Benchmark_Unmarshal_JSONBenchSyntheaFHIR_Sonic(b *testing.B) {

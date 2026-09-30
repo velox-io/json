@@ -69,6 +69,7 @@ func assertTapeHasJump(t *testing.T, v value.Value) {
 // sub-span. A seam-skipping regression would either read the jump word as a key
 // (syntax error) or advance past ext2 (missing field).
 func TestJumpTapeValue_UnmarshalValueWithValueField(t *testing.T) {
+	needNativeBinder(t)
 	// disc after "data", unknowns on both sides: the poly case descent between
 	// the ext1 and ext2 copies into B creates the seam in B.
 	src := `{"ext1":1,"data":{"name":"bob","role":"admin"},"type":"user","ext2":{"deep":true}}`

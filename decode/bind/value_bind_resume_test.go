@@ -261,8 +261,8 @@ func TestUnmarshalValueFloat32UsesStableNumberText(t *testing.T) {
 		desc := valueDescriptor(&v)
 		root, _ := desc.Extent()
 		word := desc.Doc.Tape[int(desc.Base)+root]
-		if off := uint32(word); off == 0 {
-			t.Fatal("double text offset = 0; want a nonzero StrArena offset")
+		if n := uint32(word >> 32); n == 0 {
+			t.Fatal("double carries no arena text; the token must intern into the StrArena")
 		}
 		src := desc.Doc.Src
 		for i := range src {

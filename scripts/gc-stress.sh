@@ -38,10 +38,17 @@
 #   encode  tags vjgcstress + race, same hostile GODEBUG. The encoder VM entry
 #           calls runtime.GC() before every exec, so a mark always runs while
 #           the ABI ctx holds borrowed pointers.
+#   nondec  tags vj_nondec,vj_noparsercache, same hostile GODEBUG, no race:
+#           the pure-Go engine publishes through the same allocator and
+#           string arena, so its publication windows get the self-checking
+#           collector, while the race dimension of the same build already
+#           runs in the test-nondec job. Plain Go, so one OS/arch runs it;
+#           CI keeps it off the per-platform suite jobs and gives it a
+#           dedicated Linux job.
 #
 # Cost: soak is whatever GC_STRESS_SOAK_MINUTES says. One pass of the three
 # suite legs is ~6min on a 10-core darwin/arm64 box, most of it ./decode/bind
-# under the race detector. CI runs the two groups as separate parallel jobs.
+# under the race detector. CI runs the groups as separate parallel jobs.
 #
 # Usage:
 #   scripts/gc-stress.sh                            # soak + every suite leg
@@ -71,7 +78,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-LEGS="${GC_STRESS_LEGS:-soak cold pooled encode}"
+LEGS="${GC_STRESS_LEGS:-soak cold pooled encode nondec}"
 ROUNDS="${GC_STRESS_ROUNDS:-1}"
 COUNT="${GC_STRESS_COUNT:-1}"
 TIMEOUT="${GC_STRESS_TIMEOUT:-20m}"
@@ -114,20 +121,21 @@ leg_tags() {
 	cold) echo "vj_noparsercache" ;;
 	pooled) echo "" ;;
 	encode) echo "vjgcstress" ;;
+	nondec) echo "vj_nondec,vj_noparsercache" ;;
 	esac
 }
 
 leg_race() {
 	case "$1" in
 	soak | cold | encode) echo "1" ;;
-	pooled) echo "" ;;
+	pooled | nondec) echo "" ;;
 	esac
 }
 
 leg_pkgs() {
 	case "$1" in
 	soak) echo "$SOAK_PKG" ;;
-	cold | pooled) echo "$DECODE_PKGS" ;;
+	cold | pooled | nondec) echo "$DECODE_PKGS" ;;
 	encode) echo "$ENCODE_PKGS" ;;
 	esac
 }
@@ -168,7 +176,7 @@ trap cleanup EXIT INT TERM
 
 for leg in $LEGS; do
 	if [ -z "$(leg_pkgs "$leg")" ]; then
-		echo "gc-stress: unknown leg '$leg' (want: soak cold pooled encode)" >&2
+		echo "gc-stress: unknown leg '$leg' (want: soak cold pooled encode nondec)" >&2
 		exit 2
 	fi
 done
@@ -179,7 +187,7 @@ has_leg() {
 }
 
 echo "gc-stress: legs=[$LEGS] timeout=$TIMEOUT GOMAXPROCS=${GOMAXPROCS:-default}"
-if has_leg cold || has_leg pooled || has_leg encode; then
+if has_leg cold || has_leg pooled || has_leg encode || has_leg nondec; then
 	echo "gc-stress: suites rounds=$ROUNDS count=$COUNT GODEBUG=gccheckmark=1,clobberfree=1"
 fi
 if has_leg soak; then

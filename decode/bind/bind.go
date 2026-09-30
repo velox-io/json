@@ -14,6 +14,7 @@ import (
 
 	"github.com/velox-io/json/decode/option"
 	"github.com/velox-io/json/gort"
+	"github.com/velox-io/json/internal/gbind"
 	"github.com/velox-io/json/internal/valueabi"
 	"github.com/velox-io/json/jerr"
 	"github.com/velox-io/json/native/ndec"
@@ -237,6 +238,8 @@ type shape struct {
 	hot atomic.Pointer[Parser]
 
 	parserPool sync.Pool // *Parser
+
+	gplan goPlan
 }
 
 // Parser is reusable state for one caller decoding one root type. Not safe
@@ -250,7 +253,8 @@ type Parser struct {
 	atofBuf    []byte // atof_ctx storage
 	structural []uint32
 	padBuf     []byte
-	optFlags   uint32 // BIND_OPT_* bits of the current call; setCallCtx installs them
+	gstate     gbind.State // Go engine bind storage
+	optFlags   uint32      // BIND_OPT_* bits of the current call; setCallCtx installs them
 
 	// counted records that getParser charged this borrow to inFlight, so
 	// putParser releases exactly what was charged.
@@ -259,6 +263,10 @@ type Parser struct {
 	// mapDrain backs drainAllMapSlots. One instance suffices because FLUSH
 	// handling is synchronous and runs no user callbacks, so drains never nest.
 	mapDrain mapDrainScratch
+
+	// failed collects the current root drive's hook and map-key failures;
+	// driveRoot resets it.
+	failed deferredErrs
 
 	// streamScopes is the stack of active stream scopes.
 	streamScopes []streamScopeEntry
@@ -443,7 +451,7 @@ func setParserReserveEnabled(on bool) {
 // parserFootprint reports the retained bytes of a pooled Parser, for the reserve's
 // admission and budget accounting.
 func parserFootprint(p *Parser) int {
-	return len(p.machine) + len(p.atofBuf) + cap(p.padBuf) + cap(p.structural)*4 +
+	return len(p.machine) + len(p.atofBuf) + cap(p.padBuf) + cap(p.structural)*4 + p.gstate.Footprint() +
 		p.alloc.Footprint()
 }
 
@@ -520,6 +528,10 @@ func buildShape(rtp uintptr, t reflect.Type) (*shape, error) {
 
 	// The zero Config demands nothing, so it cannot fail.
 	sh.defaultOptFlags, _ = contiguousOptFlags(tt, option.Config{})
+
+	// The Go engine view is built with the shape, so the cache's publication
+	// orders its write; the differential build defers it to the first Go bind.
+	sh.gplan.build(tt)
 
 	// A warm parser from the reserve outlives the pool's GC-driven eviction, so
 	// New prefers one over building cold.
@@ -637,6 +649,10 @@ func publishDoc(p *Parser, doc *valueabi.Doc, m *ndec.BindMachine) {
 }
 
 func (p *Parser) unmarshal(data []byte, rootDst unsafe.Pointer) error {
+	if useGoCore() {
+		// The Go engine reads no padding, so the caller's bytes serve directly.
+		return p.goUnmarshal(data, rootDst, nil)
+	}
 	return p.unmarshalPadded(p.padInputInto(data), rootDst, data)
 }
 
@@ -664,6 +680,9 @@ func checkPadded(paddedData []byte) error {
 }
 
 func (p *Parser) unmarshalPadded(src []byte, rootDst unsafe.Pointer, aliasSrc []byte) error {
+	if useGoCore() {
+		return p.goUnmarshal(src, rootDst, aliasSrc)
+	}
 	srcLen := len(src)
 	p.src = src
 	p.aliasSrc = aliasSrc
@@ -742,20 +761,11 @@ func (p *Parser) unmarshalPadded(src []byte, rootDst unsafe.Pointer, aliasSrc []
 		sealFailedStrArena(alloc, m)
 		return err
 	}
-	// Deferred callbacks complete before map slots publish their values.
-	if m.Alloc.DeferredDrainUsed > 0 {
-		if err := drainDeferredRecords(p, m); err != nil {
-			sealFailedStrArena(alloc, m)
-			return err
-		}
-	}
-	if m.Alloc.MapBufUsed > 0 {
-		// Object close may leave complete entries after the final
-		// BindYieldFlushMap, so completion drains the remainder.
-		if err := drainAllMapSlots(p, m); err != nil {
-			sealFailedStrArena(alloc, m)
-			return err
-		}
+	// Object close may leave complete entries after the final
+	// BindYieldFlushMap, so completion drains the remainder.
+	if err := p.settleStaged(m); err != nil {
+		sealFailedStrArena(alloc, m)
+		return err
 	}
 
 	// Native coordinates are relative to the current arena views, so the doc
@@ -859,6 +869,7 @@ func (p *Parser) driveBind(m *ndec.BindMachine, stop func() bool) error {
 // completion or error. A drive that completes in one native run, the common
 // case for small documents, returns without dispatching a yield.
 func (p *Parser) driveRoot(m *ndec.BindMachine) error {
+	p.failed = deferredErrs{}
 	for {
 		if p.feed != nil {
 			ndec.BindParseStreamRun(unsafe.Pointer(m))
@@ -919,9 +930,9 @@ func (p *Parser) serveYield(m *ndec.BindMachine) (done bool, err error) {
 			if m.Yield.FirstErrorPos != ^uint64(0) && m.Yield.FirstErrorPromoted == 0 {
 				m.Yield.FirstErrorPos += p.feed.base
 			}
-			return false, mkBindErr(p, m, p.feed.src(), p.feed.base)
+			return false, mkBindErr(p, machineErrInfo(m), p.feed.src(), p.feed.base)
 		}
-		return false, mkBindErr(p, m, p.curSrc(), 0)
+		return false, mkBindErr(p, machineErrInfo(m), p.curSrc(), 0)
 	case ndec.BindYieldBlockFull:
 		return false, p.alloc.ServeNewBlock(m.Yield.Arg0, m.Yield.Arg1)
 	case ndec.BindYieldTapeArena:
@@ -955,14 +966,12 @@ func (p *Parser) serveYield(m *ndec.BindMachine) (done bool, err error) {
 	case ndec.BindYieldFlushMap:
 		// Drain Unmarshaler records first: closure writes must land before
 		// the map drain copies slots into *hmaps.
-		if m.Alloc.DeferredDrainUsed > 0 {
-			if err := drainDeferredRecords(p, m); err != nil {
-				return false, err
-			}
-		}
-		return false, p.serveFlushMap(m)
+		drainDeferredRecords(p, m)
+		drainAllMapSlots(p, m)
+		return false, nil
 	case ndec.BindYieldFlushUnmarshal:
-		return false, drainDeferredRecords(p, m)
+		drainDeferredRecords(p, m)
+		return false, nil
 	case ndec.BindYieldTapeBindValue:
 		return false, p.serveTapeBindValue(m)
 	case ndec.BindYieldInput:
@@ -972,11 +981,7 @@ func (p *Parser) serveYield(m *ndec.BindMachine) (done bool, err error) {
 		// Records must drain before the window is reused: source-backed spans
 		// die with the tail relocation and str_arena offsets die with the
 		// arena growth the next mount may perform.
-		if m.Alloc.DeferredDrainUsed > 0 {
-			if err := drainDeferredRecords(p, m); err != nil {
-				return false, err
-			}
-		}
+		drainDeferredRecords(p, m)
 		return false, p.feed.serveInput(p, m)
 	default:
 		return false, errors.New("bind: unknown yield action")

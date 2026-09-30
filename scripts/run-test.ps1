@@ -43,7 +43,16 @@ function Invoke-GoTest {
 
 Invoke-GoTest . -count=1
 
-Invoke-GoTest ./vbind ./decode/bind/ -count=1
+Invoke-GoTest ./vbind ./decode/bind/ ./native/ndec ./native/vlib -count=1
+
+# Engine differential round: a native build whose engine choice is dynamic, so
+# the diff suites run both engines over each input in one process.
+Invoke-GoTest -tags vj_enginediff ./decode/bind/ -count=1
+
+# Pure-Go decoder round: the bind suite with the native blob excluded, so
+# the Go engine (internal/gbind) drives every parse. The race leg runs past
+# the 10m default on Windows runners, matching the timeout used in run-test.sh.
+Invoke-GoTest -tags vj_nondec ./decode/bind/ -count=1 -timeout 25m
 
 Invoke-GoTest ./venc -count=1
 Invoke-GoTest -tags vj_noencvm ./venc -count=1
@@ -59,8 +68,6 @@ Invoke-GoTest -tags vjgcstress ./tests/ -count=1
 Invoke-GoTest -tags vjgcstress ./tests/preemptstress -count=1
 
 Invoke-GoTest ./tests/compat/ -count=1
-
-# Invoke-GoTest ./ndec/... -count=1
 
 # The benchmark module pulls go-json-experiment snapshots that require a newer
 # toolchain than the library itself. Probe it first: when the local toolchain

@@ -92,10 +92,12 @@ func TestValuePrimitiveErrorKeepsCursorAtTokenStart(t *testing.T) {
 				t.Errorf("Unmarshal(%q) error offset = %d, want %d", tc.in, se.Offset, tc.pos)
 			}
 
-			m := machineOf(p)
-			cursor := *(**uint32)(unsafe.Add(unsafe.Pointer(m), ndec.BindMachineCursorOffset))
-			if got := *cursor; got != tc.pos {
-				t.Errorf("Unmarshal(%q) cursor offset = %d, want %d", tc.in, got, tc.pos)
+			if !useGoCore() {
+				m := machineOf(p)
+				cursor := *(**uint32)(unsafe.Add(unsafe.Pointer(m), ndec.BindMachineCursorOffset))
+				if got := *cursor; got != tc.pos {
+					t.Errorf("Unmarshal(%q) cursor offset = %d, want %d", tc.in, got, tc.pos)
+				}
 			}
 
 			if err := p.Unmarshal([]byte(`true`), &dst); err != nil {

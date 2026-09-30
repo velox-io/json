@@ -56,6 +56,7 @@ func loadDesc(v *value.Value) valueabi.Descriptor {
 // be a seam: in the old layout that slot was A's hop over B's root and the
 // slot after it another begin.
 func TestDualSharedRoot_PhysicalLayout(t *testing.T) {
+	needNativeBinder(t)
 	var h dualRootHost
 	src := `{"u1":1,"kind":"c1","name":"bob","u2":2}`
 	if err := Unmarshal([]byte(src), &h); err != nil {
@@ -110,6 +111,7 @@ func TestDualSharedRoot_PhysicalLayout(t *testing.T) {
 // (begin, leading seam, close) where the retired layout needed five, and each
 // entry adds key, value, and trailing seam unchanged.
 func TestDualSharedRoot_WordCounts(t *testing.T) {
+	needNativeBinder(t)
 	cases := []struct {
 		src      string
 		wantSpan int
@@ -139,6 +141,7 @@ func TestDualSharedRoot_WordCounts(t *testing.T) {
 // The projection it publishes keeps the complete object (discriminator
 // included) while the reserve view is left empty.
 func TestDualSharedRoot_EscapingInlineValue(t *testing.T) {
+	needNativeBinder(t)
 	var h dualRootHost
 	src := `{"kind":"raw","a":1,"b":{"c":[1,2]},"d":true}`
 	if err := Unmarshal([]byte(src), &h); err != nil {
@@ -218,6 +221,7 @@ func TestDualSharedRoot_EscapingInlineValue(t *testing.T) {
 // publishes the aliased Value with the active mode from the yield stash, and
 // restores the outer mode afterwards so the host's own sink stays view B.
 func TestDualSharedRoot_NestedModeSwitchThroughValueCase(t *testing.T) {
+	needNativeBinder(t)
 	var outer dualRootHost
 	src := `{"kind":"c1","name":"bob","deep":{"kind":"raw","a":1,"extra":9}}`
 	if err := Unmarshal([]byte(src), &outer); err != nil {

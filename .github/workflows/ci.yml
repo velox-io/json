@@ -57,6 +57,39 @@ jobs:
     - name: Run unit tests
       run: make test
 
+  cross-compile:
+    # Platforms without a native decoder blob. The pure-Go core keeps the
+    # library buildable there; this only checks compilation. Two targets
+    # cover the full delta versus tested platforms: s390x (also big-endian)
+    # compiles the ndec/encvm stubs gated on !(amd64 || arm64); freebsd
+    # compiles the execblob fallback gated on !darwin && !linux && !windows.
+    # All other GOOS/GOARCH combinations select an identical file set.
+    name: Cross-compile (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: s390x }
+          - { goos: freebsd, goarch: amd64 }
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Setup Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: stable
+
+    - name: Print Go version
+      run: go version
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Build
+      run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build ./...
+
   test-macos:
     name: Test (macOS ARM64, Go stable)
     runs-on: macos-latest
@@ -275,6 +308,44 @@ jobs:
         path: build/gc-stress/*.log
         retention-days: 30
 
+  # The pure-Go engine publishes through the same allocator and string arena
+  # as the native binder, so its publication windows get the same hostile
+  # collector. The engine is plain Go (see test-nondec), so one runner stands
+  # in for every platform and the per-platform suite jobs stay on budget.
+  gc-stress-nondec:
+    name: GC Stress (pure-Go decoder)
+    runs-on: ubuntu-latest
+    # The decode/bind suite under the hostile collector is the long pole
+    # (about 16min under race on a fast box, a fraction of that without),
+    # with the per-process -test.timeout inside the script as the hang guard.
+    timeout-minutes: 45
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Setup Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: stable
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Run GC stress
+      shell: bash
+      run: bash scripts/gc-stress.sh
+      env:
+        GC_STRESS_LEGS: nondec
+        GC_STRESS_TIMEOUT: 30m
+
+    - name: Upload GC stress logs
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: gc-stress-nondec-logs
+        path: build/gc-stress/*.log
+        retention-days: 30
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -334,10 +405,54 @@ jobs:
         path: testdata/fuzz/${{ matrix.target }}/
         retention-days: 30
 
+  # The root-package fuzz targets drive the native engine on every platform
+  # that ships the blob, so the pure-Go decoder never sees a fuzz corpus.
+  # These legs run the decode-side targets under vj_nondec; the marshal-only
+  # targets exercise the same encoder as the native build and stay out.
+  fuzz-nondec:
+    name: Fuzz pure-Go decoder (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+        - FuzzUnmarshalAny
+        - FuzzUnmarshalNumber
+        - FuzzUnmarshalStruct
+        - FuzzUnmarshalNested
+        - FuzzNoCrash
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Setup Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: stable
+
+    - name: Restore fuzz cache
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/go-build/fuzz
+        key: fuzz-corpus-nondec-${{ matrix.target }}-${{ github.sha }}
+        restore-keys: |
+          fuzz-corpus-nondec-${{ matrix.target }}-
+
+    - name: Run ${{ matrix.target }}
+      run: go test -tags vj_nondec -fuzz=${{ matrix.target }} -fuzztime=5m -timeout=10m .
+
+    - name: Upload crash artifacts
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: fuzz-nondec-crash-${{ matrix.target }}
+        path: testdata/fuzz/${{ matrix.target }}/
+        retention-days: 30
+
   pr-check:
     name: PR Check
     runs-on: ubuntu-latest
-    needs: [test-linux-amd64, test-linux-arm64, test-macos, test-macos-amd64, test-windows, test-windows-arm64, gc-soak, gc-stress, lint, fuzz]
+    needs: [test-linux-amd64, test-linux-arm64, test-macos, test-macos-amd64, test-windows, test-windows-arm64, gc-soak, gc-stress, gc-stress-nondec, lint, fuzz, fuzz-nondec]
     if: always() && github.event_name == 'pull_request'
     steps:
     - name: Check all jobs passed
@@ -350,8 +465,10 @@ jobs:
               "${{ needs.test-windows-arm64.result }}" != "success" || \
               "${{ needs.gc-soak.result }}" != "success" || \
               "${{ needs.gc-stress.result }}" != "success" || \
+              "${{ needs.gc-stress-nondec.result }}" != "success" || \
               "${{ needs.lint.result }}" != "success" || \
-              "${{ needs.fuzz.result }}" != "success" ]]; then
+              "${{ needs.fuzz.result }}" != "success" || \
+              "${{ needs.fuzz-nondec.result }}" != "success" ]]; then
           echo "::error::PR checks failed. All tests, GC stress, lint, and fuzz must pass before merging."
           exit 1
         fi

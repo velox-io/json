@@ -416,17 +416,10 @@ func (p *Parser) feedDrive(m *ndec.BindMachine) error {
 // relocation: source-backed record spans reference current window
 // coordinates.
 func (p *Parser) feedFinish(m *ndec.BindMachine, f *feedState) error {
-	if m.Alloc.DeferredDrainUsed > 0 {
-		// Records from the final window use its source span; values that
-		// crossed an edge use the raw scratch.
-		if err := drainDeferredRecords(p, m); err != nil {
-			return err
-		}
-	}
-	if m.Alloc.MapBufUsed > 0 {
-		if err := drainAllMapSlots(p, m); err != nil {
-			return err
-		}
+	// Records from the final window use its source span; values that
+	// crossed an edge use the raw scratch.
+	if err := p.settleStaged(m); err != nil {
+		return err
 	}
 	// Arena coordinates are relative to the final backings; growth copied
 	// every earlier generation into them. Feed Values never borrow the
@@ -439,6 +432,9 @@ func (p *Parser) feedFinish(m *ndec.BindMachine, f *feedState) error {
 }
 
 func (p *Parser) unmarshalFeed(r io.Reader, rootDst unsafe.Pointer) error {
+	if useGoCore() {
+		return p.goUnmarshalFeed(r, rootDst)
+	}
 	m := (*ndec.BindMachine)(unsafe.Pointer(unsafe.SliceData(p.machine)))
 	f := &feedState{r: r, win: make([]byte, feedInitialWindow+ndec.BindScanPad)}
 	if p.tt.HasRawSpan {

@@ -200,29 +200,13 @@ func (d *streamScopeDriver) PeekAnyBreak() *stream.BreakSignal {
 	return d.p.peekAnyScopeBreak()
 }
 
-// drainStaged publishes deferred fields and map entries so GC-visible roots
-// exist for pointers staged in the noscan buffers. The raw scratch backs
-// records for values that crossed a window edge under the feed driver.
-func (d *streamScopeDriver) drainStaged() error {
-	if d.m.Alloc.DeferredDrainUsed > 0 {
-		if err := drainDeferredRecords(d.p, d.m); err != nil {
-			return err
-		}
-	}
-	if d.m.Alloc.MapBufUsed > 0 {
-		if err := drainAllMapSlots(d.p, d.m); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // SettleBatch publishes deferred fields and map entries before the handler reads
 // them, closes the current generation's arena claims, and releases scoped
 // retention. Noscan staging requires GC-visible retained roots through
-// the drains.
+// the drains. The handoff is a report point: a recorded hook or map-key
+// failure stops the handler from reading the batch.
 func (d *streamScopeDriver) SettleBatch() error {
-	if err := d.drainStaged(); err != nil {
+	if err := d.p.settleStaged(d.m); err != nil {
 		return err
 	}
 	if d.views != nil {
@@ -235,16 +219,14 @@ func (d *streamScopeDriver) SettleBatch() error {
 // settleFinal is the scope-exit settle: it drains, truncates this scope's
 // provenance entries while their retired backings are still retained, and
 // releases scoped retention. restoreViews publishes the final extents right
-// after, without rotating.
-func (d *streamScopeDriver) settleFinal() error {
-	if err := d.drainStaged(); err != nil {
-		return err
-	}
+// after, without rotating. Failures stay recorded for the next report point.
+func (d *streamScopeDriver) settleFinal() {
+	drainDeferredRecords(d.p, d.m)
+	drainAllMapSlots(d.p, d.m)
 	if d.views != nil {
 		d.views.dropScopedProv(d.m)
 	}
 	d.p.alloc.ReleaseScoped(d.retainMark)
-	return nil
 }
 
 // restoreViews publishes the scope's final Value generation and reinstates the
@@ -365,7 +347,7 @@ func (p *Parser) serveStreamBatch(m *ndec.BindMachine) error {
 	// sibling streams (a []Host each with its own Stream field) activates a
 	// scope per host, and each would otherwise leave its last batch's retention
 	// behind for the parse to accumulate.
-	defer func() { _ = driver.settleFinal() }()
+	defer driver.settleFinal()
 
 	// Cross-scope break pending: skip ActivateRead and drain this array to close
 	// ']' so native pops to the parent. The signal stays stashed and
