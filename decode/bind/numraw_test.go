@@ -291,6 +291,7 @@ func TestNumRaw_KeyOrderDoesNotChangeResult(t *testing.T) {
 // Same reason vbind rejects a json.Number field on the tape-bind path outright:
 // see tapeBindNestedUnsupportedReason.
 func TestNumRaw_UseNumberBinaryTagsStillDiffer(t *testing.T) {
+	needNativeBinder(t)
 	get := func(src string) any {
 		var h numPathHost
 		if err := Unmarshal([]byte(src), &h, option.WithUseNumber()); err != nil {

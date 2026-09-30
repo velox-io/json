@@ -111,6 +111,12 @@ func (bt *BindType) HasElemHasStream() bool {
 	return bt.flags&bindFlagElemHasStream != 0
 }
 
+// IsCold reports BIND_FLAG_COLD: the type needs predispatch work, so a poly
+// case of this type binds only where the tape walker can construct it.
+func (bt *BindType) IsCold() bool {
+	return bt.flags&bindFlagCold != 0
+}
+
 // HasContainsDeferred reports the binder side of map-value indirection. It must
 // agree with MapDrainInfo.ValIsDeferred so the drain interprets each staging
 // entry with the representation native wrote.
@@ -339,7 +345,9 @@ type PolyCaseData struct {
 type StructMetaPayload struct {
 	Lookup           unsafe.Pointer // off 0  perfect-hash field-name blob base (process-global; noscan via payload [3]uintptr)
 	InlineVariantIdx uint16         // off 8  0-based index into TypeTree.Polys[]; 0xFFFF = none
-	// off 10..11 padding (uint32 alignment)
+	// KeyMemo is the struct's row in a Parser's key transition memo, which
+	// holds FieldCount+1 bytes from it; 0 means the struct has none.
+	KeyMemo                uint16 // off 10
 	ReserveUnknownFieldOff uint32 // off 12  byte offset of the reserve-unknown Value field; 0xFFFFFFFF = none
 
 	// PtrHops is the base of this struct's embedded-pointer hop array, or nil
@@ -655,11 +663,13 @@ const (
 // alive. Struct lookup blobs and runtime type pointers depend on separate
 // process lifetime roots.
 type TypeTree struct {
-	Root     uint32 // root index into Types
-	Types    []BindType
-	Fields   []BindField
-	TypeMeta []TypeMeta // parallel to Types, per-Kind metadata (union payload)
-	Slots    []SlotTemplate
+	Root   uint32 // root index into Types
+	Types  []BindType
+	Fields []BindField
+	// FieldNames is parallel to Fields: each field's JSON key.
+	FieldNames []string
+	TypeMeta   []TypeMeta // parallel to Types, per-Kind metadata (union payload)
+	Slots      []SlotTemplate
 
 	// This slice owns the records referenced by MapMetaPayload.DrainInfo.
 	MapDrainInfo []MapDrainInfo
@@ -693,6 +703,10 @@ type TypeTree struct {
 	// UnmarshalHooks is parallel to Types so drain can select a prebound hook
 	// without reflection.
 	UnmarshalHooks []*typ.InterfaceHooks
+
+	// KeyMemoLen sizes the native binder's key transition memo: the rows
+	// StructMetaPayload.KeyMemo addresses, after an unused byte 0.
+	KeyMemoLen int
 
 	// MapBufMinBytes is a capacity floor for all map regions simultaneously live
 	// on one descent path. FLUSH_MAP handles growth beyond this floor.

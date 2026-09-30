@@ -100,8 +100,8 @@ var pow10 = [...]float64{1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10,
 //
 // exact reports that f is the token's correctly rounded float64, which the
 // native finalization computes the same way for a mantissa of at most 19
-// digits: one IEEE operation within the exact range, Eisel-Lemire beyond
-// it. Otherwise the caller converts the text.
+// digits and an exponent below 10^4: one IEEE operation within the exact
+// range, Eisel-Lemire beyond it. Otherwise the caller converts the text.
 func FloatToken(src []byte, o int) (f float64, end int, ok, exact bool) {
 	b, n := unsafe.Pointer(unsafe.SliceData(src)), len(src)
 	p := o
@@ -130,7 +130,7 @@ func FloatToken(src []byte, o int) (f float64, end int, ok, exact bool) {
 			return 0, p, false, false
 		}
 		p++
-		f := p
+		frac := p
 		if mant == 0 {
 			for p < n && *(*byte)(unsafe.Add(b, p)) == '0' {
 				p++
@@ -139,8 +139,12 @@ func FloatToken(src []byte, o int) (f float64, end int, ok, exact bool) {
 		z := p
 		p, mant = digitRun(b, n, p, mant)
 		digits += p - z
-		exp = f - p
+		exp = frac - p
 	}
+	// Leading fraction zeros shift exp without bound, so an exponent past
+	// four significant digits stays with the text conversion: clipped, it
+	// could land back in range.
+	clipped := false
 	if srcAt(b, n, p)|0x20 == 'e' {
 		q := p + 1
 		c := srcAt(b, n, q)
@@ -155,9 +159,11 @@ func FloatToken(src []byte, o int) (f float64, end int, ok, exact bool) {
 				if v > 9 {
 					break
 				}
-				if e < 1000 {
-					e = 10*e + int(v)
+				if e >= 1000 {
+					clipped = true
+					continue
 				}
+				e = 10*e + int(v)
 			}
 			if negE {
 				e = -e
@@ -165,7 +171,7 @@ func FloatToken(src []byte, o int) (f float64, end int, ok, exact bool) {
 			exp += e
 		}
 	}
-	if digits > maxFastDigits {
+	if digits > maxFastDigits || clipped {
 		return 0, p, true, false
 	}
 	switch {

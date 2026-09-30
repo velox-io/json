@@ -156,16 +156,19 @@ func (d *Decoder) Decode(v any) error {
 	if err != nil {
 		return err
 	}
+	p.optFlags = 0
+	if d.useNumber {
+		p.optFlags = ndec.BindOptUseNumber
+	}
+	if useGoCore() {
+		return d.goDecode(p, ptr)
+	}
 	f := d.ensureFeed()
 	if f.raw == nil && p.tt.HasRawSpan {
 		f.raw = make([]byte, d.winSize)
 	}
 	m := (*ndec.BindMachine)(unsafe.Pointer(unsafe.SliceData(p.machine)))
 	p.feed = f
-	p.optFlags = 0
-	if d.useNumber {
-		p.optFlags |= ndec.BindOptUseNumber
-	}
 
 	defer func() {
 		p.feed = nil
@@ -242,10 +245,10 @@ func (d *Decoder) Decode(v any) error {
 
 // failDecode applies the error policy. A type mismatch that reached
 // document_end consumed the failed value and left the machine cursor at the
-// next value, so it returns non-sticky, like encoding/json; a mismatch that
-// aborted mid-value, and any syntax error, leaves the stream position
-// undefined and sticks. The skipErrors hook takes precedence and discards
-// through the next newline.
+// next value, so it returns non-sticky, like encoding/json, with the value
+// boundary advanced as a success would; a mismatch that aborted mid-value,
+// and any syntax error, leaves the stream position undefined and sticks. The
+// skipErrors hook takes precedence and discards through the next newline.
 func (d *Decoder) failDecode(f *feedState, m *ndec.BindMachine, err error) error {
 	if d.skipErrors != nil && d.skipErrors(err) {
 		if skipErr := d.skipToNewline(f); skipErr != nil {
@@ -255,6 +258,7 @@ func (d *Decoder) failDecode(f *feedState, m *ndec.BindMachine, err error) error
 	}
 	var ute *UnmarshalTypeError
 	if errors.As(err, &ute) && m.Core.Phase == ndec.BindPhaseDocumentEnd {
+		f.consumed = f.unconsumedOff(m)
 		return err
 	}
 	d.err = err

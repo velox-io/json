@@ -158,6 +158,9 @@ func (p *Parser) unmarshalValue(v value.Value, desc *valueabi.Descriptor, rootDs
 	if doc.ZeroCopy {
 		return ErrZeroCopyValue
 	}
+	if useGoCore() {
+		return p.goUnmarshalValue(desc, rootDst)
+	}
 	p.src = doc.Src
 
 	m := (*ndec.BindMachine)(unsafe.Pointer(unsafe.SliceData(p.machine)))
@@ -279,24 +282,15 @@ func (p *Parser) unmarshalValue(v value.Value, desc *valueabi.Descriptor, rootDs
 	if err := p.driveRoot(m); err != nil {
 		return err
 	}
+	if err := p.settleStaged(m); err != nil {
+		return err
+	}
 	// Publish the tape produced for nested Values with the string and
 	// source views used by this walk.
 	if valueDoc != nil {
 		valueDoc.StrArena = strArena[:m.Core.StrUsed]
 		valueDoc.Src = doc.Src
 		valueDoc.Tape = alloc.TapeArena[:m.Alloc.TapeUsed]
-	}
-
-	// Deferred callbacks complete before map slots publish their values.
-	if m.Alloc.DeferredDrainUsed > 0 {
-		if err := drainDeferredRecords(p, m); err != nil {
-			return err
-		}
-	}
-	if m.Alloc.MapBufUsed > 0 {
-		if err := drainAllMapSlots(p, m); err != nil {
-			return err
-		}
 	}
 	return nil
 }

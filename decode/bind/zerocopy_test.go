@@ -181,6 +181,7 @@ func firstKeyContaining(m map[string]string, sub string) string {
 // TestZeroCopy24BitBoundary pins the zc scan cap: a body of exactly 0xFFFFFF
 // bytes still aliases, one byte more falls back to the copying parse.
 func TestZeroCopy24BitBoundary(t *testing.T) {
+	needNativeBinder(t)
 	for _, tc := range []struct {
 		n     int
 		alias bool
@@ -611,8 +612,10 @@ func TestZeroCopyQuotedBorrow(t *testing.T) {
 	if zcEsc.Q != 42 || zcEsc.S != "hi" {
 		t.Fatalf("escaped values: %+v", zcEsc)
 	}
-	if u := strUsed(pz); u == 0 {
-		t.Error("escaped zero-copy committed no arena bytes; the escaped body must decode through str_arena")
+	if !useGoCore() {
+		if u := strUsed(pz); u == 0 {
+			t.Error("escaped zero-copy committed no arena bytes; the escaped body must decode through str_arena")
+		}
 	}
 	errZC := pz.Unmarshal(bad, &zc, WithZeroCopy(true))
 	errCP := pc.Unmarshal(bad, &cp, WithZeroCopy(false))
@@ -666,8 +669,10 @@ func TestZeroCopyTextBorrow(t *testing.T) {
 	if string(got.B) != "hello" {
 		t.Fatalf("base64 value: %q", got.B)
 	}
-	if u := strUsed(p); u == 0 {
-		t.Error("the escaped body must still intern into the arena")
+	if !useGoCore() {
+		if u := strUsed(p); u == 0 {
+			t.Error("the escaped body must still intern into the arena")
+		}
 	}
 	// A second same-length parse reuses the pad buffer, so a span left
 	// pointing at it would corrupt the first result.

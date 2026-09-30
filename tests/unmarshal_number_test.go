@@ -544,6 +544,39 @@ func TestNumber_Float64Overflow(t *testing.T) {
 	}
 }
 
+// Leading fraction zeros offset the exponent: 0.<z zeros>1e<e> is 10^(e-z-1),
+// so a long exponent lands in or out of range only when both count in full.
+func TestNumber_LeadingZerosOffsetExponent(t *testing.T) {
+	zeros := func(n int) string { return strings.Repeat("0", n) }
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"overflow_1e8999", "0." + zeros(1000) + "1e10000"},
+		{"overflow_neg", "-0." + zeros(9999) + "1e12345"},
+		{"in_range_1e99", "0." + zeros(5000) + "1e5100"},
+		{"zero_long_exp", "0e100000"},
+		{"underflow_long_exp", "1e-100000"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := []byte(tt.input)
+			var vjF, stdF float64
+			vjErr := vjson.Unmarshal(data, &vjF)
+			stdErr := json.Unmarshal(data, &stdF)
+			if (vjErr != nil) != (stdErr != nil) || (vjErr == nil && vjF != stdF) {
+				t.Errorf("float64: vjson=%v err=%v, stdlib=%v err=%v", vjF, vjErr, stdF, stdErr)
+			}
+			var vjA, stdA any
+			vjErr = vjson.Unmarshal(data, &vjA)
+			stdErr = json.Unmarshal(data, &stdA)
+			if (vjErr != nil) != (stdErr != nil) || (vjErr == nil && vjA != stdA) {
+				t.Errorf("any: vjson=%v err=%v, stdlib=%v err=%v", vjA, vjErr, stdA, stdErr)
+			}
+		})
+	}
+}
+
 // Float32 max boundary: tokens around math.MaxFloat32 must agree with
 // encoding/json on error presence and decoded value, both signs.
 func TestNumber_Float32MaxBoundary(t *testing.T) {

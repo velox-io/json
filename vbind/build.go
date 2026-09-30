@@ -36,6 +36,7 @@ func Build(root *typ.UniType) (*TypeTree, error) {
 	if err := b.attachFieldLookups(); err != nil {
 		return nil, err
 	}
+	keyMemoLen := b.attachKeyMemoRows()
 
 	b.attachMapDrainInfos()
 
@@ -65,6 +66,7 @@ func Build(root *typ.UniType) (*TypeTree, error) {
 	return &TypeTree{
 		Types:               b.types,
 		Fields:              b.fields,
+		FieldNames:          b.fieldNames,
 		TypeMeta:            b.typeMeta,
 		Slots:               b.slots,
 		Root:                rootIdx,
@@ -74,6 +76,7 @@ func Build(root *typ.UniType) (*TypeTree, error) {
 		GroupCount:          b.groupCount,
 		UnmarshalHooks:      b.unmarshalHooks,
 		MapBufMinBytes:      mapBufMinBytes,
+		KeyMemoLen:          keyMemoLen,
 		ReflectTypes:        b.reflectTypes,
 		Polys:               b.polys,
 		PolyCases:           b.polyCases,
@@ -1096,6 +1099,23 @@ func (b *builder) attachFieldLookups() error {
 		b.typeMeta[s.idx].StructMeta().Lookup = ptr
 	}
 	return nil
+}
+
+// attachKeyMemoRows lays out each struct's row of the native key transition
+// memo and returns the memo's length. Rows start past byte 0, which marks a
+// struct without one; a struct whose row would end past the uint16 offset
+// range keeps none and binds without the memo.
+func (b *builder) attachKeyMemoRows() int {
+	n := 1
+	for _, s := range b.structSites {
+		size := int(b.types[s.idx].Struct().FieldCount) + 1
+		if n+size > 1<<16 {
+			continue
+		}
+		b.typeMeta[s.idx].StructMeta().KeyMemo = uint16(n)
+		n += size
+	}
+	return n
 }
 
 // Value size and deferred reachability must be final before drain records are

@@ -109,11 +109,7 @@ func (p *Parser) installScopeViews(m *ndec.BindMachine, typeIdx uint32) (*scopeV
 	// TextUnmarshaler records carry str_arena offsets; they must resolve
 	// against the parent backing before the swap. Raw-backed records span a
 	// window edge under the feed driver.
-	if m.Alloc.DeferredDrainUsed > 0 {
-		if err := drainDeferredRecords(p, m); err != nil {
-			return nil, err
-		}
-	}
+	drainDeferredRecords(p, m)
 	_, words := p.viewBounds(m)
 	if hasTape && words > maxSeamDistance {
 		return nil, fmt.Errorf("vjson: input too large: a %d-word tape arena exceeds the %d-word seam distance limit",

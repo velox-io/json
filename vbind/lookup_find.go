@@ -6,22 +6,54 @@ import "unsafe"
 // on a miss. Struct blobs live in the process cache; each variant blob is rooted
 // by its owning BindPolyTable in a TypeTree.
 //
-// The blob layout is the native lookup ABI. WINDOW normally validates the JSON
-// closing quote at key[len]; this Go reader validates the stored length instead.
+// The WINDOW tier probes a two-byte window that may sit past a short key's
+// closing quote, which a string's backing need not hold, so short keys are
+// copied into a stack buffer that supplies the quote. Longer keys can only
+// match tiers that read the key alone.
 func LookupFind(blob unsafe.Pointer, key string) int {
 	if blob == nil || len(key) == 0 {
 		return -1
 	}
-	kind := *(*uint32)(blob)
-	switch kind {
+	if len(key) >= wKeyCap {
+		// WINDOW rejects a key this long before its window read; the other
+		// tiers read the key alone.
+		return findAt(blob, unsafe.StringData(key), uintptr(len(key)), uintptr(len(key)))
+	}
+	var buf [wKeyCap]byte
+	copy(buf[:], key)
+	buf[len(key)] = '"'
+	return findAt(blob, &buf[0], uintptr(len(key)), wKeyCap)
+}
+
+// LookupFindSpan is LookupFind over the key of n bytes at p, of which the
+// first end bytes are readable and p[n] holds the closing quote. The WINDOW
+// tier probes a two-byte window that may reach past the quote, so a byte at
+// or past end reads as 0x20, the scan padding a native source supplies past
+// its end; the probe verdict is unchanged either way, since a key short
+// enough to leave the window past its quote matches no stored key.
+func LookupFindSpan(blob unsafe.Pointer, p *byte, n, end int) int {
+	if blob == nil || n == 0 {
+		return -1
+	}
+	return findAt(blob, p, uintptr(n), uintptr(end))
+}
+
+// wKeyCap is the longest key the WINDOW tier stores, plus its quote.
+const wKeyCap = 64
+
+// findAt dispatches by tier. end is the readable byte count at p, which only
+// windowFind consults: its probe may leave the key, while the other tiers
+// read [0, klen) alone.
+func findAt(blob unsafe.Pointer, p *byte, klen, end uintptr) int {
+	switch *(*uint32)(blob) {
 	case tierWindow:
-		return windowFind(blob, key)
+		return windowFind(blob, p, klen, end)
 	case tierGperf:
-		return gperfFind(blob, key)
+		return gperfFind(blob, p, klen)
 	case tierHand:
-		return handFind(blob, key)
+		return handFind(blob, p, klen)
 	case tierTable:
-		return tableFind(blob, key)
+		return tableFind(blob, p, klen)
 	default:
 		return -1
 	}
@@ -49,12 +81,9 @@ func readPtr(p unsafe.Pointer, off uintptr) uintptr {
 	return *(*uintptr)(unsafe.Add(p, off))
 }
 
-func keyEquals(blob unsafe.Pointer, off, klen uintptr, key string) bool {
-	if klen != uintptr(len(key)) {
-		return false
-	}
+func keyEquals(blob unsafe.Pointer, off, klen uintptr, p *byte) bool {
 	stored := unsafe.String((*byte)(unsafe.Add(blob, off)), klen)
-	return key == stored
+	return stored == unsafe.String(p, klen)
 }
 
 // WINDOW blob layout on the 64-bit native ABI:
@@ -73,27 +102,29 @@ const (
 	wSizeHeader     = 304 // sizeof(ndec_lookup_window)
 )
 
-func windowFind(blob unsafe.Pointer, key string) int {
+func windowFind(blob unsafe.Pointer, p *byte, klen, end uintptr) int {
 	boff := readU8(blob, wOffByteOffset)
 	shift := readU8(blob, wOffShift)
 	n := readPtr(blob, wOffN)
 	stride := readPtr(blob, wOffStride)
 	kboff := readPtr(blob, wOffKeyBytesOff)
 
-	klen := uintptr(len(key))
-
-	// WINDOW blobs store only keys of at most 63 bytes. Native input is padded
-	// JSON source with a closing quote at key[len], so this fixed buffer provides
-	// the quote and one readable byte for that tier format.
-	var buf [65]byte
-	if klen >= uintptr(len(buf)-1) {
+	// WINDOW blobs store only keys of at most wKeyCap-1 bytes.
+	if klen >= wKeyCap {
 		return -1
 	}
-	copy(buf[:], key)
-	buf[len(key)] = '"'
-	p := &buf[0]
 
-	w := *(*uint16)(unsafe.Add(unsafe.Pointer(p), uintptr(boff)))
+	// The probe window may sit past a short key's closing quote; the bytes
+	// at or past end read as the scan padding byte, never memory the caller
+	// did not prove readable.
+	lo, hi := uintptr(' '), uintptr(' ')
+	if uintptr(boff) < end {
+		lo = uintptr(*(*byte)(unsafe.Add(unsafe.Pointer(p), uintptr(boff))))
+	}
+	if uintptr(boff)+1 < end {
+		hi = uintptr(*(*byte)(unsafe.Add(unsafe.Pointer(p), uintptr(boff)+1)))
+	}
+	w := uint16(lo) | uint16(hi)<<8
 	idx := int((w >> uint(shift)) & 0xFF)
 
 	ki := readU8(blob, wOffWindowToKey+uintptr(idx))
@@ -107,7 +138,7 @@ func windowFind(blob unsafe.Pointer, key string) int {
 	}
 
 	off := kboff + uintptr(ki)*stride
-	if keyEquals(blob, off, uintptr(storedKlen), key) {
+	if keyEquals(blob, off, klen, p) {
 		return int(ki)
 	}
 	return -1
@@ -131,7 +162,7 @@ const (
 	gOffKeyBytesOff = 80
 )
 
-func gperfFind(blob unsafe.Pointer, key string) int {
+func gperfFind(blob unsafe.Pointer, p *byte, klen uintptr) int {
 	np := readU8(blob, 8)
 	n := readPtr(blob, gOffN)
 	tableSize := readPtr(blob, gOffTableSize)
@@ -141,12 +172,9 @@ func gperfFind(blob unsafe.Pointer, key string) int {
 	klenOff := readPtr(blob, gOffKeyLenOff)
 	kboff := readPtr(blob, gOffKeyBytesOff)
 
-	klen := uintptr(len(key))
-
 	var h = klen
 	positions := unsafe.Add(blob, gOffPositions)
 	asso := unsafe.Add(blob, assoOff)
-	p := unsafe.StringData(key)
 	for i := range np {
 		pos := *(*uint8)(unsafe.Add(positions, uintptr(i)))
 		var idx uintptr
@@ -173,7 +201,7 @@ func gperfFind(blob unsafe.Pointer, key string) int {
 	}
 
 	off := kboff + uintptr(ki)*stride
-	if keyEquals(blob, off, uintptr(storedKlen), key) {
+	if keyEquals(blob, off, klen, p) {
 		return int(ki)
 	}
 	return -1
@@ -195,14 +223,11 @@ const (
 	hSizeHeader     = 832 // sizeof(ndec_lookup_hand)
 )
 
-func handFind(blob unsafe.Pointer, key string) int {
+func handFind(blob unsafe.Pointer, p *byte, klen uintptr) int {
 	variant := readU32(blob, hOffVariant)
 	n := readPtr(blob, hOffN)
 	mask := readPtr(blob, hOffMask) // uint64 but stored as uintptr
 	kboff := readPtr(blob, hOffKeyBytesOff)
-
-	klen := uintptr(len(key))
-	p := unsafe.StringData(key)
 
 	var c0, c1 byte
 	if klen > 0 {
@@ -234,7 +259,7 @@ func handFind(blob unsafe.Pointer, key string) int {
 	}
 
 	off := kboff + uintptr(ki)*readPtr(blob, 40)
-	if keyEquals(blob, off, uintptr(storedKlen), key) {
+	if keyEquals(blob, off, klen, p) {
 		return int(ki)
 	}
 	return -1
@@ -260,10 +285,10 @@ const (
 	tOffSlots = 48
 )
 
-func tableFind(blob unsafe.Pointer, key string) int {
+func tableFind(blob unsafe.Pointer, p *byte, klen uintptr) int {
 	mask := readPtr(blob, tOffMask)
 
-	h := tableHash(key)
+	h := tableHash(p, klen)
 	pos := uintptr(h & uint64(mask))
 	for {
 		slotBase := tOffSlots + pos*8
@@ -272,10 +297,9 @@ func tableFind(blob unsafe.Pointer, key string) int {
 			return -1
 		}
 		keyLen := *(*uint16)(unsafe.Add(blob, slotBase+4))
-		if uintptr(keyLen) == uintptr(len(key)) {
+		if uintptr(keyLen) == klen {
 			keyOff := *(*uint32)(unsafe.Add(blob, slotBase))
-			stored := unsafe.String((*byte)(unsafe.Add(blob, uintptr(keyOff))), uintptr(keyLen))
-			if key == stored {
+			if keyEquals(blob, uintptr(keyOff), klen, p) {
 				return int(valueP1) - 1
 			}
 		}
@@ -283,10 +307,10 @@ func tableFind(blob unsafe.Pointer, key string) int {
 	}
 }
 
-func tableHash(key string) uint64 {
+func tableHash(p *byte, klen uintptr) uint64 {
 	h := uint64(0xcbf29ce484222325)
-	for i := 0; i < len(key); i++ {
-		h ^= uint64(key[i])
+	for i := uintptr(0); i < klen; i++ {
+		h ^= uint64(*(*byte)(unsafe.Add(unsafe.Pointer(p), i)))
 		h *= 0x100000001b3
 	}
 	h ^= h >> 33

@@ -57,6 +57,39 @@ jobs:
     - name: Run unit tests
       run: make test
 
+  cross-compile:
+    # Platforms without a native decoder blob. The pure-Go core keeps the
+    # library buildable there; this only checks compilation. Two targets
+    # cover the full delta versus tested platforms: s390x (also big-endian)
+    # compiles the ndec/encvm stubs gated on !(amd64 || arm64); freebsd
+    # compiles the execblob fallback gated on !darwin && !linux && !windows.
+    # All other GOOS/GOARCH combinations select an identical file set.
+    name: Cross-compile (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: s390x }
+          - { goos: freebsd, goarch: amd64 }
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Setup Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: stable
+
+    - name: Print Go version
+      run: go version
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Build
+      run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build ./...
+
   test-macos:
     name: Test (macOS ARM64, Go stable)
     runs-on: macos-latest

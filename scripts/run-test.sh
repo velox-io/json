@@ -13,6 +13,17 @@ go test -race . -count=1
 go test ./vbind ./decode/bind/ -count=1
 go test -race ./vbind ./decode/bind/ -count=1
 
+# Pure-Go decoder round: the decode suites with the native blob excluded, so
+# the Go engine (internal/gbind) drives every parse. The race leg runs
+# past the 10m default (about 11m locally), so it names its own timeout.
+go test -tags vj_nondec . ./decode/bind/ ./stream ./tests/ ./tests/compat/ -count=1
+go test -race -tags vj_nondec ./decode/bind/ -count=1 -timeout 25m
+
+# Engine differential round: a native build whose engine choice is dynamic, so
+# the diff suites run both engines over each input in one process.
+go test -tags vj_enginediff ./decode/bind/ -count=1
+go test -race -tags vj_enginediff ./decode/bind/ -count=1
+
 go test ./venc -count=1
 go test -race ./venc -count=1
 go test -tags vj_noencvm ./venc -count=1

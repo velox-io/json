@@ -46,13 +46,39 @@ var ErrZeroCopyValue = errors.New("vjson: cannot bind a zero-copy Value; re-pars
 // those trees.
 var ErrZeroCopyTypedTree = errors.New("vjson: WithZeroCopy(true) supports typed trees only; value.Value and poly fields stay arena-backed")
 
-// mkBindErr translates the native yield payload. srcBase is the document
-// offset of src[0], zero for the contiguous engine's whole-document view and
-// the window base for the streaming engine. EOF errors wrap io.ErrUnexpectedEOF
+// bindErrInfo is the engine-neutral error payload: native fills it from the
+// yield, and the Go engine returns it as a gbind.Error of the same layout.
+// Pos is ^0 when the error has no source position. TypeIdx names the type
+// the error reports against; Target is the variant host for discriminator
+// errors.
+type bindErrInfo struct {
+	Kind    uint32
+	Detail  uint32
+	Pos     uint64
+	TypeIdx int
+	Target  unsafe.Pointer
+}
+
+func machineErrInfo(m *ndec.BindMachine) bindErrInfo {
+	return bindErrInfo{
+		Kind:    m.Yield.Arg0,
+		Detail:  m.Yield.Arg1,
+		Pos:     m.Yield.FirstErrorPos,
+		TypeIdx: int(m.Core.CurType.TypeIdx),
+		Target:  m.Yield.Target,
+	}
+}
+
+// mkBindErr translates an error payload. srcBase is the document offset of
+// src[0], zero for the contiguous engine's whole-document view and the
+// window base for the streaming engine. EOF errors wrap io.ErrUnexpectedEOF
 // for errors.Is.
-func mkBindErr(p *Parser, m *ndec.BindMachine, src []byte, srcBase uint64) error {
-	kind := m.Yield.Arg0
-	pos, hasPos := bindErrorPos(m)
+func mkBindErr(p *Parser, e bindErrInfo, src []byte, srcBase uint64) error {
+	kind := e.Kind
+	pos, hasPos := e.Pos, e.Pos != ^uint64(0)
+	if !hasPos {
+		pos = 0
+	}
 	switch kind {
 	case ndec.BindErrSyntax:
 		return jerr.NewSyntaxError("bind: syntax error", int(pos))
@@ -66,7 +92,7 @@ func mkBindErr(p *Parser, m *ndec.BindMachine, src []byte, srcBase uint64) error
 		return jerr.NewSyntaxError("bind: trailing data after value", int(pos))
 	case ndec.BindErrTypeMismatch:
 		var rt reflect.Type
-		idx := int(m.Core.CurType.TypeIdx)
+		idx := e.TypeIdx
 		if idx < len(p.tt.ReflectTypes) {
 			rt = p.tt.ReflectTypes[idx]
 		}
@@ -83,24 +109,24 @@ func mkBindErr(p *Parser, m *ndec.BindMachine, src []byte, srcBase uint64) error
 		// Name the struct the offending key was rejected by. FirstErrorPos carries
 		// the source offset when the error came from the JSON path.
 		var rt reflect.Type
-		if idx := int(m.Core.CurType.TypeIdx); idx < len(p.tt.ReflectTypes) {
+		if idx := e.TypeIdx; idx < len(p.tt.ReflectTypes) {
 			rt = p.tt.ReflectTypes[idx]
 		}
 		return &UnmarshalTypeError{Value: "unknown_field", Type: rt, Offset: int64(pos)}
 	case ndec.BindErrUnsupportedTag:
 		return jerr.NewSyntaxError("bind: unsupported target type on this bind path", int(pos))
 	case ndec.BindErrVariantUnknownDisc, ndec.BindErrVariantMissingDisc:
-		return mkVariantErr(p, m, kind, pos)
+		return mkVariantErr(p, e, pos)
 	case ndec.BindErrKindofUnregistered:
-		return mkKindofErr(p, m, pos)
+		return mkKindofErr(p, e, pos)
 	case ndec.BindErrKindofColdCase:
 		msg := "case target type not supported (use a concrete type or any)"
-		if kind := kindofName(m.Yield.Arg1); kind != "" {
+		if kind := kindofName(e.Detail); kind != "" {
 			msg = "case " + kind + " target type not supported (use a concrete type or any)"
 		}
-		return &KindofError{Host: bindErrorHost(p, m), Message: msg, Pos: int64(pos)}
+		return &KindofError{Host: bindErrorHost(p, e), Message: msg, Pos: int64(pos)}
 	case ndec.BindErrVariantColdCase:
-		return &VariantError{Host: bindErrorHost(p, m), VariantIdx: uint16(m.Yield.Arg1),
+		return &VariantError{Host: bindErrorHost(p, e), VariantIdx: uint16(e.Detail),
 			Message: "case target type not supported (use a concrete type or any)", Pos: int64(pos)}
 	default:
 		return jerr.NewSyntaxError("bind: native error", int(pos))
@@ -109,15 +135,15 @@ func mkBindErr(p *Parser, m *ndec.BindMachine, src []byte, srcBase uint64) error
 
 // mkVariantErr uses the variant index and host pointer stashed in the yield to
 // report the discriminator value.
-func mkVariantErr(p *Parser, m *ndec.BindMachine, kind uint32, pos uint64) error {
-	variantIdx := uint16(m.Yield.Arg1)
-	host := bindErrorHost(p, m)
+func mkVariantErr(p *Parser, e bindErrInfo, pos uint64) error {
+	variantIdx := uint16(e.Detail)
+	host := bindErrorHost(p, e)
 	msg := "unknown discriminator value"
-	if kind == ndec.BindErrVariantMissingDisc {
+	if e.Kind == ndec.BindErrVariantMissingDisc {
 		msg = "missing discriminator"
 	} else if int(variantIdx) < len(p.tt.Polys) {
 		discOff := uintptr(p.tt.Polys[variantIdx].DiscFieldOff)
-		hostPtr := m.Yield.Target
+		hostPtr := e.Target
 		if hostPtr != nil {
 			s := readDiscFromHost(hostPtr, discOff)
 			if s == "" {
@@ -132,23 +158,16 @@ func mkVariantErr(p *Parser, m *ndec.BindMachine, kind uint32, pos uint64) error
 
 // mkKindofErr builds the user-facing error for kindof resolution failures.
 // Arg1 carries the stable kind ordinal independently of source availability.
-func mkKindofErr(p *Parser, m *ndec.BindMachine, pos uint64) error {
+func mkKindofErr(p *Parser, e bindErrInfo, pos uint64) error {
 	msg := "unregistered JSON kind"
-	if kind := kindofName(m.Yield.Arg1); kind != "" {
+	if kind := kindofName(e.Detail); kind != "" {
 		msg += " " + kind
 	}
-	return &KindofError{Host: bindErrorHost(p, m), Message: msg, Pos: int64(pos)}
+	return &KindofError{Host: bindErrorHost(p, e), Message: msg, Pos: int64(pos)}
 }
 
-func bindErrorPos(m *ndec.BindMachine) (uint64, bool) {
-	if m.Yield.FirstErrorPos == ^uint64(0) {
-		return 0, false
-	}
-	return m.Yield.FirstErrorPos, true
-}
-
-func bindErrorHost(p *Parser, m *ndec.BindMachine) string {
-	idx := int(m.Core.CurType.TypeIdx)
+func bindErrorHost(p *Parser, e bindErrInfo) string {
+	idx := e.TypeIdx
 	if idx >= 0 && idx < len(p.tt.ReflectTypes) {
 		return p.tt.ReflectTypes[idx].String()
 	}

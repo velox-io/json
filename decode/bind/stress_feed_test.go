@@ -661,6 +661,7 @@ func TestNdjsonStressFeedGB(t *testing.T) {
 // asserted non-empty so the run proves it exercises the mechanism, and the
 // end state clean.
 func TestStreamStressStrProv(t *testing.T) {
+	needNativeBinder(t)
 	src := newStressStreamReader(32 << 20)
 	p, err := NewParser[stressHost]()
 	if err != nil {
@@ -726,6 +727,7 @@ func TestStreamStressStrProv(t *testing.T) {
 // retirements concentrate in the ramp while the rest of the run verifies the
 // converged steady state.
 func TestNdjsonStressStrProv(t *testing.T) {
+	needNativeBinder(t)
 	src := newNdjsonReader(8 << 20)
 	d := NewDecoder(src, WithBufferSize(1<<12))
 	var maxProv uint32

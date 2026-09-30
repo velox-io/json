@@ -47,6 +47,7 @@ func scopeValueJSON(n int, pad int) []byte {
 // view each time consumption crosses half of it. Without scoped views the
 // single arena holds every element's bytes until the parse ends.
 func TestScopeViewRotationBounded(t *testing.T) {
+	needNativeBinder(t)
 	const n = 20000
 	data := scopeValueJSON(n, 40)
 
@@ -181,6 +182,7 @@ func TestScopeViewValueReadablePerBatch(t *testing.T) {
 // first held element to a view sized for the remaining document, and a view
 // into the scratch backing carries that bound-sized capacity.
 func TestScopeViewValuePinIsBatchSized(t *testing.T) {
+	needNativeBinder(t)
 	run := func(n int) (first, max int, exactFit bool) {
 		data := scopeValueJSON(n, 0)
 		var h scopeValueHost
@@ -249,6 +251,7 @@ type pinNestedHost struct {
 // per-element settles make every snapshot exactly one Value. A generation
 // spanning elements would publish growing cumulative lengths.
 func TestScopeViewValuePinPerElement(t *testing.T) {
+	needNativeBinder(t)
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
 	for i := 0; i < 50; i++ {
@@ -328,6 +331,7 @@ type pinBothHost struct {
 // scope's doc, mid-handler reads must resolve, and both levels' snapshots
 // stay exact-fit at their own granularity.
 func TestScopeViewNestedValueDocs(t *testing.T) {
+	needNativeBinder(t)
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
 	for i := 0; i < 12; i++ {
@@ -432,6 +436,7 @@ type scopeNestedHost struct {
 }
 
 func TestScopeViewNestedStreamsBoundAndValid(t *testing.T) {
+	needNativeBinder(t)
 	// The first outer element's inner stream dominates the document, so the
 	// inner scope's views rotate within that single element while the outer
 	// view stays quiescent.

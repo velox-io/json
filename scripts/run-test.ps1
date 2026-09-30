@@ -45,6 +45,11 @@ Invoke-GoTest . -count=1
 
 Invoke-GoTest ./vbind ./decode/bind/ -count=1
 
+# Pure-Go decoder round: the bind suite with the native blob excluded, so
+# the Go engine (internal/gbind) drives every parse. The race leg runs past
+# the 10m default on Windows runners, matching the timeout used in run-test.sh.
+Invoke-GoTest -tags vj_nondec ./decode/bind/ -count=1 -timeout 25m
+
 Invoke-GoTest ./venc -count=1
 Invoke-GoTest -tags vj_noencvm ./venc -count=1
 Invoke-GoTest -tags vjgcstress ./venc -count=1

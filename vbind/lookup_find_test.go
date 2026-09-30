@@ -172,3 +172,86 @@ func TestLookupFind_TwoShortKeys(t *testing.T) {
 		}
 	}
 }
+
+// spanBuf materializes a key with its closing quote and reports the span's
+// readable bound, the shape a source span presents to LookupFindSpan.
+func spanBuf(key string) (*byte, int) {
+	b := make([]byte, len(key)+1)
+	copy(b, key)
+	b[len(key)] = '"'
+	return &b[0], len(b)
+}
+
+func TestLookupFindSpan_Tiers(t *testing.T) {
+	sets := [][]string{
+		{"name"},
+		{"a", "b"},
+		{"name", "age", "email", "active", "score"},
+		{
+			"apiVersion", "kind", "metadata", "spec", "status",
+			"name", "namespace", "labels", "annotations", "creationTimestamp",
+			"resourceVersion", "selfLink", "uid", "generation", "deletionGracePeriodSeconds",
+			"ownerReferences", "finalizers", "clusterName", "managedFields", "conditions",
+		},
+		{
+			"veryLongFieldNameThatExceedsNormalExpectations_1",
+			"veryLongFieldNameThatExceedsNormalExpectations_2",
+			"veryLongFieldNameThatExceedsNormalExpectations_3",
+		},
+	}
+	for _, keys := range sets {
+		blob, tier := buildLookup(t, keys)
+		t.Logf("tier=%d (n=%d)", tier, len(keys))
+		for i, k := range keys {
+			p, end := spanBuf(k)
+			if idx := LookupFindSpan(blob, p, len(k), end); idx != i {
+				t.Errorf("LookupFindSpan(%q) = %d, want %d", k, idx, i)
+			}
+		}
+		for _, miss := range []string{"xxx", "nam", "namee", "", "Name"} {
+			p, end := spanBuf(miss)
+			if idx := LookupFindSpan(blob, p, len(miss), end); idx != -1 {
+				t.Errorf("LookupFindSpan(%q) = %d, want -1", miss, idx)
+			}
+		}
+	}
+}
+
+// A WINDOW tier whose keys share a long prefix probes a window past a short
+// key's closing quote. The span names its readable bound, and the probe must
+// answer from the bytes through it, with the padding byte standing in for
+// whatever the tier would read past a source's end.
+func TestLookupFindSpan_WindowPastSpanEnd(t *testing.T) {
+	keys := []string{"shared_long_prefix_alpha", "shared_long_prefix_beta"}
+	blob, tier := buildLookup(t, keys)
+	if tier != vlib.TierWindow {
+		t.Fatalf("tier = %d, want WINDOW (%d)", tier, vlib.TierWindow)
+	}
+	for i, k := range keys {
+		p, end := spanBuf(k)
+		if idx := LookupFindSpan(blob, p, len(k), end); idx != i {
+			t.Errorf("LookupFindSpan(%q) = %d, want %d", k, idx, i)
+		}
+	}
+	// Misses shorter than the tier's byte offset, nothing readable past the
+	// quote: the probe may not reach past the span.
+	for _, miss := range []string{"y", "shared_long_prefix", "", "shared_long_prefix_alphab"} {
+		p, end := spanBuf(miss)
+		if idx := LookupFindSpan(blob, p, len(miss), end); idx != -1 {
+			t.Errorf("LookupFindSpan(%q) = %d, want -1", miss, idx)
+		}
+	}
+	// A hit whose window needs the closing quote, the span's last readable
+	// byte: the shortest key's probe ends on it.
+	short := []string{"aab", "aac"}
+	sblob, stier := buildLookup(t, short)
+	if stier != vlib.TierWindow {
+		t.Fatalf("tier = %d, want WINDOW (%d)", stier, vlib.TierWindow)
+	}
+	for i, k := range short {
+		p, end := spanBuf(k)
+		if idx := LookupFindSpan(sblob, p, len(k), end); idx != i {
+			t.Errorf("LookupFindSpan(%q) = %d, want %d", k, idx, i)
+		}
+	}
+}
