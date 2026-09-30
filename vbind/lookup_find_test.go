@@ -9,32 +9,11 @@ import (
 )
 
 func buildLookup(tb testing.TB, keys []string) (unsafe.Pointer, uint32) {
-	if !vlib.Available {
-		tb.Skip("vlib not available on this platform")
-	}
-	vkeys := make([]vlib.Key, len(keys))
-	for i, k := range keys {
-		vkeys[i] = vlib.Key{Str: unsafe.StringData(k), Len: uintptr(len(k))}
-	}
-	scratch := make([]byte, vlib.ScratchSize())
-	cfg := vlib.Config{
-		Keys:        &vkeys[0],
-		N:           uintptr(len(keys)),
-		Tiers:       vlib.TiersAll,
-		Scratch:     unsafe.Pointer(&scratch[0]),
-		ScratchSize: uintptr(len(scratch)),
-	}
-	sz := vlib.SizeFor(&cfg)
-	if sz == 0 {
-		tb.Fatal("SizeFor returned 0")
-	}
-	blob := make([]byte, sz)
-	rc := vlib.Init(unsafe.Pointer(&blob[0]), sz, &cfg)
+	blob, rc := vlib.Build(keys, vlib.TiersAll)
 	if rc <= 0 {
-		tb.Fatalf("Init returned %d", rc)
+		tb.Fatalf("Build returned %d", rc)
 	}
-	tier := vlib.GetTier(unsafe.Pointer(&blob[0]))
-	return unsafe.Pointer(&blob[0]), tier
+	return unsafe.Pointer(&blob[0]), uint32(rc)
 }
 
 func TestLookupFind_SingleKey(t *testing.T) {

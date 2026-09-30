@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
-	"runtime"
 	"slices"
 	"sync"
 	"unsafe"
@@ -208,35 +207,13 @@ func buildVariantCaseLookup(cases []variantCase) ([]byte, error) {
 	if len(cases) == 0 {
 		return nil, nil
 	}
-	if !vlib.Available {
-		return nil, nil
-	}
-	keys := make([]vlib.Key, len(cases))
+	keys := make([]string, len(cases))
 	for i, c := range cases {
-		// Init borrows each string pointer until it returns.
-		keys[i] = vlib.Key{
-			Str: unsafe.StringData(c.Value),
-			Len: uintptr(len(c.Value)),
-		}
+		keys[i] = c.Value
 	}
-	scratch := make([]byte, vlib.ScratchSize())
-	cfg := vlib.Config{
-		Keys:        &keys[0],
-		N:           uintptr(len(cases)),
-		Tiers:       vlib.TiersAll,
-		Scratch:     unsafe.Pointer(&scratch[0]),
-		ScratchSize: uintptr(len(scratch)),
-	}
-	sz := vlib.SizeFor(&cfg)
-	if sz == 0 {
-		return nil, fmt.Errorf("vbind: cannot size variant case lookup (init failed)")
-	}
-	blob := make([]byte, sz)
-	rc := vlib.Init(unsafe.Pointer(&blob[0]), sz, &cfg)
-	runtime.KeepAlive(keys)
-	runtime.KeepAlive(scratch)
+	blob, rc := vlib.Build(keys, vlib.TiersAll)
 	if rc <= 0 {
-		return nil, fmt.Errorf("vbind: cannot build variant case lookup (init rc=%d)", rc)
+		return nil, fmt.Errorf("vbind: cannot build variant case lookup (build rc=%d)", rc)
 	}
 	return blob, nil
 }

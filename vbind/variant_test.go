@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/velox-io/json/native/vlib"
 	"github.com/velox-io/json/typ"
 )
 
@@ -216,9 +215,6 @@ func TestAttachVariantsForStruct_RegistryForm(t *testing.T) {
 }
 
 func TestAttachVariantsForStruct_ConcurrentBuild(t *testing.T) {
-	if !vlib.Available {
-		t.Skip("vlib not available on this platform")
-	}
 	host := reflect.TypeFor[testVariantEnvelope]()
 	desc := reflect.TypeFor[struct {
 		_ testVariantUser    `case:"user"`
@@ -590,9 +586,6 @@ func TestFindStreamField_NoFalsePositives(t *testing.T) {
 // slot class like any hit) but is absent from the lookup blob, since a lookup
 // miss is what selects it.
 func TestAttachVariantsForStruct_DefaultCase(t *testing.T) {
-	if !vlib.Available {
-		t.Skip("vlib not available on this platform")
-	}
 	host := reflect.TypeFor[testVariantEnvelope]()
 	desc := reflect.TypeFor[struct {
 		_ testVariantUser `case:"user"`

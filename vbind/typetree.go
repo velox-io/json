@@ -655,12 +655,11 @@ const (
 // alive. Struct lookup blobs and runtime type pointers depend on separate
 // process lifetime roots.
 type TypeTree struct {
-	Root       uint32 // root index into Types
-	Types      []BindType
-	Fields     []BindField
-	FieldNames []string   // Go-only (not in C ABI); parallel to Fields, JSON name per field for the tape walker
-	TypeMeta   []TypeMeta // parallel to Types, per-Kind metadata (union payload)
-	Slots      []SlotTemplate
+	Root     uint32 // root index into Types
+	Types    []BindType
+	Fields   []BindField
+	TypeMeta []TypeMeta // parallel to Types, per-Kind metadata (union payload)
+	Slots    []SlotTemplate
 
 	// This slice owns the records referenced by MapMetaPayload.DrainInfo.
 	MapDrainInfo []MapDrainInfo

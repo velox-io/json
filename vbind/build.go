@@ -65,7 +65,6 @@ func Build(root *typ.UniType) (*TypeTree, error) {
 	return &TypeTree{
 		Types:               b.types,
 		Fields:              b.fields,
-		FieldNames:          b.fieldNames,
 		TypeMeta:            b.typeMeta,
 		Slots:               b.slots,
 		Root:                rootIdx,
@@ -99,7 +98,7 @@ type builder struct {
 	typeMeta            []TypeMeta
 	reflectTypes        []reflect.Type
 	fields              []BindField
-	fieldNames          []string // parallel to fields for tape walking
+	fieldNames          []string // parallel to fields, JSON names for error paths
 	slots               []SlotTemplate
 	slotRecs            []slotRec // parallel to slots for backing dependency analysis
 	seen                map[*typ.UniType]uint32
@@ -300,8 +299,8 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 				}
 				flags |= uint32(TagViaPtr) | (uint32(hopStart) << fieldFlagPolyIdxShift)
 			}
-			// Type remains an index until freeze. fieldNames is the scannable Go side
-			// companion used by tape walking and is not part of BindField's ABI.
+			// Type remains an index until freeze. fieldNames is the scannable Go
+			// side companion used by error paths and is not part of BindField's ABI.
 			b.fields = append(b.fields, BindField{
 				Type: uintptr(fieldTypeIdxs[i]),
 				// For a via-ptr field this is relative to the last hop's pointee,

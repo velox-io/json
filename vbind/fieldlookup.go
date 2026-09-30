@@ -1,9 +1,7 @@
 package vbind
 
 import (
-	"runtime"
 	"sync"
-	"unsafe"
 
 	"github.com/velox-io/json/native/vlib"
 	"github.com/velox-io/json/typ"
@@ -43,40 +41,11 @@ func buildStructLookup(si *typ.StructTypeInfo) ([]byte, error) {
 	if n == 0 {
 		return nil, nil
 	}
-	if !vlib.Available {
-		return nil, nil
-	}
-
-	// vlib.Init synchronously copies every key, so these pointers need to remain
-	// valid only through that native call.
-	keys := make([]vlib.Key, n)
+	keys := make([]string, n)
 	for i := range si.Fields {
-		name := si.Fields[i].JSONName
-		keys[i] = vlib.Key{
-			Str: unsafe.StringData(name),
-			Len: uintptr(len(name)),
-		}
+		keys[i] = si.Fields[i].JSONName
 	}
-	// Keep the large builder workspace on the Go heap because the native call
-	// runs on the small goroutine stack.
-	scratch := make([]byte, vlib.ScratchSize())
-	cfg := vlib.Config{
-		Keys:        &keys[0],
-		N:           uintptr(n),
-		Tiers:       vlib.TiersAll,
-		Scratch:     unsafe.Pointer(&scratch[0]),
-		ScratchSize: uintptr(len(scratch)),
-	}
-	sz := vlib.SizeFor(&cfg)
-	if sz == 0 {
-		return nil, &fieldLookupError{si: si, code: 0}
-	}
-	blob := make([]byte, sz)
-	rc := vlib.Init(unsafe.Pointer(&blob[0]), sz, &cfg)
-	// KeepAlive must follow the native call. si owns the key bytes copied by Init,
-	// and scratch must remain reachable while Init uses its workspace.
-	runtime.KeepAlive(si)
-	runtime.KeepAlive(scratch)
+	blob, rc := vlib.Build(keys, vlib.TiersAll)
 	if rc <= 0 {
 		return nil, &fieldLookupError{si: si, code: rc}
 	}
@@ -89,5 +58,5 @@ type fieldLookupError struct {
 }
 
 func (e *fieldLookupError) Error() string {
-	return "vbind: cannot build field lookup for struct (native lookup init failed)"
+	return "vbind: cannot build field lookup for struct (lookup build failed)"
 }

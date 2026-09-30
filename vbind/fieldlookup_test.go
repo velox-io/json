@@ -1,6 +1,7 @@
 package vbind
 
 import (
+	"encoding/binary"
 	"reflect"
 	"testing"
 	"unsafe"
@@ -46,15 +47,12 @@ func TestFieldLookupSharedPerType(t *testing.T) {
 		t.Fatal("second getStructLookup returned a different blob (not shared)")
 	}
 
-	if tier := vlib.GetTier(unsafe.Pointer(&blob1[0])); tier == vlib.TierNone {
+	if kind := binary.LittleEndian.Uint32(blob1); kind == vlib.TierNone {
 		t.Fatalf("blob tier = none")
 	}
 }
 
 func TestFieldLookupCrossTreeShared(t *testing.T) {
-	if !vlib.Available {
-		t.Skip("native lookup not linked on this platform")
-	}
 	type Meta struct {
 		Name string `json:"name"`
 		Ver  int    `json:"version"`
