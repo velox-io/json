@@ -2,11 +2,24 @@ package ndec
 
 import "unsafe"
 
+// The stateless entries (DOM, fmt, valid) run their pure-Go implementations
+// when Available is false and write the same context. Available is a build
+// constant, so each build compiles one side only. The bind and window
+// entries are native-only; callers gate them on Available.
+
 func DomParseCountedRun(ctx unsafe.Pointer) {
+	if !Available {
+		goDOMParseCounted((*DOMContext)(ctx))
+		return
+	}
 	vjNdecDOMParseCounted(ctx)
 }
 
 func DomBuildRun(ctx unsafe.Pointer) {
+	if !Available {
+		goDOMBuild((*DOMContext)(ctx))
+		return
+	}
 	vjNdecDOMBuild(ctx)
 }
 
@@ -31,10 +44,18 @@ func WindowScanRun(ctx unsafe.Pointer) {
 }
 
 func FmtParseRun(ctx unsafe.Pointer) {
+	if !Available {
+		goFmtParse((*FmtContext)(ctx))
+		return
+	}
 	vjNdecFmtParse(ctx)
 }
 
-// ValidRun validates one complete document through the native entry.
+// ValidRun validates one complete document.
 func ValidRun(ctx unsafe.Pointer) {
+	if !Available {
+		goValid((*ValidContext)(ctx))
+		return
+	}
 	vjNdecValid(ctx)
 }

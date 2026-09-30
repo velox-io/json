@@ -64,9 +64,11 @@ func vjNdecFmtParse(ctx unsafe.Pointer)
 //go:nosplit
 func vjNdecValid(ctx unsafe.Pointer)
 
+// Available is a build-time promise here: every arch this file builds for
+// ships a blob, so a load failure aborts startup rather than degrading.
+const Available = true
+
 func init() {
-	// Native decode is a hard requirement on every OS this file builds for:
-	// there is no pure-Go fallback to degrade to (see execblob.MustLoad).
 	funcs := execblob.MustLoad("ndec", blobImage, []string{
 		"ndec_dom_parse_counted",
 		"ndec_dom_build",

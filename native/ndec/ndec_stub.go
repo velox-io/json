@@ -4,10 +4,11 @@ package ndec
 
 import "unsafe"
 
-// These stubs cover vj_nondec builds and platforms without an arch-canonical
-// blob (any OS on an arch the blob was never built for, or an OS whose
-// executable-mapping policy refused the blob: execblob.Load failure fails
-// init instead). Callers take the supported Go paths.
+// Available is false for vj_nondec builds and platforms without an
+// arch-canonical blob: the stateless entries run their Go bodies and the
+// binder takes its Go engine, so the stubs below are never reached.
+const Available = false
+
 func vjNdecDOMParseCounted(ctx unsafe.Pointer) { panic("ndec: native decoder not linked") }
 
 func vjNdecDOMBuild(ctx unsafe.Pointer) { panic("ndec: native decoder not linked") }

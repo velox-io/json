@@ -42,3 +42,6 @@ func vjNdecFmtParse(ctx unsafe.Pointer)
 //go:noescape
 //go:nosplit
 func vjNdecValid(ctx unsafe.Pointer)
+
+// The linked artifact defines every entry symbol or the link fails.
+const Available = true
