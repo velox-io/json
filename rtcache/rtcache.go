@@ -129,7 +129,7 @@ func (t *Table[V]) Set(rtp uintptr, v V) {
 }
 
 // Cache combines a fast atomic Table with a sync.Map slow path. The slow map
-// deduplicates concurrent builds for the same key: the first publisher wins
+// deduplicates published values for the same key: the first publisher wins
 // under LoadOrStore, later racers observe the published value.
 //
 // The zero value is ready to use. Use Cache when callers need idempotent build
@@ -180,9 +180,10 @@ func (c *Cache[V]) Publish(rtp uintptr, v V) V {
 	return v
 }
 
-// GetOrBuild returns the cached value for rtp, invoking build on miss. On a
-// slow miss, build runs exactly once per racing cohort under LoadOrStore. If
-// build returns an error, no value is cached and the next caller will retry.
+// GetOrBuild returns the cached value for rtp, invoking build on miss. Each
+// goroutine that misses runs build; Publish keeps one result, the first value
+// accepted under LoadOrStore. If build returns an error, no value is cached
+// and the next caller will retry.
 func (c *Cache[V]) GetOrBuild(rtp uintptr, build func() (V, error)) (V, error) {
 	if v, ok := c.Get(rtp); ok {
 		return v, nil
