@@ -8,13 +8,14 @@
 # vlib sets SYSO_PREFIX=vlib in sources.sh, so the artifact name drops the
 # mode/isa segments, and SYSO_ARCH_ONLY=1 drops the os segment too:
 # vlib_${arch}.elf, one blob per arch shared by every platform. The blob is
-# embedded by vlib_blob_*.go and mapped at runtime, never linked, so
-# SYSO_EXT=".elf" keeps the Go tool from picking it up as a host object.
+# embedded by internal/nativeref/blob_*.go (test-only, never linked into
+# production binaries) and mapped at runtime, so SYSO_EXT=".elf" keeps the
+# Go tool from picking it up as a host object.
 # The intermediate dylib derives from the artifact basename
 # (vlib_${arch}.${ext}); it is a build
 # artifact, not an input to Go. Single mode (default), single dylib. Five
-# NOSPLIT trampolines (trampoline_arm64.s, trampoline_amd64.s,
-# trampoline_windows_amd64.s) call through function pointers into the five
+# NOSPLIT trampolines (internal/nativeref/trampoline_{arm64,amd64,
+# windows_amd64}.s) call through function pointers into the five
 # exported ndec_lookup_* build-path symbols; ndec_lookup_find is inline only
 # and ndec_lookup_tier_name is exported but has no trampoline, so neither
 # appears in STACK_CHECK_ENTRIES.
@@ -54,7 +55,7 @@ MODES := default
 # platform's object format, which the other consumers cannot parse.
 SUPPORTED_PLATFORMS := linux/amd64 linux/arm64
 
-# NOSPLIT trampoline targets (vlib_init.go declares these five).
+# NOSPLIT trampoline targets (internal/nativeref declares these five).
 STACK_CHECK_ENTRIES := ndec_lookup_size_for ndec_lookup_scratch_size \
 	ndec_lookup_init ndec_lookup_get_tier ndec_lookup_footprint
 

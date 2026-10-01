@@ -191,7 +191,7 @@ func validateKeys(keys []string, tiers uint32) (maxLen int, code int32) {
 			maxLen = len(k)
 		}
 	}
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		for j := i + 1; j < len(keys); j++ {
 			if keys[i] == keys[j] {
 				return 0, ErrKeyDuplicate
@@ -250,7 +250,7 @@ func windowByte(keys []string, i, idx int) byte {
 func windowInitForward(blob []byte, keys []string, minLen int) bool {
 	n := len(keys)
 	for off := 0; off <= minLen; off++ {
-		for shift := 0; shift < 8; shift++ {
+		for shift := range 8 {
 			if shift != 0 && off+1 > minLen {
 				continue
 			}
@@ -270,10 +270,10 @@ func windowInitForward(blob []byte, keys []string, minLen int) bool {
 			}
 			blob[4] = uint8(off)
 			blob[5] = uint8(shift)
-			for b := 0; b < 256; b++ {
+			for b := range 256 {
 				blob[wOffWindowToKey+b] = uint8(n)
 			}
-			for i := 0; i < n; i++ {
+			for i := range n {
 				val := ((uint32(windowByte(keys, i, off)) | uint32(windowByte(keys, i, off+1))<<8) >> uint(shift)) & 0xFF
 				blob[wOffWindowToKey+int(val)] = uint8(i)
 			}
@@ -371,7 +371,7 @@ func gperfCharAt(key string, pos uint8) int {
 func gperfUndistinguishedPairs(keys []string, positions []uint8, modulus int) int {
 	n := len(keys)
 	count := 0
-	for i := 0; i < n; i++ {
+	for i := range n {
 		for j := i + 1; j < n; j++ {
 			if len(keys[i])%modulus != len(keys[j])%modulus {
 				continue
@@ -458,7 +458,7 @@ func gperfTry(ws *gperfWorkspace, maxKeyLen int, keys []string, modulus int) boo
 	gs.asso = [gperfMaxPos][256]uint8{}
 
 	if np == 0 {
-		for s := 0; s < modulus; s++ {
+		for s := range modulus {
 			gs.slotToKey[s] = uint8(n)
 		}
 		for i, k := range keys {
@@ -471,21 +471,21 @@ func gperfTry(ws *gperfWorkspace, maxKeyLen int, keys []string, modulus int) boo
 		return true
 	}
 
-	for k := 0; k < n; k++ {
-		for p := 0; p < np; p++ {
+	for k := range n {
+		for p := range np {
 			ws.kchars[k][p] = gperfCharAt(keys[k], gs.positions[p])
 		}
 	}
 
 	nsyms := 0
-	for p := 0; p < np; p++ {
+	for p := range np {
 		clear(ws.freq[:])
-		for k := 0; k < n; k++ {
+		for k := range n {
 			if c := ws.kchars[k][p]; c < 256 {
 				ws.freq[c]++
 			}
 		}
-		for c := 0; c < 256; c++ {
+		for c := range 256 {
 			if ws.freq[c] > 0 {
 				ws.syms[nsyms] = gperfSym{pos: uint8(p), ch: c, freq: ws.freq[c]}
 				nsyms++
@@ -503,15 +503,15 @@ func gperfTry(ws *gperfWorkspace, maxKeyLen int, keys []string, modulus int) boo
 	}
 
 	s := uint64(0x9e3779b97f4a7c15)
-	for p := 0; p < np; p++ {
-		for c := 0; c < 256; c++ {
+	for p := range np {
+		for c := range 256 {
 			s = s*6364136223846793005 + 1442695040888963407
 			ws.salt[p][c] = s
 		}
 	}
-	for k := 0; k < n; k++ {
+	for k := range n {
 		var sg uint64
-		for p := 0; p < np; p++ {
+		for p := range np {
 			if c := ws.kchars[k][p]; c < 256 {
 				sg ^= ws.salt[p][c]
 			}
@@ -519,24 +519,21 @@ func gperfTry(ws *gperfWorkspace, maxKeyLen int, keys []string, modulus int) boo
 		ws.sig[k] = sg
 	}
 
-	for k := 0; k < n; k++ {
+	for k := range n {
 		ws.phash[k] = len(keys[k])
 		ws.order[k] = k
 	}
 	clear(ws.slotGen[:modulus])
 	gen := 0
 
-	searchLimit := modulus
-	if searchLimit < 32 {
-		searchLimit = 32
-	}
+	searchLimit := max(modulus, 32)
 
 	for si := 0; si < nsyms; si++ {
 		sp := ws.syms[si].pos
 		sc := ws.syms[si].ch
 		spSalt := ws.salt[sp][sc]
 
-		for k := 0; k < n; k++ {
+		for k := range n {
 			if ws.kchars[k][sp] == sc {
 				ws.sig[k] ^= spSalt
 			}
@@ -582,7 +579,7 @@ func gperfTry(ws *gperfWorkspace, maxKeyLen int, keys []string, modulus int) boo
 			}
 			if !collision {
 				gs.asso[sp][sc] = uint8(v)
-				for k := 0; k < n; k++ {
+				for k := range n {
 					if ws.kchars[k][sp] == sc {
 						ws.phash[k] += v
 					}
@@ -595,10 +592,10 @@ func gperfTry(ws *gperfWorkspace, maxKeyLen int, keys []string, modulus int) boo
 		}
 	}
 
-	for s := 0; s < modulus; s++ {
+	for s := range modulus {
 		gs.slotToKey[s] = uint8(n)
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		slot := ws.phash[i] & (modulus - 1)
 		if gs.slotToKey[slot] != uint8(n) {
 			return false
@@ -651,7 +648,7 @@ func gperfBuild(blob []byte, keys []string) bool {
 		kbo := off
 		putU64(blob, gOffKeyBytesOff, uint64(kbo))
 
-		for p := 0; p < np; p++ {
+		for p := range np {
 			copy(blob[assoOff+p*256:], gs.asso[p][:])
 		}
 		writeKeyBlock(blob, keys, keyLenOff, kbo, stride)
@@ -706,24 +703,21 @@ func handTryPlacement(blob []byte, keys []string, bucketOf, bucketsOrdered []int
 	n := len(keys)
 	mask := M - 1
 	clear(blob[hOffDisplacement : hOffDisplacement+256])
-	for s := 0; s < M; s++ {
+	for s := range M {
 		blob[hOffSlotToKey+s] = uint8(n)
 	}
 
 	for b := range bucketsOrdered {
 		ch := bucketsOrdered[b]
 		bkCount := 0
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if bucketOf[i] == ch {
 				ws.bucketKeys[bkCount] = i
 				bkCount++
 			}
 		}
 		placed := false
-		maxD := M
-		if maxD > 255 {
-			maxD = 255
-		}
+		maxD := min(M, 255)
 		for d := 0; d < maxD && !placed; d++ {
 			ok := true
 			for k := 0; k < bkCount && ok; k++ {
@@ -768,7 +762,7 @@ func handTrySize(blob []byte, keys []string, M int, ws *handWorkspace) bool {
 		ws.bucketOf[i] = handBucketHash(k)
 	}
 	numBuckets := 0
-	for i := 0; i < n; i++ {
+	for i := range n {
 		bk := ws.bucketOf[i]
 		found := false
 		for b := 0; b < numBuckets; b++ {

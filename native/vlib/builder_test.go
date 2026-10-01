@@ -5,29 +5,31 @@ import (
 	"math/rand"
 	"testing"
 	"unsafe"
+
+	"github.com/velox-io/json/native/vlib/internal/nativeref"
 )
 
-// buildNative builds through the trampoline path (the C builder in the
-// execblob), the reference for Build parity.
+// buildNative builds through the C builder in the embedded blob, the
+// reference for Build parity.
 func buildNative(tb testing.TB, keys []string, tiers uint32) ([]byte, int32) {
-	vkeys := make([]Key, len(keys)+1)
+	vkeys := make([]nativeref.Key, len(keys)+1)
 	for i, k := range keys {
-		vkeys[i] = Key{Str: unsafe.StringData(k), Len: uintptr(len(k))}
+		vkeys[i] = nativeref.Key{Str: unsafe.StringData(k), Len: uintptr(len(k))}
 	}
-	scratch := make([]byte, ScratchSize())
-	cfg := Config{
+	scratch := make([]byte, nativeref.ScratchSize())
+	cfg := nativeref.Config{
 		Keys:        &vkeys[0],
 		N:           uintptr(len(keys)),
 		Tiers:       tiers,
 		Scratch:     unsafe.Pointer(&scratch[0]),
 		ScratchSize: uintptr(len(scratch)),
 	}
-	sz := SizeFor(&cfg)
+	sz := nativeref.SizeFor(&cfg)
 	buf := make([]byte, sz)
 	if len(buf) < 8 {
 		buf = make([]byte, 8)
 	}
-	rc := Init(unsafe.Pointer(&buf[0]), uintptr(len(buf)), &cfg)
+	rc := nativeref.Init(unsafe.Pointer(&buf[0]), uintptr(len(buf)), &cfg)
 	if rc <= 0 {
 		return nil, rc
 	}
@@ -84,7 +86,7 @@ func TestBuild_ErrorCodes(t *testing.T) {
 		if rc != tc.want {
 			t.Errorf("%s: Build rc = %d, want %d", tc.name, rc, tc.want)
 		}
-		if !Available {
+		if !nativeref.Available {
 			continue
 		}
 		_, nrc := buildNative(t, tc.keys, tc.tier)
@@ -115,8 +117,8 @@ func TestBuild_TooLongWithTable(t *testing.T) {
 // selection also agrees in the early bytes hand hashes, so natural selection
 // lands on hand essentially never.
 func TestBuild_ParityNative(t *testing.T) {
-	if !Available {
-		t.Skip("native lookup not linked on this platform")
+	if !nativeref.Available {
+		t.Skip("native lookup not loaded on this platform")
 	}
 	alphabets := []string{
 		"ab",
@@ -151,10 +153,7 @@ func TestBuild_ParityNative(t *testing.T) {
 			if rng.Intn(4) == 0 && len(keys) > 0 {
 				// Shared prefixes stress the position selection.
 				base := keys[rng.Intn(len(keys))]
-				cut := len(base)
-				if cut > L {
-					cut = L
-				}
+				cut := min(len(base), L)
 				copy(b, base[:cut])
 			}
 			s := string(b)

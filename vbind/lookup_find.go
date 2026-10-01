@@ -2,7 +2,7 @@ package vbind
 
 import "unsafe"
 
-// LookupFind reads a vlib.Init blob and returns its key index in [0, n), or -1
+// LookupFind reads a vlib.Build blob and returns its key index in [0, n), or -1
 // on a miss. Struct blobs live in the process cache; each variant blob is rooted
 // by its owning BindPolyTable in a TypeTree.
 //

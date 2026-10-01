@@ -5,15 +5,16 @@ import (
 	"unsafe"
 
 	vlib "github.com/velox-io/json/native/vlib"
+	"github.com/velox-io/json/native/vlib/internal/nativeref"
 )
 
 // makeKeys pins Go strings and returns a []Key slice + retention slice.
 // The C build path treats key.str as a (ptr, len) tuple and copies the bytes
 // out during Init.
-func makeKeys(strs []string) ([]vlib.Key, []string) {
-	keys := make([]vlib.Key, len(strs))
+func makeKeys(strs []string) ([]nativeref.Key, []string) {
+	keys := make([]nativeref.Key, len(strs))
 	for i, s := range strs {
-		keys[i] = vlib.Key{
+		keys[i] = nativeref.Key{
 			Str: unsafe.StringData(s),
 			Len: uintptr(len(s)),
 		}
@@ -23,28 +24,28 @@ func makeKeys(strs []string) ([]vlib.Key, []string) {
 
 func TestBuildWindow(t *testing.T) {
 	keys, _ := makeKeys([]string{"apple", "banana", "cherry"})
-	scratch := make([]byte, vlib.ScratchSize())
-	cfg := vlib.Config{
+	scratch := make([]byte, nativeref.ScratchSize())
+	cfg := nativeref.Config{
 		Keys:        &keys[0],
 		N:           uintptr(len(keys)),
 		Tiers:       vlib.TiersAll,
 		Scratch:     unsafe.Pointer(&scratch[0]),
 		ScratchSize: uintptr(len(scratch)),
 	}
-	sz := vlib.SizeFor(&cfg)
+	sz := nativeref.SizeFor(&cfg)
 	if sz == 0 {
 		t.Fatal("SizeFor returned 0")
 	}
 	buf := make([]byte, sz)
-	rc := vlib.Init(unsafe.Pointer(&buf[0]), sz, &cfg)
+	rc := nativeref.Init(unsafe.Pointer(&buf[0]), sz, &cfg)
 	if rc <= 0 {
 		t.Fatalf("Init failed: %d", rc)
 	}
-	tier := vlib.GetTier(unsafe.Pointer(&buf[0]))
+	tier := nativeref.GetTier(unsafe.Pointer(&buf[0]))
 	if tier != uint32(rc) {
 		t.Fatalf("tier mismatch: init=%d get=%d", rc, tier)
 	}
-	fp := vlib.Footprint(unsafe.Pointer(&buf[0]))
+	fp := nativeref.Footprint(unsafe.Pointer(&buf[0]))
 	if fp == 0 || fp > sz {
 		t.Fatalf("bad footprint: %d (size=%d)", fp, sz)
 	}
@@ -57,21 +58,21 @@ func TestBuildWindow(t *testing.T) {
 
 func TestErrorPaths(t *testing.T) {
 	// Empty keys.
-	cfg := vlib.Config{Keys: nil, N: 0, Tiers: vlib.TiersAll}
-	if got := vlib.SizeFor(&cfg); got != 0 {
+	cfg := nativeref.Config{Keys: nil, N: 0, Tiers: vlib.TiersAll}
+	if got := nativeref.SizeFor(&cfg); got != 0 {
 		t.Fatalf("empty keys should return 0 size, got %d", got)
 	}
 
 	// Duplicate keys: SizeFor returns 0 (config invalid), Init reports the
 	// specific error even given a small non-empty buffer.
 	keys, _ := makeKeys([]string{"a", "a"})
-	cfg = vlib.Config{Keys: &keys[0], N: 2, Tiers: vlib.TiersAll}
-	if got := vlib.SizeFor(&cfg); got != 0 {
+	cfg = nativeref.Config{Keys: &keys[0], N: 2, Tiers: vlib.TiersAll}
+	if got := nativeref.SizeFor(&cfg); got != 0 {
 		t.Fatalf("SizeFor should return 0 for duplicate keys, got %d", got)
 	}
 	// Init still called against a scratch buffer; it will reject validate_keys.
 	scratch := make([]byte, 4096)
-	rc := vlib.Init(unsafe.Pointer(&scratch[0]), uintptr(len(scratch)), &cfg)
+	rc := nativeref.Init(unsafe.Pointer(&scratch[0]), uintptr(len(scratch)), &cfg)
 	if rc != vlib.ErrKeyDuplicate {
 		t.Fatalf("expected ErrKeyDuplicate (%d), got %d", vlib.ErrKeyDuplicate, rc)
 	}

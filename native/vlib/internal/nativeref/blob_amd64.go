@@ -1,6 +1,6 @@
 //go:build amd64 && !vj_nolookup
 
-package vlib
+package nativeref
 
 import _ "embed"
 

@@ -6,9 +6,9 @@
 # ndec_lookup_find lives inline in impl/lookup.h and is not part of the
 # export surface: consumers embed the header directly.
 #
-# The blob is not linked. vlib_blob_*.go embeds it with go:embed and
-# native/execblob maps it into executable memory at startup, so no linker
-# ever sees it and the artifact needs no per-OS object format.
+# The blob is not linked. internal/nativeref/blob_*.go embeds it with
+# go:embed and native/execblob maps it into executable memory at startup, so
+# no linker ever sees it and the artifact needs no per-OS object format.
 #
 # Sourced by gen-natives.sh; all paths relative to REPO_ROOT.
 
@@ -26,7 +26,7 @@ EXTRA_SOURCES=""
 # from make gen-debug) instead of overwriting them.
 EXTRA_CFLAGS="${EXTRA_CFLAGS:-} -I$REPO_ROOT/native/vlib/impl -I$REPO_ROOT/native"
 
-TARGET_DIR="native/vlib"
+TARGET_DIR="native/vlib/internal/nativeref"
 
 # Optional base name for the generated artifact. When set, it replaces the
 # default (source file basename) in the artifact file name and the mode/isa

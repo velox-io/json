@@ -3,7 +3,7 @@
 //lint:file-ignore U1000 the c* function-pointer vars are only read from
 // the trampoline .s files, which the unused check cannot observe
 
-package vlib
+package nativeref
 
 import (
 	"unsafe"
@@ -58,8 +58,8 @@ func init() {
 		"ndec_lookup_footprint",
 	}, nil)
 	if err != nil {
-		// Available stays false and callers take the pure-Go path, the
-		// same state as the vj_nolookup build.
+		// Available stays false and the parity tests skip, the same
+		// state as the vj_nolookup build.
 		return
 	}
 	cLookupSizeFor = funcs[0]
