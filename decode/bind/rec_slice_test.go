@@ -3,8 +3,10 @@ package bind
 import (
 	"encoding/json"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
+	"unsafe"
 )
 
 // recSliceNode is a recursive slice type: []recSliceNode's element-backing
@@ -124,6 +126,89 @@ func TestRecursiveSlicePreallocatedEmpty(t *testing.T) {
 			t.Errorf("got = %+v", got)
 		}
 	})
+}
+
+// TestRecursiveSliceGrowFromNonPow2Cap is a regression test for RecBatch tier
+// selection when the destination reuses a caller backing whose capacity is not
+// a power of two. Growth derived the next capacity as cap*2 and mapped it to a
+// row with ctz, so a caller cap of 3 selected the capacity-2 row while three
+// elements were copied into its two-element slot. The published slice kept
+// that slot as backing and kept writing past it (count never reaches the bogus
+// capacity again, so no further growth happens), so a sibling slice allocated
+// from the same row lands inside its data. The fix rounds the next capacity up
+// to a power of two before the row lookup.
+func TestRecursiveSliceGrowFromNonPow2Cap(t *testing.T) {
+	type growDoc struct {
+		A []recSliceNode `json:"a"`
+		B []recSliceNode `json:"b"`
+	}
+
+	// Field A binds 10 elements into a caller backing of the given capacity;
+	// growth always triggers. bLen parks B's final backing in the row the
+	// buggy lookup selects: ctz(2*odd)=1 selects the capacity-2 row, while
+	// cap 6 selects the capacity-4 row, which B only reaches by growing past
+	// two elements. cap 4 is the power-of-two control that must pass against
+	// both the old and fixed natives.
+	cases := []struct {
+		cap  int
+		bLen int
+	}{
+		{3, 2},
+		{4, 2},
+		{5, 2},
+		{6, 3},
+		{7, 2},
+	}
+	for _, tc := range cases {
+		t.Run("cap"+strconv.Itoa(tc.cap), func(t *testing.T) {
+			var a, b strings.Builder
+			a.WriteByte('[')
+			for i := range 10 {
+				if i > 0 {
+					a.WriteByte(',')
+				}
+				a.WriteString(`{"v":` + strconv.Itoa(i) + `,"c":[]}`)
+			}
+			a.WriteByte(']')
+			b.WriteByte('[')
+			for i := range tc.bLen {
+				if i > 0 {
+					b.WriteByte(',')
+				}
+				b.WriteString(`{"v":` + strconv.Itoa(100+i) + `,"c":[]}`)
+			}
+			b.WriteByte(']')
+			data := []byte(`{"a":` + a.String() + `,"b":` + b.String() + `}`)
+
+			got := growDoc{A: make([]recSliceNode, tc.cap)}
+			if err := Unmarshal(data, &got); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if len(got.A) != 10 {
+				t.Fatalf("len(A) = %d, want 10", len(got.A))
+			}
+			for i := range got.A {
+				if got.A[i].V != i {
+					t.Fatalf("A[%d].V = %d, want %d (sibling slice clobbered the reused backing)",
+						i, got.A[i].V, i)
+				}
+			}
+			for i := range got.B {
+				if got.B[i].V != 100+i {
+					t.Fatalf("B[%d].V = %d, want %d", i, got.B[i].V, 100+i)
+				}
+			}
+			// Distinct live slices hold disjoint backings. An overlap means
+			// A's data runs through memory the allocator granted to B.
+			elem := unsafe.Sizeof(recSliceNode{})
+			a0 := uintptr(unsafe.Pointer(unsafe.SliceData(got.A)))
+			b0 := uintptr(unsafe.Pointer(unsafe.SliceData(got.B)))
+			aEnd, bEnd := a0+uintptr(len(got.A))*elem, b0+uintptr(len(got.B))*elem
+			if a0 < bEnd && b0 < aEnd {
+				t.Fatalf("A backing [%#x,%#x) overlaps B backing [%#x,%#x)", a0, aEnd, b0, bEnd)
+			}
+		})
+	}
 }
 
 // recursiveMapNode is a recursive map type: map[string]*recursiveMapNode's

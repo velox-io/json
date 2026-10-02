@@ -3028,8 +3028,13 @@ t_array_value: {
       BindSlotClass *sc   = &m->b.alloc.slot_classes[alloc_class];
       if (UNLIKELY(sc->mode == BIND_SLOT_RECBATCH)) {
         /* RecBatch growth must remain in its matrix or retained bypass path;
-         * SLICE_GROW is valid only for bump mode. */
-        intptr_t next_cap = cap_field ? cap_field * 2 : 1;
+         * SLICE_GROW is valid only for bump mode. A reused caller backing can
+         * carry any capacity, so the next capacity is the smallest power of
+         * two above the current one before ctz maps it to a row. */
+        intptr_t next_cap = cap_field == 0 ? 1
+                            : cap_field >= (intptr_t)BIND_RECBATCH_MAX_CAP
+                                ? cap_field * 2
+                                : (intptr_t)(1ULL << (64 - __builtin_clzll((uint64_t)cap_field)));
         if (UNLIKELY(next_cap > (intptr_t)BIND_RECBATCH_MAX_CAP)) {
           __TAPE_BIND_SAVE_LOCALS(m);
           m->c.phase                = BIND_PHASE_TAPE_BIND_ARRAY_VALUE;
