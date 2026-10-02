@@ -418,3 +418,47 @@ func TestGoCoreGrowPointerFreeUnderGC(t *testing.T) {
 		}
 	}
 }
+
+type scanSealRoot struct {
+	X []int  `json:"x"`
+	S string `json:"s"`
+}
+
+// TestScanFailureSealsNothing pins that a parse failing its structural scan
+// leaves every slot cursor where it was. Such a parse binds nothing, but its
+// error yield runs the seal, which reads the machine's live container: it
+// must be the fresh root rather than the slice an earlier parse died in.
+//
+// The earlier parse's spill survives only while no other native parse runs,
+// so the Go engine writes the tail in between, past the abandoned region.
+func TestScanFailureSealsNothing(t *testing.T) {
+	needNativeForDiff(t)
+	p, err := NewParser[scanSealRoot]()
+	if err != nil {
+		t.Fatalf("NewParser: %v", err)
+	}
+	parse := func(goCore bool, in string, wantErr bool) {
+		t.Helper()
+		prev := forceGoCore
+		forceGoCore = goCore
+		defer func() { forceGoCore = prev }()
+		var v scanSealRoot
+		if err := p.Unmarshal([]byte(in), &v); (err != nil) != wantErr {
+			t.Fatalf("goCore=%v %q: err = %v", goCore, in, err)
+		}
+	}
+	// Room past the first slice, so the next ones borrow the same block.
+	parse(false, `{"x":[1,2,3,4,5]}`, false)
+	parse(false, `{"x":[1,2,x`, true)
+	parse(true, `{"x":[1,2,3,4,5]}`, false)
+	before := make([]uint32, len(p.alloc.Slots))
+	for i := range p.alloc.Slots {
+		before[i] = p.alloc.Slots[i].Offset
+	}
+	parse(false, `{"s":"`, true)
+	for i := range p.alloc.Slots {
+		if sc := &p.alloc.Slots[i]; sc.Offset != before[i] {
+			t.Fatalf("slot %d cursor moved from %d to %d across a scan failure", i, sc.Offset, before[i])
+		}
+	}
+}
