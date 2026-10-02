@@ -46,6 +46,27 @@ NDEC_FN_DECL void ndec_bind_parse(void *_m_) {
   NdecBindMachine *m = (NdecBindMachine *)_m_;
 
   if (UNLIKELY(m->c.phase == BIND_PHASE_ROOT)) {
+    /* The root state is complete before the scan can fail: the error yield
+     * exposes the live container to the Go seal, which must not see the one
+     * an earlier parse spilled. */
+    m->c.depth                      = 0;
+    m->c.cur_dst                    = m->b.ctx.root_dst;
+    m->c.cur_type                   = m->b.ctx.types[m->b.ctx.root_type];
+    m->c.cur_count                  = 0;
+    m->c.cur_aux                    = NULL;
+    m->c.first_error_kind           = 0;
+    m->b.yield.first_error_pos      = BIND_ERROR_NO_POS;
+    m->b.yield.first_error_promoted = 0;
+    /* Reset both auxiliary stacks. Live aux slots initialize lazily, so only
+     * the sentinel must be restored after an earlier failed parse. */
+    m->rebind_top               = 0;
+    m->tape_bind_base_depth     = 0;
+    m->aux_depth                = 0;
+    m->auxFrames[0].owner_depth = -1;
+    m->in_tape_bind             = 0;
+    /* JSON binding reads source bytes. Only nested phase2 walks select a tape view. */
+    m->tape_view_mode = TAPE_VIEW_A;
+
     /* Running the PHASE_ROOT scan in this wrapper separates scanner and
      * state-machine spill frames, reducing the maximum native stack depth. */
     uint32_t n_idx = 0;
@@ -84,25 +105,8 @@ NDEC_FN_DECL void ndec_bind_parse(void *_m_) {
       m->c.phase = BIND_PHASE_DOCUMENT_END;
       return;
     }
-    m->cursor_end.idx               = m->b.alloc.structural + n_idx;
-    m->cursor.idx                   = m->b.alloc.structural;
-    m->c.depth                      = 0;
-    m->c.cur_dst                    = m->b.ctx.root_dst;
-    m->c.cur_type                   = m->b.ctx.types[m->b.ctx.root_type];
-    m->c.cur_count                  = 0;
-    m->c.cur_aux                    = NULL;
-    m->c.first_error_kind           = 0;
-    m->b.yield.first_error_pos      = BIND_ERROR_NO_POS;
-    m->b.yield.first_error_promoted = 0;
-    /* Reset both auxiliary stacks. Live aux slots initialize lazily, so only
-     * the sentinel must be restored after an earlier failed parse. */
-    m->rebind_top               = 0;
-    m->tape_bind_base_depth     = 0;
-    m->aux_depth                = 0;
-    m->auxFrames[0].owner_depth = -1;
-    m->in_tape_bind             = 0;
-    /* JSON binding reads source bytes. Only nested phase2 walks select a tape view. */
-    m->tape_view_mode = TAPE_VIEW_A;
+    m->cursor_end.idx = m->b.alloc.structural + n_idx;
+    m->cursor.idx     = m->b.alloc.structural;
 
     /* Yield only after the root state is complete and before any tape write.
      * Go may replace the tape arena, and ROOT_SCANNED resumes without rescanning. */
