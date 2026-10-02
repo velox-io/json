@@ -376,7 +376,9 @@ INLINE void *recbatch_alloc(BindSlotClass *sc, uint32_t row_idx) {
 }
 
 INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
-  if (cap < 1 || cap > BIND_RECBATCH_MAX_CAP) return;
+  /* Row slots only ever carry power-of-two capacities, so any other cap
+   * denotes a backing that never belonged to the matrix. */
+  if (cap < 1 || cap > BIND_RECBATCH_MAX_CAP || (cap & (cap - 1)) != 0) return;
   uint32_t row_idx      = recbatch_row_idx(cap);
   RecBatchMatrix *mat   = (RecBatchMatrix *)sc->block;
   RecBatchRow *r        = &mat->rows[row_idx];
@@ -766,9 +768,13 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
       int32_t _gac        = (m)->b.ctx.type_meta[(cur_type_).type_idx].u.slice.alloc_class;                       \
       BindSlotClass *_gsc = &(m)->b.alloc.slot_classes[_gac];                                                     \
       if (UNLIKELY(_gsc->mode == BIND_SLOT_RECBATCH)) {                                                           \
-        /* A preallocated empty slice can have non-null Data and zero capacity.                                   \
-         * RecBatch grows inline, so floor the next capacity before ctz. */                                       \
-        intptr_t _gnext_cap = _gcap ? _gcap * 2 : 1;                                                              \
+        /* RecBatch grows inline. A preallocated empty slice can have non-null Data and zero                      \
+         * capacity, and a reused caller backing can carry any capacity, so the next capacity                     \
+         * is the smallest power of two above the current one before ctz maps it to a row. */                     \
+        intptr_t _gnext_cap = _gcap == 0 ? 1                                                                      \
+                              : _gcap >= BIND_RECBATCH_MAX_CAP                                                    \
+                                  ? (intptr_t)(_gcap * 2)                                                         \
+                                  : (intptr_t)(1ULL << (64 - __builtin_clzll(_gcap)));                            \
         if (UNLIKELY(_gnext_cap > (intptr_t)BIND_RECBATCH_MAX_CAP)) {                                             \
           BIND_YIELD(m, BIND_YIELD_RECBATCH_BYPASS, (uint32_t)(cur_type_).type_idx, (uint32_t)_gnext_cap,         \
                      BIND_PHASE_ARRAY_VALUE);                                                                     \
