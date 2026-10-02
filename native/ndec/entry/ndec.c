@@ -156,11 +156,15 @@ NDEC_FN_DECL void ndec_dom_build(NdecDomContext *ctx) {
 /* The binding engine instantiates twice from one machine body: NDEC_STREAM_MODE
  * is a compile-time literal in each copy, so the contiguous engine folds away
  * every window check and the streaming engine resolves window ends to
- * BIND_YIELD_INPUT. */
+ * BIND_YIELD_INPUT. The undef before each define makes this file own the
+ * literal, so a stray command-line definition neither warns nor rewrites an
+ * instantiation. */
+#undef NDEC_STREAM_MODE
 #define NDEC_STREAM_MODE 0
 #include "ndec/bind.h" // IWYU pragma: keep
 #undef NDEC_STREAM_MODE
 
+#undef NDEC_STREAM_MODE
 #define NDEC_STREAM_MODE 1
 #include "ndec/bind.h"
 #undef NDEC_STREAM_MODE

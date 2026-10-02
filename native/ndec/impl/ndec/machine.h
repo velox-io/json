@@ -34,9 +34,10 @@ typedef union NdecCursor {
  * MAP stores the published parent slot in dst and derives cur_count from the
  * live region. SLICE and STREAM persist cur_count in the slice header, leaving
  * u.sc available for the next write pointer. STRUCT has no count and caches its
- * lookup pointer in u.sc. ARRAY has no header, so u.raw_count holds its index.
- * The union is interpreted strictly by kind; map draining reads u.map_region
- * only for MAP frames. */
+ * lookup pointer in u.sc; cs holds its key cursor, the live cur_type.u.raw of
+ * the contiguous engine, while the field count stays in ctx.types. ARRAY has
+ * no header, so u.raw_count holds its index. The union is interpreted
+ * strictly by kind; map draining reads u.map_region only for MAP frames. */
 typedef struct BindFrame {
   uint8_t *dst;          /* off 0  parent container base (or parent_slot for MAP) */
   uint8_t kind;          /* off 8  BindKind */
@@ -287,6 +288,15 @@ typedef struct NdecBindMachine {
    * noscan machine cannot. */
   uint32_t str_prov_count;                 /* off 9532 */
   BindStrProv str_prov[BIND_STR_PROV_MAX]; /* off 9536 */
+
+  /* Key transition memo the Go driver owns for the Parser's lifetime. Each
+   * struct's row, at its type_meta key_memo offset, holds one word per field
+   * and the one-past sentinel, indexed by a prediction that failed: the
+   * field, plus one, that resolved when it last failed. Words survive
+   * parses, since a stale one only mispredicts. A word is one byte, so a
+   * struct past two hundred fifty four fields wraps its resolutions to the
+   * empty word, where the memo merely stops helping. */
+  uint8_t *key_memo; /* off 9792 */
 } NdecBindMachine;
 _Static_assert(offsetof(NdecBindMachine, b) == 0, "bridge must be at offset 0");
 _Static_assert(offsetof(NdecBindMachine, cursor) == 8496, "cursor offset must match Go BindMachineCursorOffset");
@@ -303,6 +313,33 @@ _Static_assert(offsetof(NdecBindMachine, vd_base_off) == 9524, "vd_base_off offs
 _Static_assert(offsetof(NdecBindMachine, vd_lifecycle) == 9528, "vd_lifecycle offset");
 _Static_assert(offsetof(NdecBindMachine, str_prov_count) == 9532, "str_prov_count offset must match Go mirror");
 _Static_assert(offsetof(NdecBindMachine, str_prov) == 9536, "str_prov offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, key_memo) == 9792, "key_memo offset must match Go mirror");
+
+/* The memo word a misprediction at cursor next reads and records, or NULL
+ * when the struct has no memo row. The row holds field_count + 1 words, so
+ * a cursor past the field count, which no writer produces, reads none. */
+INLINE uint8_t *bind_key_memo_slot(const NdecBindMachine *m, uint16_t type_idx, uint32_t next) {
+  uint32_t row = m->b.ctx.type_meta[type_idx].u.strct.key_memo;
+  if (row == 0 || next > m->b.ctx.types[type_idx].u.strct.field_count) return NULL;
+  return m->key_memo + row + next;
+}
+
+/* The field the memo recorded against the failed prediction next when the
+ * key at p is that field, else -1. Out of line, so a hit on the prediction
+ * carries none of it. */
+NOINLINE static int bind_key_memo_match(const NdecBindMachine *m, uint16_t type_idx, uint32_t next,
+                                        const ndec_lookup *lk, const uint8_t *p) {
+  const uint8_t *w = bind_key_memo_slot(m, type_idx, next);
+  if (w == NULL || *w == 0) return -1;
+  uint32_t cand = *w - 1u;
+  return ndec_lookup_match_quoted(lk, cand, (const char *)p) ? (int)cand : -1;
+}
+
+/* Records fidx, the lookup's resolution, against the failed prediction next. */
+NOINLINE static void bind_key_memo_record(NdecBindMachine *m, uint16_t type_idx, uint32_t next, int fidx) {
+  uint8_t *w = bind_key_memo_slot(m, type_idx, next);
+  if (w != NULL) *w = (uint8_t)(fidx + 1);
+}
 
 /* No deferred raw value is being materialized across windows. */
 #define BIND_RAW_NONE 0xFFFFFFFFu

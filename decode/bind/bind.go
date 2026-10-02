@@ -253,6 +253,7 @@ type Parser struct {
 	atofBuf    []byte // atof_ctx storage
 	structural []uint32
 	padBuf     []byte
+	keyMemo    []byte      // native key transition memo; the machine names it
 	gstate     gbind.State // Go engine bind storage
 	optFlags   uint32      // BIND_OPT_* bits of the current call; setCallCtx installs them
 
@@ -309,6 +310,7 @@ func newParserFromShape(sh *shape) *Parser {
 		alloc:   vbind.NewAllocator(sh.tt),
 		machine: make([]byte, ndec.BindMachineSize),
 		atofBuf: make([]byte, ndec.AtofStateSize),
+		keyMemo: make([]byte, sh.tt.KeyMemoLen),
 	}
 	// Slot classes, atof storage, the fixed-size drain staging buffers, and
 	// the shape's context fields are constant for the Parser's lifetime, so
@@ -317,6 +319,7 @@ func newParserFromShape(sh *shape) *Parser {
 	m := (*ndec.BindMachine)(unsafe.Pointer(unsafe.SliceData(p.machine)))
 	m.Alloc.SlotClasses = unsafe.SliceData(p.alloc.Slots)
 	m.Core.Atof = uintptr(unsafe.Pointer(unsafe.SliceData(p.atofBuf)))
+	*m.KeyMemo() = unsafe.SliceData(p.keyMemo)
 	m.Ctx = sh.ctxTemplate
 	m.Alloc.DeferredDrain = unsafe.SliceData(p.alloc.DeferredDrain)
 	m.Alloc.DeferredDrainCap = uint32(cap(p.alloc.DeferredDrain))
@@ -451,7 +454,7 @@ func setParserReserveEnabled(on bool) {
 // parserFootprint reports the retained bytes of a pooled Parser, for the reserve's
 // admission and budget accounting.
 func parserFootprint(p *Parser) int {
-	return len(p.machine) + len(p.atofBuf) + cap(p.padBuf) + cap(p.structural)*4 + p.gstate.Footprint() +
+	return len(p.machine) + len(p.atofBuf) + len(p.keyMemo) + cap(p.padBuf) + cap(p.structural)*4 + p.gstate.Footprint() +
 		p.alloc.Footprint()
 }
 

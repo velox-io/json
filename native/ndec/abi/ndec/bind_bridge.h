@@ -188,7 +188,8 @@ typedef struct BindTypeMeta {
     struct {
       uintptr_t lookup;                   /* off 8, field-name perfect-hash blob */
       uint16_t inline_variant_idx;        /* off 16, ctx.polys index; 0xFFFF means none */
-      uint16_t _pad;                      /* off 18 */
+      /* off 18, struct's row in the machine key_memo; 0 means none */
+      uint16_t key_memo;
       uint32_t reserve_unknown_field_off; /* off 20, byte offset; 0xFFFFFFFF means none */
       /* off 24, BindPtrHop base owned and rooted by TypeTree; NULL when unused */
       uintptr_t ptr_hops;
@@ -218,6 +219,7 @@ _Static_assert(offsetof(BindTypeMeta, u) == 8, "BindTypeMeta.u off 8");
 _Static_assert(offsetof(BindTypeMeta, u.strct.lookup) == 8, "BindTypeMeta.u.strct.lookup");
 _Static_assert(offsetof(BindTypeMeta, u.strct.inline_variant_idx) == 16,
                "BindTypeMeta.u.strct.inline_variant_idx");
+_Static_assert(offsetof(BindTypeMeta, u.strct.key_memo) == 18, "BindTypeMeta.u.strct.key_memo");
 _Static_assert(offsetof(BindTypeMeta, u.strct.reserve_unknown_field_off) == 20,
                "BindTypeMeta.u.strct.reserve_unknown_field_off");
 _Static_assert(offsetof(BindTypeMeta, u.strct.ptr_hops) == 24, "BindTypeMeta.u.strct.ptr_hops");

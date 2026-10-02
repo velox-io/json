@@ -414,6 +414,42 @@ INLINE int ndec_lookup_find(const ndec_lookup *l, ndec_lookup_key key) {
   }
 }
 
+// ---- Public API: predicted match (inline) ----
+
+// ndec_lookup_match_quoted reports whether p holds key idx followed by its
+// closing quote. The perfect tiers store keys by index; TABLE, NONE, and an
+// idx outside [0, n) never match. Stored keys hold no quote or backslash, so
+// a match proves the string body at p is escape-free and equals key idx: the
+// verdict a scan to the closing quote followed by ndec_lookup_find reaches.
+// p carries the padding contract of ndec_lookup_find.
+INLINE int ndec_lookup_match_quoted(const ndec_lookup *l, size_t idx, const char *p) {
+  ndec_lookup_cmp_kind cmp;
+  const uint8_t *klens;
+  const char *kbytes;
+  size_t n, stride;
+  if (LIKELY(l->kind == NDEC_LOOKUP_TIER_WINDOW)) {
+    const ndec_lookup_window *w = (const ndec_lookup_window *)l;
+    cmp = w->cmp, n = w->n, stride = w->stride;
+    klens   = (const uint8_t *)w + sizeof(ndec_lookup_window);
+    kbytes  = (const char *)w + w->key_bytes_off;
+  } else if (l->kind == NDEC_LOOKUP_TIER_GPERF) {
+    const ndec_lookup_gperf *gp = (const ndec_lookup_gperf *)l;
+    cmp = gp->cmp, n = gp->n, stride = gp->stride;
+    klens   = (const uint8_t *)gp + gp->key_len_off;
+    kbytes  = (const char *)gp + gp->key_bytes_off;
+  } else if (l->kind == NDEC_LOOKUP_TIER_HAND) {
+    const ndec_lookup_hand *hd = (const ndec_lookup_hand *)l;
+    cmp = hd->cmp, n = hd->n, stride = hd->stride;
+    klens   = (const uint8_t *)hd + sizeof(ndec_lookup_hand);
+    kbytes  = (const char *)hd + hd->key_bytes_off;
+  } else {
+    return 0;
+  }
+  if (idx >= n) return 0;
+  size_t len = klens[idx];
+  return ndec_lookup_compare_bytes(cmp, p, kbytes + idx * stride, len) & (p[len] == '"');
+}
+
 // Robustness: if a runtime key contains 0x00 / 0x22 / 0x5C in [0, key.len),
 // ndec_lookup_find safely returns -1 (no false match). Callers seeing raw
 // JSON segments with escapes can call ndec_lookup_find directly and fall
