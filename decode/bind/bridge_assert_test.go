@@ -117,13 +117,15 @@ func TestBindMachineOffsets(t *testing.T) {
 
 	var sm vbind.StructMetaPayload
 	check("StructMetaPayload.InlineVariantIdx", unsafe.Offsetof(sm.InlineVariantIdx), 8)
+	check("StructMetaPayload.KeyMemo", unsafe.Offsetof(sm.KeyMemo), 10)
 
 	// The retired-generation history lives in the C-private machine tail; the
 	// literals pin the Go offset constants to the native static asserts.
 	check("StrProvCountOffset", nativendec.BindMachineStrProvCountOffset, 9532)
 	check("StrProvOffset", nativendec.BindMachineStrProvOffset, 9536)
-	if end := nativendec.BindMachineStrProvOffset + 16*nativendec.BindStrProvMax; end > nativendec.BindMachineSize {
-		t.Errorf("str_prov region ends at %d, machine budget %d", end, nativendec.BindMachineSize)
+	check("KeyMemoOffset", nativendec.BindMachineKeyMemoOffset, 9792)
+	if end := nativendec.BindMachineKeyMemoOffset + 8; end > nativendec.BindMachineSize {
+		t.Errorf("machine tail ends at %d, machine budget %d", end, nativendec.BindMachineSize)
 	}
 }
 

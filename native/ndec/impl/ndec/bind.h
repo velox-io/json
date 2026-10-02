@@ -586,6 +586,12 @@ document_start: {
 
 object_begin:
   cur_aux = (void *)(uintptr_t)m->b.ctx.type_meta[cur_type.type_idx].u.strct.lookup;
+#if !NDEC_STREAM_MODE
+  /* A struct's live payload is its key cursor, the field a member in
+   * declaration order binds next. Frames carry it across a descent and the
+   * locals across a yield; any value is only a prediction. */
+  cur_type.u.raw = 0;
+#endif
   /* A window edge between '{' and the first byte defers the close-or-key
    * decision to object_first_key; the fresh path already saw a non-'}'
    * byte at its open site. */
@@ -640,21 +646,37 @@ object_field_key: {
      * str_arena, while unescaped keys borrow source bytes. */
     cur_struct_field      = (const BindField *)NULL;
     const ndec_lookup *lk = (const ndec_lookup *)cur_aux;
-    uint32_t klen, bp;
-    int32_t st = ndec_str_parse_zc_scan(key + 1, &klen, &bp, 0);
-    if (LIKELY(st == 1)) {
-      ndec_lookup_key lkey = {(const char *)(key + 1), (size_t)klen};
-      fidx                 = ndec_lookup_find(lk, lkey);
-    } else if (st == 2) {
-      /* Escaped keys decode through the raw policy; the high-bit bytes an
-       * escape-free key may carry borrow verbatim through st == 1 above. */
-      const uint8_t *kd;
-      uint32_t kl;
-      if (bind_intern_key_for_lookup(str_p, key, &kd, &kl) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (key - src));
-      ndec_lookup_key lkey = {(const char *)kd, (size_t)kl};
-      fidx                 = ndec_lookup_find(lk, lkey);
-    } else {
-      BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (uint32_t)(key - src));
+#if !NDEC_STREAM_MODE
+    /* The predicted field matches in one compare against the source, the
+     * verdict the scan and lookup below reach. A misprediction tries the
+     * field the memo recorded against it before the lookup. */
+    uint32_t next = cur_type.u.raw;
+    if (ndec_lookup_match_quoted(lk, next, (const char *)(key + 1))) {
+      fidx = (int)next;
+    } else if ((fidx = bind_key_memo_match(m, cur_type.type_idx, next, lk, key + 1)) >= 0) {
+      /* The memo's field answered; no resolution to record against next. */
+    } else
+#endif
+    {
+      uint32_t klen, bp;
+      int32_t st = ndec_str_parse_zc_scan(key + 1, &klen, &bp, 0);
+      if (LIKELY(st == 1)) {
+        ndec_lookup_key lkey = {(const char *)(key + 1), (size_t)klen};
+        fidx                 = ndec_lookup_find(lk, lkey);
+      } else if (st == 2) {
+        /* Escaped keys decode through the raw policy; the high-bit bytes an
+         * escape-free key may carry borrow verbatim through st == 1 above. */
+        const uint8_t *kd;
+        uint32_t kl;
+        if (bind_intern_key_for_lookup(str_p, key, &kd, &kl) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (key - src));
+        ndec_lookup_key lkey = {(const char *)kd, (size_t)kl};
+        fidx                 = ndec_lookup_find(lk, lkey);
+      } else {
+        BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (uint32_t)(key - src));
+      }
+#if !NDEC_STREAM_MODE
+      if (fidx >= 0) bind_key_memo_record(m, cur_type.type_idx, cur_type.u.raw, fidx);
+#endif
     }
   }
   if (UNLIKELY(fidx < 0)) {
@@ -671,6 +693,10 @@ object_field_key: {
     goto skip_value;
   }
   cur_struct_field = &first_field[fidx];
+#if !NDEC_STREAM_MODE
+  /* An unknown key leaves the cursor where it was. */
+  cur_type.u.raw = (uint32_t)fidx + 1;
+#endif
   SRC_EXPECT(':');
   /* Resume restores cur_struct_field and enters after the consumed colon.
    * cur_type remains the parent struct throughout field iteration and phase2. */
@@ -1167,7 +1193,8 @@ phase2_case_bind: {
 
   uint8_t *eface      = NULL;
   const BindField *hf = (const BindField *)cur_type.child;
-  for (uint32_t i = 0, n = cur_type.u.raw; i < n; i++) {
+  /* The live struct payload is the key cursor; the field count is static. */
+  for (uint32_t i = 0, n = m->b.ctx.types[cur_type.type_idx].u.strct.field_count; i < n; i++) {
     if (hf[i].flags & BIND_FF_INLINE_VARIANT) {
       eface = cur_dst + hf[i].offset;
       break;

@@ -20,11 +20,14 @@
 
 #include "bind_fixture.h"
 
-/* Instantiate both engines from the one machine body. */
+/* Instantiate both engines from the one machine body. The undefs keep the
+ * literals this file owns, whatever the caller predefined. */
+#undef NDEC_STREAM_MODE
 #define NDEC_STREAM_MODE 0
 #include "ndec/bind.h"
 #undef NDEC_STREAM_MODE
 
+#undef NDEC_STREAM_MODE
 #define NDEC_STREAM_MODE 1
 #include "ndec/bind.h"
 #undef NDEC_STREAM_MODE

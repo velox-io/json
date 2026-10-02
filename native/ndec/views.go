@@ -26,6 +26,12 @@ func (m *BindMachine) RawArena() *unsafe.Pointer {
 	return (*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(m), BindMachineRawArenaOffset))
 }
 
+// KeyMemo returns the machine's key transition memo slot. The Parser's memo
+// slice is the lifetime root for the backing it names.
+func (m *BindMachine) KeyMemo() **byte {
+	return (**byte)(unsafe.Add(unsafe.Pointer(m), BindMachineKeyMemoOffset))
+}
+
 // DropStructuralViews clears the structural ABI view and the cursor pair
 // before the caller replaces the structural-index backing.
 func (m *BindMachine) DropStructuralViews() {

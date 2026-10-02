@@ -544,6 +544,10 @@ const (
 	BindMachineStrProvCountOffset = BindMachineCursorOffset + 1036
 	BindMachineStrProvOffset      = BindMachineCursorOffset + 1040
 
+	// The struct key transition memo, after the retired generations. Go
+	// owns its backing for the Parser's lifetime.
+	BindMachineKeyMemoOffset = BindMachineStrProvOffset + 16*BindStrProvMax
+
 	// BindStrProvMax caps the retired-generation history; geometric growth
 	// exhausts it only past the 32-bit arena offset limit.
 	BindStrProvMax = 16

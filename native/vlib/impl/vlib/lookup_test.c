@@ -13,6 +13,41 @@
 static char g_scratch[80 * 1024];
 #define TEST_SCRATCH .scratch = g_scratch, .scratch_size = sizeof(g_scratch)
 
+static ndec_lookup *build_tier(const ndec_lookup_key *keys, size_t n, ndec_lookup_tier_mask tiers) {
+  ndec_lookup_config cfg = {.keys = keys, .n = n, .tiers = tiers, TEST_SCRATCH};
+  size_t sz              = ndec_lookup_size_for(&cfg);
+  assert(sz > 0);
+  ndec_lookup *l = malloc(sz);
+  assert(ndec_lookup_init(l, sz, &cfg) > 0);
+  return l;
+}
+
+// match_text reports ndec_lookup_match_quoted over text in a padded buffer.
+static int match_text(const ndec_lookup *l, size_t idx, const char *text) {
+  char buf[256];
+  memset(buf, ' ', sizeof(buf));
+  memcpy(buf, text, strlen(text));
+  return ndec_lookup_match_quoted(l, idx, buf);
+}
+
+// check_predicted pins every key of a perfect tier against itself, its
+// neighbours, an unquoted continuation, and the one-past index.
+static void check_predicted(const ndec_lookup *l, const ndec_lookup_key *keys, size_t n) {
+  char quoted[128], longer[128];
+  for (size_t i = 0; i < n; i++) {
+    snprintf(quoted, sizeof(quoted), "%.*s\":1", (int)keys[i].len, keys[i].str);
+    snprintf(longer, sizeof(longer), "%.*sx\":1", (int)keys[i].len, keys[i].str);
+    for (size_t j = 0; j < n; j++)
+      assert(match_text(l, j, quoted) == (i == j));
+    assert(match_text(l, i, longer) == 0);
+    assert(match_text(l, n, quoted) == 0);
+    assert(match_text(l, i, "\":1") == 0);
+  }
+  // The empty key's body is its closing quote, which a slot read past the
+  // last key would accept.
+  assert(match_text(l, n, "\":1") == 0);
+}
+
 int main(void) {
   assert(ndec_lookup_scratch_size() <= sizeof(g_scratch));
   printf("Testing ndec_lookup...\n\n");
@@ -158,6 +193,61 @@ int main(void) {
     assert(ndec_lookup_init(l, 64, &bcfg) == NDEC_LOOKUP_ERR_KEY_INVALID_BYTE);
     free(l);
     printf("\nError paths OK.\n");
+  }
+
+  // ---- Case 5: predicted match on every tier. ----
+  {
+    ndec_lookup_key prefix[] = {{"id", 2}, {"idx", 3}, {"name", 4}, {"exactly_sixteen_", 16}};
+    ndec_lookup_key many[]   = {
+        {"apiVersion", 10},     {"kind", 4},          {"metadata", 8},         {"spec", 4},
+        {"status", 6},          {"name", 4},          {"namespace", 9},        {"labels", 6},
+        {"annotations", 11},    {"creationTimestamp", 17}, {"resourceVersion", 15}, {"uid", 3},
+        {"ownerReferences", 15}, {"finalizers", 10},  {"managedFields", 13},   {"conditions", 10},
+    };
+    ndec_lookup_key long63[] = {
+        {"a23456789012345678901234567890123456789012345678901234567890123", 63},
+        {"b23456789012345678901234567890123456789012345678901234567890123", 63},
+        {"c", 1},
+    };
+    ndec_lookup_tier_mask perfect[] = {NDEC_LOOKUP_TIER_WINDOW, NDEC_LOOKUP_TIER_GPERF, NDEC_LOOKUP_TIER_HAND};
+    struct {
+      const ndec_lookup_key *keys;
+      size_t n;
+    } sets[] = {{prefix, 4}, {many, 16}, {long63, 3}};
+    int built = 0;
+    for (size_t s = 0; s < sizeof(sets) / sizeof(sets[0]); s++) {
+      for (size_t t = 0; t < 3; t++) {
+        ndec_lookup_config cfg = {.keys = sets[s].keys, .n = sets[s].n, .tiers = perfect[t], TEST_SCRATCH};
+        size_t sz              = ndec_lookup_size_for(&cfg);
+        ndec_lookup *l         = malloc(sz ? sz : 64);
+        if (sz == 0 || ndec_lookup_init(l, sz, &cfg) <= 0) {
+          free(l);
+          continue;
+        }
+        assert(ndec_lookup_get_tier(l) == (ndec_lookup_tier)perfect[t]);
+        check_predicted(l, sets[s].keys, sets[s].n);
+        built |= 1 << t;
+        free(l);
+      }
+    }
+    assert(built == 7);
+
+    ndec_lookup *l = build_tier(prefix, 4, NDEC_LOOKUP_TIERS_ALL);
+    assert(match_text(l, 0, "idx\"") == 0);
+    assert(match_text(l, 1, "id\"") == 0);
+    assert(match_text(l, 0, "\\u0069d\"") == 0);
+    assert(match_text(l, 0, "i\"") == 0);
+    free(l);
+
+    ndec_lookup_key longk[] = {{"veryveryverylongkeyname_that_exceeds_sixtythreebytes_number_one_xyz", 67}, {"a", 1}};
+    l                       = build_tier(longk, 2, NDEC_LOOKUP_TIERS_ALL);
+    assert(ndec_lookup_get_tier(l) == NDEC_LOOKUP_TIER_TABLE);
+    assert(match_text(l, 1, "a\"") == 0);
+    free(l);
+
+    uint32_t none = NDEC_LOOKUP_TIER_NONE;
+    assert(ndec_lookup_match_quoted((const ndec_lookup *)&none, 0, "a\"") == 0);
+    printf("\nPredicted match OK.\n");
   }
 
   printf("\nAll tests passed!\n");
