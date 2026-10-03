@@ -535,7 +535,7 @@ func TestMarshal_NonByteSlice_Empty(t *testing.T) {
 // TestMarshal_MapStringString_HTMLEscape verifies that the EscapeHTML flag
 // is correctly propagated into the Swiss Map iteration path. Because that
 // function is noinline, a linker that resolves it to the wrong translation
-// unit could silently ignore the flags parameter, making vjson.WithEscapeHTML()
+// unit could silently ignore the flags parameter, making vjson.EscapeHTML(true)
 // and default produce identical output for map[string]string values.
 func TestMarshal_MapStringString_HTMLEscape(t *testing.T) {
 	type S struct {
@@ -552,13 +552,13 @@ func TestMarshal_MapStringString_HTMLEscape(t *testing.T) {
 	}
 
 	// With HTML escaping: < and > must become \u003c, \u003e.
-	gotHTML, err := vjson.Marshal(v, vjson.WithEscapeHTML())
+	gotHTML, err := vjson.Marshal(v, vjson.EscapeHTML(true))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if string(gotDefault) == string(gotHTML) {
-		t.Fatalf("default and vjson.WithEscapeHTML() produced identical output for map[string]string;\n"+
+		t.Fatalf("default and vjson.EscapeHTML(true) produced identical output for map[string]string;\n"+
 			"flags not propagated to swiss map iterate path?\n"+
 			"  output: %s", gotDefault)
 	}
@@ -567,7 +567,7 @@ func TestMarshal_MapStringString_HTMLEscape(t *testing.T) {
 	s := string(gotHTML)
 	for _, esc := range []string{`\u003c`, `\u003e`} {
 		if !strings.Contains(s, esc) {
-			t.Errorf("vjson.WithEscapeHTML() output missing %s: %s", esc, s)
+			t.Errorf("vjson.EscapeHTML(true) output missing %s: %s", esc, s)
 		}
 	}
 

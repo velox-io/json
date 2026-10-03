@@ -10,19 +10,13 @@ This file lists current high-impact improvement areas for contributors.
    Explore API shape, implementation strategy, and performance trade-offs for adding
    an optional sorted-keys mode without regressing the default fast path.
 
-2. **Match `encoding/json` handling of custom `MarshalJSON` output**
+2. **Support JSON v2 `format` tag**
 
-   Custom `MarshalJSON` output is currently appended verbatim: it is not
-   re-indented under indent mode and not HTML-escaped under EscapeHTML mode.
-   Post-process the output so indent and EscapeHTML behave like `encoding/json`
-   without regressing the default fast path (a scan-only pass when no
-   transformation is needed). Validity checking stays out of scope: the
-   implementer is responsible for producing valid JSON. `MarshalText` output
-   already goes through the normal string escaper and is unaffected.
 
-3. **Expand documentation**
+3. **First-class custom encoding and decoding**
 
-   Improve the documentation, particularly for polymorphic decoding.
-
-4. **Support JSON v2 `format` tag**
-
+   A JSON library must let users define their own encode/decode logic, and velox lacks an elegant mechanism for it.
+   The only extension point today is `MarshalJSON() ([]byte, error)` / `UnmarshalJSON([]byte) error`, whose bytes-in/bytes-out shape isolates custom types from the library:
+   Indent, `EscapeHTML` and `FloatExpAuto` have no effect on their output, and `UseNumber`, `RejectUnknownMembers` and `ZeroCopy` cannot reach them on decode.
+   Define extension interfaces in velox: custom logic reads and writes through the velox encoder/decoder, which carries the Options and enforces formatting, and nested values recurse back into velox.
+   A custom codec describes only the structure of a value while Options decide the format, keeping the two orthogonal. Consider supporting the v2 interfaces as a bridge.

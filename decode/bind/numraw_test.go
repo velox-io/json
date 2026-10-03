@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/velox-io/json/decode/dom"
-	"github.com/velox-io/json/decode/option"
 	"github.com/velox-io/json/internal/valueabi"
 	"github.com/velox-io/json/vbind"
+	"github.com/velox-io/json/vopt"
 )
 
 // Numbers no binary form represents faithfully reach the tape as TagNumRaw: the
@@ -248,7 +248,7 @@ func TestNumRaw_KeyOrderDoesNotChangeResult(t *testing.T) {
 	// Renders the outcome as a comparable string: either the error class or the
 	// bound value plus the dynamic type of the any field, since json.Number and
 	// float64 can print identically.
-	render := func(src string, opts ...option.Option) string {
+	render := func(src string, opts ...vopt.Options) string {
 		var h numPathHost
 		if err := Unmarshal([]byte(src), &h, opts...); err != nil {
 			return "error"
@@ -260,7 +260,7 @@ func TestNumRaw_KeyOrderDoesNotChangeResult(t *testing.T) {
 		}
 		return fmt.Sprintf("%s|%T", out, c.A)
 	}
-	compare := func(t *testing.T, body string, opts ...option.Option) {
+	compare := func(t *testing.T, body string, opts ...vopt.Options) {
 		t.Helper()
 		fromJSON := render(`{"type":"c","data":`+body+`}`, opts...)
 		fromTape := render(`{"data":`+body+`,"type":"c"}`, opts...)
@@ -272,7 +272,7 @@ func TestNumRaw_KeyOrderDoesNotChangeResult(t *testing.T) {
 	for _, tok := range numRawTokens {
 		for _, body := range []string{`{"a":` + tok + `}`, `{"f":` + tok + `}`} {
 			compare(t, body)
-			compare(t, body, option.WithUseNumber())
+			compare(t, body, vopt.UseNumber(true))
 		}
 	}
 	// Ordinary numbers: paths must agree on the value. UseNumber is excluded here
@@ -294,7 +294,7 @@ func TestNumRaw_UseNumberBinaryTagsStillDiffer(t *testing.T) {
 	needNativeBinder(t)
 	get := func(src string) any {
 		var h numPathHost
-		if err := Unmarshal([]byte(src), &h, option.WithUseNumber()); err != nil {
+		if err := Unmarshal([]byte(src), &h, vopt.UseNumber(true)); err != nil {
 			t.Fatalf("%s: %v", src, err)
 		}
 		c, _ := h.Data.(numPathCase)
@@ -316,7 +316,7 @@ func TestNumRaw_UseNumberOverTape(t *testing.T) {
 	for _, tok := range numRawTokens {
 		src := `{"data":{"a":` + tok + `},"type":"c"}` // disc last: tape path
 		var h numPathHost
-		if err := Unmarshal([]byte(src), &h, option.WithUseNumber()); err != nil {
+		if err := Unmarshal([]byte(src), &h, vopt.UseNumber(true)); err != nil {
 			t.Errorf("%s: %v", src, err)
 			continue
 		}

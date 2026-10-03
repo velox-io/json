@@ -4,36 +4,63 @@ import (
 	"io"
 
 	"github.com/velox-io/json/decode/bind"
-	"github.com/velox-io/json/decode/option"
 	"github.com/velox-io/json/native/ndec"
+	"github.com/velox-io/json/vopt"
 )
 
-// Option is the functional-option type accepted by Unmarshal,
-// UnmarshalPadded, Parse, and ParsePadded. An Option value can be passed
-// to any of them; options that don't apply to a given decoder are ignored.
-type Option = option.Option
+// Options is the single option set accepted by every entry point: Marshal,
+// MarshalIndent, AppendMarshal, Unmarshal, UnmarshalPadded, Parse, and
+// ParsePadded. Options that do not apply to a given operation are ignored.
+// Later values override earlier ones.
+type Options = vopt.Options
 
-// UnmarshalOption aliases Option, retained for source compatibility with
+// Option aliases Options, retained for code written against the singular name.
+type Option = Options
+
+// UnmarshalOption aliases Options, retained for source compatibility with
 // code written against the bind-specific type.
-type UnmarshalOption = Option
+type UnmarshalOption = Options
 
-// WithUseNumber aliases option.WithUseNumber.
-func WithUseNumber() Option { return option.WithUseNumber() }
+// Join merges opts into one Options. A later value overrides an earlier one
+// for the options it names and leaves the rest untouched, so a joined set can
+// be stored once and still be overridden per call.
+func Join(opts ...Options) Options { return vopt.Join(opts...) }
 
-// WithDisallowUnknownFields aliases option.WithDisallowUnknownFields.
-func WithDisallowUnknownFields() Option { return option.WithDisallowUnknownFields() }
+// AllowInvalidUTF8 controls invalid UTF-8 handling on both sides. When false,
+// decoding rejects invalid byte sequences and unescaped C0 control bytes, and
+// encoding replaces invalid bytes with U+FFFD. Default true: bytes pass
+// through verbatim, so the decoder never rewrites its input and the encoder
+// takes its fastest string path. The JSON syntax stays valid either way.
+func AllowInvalidUTF8(v bool) Options { return vopt.AllowInvalidUTF8(v) }
 
-// WithStrictScan validates raw UTF-8 and rejects unescaped C0 control bytes
-// in JSON strings during the native root scan.
-func WithStrictScan() Option { return option.WithStrictScan() }
+// UseNumber decodes numbers bound to any as json.Number rather than float64,
+// preserving the literal text and its full precision.
+func UseNumber(v bool) Options { return vopt.UseNumber(v) }
 
-// WithZeroCopy selects the string backing for decode entries whose input is
-// caller bytes. Unmarshal and UnmarshalPadded alias escape-free strings into
-// that input by default; WithZeroCopy(false) selects the copying parse, and
-// WithZeroCopy(true) is an explicit demand that entries whose input cannot
-// alias reject with ErrZeroCopyUnsupported. On ParsePadded the option is an
-// opt-in: WithZeroCopy(true) makes the returned Value navigation-only.
-func WithZeroCopy(enabled bool) Option { return option.WithZeroCopy(enabled) }
+// RejectUnknownMembers fails a decode that meets a JSON object member with no
+// matching Go struct field.
+func RejectUnknownMembers(v bool) Options { return vopt.RejectUnknownMembers(v) }
+
+// ZeroCopy selects the backing for escape-free decoded strings. Left unset,
+// each entry applies its input-model default: Unmarshal and UnmarshalPadded
+// alias the caller-owned input, while entries whose input relocates across
+// windows copy. ZeroCopy(false) selects the copying parse. ZeroCopy(true) is a
+// demand that entries unable to alias reject with ErrZeroCopyUnsupported. On
+// ParsePadded it is an opt-in that makes the returned Value navigation-only.
+func ZeroCopy(v bool) Options { return vopt.ZeroCopy(v) }
+
+// SkipLenient selects the skip a decode runs over values it does not bind:
+// surplus fixed-array elements, values a stopped stream drains, unknown struct
+// members, and values a mismatched field or root discards. Lenient counts
+// brackets and trusts the rest, so a skipped scalar is not validated and comma
+// order inside a skipped container is not checked. It is a trust-your-input
+// switch: malformed bytes inside a skipped region go unreported, and where a
+// value is missing, as in `[1,]` with a surplus element, the skip consumes
+// the byte in its place, even the enclosing container's closing bracket, so
+// the decode goes on against the wrong nesting and its result or error is
+// unspecified. Default false, where those regions are validated and a
+// malformed one is a syntax error.
+func SkipLenient(v bool) Options { return vopt.SkipLenient(v) }
 
 // PaddingSize is the minimum number of 0x20 padding bytes a buffer must
 // carry past its length to be usable with UnmarshalPadded / ParsePadded.
@@ -46,7 +73,7 @@ const PaddingSize = ndec.BindScanPad
 // Escape-free strings alias data's backing by default: the input is scanned
 // through an internal padded copy, and each aliased span rebases into the
 // caller-owned original. The caller preserves data's bytes while any decoded
-// value remains reachable. WithZeroCopy(false) selects the copying parse.
+// value remains reachable. ZeroCopy(false) selects the copying parse.
 // Trees carrying value.Value or poly fields stay arena-backed under the
 // default and are rejected with ErrZeroCopyTypedTree when zero-copy is
 // demanded explicitly.
@@ -59,23 +86,23 @@ func Unmarshal[T any](data []byte, v T, opts ...Option) (err error) {
 // tape is walked by the native tape-bind sub-routine, so every kind is
 // supported (struct/slice/array/map/pointer/any/scalar, plus nested
 // variant/kindof and value.Value fields). See decode/bind.UnmarshalValue.
-// Values parsed with WithZeroCopy(true) are rejected with ErrZeroCopyValue.
+// Values parsed with ZeroCopy(true) are rejected with ErrZeroCopyValue.
 func UnmarshalValue[T any](v Value, out T, opts ...Option) (err error) {
 	err = bind.UnmarshalValue(v, out, opts...)
 	return
 }
 
 // ErrZeroCopyValue aliases bind.ErrZeroCopyValue: UnmarshalValue rejects
-// navigation-only Values whose document was parsed with WithZeroCopy(true).
+// navigation-only Values whose document was parsed with ZeroCopy(true).
 var ErrZeroCopyValue = bind.ErrZeroCopyValue
 
-// ErrZeroCopyUnsupported aliases option.ErrZeroCopyUnsupported: entries whose
+// ErrZeroCopyUnsupported aliases vopt.ErrZeroCopyUnsupported: entries whose
 // input relocates across windows or is not caller bytes reject an explicit
-// WithZeroCopy(true) demand.
-var ErrZeroCopyUnsupported = option.ErrZeroCopyUnsupported
+// ZeroCopy(true) demand.
+var ErrZeroCopyUnsupported = vopt.ErrZeroCopyUnsupported
 
 // ErrZeroCopyTypedTree aliases bind.ErrZeroCopyTypedTree: Unmarshal and
-// UnmarshalPadded reject an explicit WithZeroCopy(true) demand on trees
+// UnmarshalPadded reject an explicit ZeroCopy(true) demand on trees
 // carrying value.Value or poly fields.
 var ErrZeroCopyTypedTree = bind.ErrZeroCopyTypedTree
 
@@ -90,7 +117,7 @@ func Pad(data []byte) []byte { return bind.Pad(data) }
 // Escape-free strings alias paddedData by default: decoded values keep its
 // backing reachable, and the caller preserves its bytes while any decoded
 // value remains reachable. Escaped strings still decode through the internal
-// string arena, and WithZeroCopy(false) selects the copying parse. Trees
+// string arena, and ZeroCopy(false) selects the copying parse. Trees
 // carrying value.Value or poly fields stay arena-backed under the default
 // and are rejected with ErrZeroCopyTypedTree when zero-copy is demanded
 // explicitly.

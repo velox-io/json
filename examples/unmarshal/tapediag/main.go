@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	json "github.com/velox-io/json"
+	vjson "github.com/velox-io/json"
 	"github.com/velox-io/json/value"
 )
 
@@ -17,7 +17,7 @@ type product struct {
 }
 type host struct {
 	Type   string      `json:"type"`
-	M1     json.Value  `json:"m1"`
+	M1     vjson.Value `json:"m1"`
 	EVar   any         `json:",embed" vjson:"variant=type"`
 	Others value.Value `json:",embed"`
 }
@@ -33,15 +33,15 @@ type capture struct {
 	Type    string      `json:"type"`
 	Data    any         `json:",embed" vjson:"variant=type"`
 	Num     value.Value `json:"num"`
-	Remains json.Value  `json:",embed"`
+	Remains vjson.Value `json:",embed"`
 }
 
 func init() {
-	json.DefineVariantCases[host, struct {
+	vjson.DefineVariantCases[host, struct {
 		user    user
 		product product
 	}]()
-	json.DefineVariantCases[capture, struct {
+	vjson.DefineVariantCases[capture, struct {
 		user    user
 		product product
 	}]()
@@ -53,7 +53,7 @@ func main() {
 {"title":"Widget","price":99,"type":"product","oth1":"aaa","m1":{"A":1,"C":false}}
 ]}`)
 	var obj foo
-	if err := json.Unmarshal(data, &obj); err != nil {
+	if err := vjson.Unmarshal(data, &obj); err != nil {
 		panic(err)
 	}
 	for i, item := range obj.Arr {
@@ -70,7 +70,7 @@ func main() {
 		{"title": "Widget","price":99,"type":"product", "b": 2222, "num": 7, "c": 333}
 	]`)
 	var items []capture
-	if err := json.Unmarshal(data, &items); err != nil {
+	if err := vjson.Unmarshal(data, &items); err != nil {
 		panic(err)
 	}
 	for i, it := range items {

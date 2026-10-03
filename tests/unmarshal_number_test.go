@@ -124,7 +124,7 @@ func TestNumber_StructField_Mixed(t *testing.T) {
 func TestNumber_UseNumber_Unmarshal(t *testing.T) {
 	input := []byte(`{"n":42,"f":3.14,"big":9007199254740993}`)
 	var result map[string]any
-	if err := vjson.Unmarshal(input, &result, vjson.WithUseNumber()); err != nil {
+	if err := vjson.Unmarshal(input, &result, vjson.UseNumber(true)); err != nil {
 		t.Fatal(err)
 	}
 	for key, want := range map[string]string{
@@ -162,7 +162,7 @@ func TestNumber_WithoutUseNumber_Unmarshal(t *testing.T) {
 func TestNumber_UseNumber_NestedInterface(t *testing.T) {
 	input := []byte(`{"outer":{"inner":123456789012345678}}`)
 	var result map[string]any
-	if err := vjson.Unmarshal(input, &result, vjson.WithUseNumber()); err != nil {
+	if err := vjson.Unmarshal(input, &result, vjson.UseNumber(true)); err != nil {
 		t.Fatal(err)
 	}
 	outer, ok := result["outer"].(map[string]any)
@@ -181,7 +181,7 @@ func TestNumber_UseNumber_NestedInterface(t *testing.T) {
 func TestNumber_UseNumber_ArrayInterface(t *testing.T) {
 	input := []byte(`[1, 2.5, 9007199254740993]`)
 	var result []any
-	if err := vjson.Unmarshal(input, &result, vjson.WithUseNumber()); err != nil {
+	if err := vjson.Unmarshal(input, &result, vjson.UseNumber(true)); err != nil {
 		t.Fatal(err)
 	}
 	if len(result) != 3 {
@@ -361,7 +361,7 @@ func TestNumber_RoundTrip_UseNumber(t *testing.T) {
 	// UseNumber unmarshal into interface{}, then marshal back
 	original := []byte(`{"big":9007199254740993}`)
 	var result map[string]any
-	if err := vjson.Unmarshal(original, &result, vjson.WithUseNumber()); err != nil {
+	if err := vjson.Unmarshal(original, &result, vjson.UseNumber(true)); err != nil {
 		t.Fatal(err)
 	}
 	got, err := vjson.Marshal(result)
@@ -765,7 +765,7 @@ func TestNumber_FuzzCrash_2cef50110e034bfc(t *testing.T) {
 func TestNumber_UseNumber_NonNumbers(t *testing.T) {
 	input := []byte(`{"s":"hello","b":true,"n":null,"a":[1]}`)
 	var result map[string]any
-	if err := vjson.Unmarshal(input, &result, vjson.WithUseNumber()); err != nil {
+	if err := vjson.Unmarshal(input, &result, vjson.UseNumber(true)); err != nil {
 		t.Fatal(err)
 	}
 	if s, ok := result["s"].(string); !ok || s != "hello" {

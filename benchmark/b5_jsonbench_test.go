@@ -359,7 +359,7 @@ func Benchmark_Unmarshal_JSONBenchCITMCatalog_Velox(b *testing.B) {
 
 func Benchmark_Unmarshal_JSONBenchCITMCatalog_VeloxStrict(b *testing.B) {
 	benchmarkJSONBenchUnmarshal(b, mustLoadJSONBenchCITMCatalogRaw(), func(data []byte, dst *jsonbench.CITMRoot) error {
-		return vjson.Unmarshal(data, dst, vjson.WithStrictScan())
+		return vjson.Unmarshal(data, dst, vjson.AllowInvalidUTF8(false))
 	})
 }
 
@@ -393,7 +393,7 @@ func Benchmark_Unmarshal_JSONBenchStringUnicode_Velox(b *testing.B) {
 
 func Benchmark_Unmarshal_JSONBenchStringUnicode_VeloxStrict(b *testing.B) {
 	benchmarkJSONBenchUnmarshal(b, mustLoadJSONBenchStringUnicodeRaw(), func(data []byte, dst *jsonbench.StringRoot) error {
-		return vjson.Unmarshal(data, dst, vjson.WithStrictScan())
+		return vjson.Unmarshal(data, dst, vjson.AllowInvalidUTF8(false))
 	})
 }
 

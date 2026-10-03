@@ -460,11 +460,6 @@ const (
 	// one meaning the opening bracket was already consumed.
 	BindPhaseRootSkipResume uint32 = 50
 
-	// BindPhaseSafeSkipResume re-enters a safe skip entered from an array
-	// element site (a fixed array's surplus element or a stopped stream's
-	// remainder). Machine skip_depth carries the nesting.
-	BindPhaseSafeSkipResume uint32 = 51
-
 	// BindPhaseArrayFirst and BindPhaseMapFirst resume after the window ended
 	// between an opening bracket and the first element or key: a closing
 	// bracket in the next window closes the empty container, any other byte

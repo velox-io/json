@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/velox-io/json/vbind"
+	"github.com/velox-io/json/vopt"
 
 	"github.com/velox-io/json/native/ndec"
 )
@@ -245,8 +246,12 @@ func TestGoCoreDiffPoly(t *testing.T) {
 	for _, in := range gcPolyInputs {
 		b := []byte(in)
 		diffEngines[gcPolyHost](t, b, nil)
+		diffEngines[gcPolyHost](t, b, nil, vopt.UseNumber(true))
+		diffEngines[gcPolyHost](t, b, nil, vopt.RejectUnknownMembers(true))
+		diffEngines[gcPolyHost](t, b, nil, vopt.ZeroCopy(true))
 		diffEngines[gcPolyHost](t, b, func(v *gcPolyHost) { v.Type, v.Data = "stale", gcPolyUser{ID: 9} })
 		diffEngines[gcKindofHost](t, b, nil)
+		diffEngines[gcKindofHost](t, b, nil, vopt.RejectUnknownMembers(true))
 	}
 }
 
@@ -296,9 +301,10 @@ func TestGoCoreDiffCases(t *testing.T) {
 	needNativeForDiff(t)
 	for _, in := range gcDiffInputs {
 		diffEngines[gcAll](t, []byte(in), nil)
-		diffEngines[gcAll](t, []byte(in), nil, WithUseNumber())
-		diffEngines[gcAll](t, []byte(in), nil, WithDisallowUnknownFields())
-		diffEngines[gcAll](t, []byte(in), nil, WithZeroCopy(true))
+		diffEngines[gcAll](t, []byte(in), nil, vopt.UseNumber(true))
+		diffEngines[gcAll](t, []byte(in), nil, vopt.RejectUnknownMembers(true))
+		diffEngines[gcAll](t, []byte(in), nil, vopt.ZeroCopy(true))
+		diffEngines[gcAll](t, []byte(in), nil, vopt.SkipLenient(true))
 		diffEngines[gcAll](t, []byte(in), func(v *gcAll) {
 			one := 1
 			v.A, v.X, v.P, v.N = 9, []int{7, 7, 7, 7}, &one, gcInner{B: 5, D: []float64{3}}
@@ -312,27 +318,30 @@ func TestGoCoreDiffRoots(t *testing.T) {
 	needNativeForDiff(t)
 	roots := []string{`1`, `-0`, `"x"`, `true`, `null`, `[1,2]`, `{"a":1}`, `1 2`, `[1,]`, `[1,"x",3]`,
 		`[[1],[2,"x"]]`, `{"1":1,"x":2}`, `{"a":[1,"x"]}`, `"`, `[`, `{`, `[1`, `1e400`, `nul`, `[]`, `{}`,
-		`  [ 1 , 2 ]  `, `{"a":{"b":[1,{"c":null}]}}`, `"aGk="`, `[1] x`, `tru`, `"\ud800"`}
+		`  [ 1 , 2 ]  `, `{"a":{"b":[1,{"c":null}]}}`, `"aGk="`, `[1] x`, `tru`, `"\ud800"`,
+		`[1,2,3]`, `[1,2,[3,"x"]]`, `[1,2,1.2.3]`, `[1,2,]`}
 	for _, in := range roots {
 		b := []byte(in)
-		diffEngines[int](t, b, nil)
-		diffEngines[*int](t, b, nil)
-		diffEngines[string](t, b, nil)
-		diffEngines[bool](t, b, nil)
-		diffEngines[[]int](t, b, nil)
-		diffEngines[[2]int](t, b, nil)
-		diffEngines[[][]int](t, b, nil)
-		diffEngines[map[string]int](t, b, nil)
-		diffEngines[map[int]int](t, b, nil)
-		diffEngines[map[string][]int](t, b, nil)
-		diffEngines[any](t, b, nil)
-		diffEngines[[]any](t, b, nil)
-		diffEngines[map[string]any](t, b, nil)
-		diffEngines[json.RawMessage](t, b, nil)
-		diffEngines[[]byte](t, b, nil)
-		diffEngines[json.Number](t, b, nil)
-		diffEngines[gcInner](t, b, nil)
-		diffEngines[*gcInner](t, b, nil)
+		for _, opts := range [][]UnmarshalOption{nil, {vopt.SkipLenient(true)}} {
+			diffEngines[int](t, b, nil, opts...)
+			diffEngines[*int](t, b, nil, opts...)
+			diffEngines[string](t, b, nil, opts...)
+			diffEngines[bool](t, b, nil, opts...)
+			diffEngines[[]int](t, b, nil, opts...)
+			diffEngines[[2]int](t, b, nil, opts...)
+			diffEngines[[][]int](t, b, nil, opts...)
+			diffEngines[map[string]int](t, b, nil, opts...)
+			diffEngines[map[int]int](t, b, nil, opts...)
+			diffEngines[map[string][]int](t, b, nil, opts...)
+			diffEngines[any](t, b, nil, opts...)
+			diffEngines[[]any](t, b, nil, opts...)
+			diffEngines[map[string]any](t, b, nil, opts...)
+			diffEngines[json.RawMessage](t, b, nil, opts...)
+			diffEngines[[]byte](t, b, nil, opts...)
+			diffEngines[json.Number](t, b, nil, opts...)
+			diffEngines[gcInner](t, b, nil, opts...)
+			diffEngines[*gcInner](t, b, nil, opts...)
+		}
 	}
 }
 
@@ -453,11 +462,11 @@ func TestGoCoreDiffMutations(t *testing.T) {
 		var opts []UnmarshalOption
 		switch i % 4 {
 		case 1:
-			opts = []UnmarshalOption{WithUseNumber()}
+			opts = []UnmarshalOption{vopt.UseNumber(true)}
 		case 2:
-			opts = []UnmarshalOption{WithZeroCopy(true), WithStrictScan()}
+			opts = []UnmarshalOption{vopt.ZeroCopy(true), vopt.AllowInvalidUTF8(false)}
 		case 3:
-			opts = []UnmarshalOption{WithDisallowUnknownFields()}
+			opts = []UnmarshalOption{vopt.RejectUnknownMembers(true)}
 		}
 		if !diffEngines[gcAll](t, b, nil, opts...) {
 			fails++

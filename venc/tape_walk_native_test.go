@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/decode/bind"
 	"github.com/velox-io/json/decode/dom"
 	"github.com/velox-io/json/native/encvm"
@@ -131,7 +133,7 @@ func TestValueFieldBufFullSweep(t *testing.T) {
 		t.Fatalf("baseline: got %s", want)
 	}
 	for n := 8; n <= len(want)+16; n++ {
-		got, err := Marshal(S{D: v}, WithBufSize(n))
+		got, err := Marshal(S{D: v}, vopt.BufSize(n))
 		if err != nil {
 			t.Fatalf("bufsize %d: %v", n, err)
 		}
@@ -156,7 +158,7 @@ func TestValueIndentBufFullSweep(t *testing.T) {
 		t.Fatal(err)
 	}
 	for n := 8; n <= len(want)+16; n++ {
-		got, err := MarshalIndent(S{D: v}, "", "  ", WithBufSize(n))
+		got, err := MarshalIndent(S{D: v}, "", "  ", vopt.BufSize(n))
 		if err != nil {
 			t.Fatalf("bufsize %d: %v", n, err)
 		}
@@ -209,7 +211,7 @@ func TestValueEscapeModeNative(t *testing.T) {
 		E string      `json:"e"`
 	}
 	v := parseValue(t, `{"h":"<b>&"}`)
-	got, err := Marshal(S{D: v, E: "<b>&"}, WithStdCompat())
+	got, err := Marshal(S{D: v, E: "<b>&"}, vopt.EscapeHTML(true), vopt.EscapeLineTerms(true), vopt.AllowInvalidUTF8(false), vopt.FloatExpAuto(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +276,7 @@ func TestValueSpreadBufFullSweep(t *testing.T) {
 		t.Fatal(err)
 	}
 	for n := 8; n <= len(want)+16; n++ {
-		got, err := Marshal(s, WithBufSize(n))
+		got, err := Marshal(s, vopt.BufSize(n))
 		if err != nil {
 			t.Fatalf("bufsize %d: %v", n, err)
 		}

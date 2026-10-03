@@ -8,11 +8,11 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/velox-io/json/decode/option"
 	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/internal/valueabi"
 	"github.com/velox-io/json/jerr"
 	"github.com/velox-io/json/native/ndec"
+	"github.com/velox-io/json/vopt"
 )
 
 // Streaming input driver. The native engine consumes one window at a time:
@@ -322,8 +322,8 @@ func (p *Parser) UnmarshalFeed(r io.Reader, dst any, opts ...UnmarshalOption) er
 	}
 	// Feed windows relocate between native runs, so published strings cannot
 	// alias the input; an explicit demand is rejected rather than downgraded.
-	if cfg := applyOpts(p, opts); cfg.ZeroCopy == option.ZeroCopyOn {
-		return option.ErrZeroCopyUnsupported
+	if o := applyOpts(p, opts); o.Enabled(vopt.FlagZeroCopy) {
+		return vopt.ErrZeroCopyUnsupported
 	}
 	return p.unmarshalFeed(r, dstPtr)
 }

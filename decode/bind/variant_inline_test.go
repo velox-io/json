@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/decode/dom"
 	"github.com/velox-io/json/value"
 	"github.com/velox-io/json/vbind"
@@ -1015,7 +1017,7 @@ func TestInlineVariant_IfaceField_ProductCase(t *testing.T) {
 	}
 }
 
-// --- strict mode (WithDisallowUnknownFields) + inline variant ---
+// --- strict mode (RejectUnknownMembers) + inline variant ---
 //
 // Ported from examples/unmarshal/poly/main.go's Permission example. The host
 // mirrors Permission: a discriminator (Type) plus a virtual inline variant
@@ -1041,7 +1043,7 @@ func TestInlineVariant_StrictMode_PermissionExample(t *testing.T) {
 	// "is_admin" is declared by neither inlPermission nor inlUser.
 	src := `{"type":"user", "name": "bob", "is_admin": true}`
 	var perm inlPermission
-	err := Unmarshal([]byte(src), &perm, WithDisallowUnknownFields())
+	err := Unmarshal([]byte(src), &perm, vopt.RejectUnknownMembers(true))
 	var typeErr *UnmarshalTypeError
 	if !errors.As(err, &typeErr) {
 		t.Fatalf("Unmarshal error = %v, want *UnmarshalTypeError", err)

@@ -546,9 +546,7 @@ func (c *binder) fixedElems(s text, p int, dst unsafe.Pointer, ti uint32) (int, 
 	for count := 0; ; {
 		var err error
 		if count >= arrLen {
-			c.p = p
-			err = c.safeSkip()
-			p = c.p
+			p, err = c.skipAt(s, p)
 		} else {
 			count++
 			p, err = c.bindValue(s, p, unsafe.Add(dst, uintptr(count-1)*esz), elemTi, ti, siteElem, false)

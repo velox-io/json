@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/decode/dom"
 )
 
@@ -12,7 +14,7 @@ import (
 // destination, so both the root and any child sharing the doc are rejected
 // before the machine runs.
 func TestUnmarshalValueRejectsZeroCopy(t *testing.T) {
-	v, err := dom.ParsePadded(dom.Pad([]byte(`{"s":"hello","n":[1,2]}`)), dom.WithZeroCopy(true))
+	v, err := dom.ParsePadded(dom.Pad([]byte(`{"s":"hello","n":[1,2]}`)), vopt.ZeroCopy(true))
 	if err != nil {
 		t.Fatalf("ParsePadded: %v", err)
 	}

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/velox-io/json/vopt"
 )
 
 // parseSized parses src through a fresh Parser with the requested string mode.
@@ -13,7 +15,7 @@ func parseSized(t *testing.T, src string, zc bool) (Value, *Parser) {
 	var v Value
 	var err error
 	if zc {
-		v, err = p.ParsePadded(Pad([]byte(src)), WithZeroCopy(true))
+		v, err = p.ParsePadded(Pad([]byte(src)), vopt.ZeroCopy(true))
 	} else {
 		v, err = p.Parse([]byte(src))
 	}
@@ -98,7 +100,7 @@ func TestSizingBoundDominance(t *testing.T) {
 
 // TestSizingErrors checks that failures surface through the counted flow,
 // including the ones the scan phase reports before any tape word is written.
-// The invalid-UTF-8 case rides WithStrictScan: the lax default passes raw
+// The invalid-UTF-8 case rides AllowInvalidUTF8(false): the lax default passes raw
 // bytes inside strings through, so only the strict scan rejects it.
 func TestSizingErrors(t *testing.T) {
 	cases := []string{
@@ -118,8 +120,8 @@ func TestSizingErrors(t *testing.T) {
 			}
 		})
 	}
-	if _, err := Parse([]byte("[\"a\x80b\"]"), WithStrictScan()); err == nil {
-		t.Fatal("Parse accepted invalid UTF-8 under WithStrictScan")
+	if _, err := Parse([]byte("[\"a\x80b\"]"), vopt.AllowInvalidUTF8(false)); err == nil {
+		t.Fatal("Parse accepted invalid UTF-8 under AllowInvalidUTF8(false)")
 	}
 }
 

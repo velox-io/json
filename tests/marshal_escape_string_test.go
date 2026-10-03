@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/velox-io/json/vopt"
+
 	vjson "github.com/velox-io/json"
 	"github.com/velox-io/json/venc"
 )
@@ -95,9 +97,9 @@ func buildModes() []marshalMode {
 	}
 	cfgs := []escCfg{
 		{"fast", nil, false, nil},
-		{"stdcompat", []venc.MarshalOption{venc.WithStdCompat()}, false,
+		{"stdcompat", []venc.MarshalOption{vopt.EscapeHTML(true), vopt.EscapeLineTerms(true), vopt.AllowInvalidUTF8(false), vopt.FloatExpAuto(true)}, false,
 			func(v any) ([]byte, error) { return json.Marshal(v) }},
-		{"stdcompat_indent", []venc.MarshalOption{venc.WithStdCompat()}, true,
+		{"stdcompat_indent", []venc.MarshalOption{vopt.EscapeHTML(true), vopt.EscapeLineTerms(true), vopt.AllowInvalidUTF8(false), vopt.FloatExpAuto(true)}, true,
 			func(v any) ([]byte, error) { return json.MarshalIndent(v, "", "  ") }},
 	}
 
@@ -112,7 +114,7 @@ func buildModes() []marshalMode {
 			opts := append([]venc.MarshalOption{}, cfg.opts...)
 			if bs > 0 {
 				name += "_buf" + itoa(bs)
-				opts = append(opts, venc.WithBufSize(bs))
+				opts = append(opts, vopt.BufSize(bs))
 			}
 			modes = append(modes, marshalMode{
 				name:    name,

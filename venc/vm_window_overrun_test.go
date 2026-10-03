@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/native/encvm"
 	"github.com/velox-io/json/value"
 )
@@ -29,11 +31,11 @@ type windowOpt struct {
 
 var windowOpts = []windowOpt{
 	{"default", nil},
-	{"std", []MarshalOption{WithStdCompat()}},
-	{"fast", []MarshalOption{WithFastEscape()}},
-	{"nohtml", []MarshalOption{WithStdCompat(), WithoutEscapeHTML()}},
-	{"indent", []MarshalOption{WithStdCompat(), withIndent("", "  ")}},
-	{"indent-prefix", []MarshalOption{withIndent(">>", "\t")}},
+	{"std", []MarshalOption{vopt.EscapeHTML(true), vopt.EscapeLineTerms(true), vopt.AllowInvalidUTF8(false), vopt.FloatExpAuto(true)}},
+	{"fast", nil},
+	{"nohtml", []MarshalOption{vopt.EscapeHTML(true), vopt.EscapeLineTerms(true), vopt.AllowInvalidUTF8(false), vopt.FloatExpAuto(true), vopt.EscapeHTML(false)}},
+	{"indent", []MarshalOption{vopt.EscapeHTML(true), vopt.EscapeLineTerms(true), vopt.AllowInvalidUTF8(false), vopt.FloatExpAuto(true), vopt.Indent("", "  ")}},
+	{"indent-prefix", []MarshalOption{vopt.Indent(">>", "\t")}},
 }
 
 // windowSweep encodes v into every capacity from 0 to past the full output,

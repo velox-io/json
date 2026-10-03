@@ -22,7 +22,7 @@ type wrapF32 struct {
 func marshalFloat64(t *testing.T, val float64) string {
 	t.Helper()
 	w := wrapF64{V: val}
-	got, err := vjson.Marshal(w, vjson.WithFloatExpAuto())
+	got, err := vjson.Marshal(w, vjson.FloatExpAuto(true))
 	if err != nil {
 		t.Fatalf("vjson.Marshal(%v) error: %v", val, err)
 	}
@@ -33,7 +33,7 @@ func marshalFloat64(t *testing.T, val float64) string {
 func marshalFloat32(t *testing.T, val float32) string {
 	t.Helper()
 	w := wrapF32{V: val}
-	got, err := vjson.Marshal(w, vjson.WithFloatExpAuto())
+	got, err := vjson.Marshal(w, vjson.FloatExpAuto(true))
 	if err != nil {
 		t.Fatalf("vjson.Marshal(%v) error: %v", val, err)
 	}
@@ -493,7 +493,7 @@ func TestNativeFloat_InStruct(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := vjson.Marshal(tc.val, vjson.WithFloatExpAuto())
+			got, err := vjson.Marshal(tc.val, vjson.FloatExpAuto(true))
 			if err != nil {
 				t.Fatalf("Marshal error: %v", err)
 			}
@@ -686,7 +686,7 @@ func TestFloat64_ExpAutoRoundTrip(t *testing.T) {
 		w := wrapF64{V: val}
 
 		// Marshal with velox
-		vjsonOut, err := vjson.Marshal(w, vjson.WithFloatExpAuto())
+		vjsonOut, err := vjson.Marshal(w, vjson.FloatExpAuto(true))
 		if err != nil {
 			t.Fatalf("vjson.Marshal(%v) error: %v", val, err)
 		}

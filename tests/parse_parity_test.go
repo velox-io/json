@@ -164,7 +164,7 @@ func TestDecoder_UnicodeEscapeNearBufferEnd(t *testing.T) {
 }
 
 // Invalid UTF-8 bytes inside strings pass through verbatim in values and map
-// keys alike, and WithStrictScan rejects them. This is a deliberate divergence
+// keys alike, and AllowInvalidUTF8(false) rejects them. This is a deliberate divergence
 // from encoding/json, which replaces each invalid byte with U+FFFD. Raw bytes
 // are assembled by concatenation, not backticks, so they stay real 0xe2
 // bytes.
@@ -212,7 +212,7 @@ func TestUnmarshal_InvalidUTF8RawPassthrough(t *testing.T) {
 	}
 
 	// Strict scan rejects the same input.
-	if err := vjson.Unmarshal(data, vjson.WithStrictScan()); err == nil {
+	if err := vjson.Unmarshal(data, vjson.AllowInvalidUTF8(false)); err == nil {
 		t.Fatal("invalid utf8 strict: accepted; want rejection")
 	}
 }

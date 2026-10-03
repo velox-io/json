@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	json "github.com/velox-io/json"
+	vjson "github.com/velox-io/json"
 )
 
 // main runs every demo when invoked without arguments; with one
@@ -51,7 +51,7 @@ func main() {
 func marshalUser() error {
 	u := NewTestUser()
 
-	b, err := json.MarshalIndent(u, "", "  ")
+	b, err := vjson.MarshalIndent(u, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func marshalUser() error {
 func marshalCanada() error {
 	c := NewCanadaRoot()
 
-	b, err := json.Marshal(c)
+	b, err := vjson.Marshal(c)
 	if err != nil {
 		return err
 	}
@@ -78,7 +78,7 @@ func marshalCanada() error {
 func marshalCanadaIndent() error {
 	c := NewCanadaRoot()
 
-	b, err := json.MarshalIndent(c, "", "  ")
+	b, err := vjson.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}

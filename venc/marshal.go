@@ -6,63 +6,42 @@ import (
 
 	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/native/encvm"
+	"github.com/velox-io/json/vopt"
 )
 
-type MarshalOption func(*encodeState)
+// MarshalOption is an alias for vopt.Options.
+type MarshalOption = vopt.Options
 
-func WithEscapeHTML() MarshalOption {
-	return func(es *encodeState) { es.flags |= uint32(escapeHTML) }
-}
-
-func WithoutEscapeHTML() MarshalOption {
-	return func(es *encodeState) { es.flags &^= uint32(escapeHTML) }
-}
-
-func WithEscapeLineTerms() MarshalOption {
-	return func(es *encodeState) { es.flags |= uint32(escapeLineTerms) }
-}
-
-func WithoutEscapeLineTerms() MarshalOption {
-	return func(es *encodeState) { es.flags &^= uint32(escapeLineTerms) }
-}
-
-func WithUTF8Correction() MarshalOption {
-	return func(es *encodeState) { es.flags |= uint32(escapeInvalidUTF8) | EncRawUTF8Repl }
-}
-
-func WithoutUTF8Correction() MarshalOption {
-	return func(es *encodeState) { es.flags &^= uint32(escapeInvalidUTF8) | EncRawUTF8Repl }
-}
-
-// WithStdCompat matches encoding/json escaping and float formatting.
-func WithStdCompat() MarshalOption {
-	return func(es *encodeState) {
-		es.flags = uint32(escapeStdCompat) | EncFloatExpAuto | EncRawUTF8Repl
+// encFlagsOf translates o into the flag word the escaper and the native VM
+// read. Absent options stay zero, which is the no-escape fast path.
+func encFlagsOf(o vopt.Options) uint32 {
+	var f uint32
+	if o.Enabled(vopt.FlagEscapeHTML) {
+		f |= uint32(escapeHTML)
 	}
-}
-
-func WithFloatExpAuto() MarshalOption {
-	return func(es *encodeState) { es.flags |= EncFloatExpAuto }
-}
-
-func WithFastEscape() MarshalOption {
-	return func(es *encodeState) {
-		es.flags &^= uint32(escapeHTML|escapeLineTerms|escapeInvalidUTF8) | EncRawUTF8Repl
+	if o.Enabled(vopt.FlagEscapeLineTerms) {
+		f |= uint32(escapeLineTerms)
 	}
+	if allow, named := o.Get(vopt.FlagAllowInvalidUTF8); named && !allow {
+		f |= uint32(escapeInvalidUTF8) | EncRawUTF8Repl
+	}
+	if o.Enabled(vopt.FlagFloatExpAuto) {
+		f |= EncFloatExpAuto
+	}
+	return f
 }
 
-// WithBufSize sets a fixed starting size for the working buffer. If the pooled
-// buffer's capacity is less than n, a fresh buffer of size n is allocated;
-// otherwise the existing one is kept. After encoding, the result is copied into
-// a tight-fit allocation (exactly len(output) bytes) and returned, so the
-// pooled buffer retains its full capacity for reuse (this opts out of the
-// default zero-copy return).
-func WithBufSize(n int) MarshalOption {
-	return func(es *encodeState) {
-		if n > 0 {
-			es.bufSize = n
-		}
+// applyOptions resolves o onto es. acquireEncodeState has already zeroed flags
+// and indentString, so only named options need writing.
+func (es *encodeState) applyOptions(o vopt.Options) {
+	es.flags = encFlagsOf(o)
+	if prefix, step, ok := o.Indent(); ok {
+		es.indentPrefix = prefix
+		es.indentString = step
+		es.indentDepth = 0
+		es.useNativeVM = encvm.Available && isSimpleIndent(prefix, step)
 	}
+	es.bufSize = o.BufSize()
 }
 
 // Marshal serializes v to JSON.
@@ -106,9 +85,7 @@ func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
 func marshalPtr(rtp uintptr, rt reflect.Type, elemPtr unsafe.Pointer, opts []MarshalOption) ([]byte, error) {
 	es := acquireEncodeState()
 	defer releaseEncodeState(es)
-	for _, o := range opts {
-		o(es)
-	}
+	es.applyOptions(vopt.Join(opts...))
 	return es.marshalWith(encElemTypeInfoOf(rtp, rt), elemPtr)
 }
 
@@ -119,18 +96,16 @@ func marshalSlow[T any](v T, rt reflect.Type, opts []MarshalOption) ([]byte, err
 func marshalSlowPtr[T any](v *T, rt reflect.Type, opts []MarshalOption) ([]byte, error) {
 	es := acquireEncodeState()
 	defer releaseEncodeState(es)
-	for _, o := range opts {
-		o(es)
-	}
+	es.applyOptions(vopt.Join(opts...))
 
 	ti := EncTypeInfoOf(rt)
 	return es.marshalWith(ti, unsafe.Pointer(v))
 }
 
 func (es *encodeState) marshalWith(ti *EncTypeInfo, ptr unsafe.Pointer) ([]byte, error) {
-	// Drain the WithBufSize hand-off into a local: it is a per-call directive,
+	// Drain the BufSize hand-off into a local: it is a per-call directive,
 	// not encode state, so it lives on es only long enough to cross from the
-	// MarshalOption closure to here. Zeroing it now means release needs no reset.
+	// Options application to here. Zeroing it now means release needs no reset.
 	bufSize := es.bufSize
 	es.bufSize = 0
 
@@ -173,17 +148,7 @@ func (es *encodeState) marshalWith(ti *EncTypeInfo, ptr unsafe.Pointer) ([]byte,
 }
 
 func MarshalIndent[T any](v T, prefix, indent string, opts ...MarshalOption) ([]byte, error) {
-	return Marshal(v, append(opts, withIndent(prefix, indent))...)
-}
-
-// withIndent returns an internal MarshalOption that configures indentation.
-func withIndent(prefix, indent string) MarshalOption {
-	return func(es *encodeState) {
-		es.indentString = indent
-		es.indentPrefix = prefix
-		es.indentDepth = 0
-		es.useNativeVM = encvm.Available && isSimpleIndent(prefix, indent)
-	}
+	return Marshal(v, append(opts, vopt.Indent(prefix, indent))...)
 }
 
 func AppendMarshal[T any](dst []byte, v T, opts ...MarshalOption) ([]byte, error) {
@@ -199,9 +164,7 @@ func AppendMarshal[T any](dst []byte, v T, opts ...MarshalOption) ([]byte, error
 
 	es := acquireEncodeState()
 	defer releaseEncodeState(es)
-	for _, o := range opts {
-		o(es)
-	}
+	es.applyOptions(vopt.Join(opts...))
 
 	es.buf = dst
 	rtp := uintptr(gort.TypePtr(rt))
@@ -224,9 +187,7 @@ func appendMarshalSlow[T any](dst []byte, v T, rt reflect.Type, opts []MarshalOp
 func appendMarshalSlowPtr[T any](dst []byte, v *T, rt reflect.Type, opts []MarshalOption) ([]byte, error) {
 	es := acquireEncodeState()
 	defer releaseEncodeState(es)
-	for _, o := range opts {
-		o(es)
-	}
+	es.applyOptions(vopt.Join(opts...))
 
 	es.buf = dst
 	ti := EncTypeInfoOf(rt)

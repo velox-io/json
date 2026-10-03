@@ -28,6 +28,8 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/velox-io/json/vopt"
+
 	vjson "github.com/velox-io/json"
 	"github.com/velox-io/json/decode/dom"
 	"github.com/velox-io/json/internal/valueabi"
@@ -353,7 +355,7 @@ func TestPIN_DomStringPast24BitsRejects(t *testing.T) {
 		opts []dom.ParseOption
 	}{
 		{"copy", nil},
-		{"zero-copy", []dom.ParseOption{dom.WithZeroCopy(true)}},
+		{"zero-copy", []dom.ParseOption{vopt.ZeroCopy(true)}},
 	}
 	for _, n := range []int{lim - 1, lim} {
 		for _, m := range modes {
@@ -435,7 +437,7 @@ func TestPIN_ZeroCopyAcceptsWhateverDefaultAccepts(t *testing.T) {
 			if _, err := dom.Parse(src); err != nil {
 				t.Errorf("n=%d: default mode rejected a valid document: %v", n, err)
 			}
-			if _, err := dom.ParsePadded(dom.Pad(src), dom.WithZeroCopy(true)); err != nil {
+			if _, err := dom.ParsePadded(dom.Pad(src), vopt.ZeroCopy(true)); err != nil {
 				t.Errorf("n=%d (%d bytes of kept number text): zero-copy rejected a document the "+
 					"default mode accepts: %v", n, n*5, err)
 			}
@@ -450,7 +452,7 @@ func TestPIN_ZeroCopyAcceptsWhateverDefaultAccepts(t *testing.T) {
 			if _, err := dom.Parse(src); err != nil {
 				t.Errorf("n=%d: default mode rejected a valid document: %v", n, err)
 			}
-			v, err := dom.ParsePadded(dom.Pad(src), dom.WithZeroCopy(true))
+			v, err := dom.ParsePadded(dom.Pad(src), vopt.ZeroCopy(true))
 			if err != nil {
 				t.Errorf("n=%d: zero-copy rejected a document the default mode accepts: %v", n, err)
 				continue

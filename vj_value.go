@@ -54,7 +54,7 @@ func Parse(src []byte, opts ...Option) (Value, error) {
 // unavailable.
 //
 // paddedSrc must carry at least PaddingSize bytes of 0x20 padding past its
-// length; use Pad to construct it. WithZeroCopy(true) makes escape-free
+// length; use Pad to construct it. ZeroCopy(true) makes escape-free
 // strings alias paddedSrc directly, so the caller must keep paddedSrc alive
 // and unmodified as long as the Value (or any sub-value) is reachable.
 // Zero-copy Values are navigation-only and rejected by UnmarshalValue.

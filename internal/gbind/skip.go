@@ -5,7 +5,10 @@ import (
 	"github.com/velox-io/json/native/ndec"
 )
 
-// skipValue skips a field value at the cursor.
+// skipValue skips the value at the cursor through the generic skip, so the
+// lenient opt governs it at every site that skips a value: an unbound struct
+// member, a mismatched field, a fixed array's surplus element, and a stopped
+// stream's remainder.
 func (c *binder) skipValue() error {
 	p, err := c.skipAt(c.txt, c.p)
 	c.p = p
@@ -39,15 +42,9 @@ func (c *binder) skipNested() error {
 	return err
 }
 
-// safeSkip validates a skipped scalar, and within a container rejects a
-// comma followed by a close or another comma.
-func (c *binder) safeSkip() error {
-	return c.skipChecked(true)
-}
-
 // rootSkip consumes the root value after a recorded mismatch. Scalars
-// validate; containers count brackets. depth is one when the opening
-// bracket is already consumed.
+// validate under the strict skip; containers count brackets. depth is one
+// when the opening bracket is already consumed.
 func (c *binder) rootSkip(depth int) error {
 	if depth == 0 {
 		return c.skipChecked(false)
@@ -57,8 +54,9 @@ func (c *binder) rootSkip(depth int) error {
 	return err
 }
 
-// skipChecked skips one value whose scalar, if it is one, must validate.
-// commas selects the safe skip's comma check inside containers.
+// skipChecked skips one value. Its scalar validates unless the lenient opt
+// releases it, and commas selects the comma check inside containers; the
+// root skip passes false because its container walk counts brackets only.
 func (c *binder) skipChecked(commas bool) error {
 	s, p := c.txt, c.p
 	var err error
@@ -68,7 +66,13 @@ func (c *binder) skipChecked(commas bool) error {
 	case s.at(p) == '{' || s.at(p) == '[':
 		p, err = c.nestedAt(s, p+1, commas)
 	default:
-		p, err = c.scalarAt(s, p)
+		if c.opt&ndec.BindOptSkipLenient != 0 {
+			c.p = p
+			err = c.skipToken()
+			p = c.p
+		} else {
+			p, err = c.scalarAt(s, p)
+		}
 	}
 	c.p = p
 	return err

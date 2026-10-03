@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/native/encvm"
 )
 
@@ -348,11 +350,11 @@ func TestNativeEncoder_GoroutineStackStress_ManyOptions(t *testing.T) {
 	}
 	cases := []optCase{
 		{"default", nil},
-		{"escape-html", []MarshalOption{WithEscapeHTML()}},
-		{"std-compat", []MarshalOption{WithStdCompat()}},
-		{"fast-escape", []MarshalOption{WithFastEscape()}},
-		{"line-terms", []MarshalOption{WithEscapeLineTerms()}},
-		{"utf8-correction", []MarshalOption{WithUTF8Correction()}},
+		{"escape-html", []MarshalOption{vopt.EscapeHTML(true)}},
+		{"std-compat", []MarshalOption{vopt.EscapeHTML(true), vopt.EscapeLineTerms(true), vopt.AllowInvalidUTF8(false), vopt.FloatExpAuto(true)}},
+		{"fast-escape", nil},
+		{"line-terms", []MarshalOption{vopt.EscapeLineTerms(true)}},
+		{"utf8-correction", []MarshalOption{vopt.AllowInvalidUTF8(false)}},
 	}
 
 	runStackStressTest(t, 300, func(t *testing.T, id int) {

@@ -3,6 +3,8 @@ package venc
 import (
 	"testing"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/decode/bind"
 	"github.com/velox-io/json/decode/dom"
 	"github.com/velox-io/json/native/encvm"
@@ -183,7 +185,7 @@ func TestUnfoldBufFullSweep(t *testing.T) {
 		t.Fatal(err)
 	}
 	for n := 8; n <= len(want)+16; n++ {
-		got, err := Marshal(h, WithBufSize(n))
+		got, err := Marshal(h, vopt.BufSize(n))
 		if err != nil {
 			t.Fatalf("bufsize %d: %v", n, err)
 		}

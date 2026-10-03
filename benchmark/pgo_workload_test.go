@@ -14,7 +14,7 @@ import (
 // counter collection:
 //
 //	full    <- MarshalIndent: indentString != "" dispatches to vj_vm_exec_full
-//	compact <- Marshal + WithStdCompat: escape flags dispatch to vj_vm_exec_compact
+//	compact <- Marshal + escape options: escape flags dispatch to vj_vm_exec_compact
 //
 // Naming: these entries deliberately carry NO library suffix
 // (_Velox/_Sonic/_GoJSON/_JSONv2). scripts/bench.sh sweeps construct
@@ -42,11 +42,11 @@ func pgoStep[T any](v T, marshal func(T) ([]byte, error)) func() error {
 }
 
 func pgoMarshalFull[T any](v T) ([]byte, error) {
-	return vjson.MarshalIndent(v, "", "  ", vjson.WithStdCompat())
+	return vjson.MarshalIndent(v, "", "  ", stdlibLikeOpts)
 }
 
 func pgoMarshalCompact[T any](v T) ([]byte, error) {
-	return vjson.Marshal(v, vjson.WithStdCompat())
+	return vjson.Marshal(v, stdlibLikeOpts)
 }
 
 func pgoRunWorkload(b *testing.B, steps []func() error) {

@@ -57,19 +57,22 @@ func init() {
 		object User
 	}]()
 
-	// K8sObject carries two independent polymorphic axes on the same struct, each
-	// registered with its own case set via DefineVariantCasesAt (keyed by Go field
-	// name, since the embedded field has no JSON name):
-	//   - Object (embedded, disc "kind"): the case is a composite struct
-	//     (PodObject/ServiceObject) whose Spec+Status fields unfold into the host.
-	//     One disc drives multiple host fields at once.
-	//   - Report (sibling, disc "observer"): independent case set (KubeletReport/
-	//     SchedulerReport), independent disc.
-	// A host permits any number of siblings but at most one embedded variant.
+	// Shape is a flat tagged union: the selected case's fields unfold into the
+	// host object, so one disc drives several host members at once.
+	vjson.DefineVariantCases[Shape, struct {
+		_ Circle `case:"circle"`
+		_ Rect   `case:"rect"`
+	}]()
+
+	// K8sObject carries two independent sibling variants on the same struct,
+	// each registered with its own case set via DefineVariantCasesAt (keyed by
+	// Go field name):
+	//   - Spec (disc "kind"): PodSpec/ServiceSpec.
+	//   - Report (disc "observer"): KubeletReport/SchedulerReport.
 	vjson.DefineVariantCasesAt[K8sObject, struct {
-		_ PodObject     `case:"Pod"`
-		_ ServiceObject `case:"Service"`
-	}]("Object")
+		_ PodSpec     `case:"Pod"`
+		_ ServiceSpec `case:"Service"`
+	}]("Spec")
 	vjson.DefineVariantCasesAt[K8sObject, struct {
 		_ KubeletReport   `case:"kubelet"`
 		_ SchedulerReport `case:"scheduler"`
@@ -108,18 +111,36 @@ type Response struct {
 	Data any `json:"data" vjson:"kindof"`
 }
 
+// --- flat tagged union (inline variant) ---
+//
+// Shape's disc and the case's fields live in the same JSON object:
+// {"type":"rect","width":3,"height":4} selects Rect and binds width and
+// height into it. Inline cases must be structs; a host has at most one
+// inline variant.
+type Shape struct {
+	Type string `json:"type"`
+	Body any    `json:",embed" vjson:"variant=type"`
+}
+
+type Circle struct {
+	Radius float64 `json:"radius"`
+}
+
+type Rect struct {
+	Width  float64 `json:"width"`
+	Height float64 `json:"height"`
+}
+
 // --- Kubernetes-style multi-variant example ---
 //
-// K8sObject mirrors the shape of a Kubernetes API object: a Kind/APIVersion
-// pair identifies the resource type, and the spec+status payloads are typed
-// accordingly. One JSON scan resolves all three axes with no RawMessage:
+// K8sObject mirrors the shape of a Kubernetes API object. The payload already
+// sits under its own member (spec), so a plain sibling variant is the right
+// tool, not embed. One JSON scan resolves all three axes with no RawMessage:
 //
-//   - inline variant on "kind": composite case (PodObject{PodSpec, PodStatus})
-//     unfolds its fields into the host, so podSpec AND podStatus appear in
-//     the host JSON when kind="Pod", both selected by the single disc value.
+//   - sibling variant on "kind": selects PodSpec/ServiceSpec for spec.
 //   - sibling variant on "observer": independent axis with its own disc and
-//     case set. Report stays a real JSON member.
-//   - nested envelope (OwnerReference) carries a second sibling variant on
+//     case set for report.
+//   - nested envelope (OwnerReference) carries a third sibling variant on
 //     "ownerKind".
 
 type PodSpec struct {
@@ -127,31 +148,9 @@ type PodSpec struct {
 	NodeName   string   `json:"nodeName"`
 }
 
-type PodStatus struct {
-	Phase string `json:"phase"`
-	PodIP string `json:"podIP"`
-}
-
 type ServiceSpec struct {
 	Port     int      `json:"port"`
 	Selector []string `json:"selector"`
-}
-
-type ServiceStatus struct {
-	ClusterIP string `json:"clusterIP"`
-}
-
-// PodObject / ServiceObject are the inline variant's composite cases. When
-// kind="Pod", PodObject's fields unfold into the host JSON object so the
-// host gains podSpec and podStatus members directly.
-type PodObject struct {
-	PodSpec   PodSpec   `json:"podSpec"`
-	PodStatus PodStatus `json:"podStatus"`
-}
-
-type ServiceObject struct {
-	ServiceSpec   ServiceSpec   `json:"serviceSpec"`
-	ServiceStatus ServiceStatus `json:"serviceStatus"`
 }
 
 type KubeletReport struct {
@@ -180,13 +179,12 @@ type ReplicaSetOwner struct {
 	Name string `json:"name"`
 }
 
-// K8sObject is the polymorphic host. Object is the inline variant (kind axis,
-// fields unfold into host); Report is the sibling variant (observer axis, real
-// JSON member); Owner is a nested envelope carrying a second sibling.
+// K8sObject is the polymorphic host. Spec (kind axis) and Report (observer
+// axis) are sibling variants; Owner is a nested envelope carrying a third.
 type K8sObject struct {
 	Kind       string         `json:"kind"`
 	APIVersion string         `json:"apiVersion"`
-	Object     any            `json:",embed" vjson:"variant=kind"`
+	Spec       any            `json:"spec" vjson:"variant=kind"`
 	Observer   string         `json:"observer"`
 	Report     any            `json:"report" vjson:"variant=observer"`
 	Owner      OwnerReference `json:"owner"`
@@ -279,19 +277,29 @@ func main() {
 		useKindof(resp)
 	}
 
+	// Flat tagged union: the case's fields unfold into the host object.
+	for _, shapeSrc := range []string{
+		`{"type":"circle","radius":1.5}`,
+		`{"type":"rect","width":3,"height":4}`,
+	} {
+		var s Shape
+		if err := vjson.Unmarshal([]byte(shapeSrc), &s); err != nil {
+			fmt.Println("error:", err)
+			return
+		}
+		fmt.Printf("shape %s -> %T %+v\n", shapeSrc, s.Body, s.Body)
+	}
+
 	// Kubernetes-style multi-variant host: one JSON object, three independent
 	// polymorphic axes resolved in one scan.
-	//   - kind="Pod" unfolds podSpec+podStatus into the host (inline composite
-	//     case: one disc drives multiple host fields)
+	//   - kind="Pod" selects PodSpec for the spec member
 	//   - observer="kubelet" selects KubeletReport for the report member
-	//     (sibling variant, independent axis)
 	//   - owner.ownerKind="Deployment" selects DeploymentOwner inside the
-	//     nested OwnerReference envelope (second sibling, via nesting)
+	//     nested OwnerReference envelope
 	k8sSrc := `{
 		"kind": "Pod",
 		"apiVersion": "v1",
-		"podSpec": {"containers": ["nginx", "envoy"], "nodeName": "node-1"},
-		"podStatus": {"phase": "Running", "podIP": "10.0.0.1"},
+		"spec": {"containers": ["nginx", "envoy"], "nodeName": "node-1"},
 		"observer": "kubelet",
 		"report": {"nodeName": "node-1", "hostIP": "192.168.1.1"},
 		"owner": {"ownerKind": "Deployment", "owner": {"name": "my-deployment"}}
@@ -390,20 +398,16 @@ func firstOr(users []User, fallback string) string {
 }
 
 // useK8sObject consumes a multi-variant host. Each variant field is a separate
-// any; type-switch on it. The inline variant's case (PodObject) carries both
-// spec and status as struct fields, so one type assertion unpacks everything
-// kind drove into the host.
+// any; type-switch on it.
 func useK8sObject(obj K8sObject) {
 	fmt.Printf("k8s %s/%s observer=%s\n", obj.APIVersion, obj.Kind, obj.Observer)
-	switch o := obj.Object.(type) {
-	case PodObject:
-		fmt.Printf("  spec: containers=%v nodeName=%s\n", o.PodSpec.Containers, o.PodSpec.NodeName)
-		fmt.Printf("  status: phase=%s podIP=%s\n", o.PodStatus.Phase, o.PodStatus.PodIP)
-	case ServiceObject:
-		fmt.Printf("  spec: port=%d selector=%v\n", o.ServiceSpec.Port, o.ServiceSpec.Selector)
-		fmt.Printf("  status: clusterIP=%s\n", o.ServiceStatus.ClusterIP)
+	switch s := obj.Spec.(type) {
+	case PodSpec:
+		fmt.Printf("  spec(pod): containers=%v nodeName=%s\n", s.Containers, s.NodeName)
+	case ServiceSpec:
+		fmt.Printf("  spec(service): port=%d selector=%v\n", s.Port, s.Selector)
 	default:
-		fmt.Printf("  unexpected object type %T\n", o)
+		fmt.Printf("  unexpected spec type %T\n", s)
 	}
 	switch r := obj.Report.(type) {
 	case KubeletReport:

@@ -3,7 +3,7 @@ package tests
 // Coverage matrix for the strict body policy across every consumer the bind
 // walk passes a string span through. Each case names a placement of a raw
 // violation (malformed UTF-8 or an unescaped control byte) that the default
-// scan passes raw and WithStrictScan must reject. The same corpus runs
+// scan passes raw and AllowInvalidUTF8(false) must reject. The same corpus runs
 // against the native and the pure-Go engine through the test matrix, so
 // both reach the same verdict.
 
@@ -61,8 +61,8 @@ func TestStrictScanMatrix_RejectsEveryPlacement(t *testing.T) {
 			continue
 		}
 		var strict strictMatrix
-		if err := vjson.Unmarshal(src, &strict, vjson.WithStrictScan()); err == nil {
-			t.Errorf("%s: WithStrictScan accepted %q", tc.placement, tc.src)
+		if err := vjson.Unmarshal(src, &strict, vjson.AllowInvalidUTF8(false)); err == nil {
+			t.Errorf("%s: AllowInvalidUTF8(false) accepted %q", tc.placement, tc.src)
 		}
 	}
 }
@@ -72,8 +72,8 @@ func TestStrictScanMatrix_RejectsEveryPlacement(t *testing.T) {
 func TestStrictScanMatrix_AcceptsValidMultibyte(t *testing.T) {
 	src := "{\"bound\":\"世界\",\"known\":{\"ключ\":\"значение\"},\"zz\":\"" + strings.Repeat("ab世界", 20) + "\",\"nested\":[{\"s\":\"技\"}]}"
 	var dst strictMatrix
-	if err := vjson.Unmarshal([]byte(src), &dst, vjson.WithStrictScan()); err != nil {
-		t.Fatalf("WithStrictScan rejected valid multibyte: %v", err)
+	if err := vjson.Unmarshal([]byte(src), &dst, vjson.AllowInvalidUTF8(false)); err != nil {
+		t.Fatalf("AllowInvalidUTF8(false) rejected valid multibyte: %v", err)
 	}
 }
 
@@ -89,7 +89,7 @@ func TestStrictScanMatrix_ValueDoc(t *testing.T) {
 	var strict struct {
 		V value.Value `json:"v"`
 	}
-	if err := vjson.Unmarshal([]byte(src), &strict, vjson.WithStrictScan()); err == nil {
-		t.Fatal("WithStrictScan accepted invalid UTF-8 in a Value doc")
+	if err := vjson.Unmarshal([]byte(src), &strict, vjson.AllowInvalidUTF8(false)); err == nil {
+		t.Fatal("AllowInvalidUTF8(false) accepted invalid UTF-8 in a Value doc")
 	}
 }

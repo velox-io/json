@@ -69,7 +69,7 @@ func (d *streamDriver) loop(yield func(stream.StopReason) bool) {
 			}
 		}
 		if d.skip {
-			d.err = c.safeSkip()
+			d.err = c.skipValue()
 		} else {
 			slot := unsafe.Add(d.hdr.Data, uintptr(d.hdr.Len)*d.esz)
 			d.hdr.Len++

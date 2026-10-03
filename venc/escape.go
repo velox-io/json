@@ -14,7 +14,6 @@ const (
 )
 
 const escapeStringFlags = escapeHTML | escapeLineTerms | escapeInvalidUTF8
-const escapeStdCompat = escapeStringFlags
 
 // EncFloatExpAuto (bit 3) matches encoding/json scientific-notation thresholds.
 const EncFloatExpAuto uint32 = 1 << 3

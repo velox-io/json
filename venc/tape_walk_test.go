@@ -132,7 +132,7 @@ func TestTapeWalkSpreadNonObject(t *testing.T) {
 func TestTapeWalkEscapeModeIndependent(t *testing.T) {
 	v := tapeWalkParse(t, `{"h":"<b>&amp;</b>"}`)
 	es := acquireEncodeState()
-	es.flags = uint32(escapeStdCompat)
+	es.flags = uint32(escapeStringFlags)
 	if err := es.appendTapeValue(&v); err != nil {
 		t.Fatal(err)
 	}

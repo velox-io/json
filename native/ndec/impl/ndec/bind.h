@@ -352,8 +352,7 @@ NOINLINE static void ndec_bind_parse_inner(NdecBindMachine *m) {
      * inside the skip would save the root phase and re-dispatch document_start
      * with a mid-parse cur_type. */
     if (UNLIKELY(cur_type.flags & BIND_FLAG_STREAM_SKIP)) {
-      NDEC_SET_INPUT_PHASE(BIND_PHASE_SAFE_SKIP_RESUME);
-      goto safe_skip_value;
+      goto skip_value;
     }
     NDEC_SET_INPUT_PHASE(BIND_PHASE_ARRAY_VALUE_BEGIN);
     goto array_value_bind_body;
@@ -434,19 +433,15 @@ NOINLINE static void ndec_bind_parse_inner(NdecBindMachine *m) {
   case BIND_PHASE_OBJECT_FIELD_FIRST:
     goto object_first_key;
   case BIND_PHASE_SKIP_RESUME:
-    /* skip_value restores the block-local skip_depth from m->skip_depth and
-     * routes by SKIP_LENIENT; entering the loops directly would bypass the
-     * local's initialization and count brackets from an indeterminate value. */
+    /* Every skip site resumes here rather than at its own loop: skip_value
+     * restores the block-local skip_depth from m->skip_depth and routes by
+     * SKIP_LENIENT, and entering the loops directly would both bypass the
+     * local's initialization and lose the re-dispatch. */
     goto skip_value;
   case BIND_PHASE_ROOT_SKIP_RESUME:
     /* root_skip_value restores its bracket depth the same way. */
     goto root_skip_value;
 #if NDEC_STREAM_MODE
-  case BIND_PHASE_SAFE_SKIP_RESUME:
-    /* An array element site's skip. Re-entry through the element edge would
-     * bind the skipped value as an element instead. */
-    NDEC_SET_INPUT_PHASE(BIND_PHASE_SAFE_SKIP_RESUME);
-    goto safe_skip_value;
   case BIND_PHASE_ARRAY_FIRST:
     goto array_first;
   case BIND_PHASE_MAP_FIRST:
@@ -1308,15 +1303,13 @@ array_value: {
   } else if (cur_type.kind == BIND_KIND_ARRAY) {
     /* Fixed arrays parse and discard elements beyond their declared length. */
     if (UNLIKELY(cur_count >= m->b.ctx.type_meta[cur_type.type_idx].u.array.array_len)) {
-      NDEC_SET_INPUT_PHASE(BIND_PHASE_SAFE_SKIP_RESUME);
-      goto safe_skip_value;
+      goto skip_value;
     }
   } else {
     BIND_SLICE_GROW_CHECK(m, cur_type, cur_dst, cur_aux, cur_count);
     /* STREAM_SKIP drains remaining elements after a handler stops. */
     if (UNLIKELY(cur_type.flags & BIND_FLAG_STREAM_SKIP)) {
-      NDEC_SET_INPUT_PHASE(BIND_PHASE_SAFE_SKIP_RESUME);
-      goto safe_skip_value;
+      goto skip_value;
     }
     /* Before binding an element that contains a nested stream, yield with
      * cur_count as its index and cur_aux as its unbound slot. Go registers the
@@ -1794,18 +1787,21 @@ root_skip_value: {
       SRC_ADVANCE();
     } else {
       /* The scanner publishes whole atoms, so validation mirrors safe_skip_value
-       * and one structural advance consumes the token. */
-      if (ch == '"') {
-        if (UNLIKELY(ndec_str_parse(SRC_PTR() + 1, str_p, NULL, 0) < 0))
-          BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-      } else if (ch == 't' || ch == 'f' || ch == 'n') {
-        if (UNLIKELY(bind_validate_atom(SRC_PTR(), ch) < 0)) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-      } else {
-        const uint8_t *_end;
-        double _dv;
-        if (UNLIKELY(ndec_parse_double_padded(SRC_PTR(), &_dv, m->c.atof, &_end)))
-          BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-        if (UNLIKELY(is_non_delim(*_end))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+       * and one structural advance consumes the token. The container loop below
+       * counts brackets only, so SKIP_LENIENT relaxes the scalar root alone. */
+      if (!(m->b.ctx.opt_flags & BIND_OPT_SKIP_LENIENT)) {
+        if (ch == '"') {
+          if (UNLIKELY(ndec_str_parse(SRC_PTR() + 1, str_p, NULL, 0) < 0))
+            BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+        } else if (ch == 't' || ch == 'f' || ch == 'n') {
+          if (UNLIKELY(bind_validate_atom(SRC_PTR(), ch) < 0)) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+        } else {
+          const uint8_t *_end;
+          double _dv;
+          if (UNLIKELY(ndec_parse_double_padded(SRC_PTR(), &_dv, m->c.atof, &_end)))
+            BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+          if (UNLIKELY(is_non_delim(*_end))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+        }
       }
       SRC_ADVANCE();
       goto document_end;
@@ -1829,6 +1825,14 @@ root_skip_value: {
   }
 }
 
+/* The one skip every site that discards a value routes through: an unbound
+ * struct member, a mismatched field, a fixed array's surplus element, and a
+ * stopped stream's remainder. It re-dispatches on every entry including the
+ * resume edge, so the block-local skip_depth below is always initialized and
+ * the flag is never read at a site that bypassed it.
+ * Both arms continue through json_parent_continue, which reclassifies the
+ * unchanged cur_type: the skip leaves the parent's kind alone, so an object
+ * field resumes its member walk and an array element its element walk. */
 skip_value: {
   NDEC_SET_INPUT_PHASE(BIND_PHASE_SKIP_RESUME);
   if (m->b.ctx.opt_flags & BIND_OPT_SKIP_LENIENT) {
@@ -1838,8 +1842,8 @@ skip_value: {
   }
 }
 
+/* Tracks container depth without validating scalars or comma order. */
 unsafe_skip_value: {
-  /* This path tracks container depth without validating scalars or comma order. */
   uint32_t skip_depth = 0;
   if (NDEC_STREAM_MODE && m->skip_depth != 0) {
     skip_depth = m->skip_depth;
@@ -1856,7 +1860,7 @@ unsafe_skip_value: {
     SRC_ADVANCE();
   } else {
     SRC_ADVANCE();
-    goto object_continue;
+    goto json_parent_continue;
   }
   for (;;) {
   unsafe_skip_loop:
@@ -1873,7 +1877,7 @@ unsafe_skip_value: {
     else if (ch == '}' || ch == ']') {
       if (--skip_depth == 0) {
         if (NDEC_STREAM_MODE) m->skip_depth = 0;
-        goto object_continue;
+        goto json_parent_continue;
       }
     }
   }
@@ -1886,9 +1890,7 @@ safe_skip_value: {
     goto safe_skip_loop;
   }
   if (UNLIKELY(SRC_EOF())) {
-    /* skip_value arms SKIP_RESUME; array element sites arm SAFE_SKIP_RESUME
-     * because the lenient dispatch behind SKIP_RESUME continues an object. */
-    BIND_INPUT_PHASE_EXPECT2(BIND_PHASE_SKIP_RESUME, BIND_PHASE_SAFE_SKIP_RESUME);
+    BIND_INPUT_PHASE_EXPECT(BIND_PHASE_SKIP_RESUME);
     BIND_INPUT_EOF_CHECK(m);
     BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
   }
@@ -1922,7 +1924,7 @@ safe_skip_value: {
   safe_skip_loop:
     if (UNLIKELY(SRC_EOF())) {
       if (NDEC_STREAM_MODE && !m->window_final) {
-        BIND_INPUT_PHASE_EXPECT2(BIND_PHASE_SKIP_RESUME, BIND_PHASE_SAFE_SKIP_RESUME);
+        BIND_INPUT_PHASE_EXPECT(BIND_PHASE_SKIP_RESUME);
         m->skip_depth = skip_depth;
         BIND_INPUT_EOF_YIELD(m);
       }
@@ -1938,7 +1940,7 @@ safe_skip_value: {
     } else if (ch == ',') {
       if (UNLIKELY(SRC_EOF())) {
         if (NDEC_STREAM_MODE && !m->window_final) {
-          BIND_INPUT_PHASE_EXPECT2(BIND_PHASE_SKIP_RESUME, BIND_PHASE_SAFE_SKIP_RESUME);
+          BIND_INPUT_PHASE_EXPECT(BIND_PHASE_SKIP_RESUME);
           /* Leave the comma unconsumed: the resumed loop re-reads it together
            * with its successor, so the successor check below still runs. */
           cursor.idx--;

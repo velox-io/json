@@ -10,11 +10,11 @@ import (
 	"unsafe"
 
 	"github.com/velox-io/json/decode/dom"
-	"github.com/velox-io/json/decode/option"
 	"github.com/velox-io/json/native/ndec"
 	"github.com/velox-io/json/stream"
 	"github.com/velox-io/json/value"
 	"github.com/velox-io/json/vbind"
+	"github.com/velox-io/json/vopt"
 )
 
 // strPtr returns the data pointer of a Go string header.
@@ -92,8 +92,8 @@ func zcWant() zcDoc {
 // padded copy.
 func TestZeroCopyEquivalence(t *testing.T) {
 	doc := zcDocBytes()
-	for _, opts := range [][]UnmarshalOption{nil, {WithUseNumber()}} {
-		copyOpts := append(slices.Clone(opts), WithZeroCopy(false))
+	for _, opts := range [][]UnmarshalOption{nil, {vopt.UseNumber(true)}} {
+		copyOpts := append(slices.Clone(opts), vopt.ZeroCopy(false))
 		var want, got, gotU zcDoc
 		if err := Unmarshal(doc, &want, copyOpts...); err != nil {
 			t.Fatalf("opts=%v copy: %v", opts, err)
@@ -126,7 +126,7 @@ func TestZeroCopyEquivalence(t *testing.T) {
 func TestZeroCopyAliasBounds(t *testing.T) {
 	padded := Pad(zcDocBytes())
 	var got zcDoc
-	if err := UnmarshalPadded(padded, &got, WithZeroCopy(true)); err != nil {
+	if err := UnmarshalPadded(padded, &got, vopt.ZeroCopy(true)); err != nil {
 		t.Fatalf("zero-copy: %v", err)
 	}
 	aliased := map[string]string{
@@ -194,7 +194,7 @@ func TestZeroCopy24BitBoundary(t *testing.T) {
 		var got struct {
 			S string `json:"s"`
 		}
-		if err := UnmarshalPadded(doc, &got, WithZeroCopy(true)); err != nil {
+		if err := UnmarshalPadded(doc, &got, vopt.ZeroCopy(true)); err != nil {
 			t.Fatalf("n=%#x: %v", tc.n, err)
 		}
 		if len(got.S) != tc.n || got.S[0] != 'a' || got.S[tc.n-1] != 'a' {
@@ -207,7 +207,7 @@ func TestZeroCopy24BitBoundary(t *testing.T) {
 }
 
 // TestZeroCopyGates pins the input-model and shape gates: contiguous drives
-// alias by default and copy under WithZeroCopy(false); trees carrying
+// alias by default and copy under vopt.ZeroCopy(false); trees carrying
 // value.Value or poly fields fall back to the copying parse under the default
 // and reject an explicit demand; entries whose input relocates across windows
 // or reads a Value doc reject the explicit demand only.
@@ -225,11 +225,11 @@ func TestZeroCopyGates(t *testing.T) {
 	var optOut struct {
 		S string `json:"s"`
 	}
-	if err := Unmarshal(zeroCopyGateInput, &optOut, WithZeroCopy(false)); err != nil {
+	if err := Unmarshal(zeroCopyGateInput, &optOut, vopt.ZeroCopy(false)); err != nil {
 		t.Errorf("Unmarshal opt-out: %v", err)
 	}
 	if optOut.S != "x" || inSpan(strPtr(optOut.S), zeroCopyGateInput) {
-		t.Errorf("Unmarshal opt-out: S=%q aliased=%v; WithZeroCopy(false) must copy",
+		t.Errorf("Unmarshal opt-out: S=%q aliased=%v; vopt.ZeroCopy(false) must copy",
 			optOut.S, inSpan(strPtr(optOut.S), zeroCopyGateInput))
 	}
 	p, err := NewParser[struct {
@@ -250,14 +250,14 @@ func TestZeroCopyGates(t *testing.T) {
 	if plain.S != "x" {
 		t.Errorf("UnmarshalFeed default: S=%q", plain.S)
 	}
-	if err = p.UnmarshalFeed(strings.NewReader(`{"s":"x"}`), &plain, WithZeroCopy(true)); !errors.Is(err, option.ErrZeroCopyUnsupported) {
+	if err = p.UnmarshalFeed(strings.NewReader(`{"s":"x"}`), &plain, vopt.ZeroCopy(true)); !errors.Is(err, vopt.ErrZeroCopyUnsupported) {
 		t.Errorf("UnmarshalFeed: got %v, want ErrZeroCopyUnsupported", err)
 	}
 	v, err := dom.Parse([]byte(`{"s":"x"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = UnmarshalValue(v, &plain, WithZeroCopy(true)); !errors.Is(err, option.ErrZeroCopyUnsupported) {
+	if err = UnmarshalValue(v, &plain, vopt.ZeroCopy(true)); !errors.Is(err, vopt.ErrZeroCopyUnsupported) {
 		t.Errorf("UnmarshalValue: got %v, want ErrZeroCopyUnsupported", err)
 	}
 
@@ -279,13 +279,13 @@ func TestZeroCopyGates(t *testing.T) {
 	if inSpan(strPtr(vh.S), valueDoc) {
 		t.Error("value tree default: S aliases the source; the fallback must copy")
 	}
-	if err = pv.UnmarshalPadded(valueDoc, &vh, WithZeroCopy(true)); !errors.Is(err, ErrZeroCopyTypedTree) {
+	if err = pv.UnmarshalPadded(valueDoc, &vh, vopt.ZeroCopy(true)); !errors.Is(err, ErrZeroCopyTypedTree) {
 		t.Errorf("value tree: got %v, want ErrZeroCopyTypedTree", err)
 	}
-	if err = UnmarshalPadded(valueDoc, &vh, WithZeroCopy(true)); !errors.Is(err, ErrZeroCopyTypedTree) {
+	if err = UnmarshalPadded(valueDoc, &vh, vopt.ZeroCopy(true)); !errors.Is(err, ErrZeroCopyTypedTree) {
 		t.Errorf("package value tree: got %v, want ErrZeroCopyTypedTree", err)
 	}
-	if err = Unmarshal(valueRaw, &vh, WithZeroCopy(true)); !errors.Is(err, ErrZeroCopyTypedTree) {
+	if err = Unmarshal(valueRaw, &vh, vopt.ZeroCopy(true)); !errors.Is(err, ErrZeroCopyTypedTree) {
 		t.Errorf("unmarshal value tree: got %v, want ErrZeroCopyTypedTree", err)
 	}
 
@@ -305,10 +305,10 @@ func TestZeroCopyGates(t *testing.T) {
 	if inSpan(strPtr(ph.Kind), polyDoc) {
 		t.Error("poly tree default: Kind aliases the source; the fallback must copy")
 	}
-	if err = pp.UnmarshalPadded(polyDoc, &ph, WithZeroCopy(true)); !errors.Is(err, ErrZeroCopyTypedTree) {
+	if err = pp.UnmarshalPadded(polyDoc, &ph, vopt.ZeroCopy(true)); !errors.Is(err, ErrZeroCopyTypedTree) {
 		t.Errorf("poly tree: got %v, want ErrZeroCopyTypedTree", err)
 	}
-	if err = Unmarshal(polyRaw, &ph, WithZeroCopy(true)); !errors.Is(err, ErrZeroCopyTypedTree) {
+	if err = Unmarshal(polyRaw, &ph, vopt.ZeroCopy(true)); !errors.Is(err, ErrZeroCopyTypedTree) {
 		t.Errorf("unmarshal poly tree: got %v, want ErrZeroCopyTypedTree", err)
 	}
 }
@@ -347,10 +347,10 @@ func TestZeroCopyParserReuse(t *testing.T) {
 		t.Fatal(err)
 	}
 	var first, second zcDoc
-	if err := p.UnmarshalPadded(Pad([]byte(`{"clean":"one","escaped":"a\nb"}`)), &first, WithZeroCopy(true)); err != nil {
+	if err := p.UnmarshalPadded(Pad([]byte(`{"clean":"one","escaped":"a\nb"}`)), &first, vopt.ZeroCopy(true)); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.UnmarshalPadded(Pad([]byte(`{"clean":"two","escaped":"c\nd"}`)), &second, WithZeroCopy(true)); err != nil {
+	if err := p.UnmarshalPadded(Pad([]byte(`{"clean":"two","escaped":"c\nd"}`)), &second, vopt.ZeroCopy(true)); err != nil {
 		t.Fatal(err)
 	}
 	if first.Clean != "one" || first.Escaped != "a\nb" {
@@ -418,12 +418,12 @@ func TestZeroCopyIfaceSubDecode(t *testing.T) {
 	var h1, h2 host
 	h1.Sub = &zcIfaceTarget{}
 	h2.Sub = &zcIfaceTarget{}
-	if err := p.UnmarshalPadded(Pad([]byte(`{"sub":{"s":"first"}}`)), &h1, WithZeroCopy(true)); err != nil {
+	if err := p.UnmarshalPadded(Pad([]byte(`{"sub":{"s":"first"}}`)), &h1, vopt.ZeroCopy(true)); err != nil {
 		t.Fatal(err)
 	}
 	// Equal document lengths keep the pooled sub-parser's pad buffer reused,
 	// so a propagated zero-copy bit would corrupt the first sub-decode.
-	if err := p.UnmarshalPadded(Pad([]byte(`{"sub":{"s":"third"}}`)), &h2, WithZeroCopy(true)); err != nil {
+	if err := p.UnmarshalPadded(Pad([]byte(`{"sub":{"s":"third"}}`)), &h2, vopt.ZeroCopy(true)); err != nil {
 		t.Fatal(err)
 	}
 	if s := h1.Sub.(*zcIfaceTarget).S; s != "first" {
@@ -453,7 +453,7 @@ func TestZeroCopyStreamHost(t *testing.T) {
 		return nil
 	})
 	padded := Pad([]byte(`{"items":[{"s":"a"},{"s":"b"}],"name":"n"}`))
-	if err := UnmarshalPadded(padded, &h, WithZeroCopy(true)); err != nil {
+	if err := UnmarshalPadded(padded, &h, vopt.ZeroCopy(true)); err != nil {
 		t.Fatal(err)
 	}
 	if len(ids) != 2 || ids[0] != "a" || ids[1] != "b" {
@@ -475,7 +475,7 @@ func TestZeroCopyStreamHost(t *testing.T) {
 func TestZeroCopyUnmarshalAliasBounds(t *testing.T) {
 	data := zcDocBytes()
 	var got zcDoc
-	if err := Unmarshal(data, &got, WithZeroCopy(true)); err != nil {
+	if err := Unmarshal(data, &got, vopt.ZeroCopy(true)); err != nil {
 		t.Fatalf("zero-copy: %v", err)
 	}
 	aliased := map[string]string{
@@ -540,11 +540,11 @@ func TestZeroCopyUnmarshalPadChurn(t *testing.T) {
 	for i, d := range [][]byte{doc1, doc2, doc3} {
 		switch i {
 		case 0:
-			err = p.Unmarshal(d, &one, WithZeroCopy(true))
+			err = p.Unmarshal(d, &one, vopt.ZeroCopy(true))
 		case 1:
-			err = p.Unmarshal(d, &two, WithZeroCopy(true))
+			err = p.Unmarshal(d, &two, vopt.ZeroCopy(true))
 		case 2:
-			err = p.Unmarshal(d, &three, WithZeroCopy(true))
+			err = p.Unmarshal(d, &three, vopt.ZeroCopy(true))
 		}
 		if err != nil {
 			t.Fatalf("parse %d: %v", i+1, err)
@@ -596,17 +596,17 @@ func TestZeroCopyQuotedBorrow(t *testing.T) {
 	esc := []byte(`{"q":"4\u0032","s":"\"hi\""}`)
 	bad := []byte(`{"q":"42","s":"hi"}`)
 	var zc, cp doc
-	if err := pz.Unmarshal(clean, &zc, WithZeroCopy(true)); err != nil {
+	if err := pz.Unmarshal(clean, &zc, vopt.ZeroCopy(true)); err != nil {
 		t.Fatalf("clean zero-copy: %v", err)
 	}
-	if err := pc.Unmarshal(clean, &cp, WithZeroCopy(false)); err != nil {
+	if err := pc.Unmarshal(clean, &cp, vopt.ZeroCopy(false)); err != nil {
 		t.Fatalf("clean copy: %v", err)
 	}
 	if zc.Q != 42 || zc.S != "hi" || cp.Q != 42 || cp.S != "hi" {
 		t.Fatalf("values: zero-copy %+v copy %+v", zc, cp)
 	}
 	var zcEsc doc
-	if err := pz.Unmarshal(esc, &zcEsc, WithZeroCopy(true)); err != nil {
+	if err := pz.Unmarshal(esc, &zcEsc, vopt.ZeroCopy(true)); err != nil {
 		t.Fatalf("escaped zero-copy: %v", err)
 	}
 	if zcEsc.Q != 42 || zcEsc.S != "hi" {
@@ -617,8 +617,8 @@ func TestZeroCopyQuotedBorrow(t *testing.T) {
 			t.Error("escaped zero-copy committed no arena bytes; the escaped body must decode through str_arena")
 		}
 	}
-	errZC := pz.Unmarshal(bad, &zc, WithZeroCopy(true))
-	errCP := pc.Unmarshal(bad, &cp, WithZeroCopy(false))
+	errZC := pz.Unmarshal(bad, &zc, vopt.ZeroCopy(true))
+	errCP := pc.Unmarshal(bad, &cp, vopt.ZeroCopy(false))
 	if errZC == nil || errCP == nil {
 		t.Fatalf("unquoted string content accepted: zero-copy err=%v copy err=%v", errZC, errCP)
 	}
@@ -651,7 +651,7 @@ func TestZeroCopyTextBorrow(t *testing.T) {
 	}
 	data := []byte(`{"t":"hello","esc":"a\nb","b":"aGVsbG8="}`)
 	var got doc
-	if err := p.Unmarshal(data, &got, WithZeroCopy(true)); err != nil {
+	if err := p.Unmarshal(data, &got, vopt.ZeroCopy(true)); err != nil {
 		t.Fatal(err)
 	}
 	if string(got.T.Span) != "hello" {
@@ -678,7 +678,7 @@ func TestZeroCopyTextBorrow(t *testing.T) {
 	// pointing at it would corrupt the first result.
 	data2 := []byte(`{"t":"world","esc":"c\nd","b":"d29ybGQ="}`)
 	var got2 doc
-	if err := p.Unmarshal(data2, &got2, WithZeroCopy(true)); err != nil {
+	if err := p.Unmarshal(data2, &got2, vopt.ZeroCopy(true)); err != nil {
 		t.Fatal(err)
 	}
 	if string(got.T.Span) != "hello" {
@@ -705,10 +705,10 @@ func TestZeroCopyUnmarshalIfaceSubDecode(t *testing.T) {
 	h2.Sub = &zcIfaceTarget{}
 	doc1 := []byte(`{"sub":{"s":"first"}}`)
 	doc2 := []byte(`{"sub":{"s":"third"}}`)
-	if err := p.Unmarshal(doc1, &h1, WithZeroCopy(true)); err != nil {
+	if err := p.Unmarshal(doc1, &h1, vopt.ZeroCopy(true)); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.Unmarshal(doc2, &h2, WithZeroCopy(true)); err != nil {
+	if err := p.Unmarshal(doc2, &h2, vopt.ZeroCopy(true)); err != nil {
 		t.Fatal(err)
 	}
 	if s := h1.Sub.(*zcIfaceTarget).S; s != "first" {

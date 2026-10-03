@@ -28,7 +28,7 @@ func TestPreemptStress_GC(t *testing.T) {
 		{"marshal", func(v any) ([]byte, error) { return json.Marshal(v) }},
 		{"marshalIndent", func(v any) ([]byte, error) { return json.MarshalIndent(v, "", "  ") }},
 		{"marshalEscapeHTML", func(v any) ([]byte, error) {
-			return json.Marshal(v, json.WithEscapeHTML())
+			return json.Marshal(v, json.EscapeHTML(true))
 		}},
 	}
 

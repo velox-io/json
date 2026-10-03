@@ -10,7 +10,7 @@ import (
 // ndec backend intentionally diverges from encoding/json.
 //
 // The default ndec string path accepts raw control characters in string bodies.
-// WithStrictScan rejects them during the root structural scan.
+// AllowInvalidUTF8(false) rejects them during the root structural scan.
 var backendGotPassingWantFailing = []string{
 	"n_string_unescaped_ctrl_char.json",
 	"n_string_unescaped_newline.json",
@@ -30,8 +30,8 @@ func TestStrictScanRejectsNativeControlCharacterDivergences(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			data := readJSONTestSuiteFile(t, name)
 			var v any
-			if err := vjson.Unmarshal(data, &v, vjson.WithStrictScan()); err == nil {
-				t.Fatalf("WithStrictScan accepted %s", name)
+			if err := vjson.Unmarshal(data, &v, vjson.AllowInvalidUTF8(false)); err == nil {
+				t.Fatalf("AllowInvalidUTF8(false) accepted %s", name)
 			}
 		})
 	}

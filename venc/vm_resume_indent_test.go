@@ -8,6 +8,8 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/native/encvm"
 )
 
@@ -56,8 +58,8 @@ func sweepIndentWindow(t *testing.T, v any, ptr unsafe.Pointer, want string) {
 	ti := EncTypeInfoOf(reflect.TypeOf(v))
 	for k := 8; k <= len(want)+64; k++ {
 		es := acquireEncodeState()
-		withIndent("", "  ")(es)
-		es.flags = uint32(escapeStdCompat)
+		es.applyOptions(vopt.Indent("", "  "))
+		es.flags = uint32(escapeStringFlags)
 		es.buf = make([]byte, 0, k)
 		err := es.encodeTop(ti, ptr)
 		got := string(es.buf)
@@ -143,7 +145,7 @@ func TestMarshalIndent_FallbackFieldPaths(t *testing.T) {
 		E: indentCheckMarshaler{Ref: "2026-08-20T12:00:00Z"},
 		F: []indentCheckInner{{Y: 10}, {Y: 20}},
 	}
-	got, err := MarshalIndent(&v, "", "  ", WithStdCompat())
+	got, err := MarshalIndent(&v, "", "  ", vopt.EscapeHTML(true), vopt.EscapeLineTerms(true), vopt.AllowInvalidUTF8(false), vopt.FloatExpAuto(true))
 	if err != nil {
 		t.Fatalf("MarshalIndent: %v", err)
 	}
