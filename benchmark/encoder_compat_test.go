@@ -128,6 +128,23 @@ func TestNativeEncoder_Twitter_Users(t *testing.T) {
 	}
 }
 
+// TestNativeEncoder_GitHubIssues validates the encoder against the GitHub
+// REST issues payload: 117 wrapper timestamps (github.Timestamp shape) across
+// issues, milestones and pull-request links, which the native time op takes,
+// and pointer-heavy go-github types throughout.
+func TestNativeEncoder_GitHubIssues(t *testing.T) {
+	v := loadGitHubIssuesValue()
+	stdOut, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("stdlib Marshal: %v", err)
+	}
+	vjOut, err := vjson.Marshal(v, stdlibLikeOpts)
+	if err != nil {
+		t.Fatalf("velox Marshal: %v", err)
+	}
+	assertJSONEqual(t, "GitHubIssues", stdOut, vjOut)
+}
+
 // ---- helpers ----
 
 // assertJSONEqual re-parses both JSON outputs into interface{} and
