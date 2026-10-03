@@ -160,6 +160,39 @@ func Benchmark_Marshal_TwitterTyped_Velox(b *testing.B) {
 }
 
 // =============================================================================
+// GitHubIssues: GitHub REST API issues (~186KB, 30 issues). Pointer-heavy
+// go-github types; every field has omitempty, and the times marshal by the
+// embedded time.Time.
+// =============================================================================
+
+var (
+	githubIssuesValueOnce sync.Once
+	githubIssuesValue     []*GitHubIssue
+)
+
+func loadGitHubIssuesValue() []*GitHubIssue {
+	githubIssuesValueOnce.Do(func() {
+		if err := json.Unmarshal(LoadGitHubIssuesJSON(), &githubIssuesValue); err != nil {
+			panic("load github issues: " + err.Error())
+		}
+	})
+	return githubIssuesValue
+}
+
+func Benchmark_Marshal_GitHubIssues_Sonic(b *testing.B) {
+	benchMarshalSonic(b, loadGitHubIssuesValue())
+}
+func Benchmark_Marshal_GitHubIssues_GoJSON(b *testing.B) {
+	benchMarshalGoJSON(b, loadGitHubIssuesValue())
+}
+func Benchmark_Marshal_GitHubIssues_JSONv2(b *testing.B) {
+	benchMarshalJSONv2(b, loadGitHubIssuesValue())
+}
+func Benchmark_Marshal_GitHubIssues_Velox(b *testing.B) {
+	benchMarshalVelox(b, loadGitHubIssuesValue())
+}
+
+// =============================================================================
 // MapAny: map[string]any – exercises encodeAnyMap / encodeAnyVal path
 // Uses KubePods JSON decoded into map[string]any for realistic nested data.
 // =============================================================================

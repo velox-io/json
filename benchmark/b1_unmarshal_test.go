@@ -1,6 +1,8 @@
 package benchmark
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 
 	"dev.local/benchmark/twitter"
@@ -229,6 +231,46 @@ func Benchmark_Unmarshal_TwitterTyped_JSONv2(b *testing.B) {
 }
 func Benchmark_Unmarshal_TwitterTyped_Velox(b *testing.B) {
 	benchUnmarshalVelox[twitter_typed.TwitterStruct](b, LoadTwitterCompactJSON())
+}
+
+// =============================================================================
+// GitHubIssues: GitHub REST API issues (~186KB, 30 issues). Pointer-heavy
+// go-github types with a custom UnmarshalJSON timestamp. The response keys
+// have not the field order of the types, and some match no field, so the
+// key prediction mostly misses and the full lookup path runs.
+// =============================================================================
+
+func Benchmark_Unmarshal_GitHubIssues_Sonic(b *testing.B) {
+	benchUnmarshalSonic[[]*GitHubIssue](b, LoadGitHubIssuesJSON())
+}
+func Benchmark_Unmarshal_GitHubIssues_GoJSON(b *testing.B) {
+	benchUnmarshalGoJSON[[]*GitHubIssue](b, LoadGitHubIssuesJSON())
+}
+func Benchmark_Unmarshal_GitHubIssues_JSONv2(b *testing.B) {
+	benchUnmarshalJSONv2[[]*GitHubIssue](b, LoadGitHubIssuesJSON())
+}
+func Benchmark_Unmarshal_GitHubIssues_Velox(b *testing.B) {
+	benchUnmarshalVelox[[]*GitHubIssue](b, LoadGitHubIssuesJSON())
+}
+
+// TestGitHubIssuesPayload checks that velox decodes the payload exactly as
+// encoding/json does: the pointer fields, the times by UnmarshalJSON, the
+// empty arrays, and the response keys which no field matches.
+func TestGitHubIssuesPayload(t *testing.T) {
+	data := LoadGitHubIssuesJSON()
+	var want, got []*GitHubIssue
+	if err := json.Unmarshal(data, &want); err != nil {
+		t.Fatal(err)
+	}
+	if err := vjson.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatal("the payload decodes differently")
+	}
+	if len(got) != 30 || got[0].Title == nil || got[0].User == nil || got[0].User.Login == nil {
+		t.Fatal("the payload has no issues")
+	}
 }
 
 // =============================================================================
