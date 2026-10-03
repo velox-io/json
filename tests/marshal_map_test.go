@@ -7,8 +7,9 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/velox-io/json/vopt"
+
 	vjson "github.com/velox-io/json"
-	"github.com/velox-io/json/venc"
 )
 
 type wrapMapStrStr struct {
@@ -580,7 +581,7 @@ func TestNativeMap_EscapeHTML(t *testing.T) {
 			"amp":    "tom & jerry",
 			"quote":  `"quoted"`,
 		}
-		got, err := vjson.Marshal(val, vjson.WithEscapeHTML())
+		got, err := vjson.Marshal(val, vjson.EscapeHTML(true))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -597,7 +598,7 @@ func TestNativeMap_EscapeHTML(t *testing.T) {
 			"a&b":         2,
 			"normal":      3,
 		}
-		got, err := vjson.Marshal(val, vjson.WithEscapeHTML())
+		got, err := vjson.Marshal(val, vjson.EscapeHTML(true))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -612,7 +613,7 @@ func TestNativeMap_EscapeHTML(t *testing.T) {
 			"<tag>": 999999999999,
 			"a&b":   -42,
 		}
-		got, err := vjson.Marshal(val, vjson.WithEscapeHTML())
+		got, err := vjson.Marshal(val, vjson.EscapeHTML(true))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -838,7 +839,7 @@ func TestNativeMap_SliceOfMap_BufFull(t *testing.T) {
 	for ci, val := range cases {
 		want, _ := json.Marshal(val)
 
-		// Default buffer (no WithBufSize) to test the basic path.
+		// Default buffer (no BufSize) to test the basic path.
 		got, err := vjson.Marshal(val)
 		if err != nil {
 			t.Fatalf("case=%d: Marshal error: %v", ci, err)
@@ -850,7 +851,7 @@ func TestNativeMap_SliceOfMap_BufFull(t *testing.T) {
 
 		// Sweep buffer sizes to also stress BUF_FULL re-entry.
 		for bufSize := 1; bufSize <= 256; bufSize++ {
-			got, err := vjson.Marshal(val, venc.WithBufSize(bufSize))
+			got, err := vjson.Marshal(val, vopt.BufSize(bufSize))
 			if err != nil {
 				t.Fatalf("case=%d bufSize=%d: Marshal error: %v", ci, bufSize, err)
 			}

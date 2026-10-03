@@ -324,7 +324,7 @@ func TestMarshal_SeqEscapeHTML(t *testing.T) {
 		"normal",
 	}}
 
-	got, err := vjson.Marshal(val, vjson.WithEscapeHTML())
+	got, err := vjson.Marshal(val, vjson.EscapeHTML(true))
 	if err != nil {
 		t.Fatal(err)
 	}

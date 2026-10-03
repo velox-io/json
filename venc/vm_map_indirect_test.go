@@ -8,6 +8,8 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/native/encvm"
 )
@@ -210,7 +212,7 @@ func TestMapIterSmallElemsMarshal(t *testing.T) {
 	ti := EncTypeInfoOf(reflect.TypeOf(v))
 	for n := 16; n <= 256; n += 8 {
 		es := acquireEncodeState()
-		WithBufSize(n)(es)
+		es.applyOptions(vopt.BufSize(n))
 		es.buf = make([]byte, 0, n)
 		got, err := es.marshalWith(ti, unsafe.Pointer(&v))
 		releaseEncodeState(es)
@@ -276,7 +278,7 @@ func TestMapIndirectElemBufFullResume(t *testing.T) {
 
 	for _, cap := range []int{16, 24, 32, 48, 64, 96, 128, 192} {
 		es := acquireEncodeState()
-		WithBufSize(cap)(es)
+		es.applyOptions(vopt.BufSize(cap))
 		es.buf = make([]byte, 0, cap)
 		got, err := es.marshalWith(ti, unsafe.Pointer(&h))
 		releaseEncodeState(es)

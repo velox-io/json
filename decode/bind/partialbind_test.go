@@ -9,6 +9,8 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/decode/dom"
 	"github.com/velox-io/json/native/ndec"
 	"github.com/velox-io/json/value"
@@ -150,13 +152,13 @@ func TestReserveUnknownNestedValue(t *testing.T) {
 	}
 }
 
-// TestReserveUnknownDisallowUnknownNoOp verifies that WithDisallowUnknownFields
+// TestReserveUnknownDisallowUnknownNoOp verifies that RejectUnknownMembers
 // is a silent no-op when a reserve-unknown is present: unknown keys are captured,
 // not rejected.
 func TestReserveUnknownDisallowUnknownNoOp(t *testing.T) {
 	src := `{"name":"x","unknown":2}`
 	var result reserveUnknownStruct
-	err := Unmarshal([]byte(src), &result, WithDisallowUnknownFields())
+	err := Unmarshal([]byte(src), &result, vopt.RejectUnknownMembers(true))
 	if err != nil {
 		t.Fatalf("Unmarshal with DisallowUnknown: %v (expected no-op)", err)
 	}

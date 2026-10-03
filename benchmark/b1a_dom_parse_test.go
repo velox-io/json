@@ -63,7 +63,7 @@ func benchDomValueStrict(b *testing.B, data []byte) {
 	b.ResetTimer()
 	for b.Loop() {
 		var val vjson.Value
-		if err := vjson.Unmarshal(data, &val, vjson.WithStrictScan()); err != nil {
+		if err := vjson.Unmarshal(data, &val, vjson.AllowInvalidUTF8(false)); err != nil {
 			b.Fatal(err)
 		}
 	}

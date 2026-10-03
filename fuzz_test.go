@@ -23,7 +23,7 @@ import (
 // characters (bytes < 0x20) and invalid escape sequences inside strings, and
 // it replaces each invalid UTF-8 byte with U+FFFD during unquote. vjson's
 // string decode passes raw bytes through: the lax scan keeps malformed UTF-8
-// verbatim (the documented raw-passthrough policy; WithStrictScan rejects
+// verbatim (the documented raw-passthrough policy; AllowInvalidUTF8(false) rejects
 // it) and accepts raw control bytes that std rejects. Inputs carrying
 // invalid UTF-8 are therefore skipped in the value comparison below;
 // control-char leniency is absorbed by the lenient branch.
@@ -315,7 +315,7 @@ func FuzzNoCrash(f *testing.F) {
 // FuzzMarshalString: differential fuzzer for string escaping.
 //
 // Takes an arbitrary string, wraps it in a struct field, and marshals with
-// both vjson (WithStdCompat) and encoding/json. Output must be byte-identical.
+// both vjson (stdlib-like options) and encoding/json. Output must be byte-identical.
 // This exercises all native string escape paths: SIMD (16/32-byte), SWAR
 // (8-byte), byte-by-byte, UTF-8 validation, HTML escaping, line terminators,
 // and surrogate replacement.
@@ -370,7 +370,7 @@ func FuzzMarshalString(f *testing.F) {
 	f.Fuzz(func(t *testing.T, s string) {
 		v := S{V: s}
 
-		vjOut, vjErr := Marshal(v, WithStdCompat())
+		vjOut, vjErr := Marshal(v, EscapeHTML(true), EscapeLineTerms(true), AllowInvalidUTF8(false), FloatExpAuto(true))
 		stdOut, stdErr := json.Marshal(v)
 
 		if vjErr != nil && stdErr == nil {
@@ -393,7 +393,7 @@ func FuzzMarshalString(f *testing.F) {
 // FuzzMarshalStruct: differential fuzzer for structured types.
 //
 // Builds a struct with diverse field types from fuzzer-provided entropy bytes,
-// then marshals with both vjson (WithStdCompat) and encoding/json. Exercises
+// then marshals with both vjson (stdlib-like options) and encoding/json. Exercises
 // the native C VM, string escaping, number formatting, bool encoding, slices,
 // maps, pointers, []byte (base64), and omitempty.
 
@@ -471,7 +471,7 @@ func FuzzMarshalStruct(f *testing.F) {
 			v.Data = r.readBytes(n)
 		}
 
-		vjOut, vjErr := Marshal(v, WithStdCompat())
+		vjOut, vjErr := Marshal(v, EscapeHTML(true), EscapeLineTerms(true), AllowInvalidUTF8(false), FloatExpAuto(true))
 		stdOut, stdErr := json.Marshal(v)
 
 		if vjErr != nil && stdErr == nil {
@@ -562,19 +562,19 @@ func FuzzMarshalNoCrash(f *testing.F) {
 
 		// Marshal with every option combination; must not panic.
 		Marshal(v)
-		Marshal(v, WithStdCompat())
-		Marshal(v, WithFastEscape())
-		Marshal(v, WithEscapeHTML())
-		Marshal(v, WithoutUTF8Correction())
+		Marshal(v, EscapeHTML(true), EscapeLineTerms(true), AllowInvalidUTF8(false), FloatExpAuto(true))
+		Marshal(v)
+		Marshal(v, EscapeHTML(true))
+		Marshal(v, AllowInvalidUTF8(true))
 
 		// Also test bare string marshaling
 		s := v.A
 		Marshal(s)
-		Marshal(s, WithStdCompat())
+		Marshal(s, EscapeHTML(true), EscapeLineTerms(true), AllowInvalidUTF8(false), FloatExpAuto(true))
 
 		// Also test MarshalIndent
 		MarshalIndent(v, "", "  ")
-		MarshalIndent(v, ">", "\t", WithStdCompat())
+		MarshalIndent(v, ">", "\t", EscapeHTML(true), EscapeLineTerms(true), AllowInvalidUTF8(false), FloatExpAuto(true))
 	})
 }
 

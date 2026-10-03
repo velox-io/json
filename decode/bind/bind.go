@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/velox-io/json/decode/option"
 	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/internal/gbind"
 	"github.com/velox-io/json/internal/valueabi"
@@ -20,60 +19,54 @@ import (
 	"github.com/velox-io/json/native/ndec"
 	"github.com/velox-io/json/rtcache"
 	"github.com/velox-io/json/vbind"
+	"github.com/velox-io/json/vopt"
 )
 
-// UnmarshalOption is an alias for option.Option
-type UnmarshalOption = option.Option
+// UnmarshalOption is an alias for vopt.Options
+type UnmarshalOption = vopt.Options
 
-func WithUseNumber() UnmarshalOption { return option.WithUseNumber() }
-
-func WithDisallowUnknownFields() UnmarshalOption { return option.WithDisallowUnknownFields() }
-
-func WithStrictScan() UnmarshalOption { return option.WithStrictScan() }
-
-func WithZeroCopy(enabled bool) UnmarshalOption { return option.WithZeroCopy(enabled) }
-
-// optFlagsOf translates cfg into the C-side opt flag bits every input model
+// optFlagsOf translates o into the C-side opt flag bits every input model
 // shares. The zero-copy bit depends on the input model and is left to the
 // entry.
-func optFlagsOf(cfg option.Config) uint32 {
+func optFlagsOf(o vopt.Options) uint32 {
 	var flags uint32
-	if cfg.UseNumber {
+	if o.Enabled(vopt.FlagUseNumber) {
 		flags |= ndec.BindOptUseNumber
 	}
-	if cfg.DisallowUnknown {
+	if o.Enabled(vopt.FlagRejectUnknownMembers) {
 		flags |= ndec.BindOptDisallowUnknown
 	}
-	if cfg.StrictScan {
+	if v, ok := o.Get(vopt.FlagAllowInvalidUTF8); ok && !v {
 		flags |= ndec.BindOptStrictScan
 	}
-	if cfg.SkipLenient {
+	if o.Enabled(vopt.FlagSkipLenient) {
 		flags |= ndec.BindOptSkipLenient
 	}
 	return flags
 }
 
 // applyOpts sets p.optFlags for a drive whose input cannot be aliased, and
-// returns the resolved config so the entry can reject a zero-copy demand.
-func applyOpts(p *Parser, opts []UnmarshalOption) option.Config {
-	cfg := option.Apply(opts)
-	p.optFlags = optFlagsOf(cfg)
-	return cfg
+// returns the resolved options so the entry can reject a zero-copy demand.
+func applyOpts(p *Parser, opts []UnmarshalOption) vopt.Options {
+	o := vopt.Join(opts...)
+	p.optFlags = optFlagsOf(o)
+	return o
 }
 
-// contiguousOptFlags resolves cfg for a drive over caller-owned bytes, which
+// contiguousOptFlags resolves o for a drive over caller-owned bytes, which
 // zero-copy strings may alias. The default aliases, except on trees carrying
 // value.Value or poly fields: their strings flow through the tape and stay
 // arena-backed, so an explicit demand there is rejected rather than downgraded.
-func contiguousOptFlags(tt *vbind.TypeTree, cfg option.Config) (uint32, error) {
-	flags := optFlagsOf(cfg)
+func contiguousOptFlags(tt *vbind.TypeTree, o vopt.Options) (uint32, error) {
+	flags := optFlagsOf(o)
+	zeroCopy, named := o.Get(vopt.FlagZeroCopy)
 	if tt.HasValueField || tt.HasPolyField {
-		if cfg.ZeroCopy == option.ZeroCopyOn {
+		if named && zeroCopy {
 			return 0, ErrZeroCopyTypedTree
 		}
 		return flags, nil
 	}
-	if cfg.ZeroCopy != option.ZeroCopyOff {
+	if !named || zeroCopy {
 		flags |= ndec.BindOptZeroCopyStr
 	}
 	return flags, nil
@@ -86,7 +79,7 @@ func resolveContiguousOpts(p *Parser, opts []UnmarshalOption) error {
 		p.optFlags = p.defaultOptFlags
 		return nil
 	}
-	flags, err := contiguousOptFlags(p.tt, option.Apply(opts))
+	flags, err := contiguousOptFlags(p.tt, vopt.Join(opts...))
 	if err != nil {
 		return err
 	}
@@ -530,7 +523,7 @@ func buildShape(rtp uintptr, t reflect.Type) (*shape, error) {
 	}
 
 	// The zero Config demands nothing, so it cannot fail.
-	sh.defaultOptFlags, _ = contiguousOptFlags(tt, option.Config{})
+	sh.defaultOptFlags, _ = contiguousOptFlags(tt, vopt.Options{})
 
 	// The Go engine view is built with the shape, so the cache's publication
 	// orders its write; the differential build defers it to the first Go bind.

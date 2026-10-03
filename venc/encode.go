@@ -81,10 +81,11 @@ type encodeState struct {
 	// dead state it must reset; only encodePtr writes it, and undoes it.
 	stream streamState
 
-	// bufSize carries WithBufSize across the MarshalOption boundary (whose
-	// func(*encodeState) signature is public and fixed). marshalWith drains it
-	// into a local and zeroes it on entry, so it is not cross-encode state.
-	// Zero means "not set".
+	// bufSize carries the BufSize option from applyOptions to marshalWith,
+	// which drains it into a local and zeroes it. AppendMarshal never reads
+	// or drains it, so it can ride back into the pool set; the next
+	// applyOptions overwrites it before any read, so nothing crosses
+	// encodes. Zero means "not set".
 	bufSize int
 
 	// execDepth counts es.exec runs on the Go call stack. The outermost run

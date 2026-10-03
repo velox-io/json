@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/velox-io/json/vopt"
 )
 
 // Stress tests driven from the caller's perspective. Each test mixes real API
@@ -327,7 +329,7 @@ func TestStress_EncoderErrorReuse(t *testing.T) {
 // returned slices, GC must reclaim them and HeapInuse must return to baseline.
 //
 // The default path returns a sub-slice of a pooled 32 KiB buffer, and
-// WithBufSize opts into a tight copy. We exercise both paths interleaved, hold
+// BufSize opts into a tight copy. We exercise both paths interleaved, hold
 // all results, record the peak, then release and force GC. The assertion is on
 // the post-release HeapInuse, not on the peak: pool reuse means the default
 // path's pin footprint is dominated by how many distinct backing arrays got
@@ -344,7 +346,7 @@ func TestStress_MarshalReturnPin_Heap(t *testing.T) {
 	var baseline runtime.MemStats
 	runtime.ReadMemStats(&baseline)
 
-	// Phase 1: interleave default and WithBufSize paths, holding every result.
+	// Phase 1: interleave default and BufSize paths, holding every result.
 	hold := make([][]byte, 0, n*2)
 	for range n {
 		b1, err := Marshal(v)
@@ -353,9 +355,9 @@ func TestStress_MarshalReturnPin_Heap(t *testing.T) {
 		}
 		hold = append(hold, b1)
 
-		b2, err := Marshal(v, WithBufSize(64))
+		b2, err := Marshal(v, vopt.BufSize(64))
 		if err != nil {
-			t.Fatalf("Marshal WithBufSize: %v", err)
+			t.Fatalf("Marshal BufSize: %v", err)
 		}
 		hold = append(hold, b2)
 	}
@@ -440,7 +442,7 @@ func TestStress_ConcurrentMixedWriters_NoDeadlock(t *testing.T) {
 					_ = NewEncoder(&flakyWriter{okCalls: rng.IntN(5), err: errors.New("boom")}).Encode(v)
 				case 4:
 					// AppendMarshal, then drop the result.
-					_, _ = AppendMarshal(make([]byte, 0, 128), v, WithStdCompat())
+					_, _ = AppendMarshal(make([]byte, 0, 128), v, vopt.EscapeHTML(true), vopt.EscapeLineTerms(true), vopt.AllowInvalidUTF8(false), vopt.FloatExpAuto(true))
 				}
 			}
 		}(w)

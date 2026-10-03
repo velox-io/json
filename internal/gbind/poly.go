@@ -9,6 +9,7 @@ import (
 	"github.com/velox-io/json/native/ndec"
 	"github.com/velox-io/json/value"
 	"github.com/velox-io/json/vbind"
+	"github.com/velox-io/json/vopt"
 )
 
 // Poly hosts: structs with an inline variant, a reserve-unknown Value, or a
@@ -510,7 +511,7 @@ func (c *binder) bindValueDoc(dst unsafe.Pointer) error {
 func (c *binder) storeDoc(dst unsafe.Pointer, text []byte, pos uint64) error {
 	var opts []dom.ParseOption
 	if c.opt&ndec.BindOptStrictScan != 0 {
-		opts = append(opts, dom.WithStrictScan())
+		opts = append(opts, vopt.AllowInvalidUTF8(false))
 	}
 	v, err := dom.Parse(text, opts...)
 	if err != nil {

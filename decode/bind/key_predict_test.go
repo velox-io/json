@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/velox-io/json/vopt"
 )
 
 // Both engines try the field after the last match before resolving a key.
@@ -116,7 +118,7 @@ func TestStructKeyPredictionTruncated(t *testing.T) {
 
 func TestStructKeyPredictionDisallowUnknown(t *testing.T) {
 	var v predictPrefix
-	err := Unmarshal([]byte(`{"ab":1,"abcd":2}`), &v, WithDisallowUnknownFields())
+	err := Unmarshal([]byte(`{"ab":1,"abcd":2}`), &v, vopt.RejectUnknownMembers(true))
 	if err == nil || !strings.Contains(err.Error(), "unknown_field") {
 		t.Fatalf("err = %v, want unknown field", err)
 	}

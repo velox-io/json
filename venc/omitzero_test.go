@@ -7,6 +7,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/native/encvm"
 )
 
@@ -112,7 +114,7 @@ func TestOmitZeroNativeBufFullMidField(t *testing.T) {
 	}
 	for cap := lo; cap <= wantLen+4; cap++ {
 		es := acquireEncodeState()
-		WithBufSize(cap)(es)
+		es.applyOptions(vopt.BufSize(cap))
 		es.buf = make([]byte, 0, cap)
 
 		got, err := es.marshalWith(ti, unsafe.Pointer(&v))

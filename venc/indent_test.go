@@ -6,6 +6,8 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/native/encvm"
 )
 
@@ -57,7 +59,9 @@ func runIndentDepthReset(t *testing.T, setup func(*encodeState)) {
 // TestIndentDepthReset_MarshalPath exercises the real withIndent option
 // (MarshalIndent path). withIndent must reset es.indentDepth = 0.
 func TestIndentDepthReset_MarshalPath(t *testing.T) {
-	runIndentDepthReset(t, withIndent("", "\u00a0"))
+	runIndentDepthReset(t, func(es *encodeState) {
+		es.applyOptions(vopt.Indent("", "\u00a0"))
+	})
 }
 
 // TestIndentDepthReset_EncoderPath mirrors Encoder.encodePtr's indent setup
@@ -91,7 +95,7 @@ func TestIndentYieldRunExitsAtEntryDepth(t *testing.T) {
 	es := acquireEncodeState()
 	defer releaseEncodeState(es)
 
-	withIndent("", "  ")(es)
+	es.applyOptions(vopt.Indent("", "  "))
 	outer := indentResetYielder{Name: "x", Val: customMarshalerVal{}}
 	ti := EncTypeInfoOf(reflect.TypeOf(indentResetYielder{}))
 	if err := es.encodeTop(ti, unsafe.Pointer(&outer)); err != nil {

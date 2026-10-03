@@ -15,6 +15,8 @@ import (
 	"testing/iotest"
 	"time"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/native/ndec"
 )
 
@@ -216,9 +218,9 @@ func TestGoCoreDiffCases(t *testing.T) {
 	needNativeForDiff(t)
 	for _, in := range gcDiffInputs {
 		diffEngines[gcAll](t, []byte(in), nil)
-		diffEngines[gcAll](t, []byte(in), nil, WithUseNumber())
-		diffEngines[gcAll](t, []byte(in), nil, WithDisallowUnknownFields())
-		diffEngines[gcAll](t, []byte(in), nil, WithZeroCopy(true))
+		diffEngines[gcAll](t, []byte(in), nil, vopt.UseNumber(true))
+		diffEngines[gcAll](t, []byte(in), nil, vopt.RejectUnknownMembers(true))
+		diffEngines[gcAll](t, []byte(in), nil, vopt.ZeroCopy(true))
 		diffEngines[gcAll](t, []byte(in), func(v *gcAll) {
 			one := 1
 			v.A, v.X, v.P, v.N = 9, []int{7, 7, 7, 7}, &one, gcInner{B: 5, D: []float64{3}}
@@ -370,11 +372,11 @@ func TestGoCoreDiffMutations(t *testing.T) {
 		var opts []UnmarshalOption
 		switch i % 4 {
 		case 1:
-			opts = []UnmarshalOption{WithUseNumber()}
+			opts = []UnmarshalOption{vopt.UseNumber(true)}
 		case 2:
-			opts = []UnmarshalOption{WithZeroCopy(true), WithStrictScan()}
+			opts = []UnmarshalOption{vopt.ZeroCopy(true), vopt.AllowInvalidUTF8(false)}
 		case 3:
-			opts = []UnmarshalOption{WithDisallowUnknownFields()}
+			opts = []UnmarshalOption{vopt.RejectUnknownMembers(true)}
 		}
 		if !diffEngines[gcAll](t, b, nil, opts...) {
 			fails++

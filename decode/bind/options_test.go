@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/value"
 )
 
@@ -12,12 +14,12 @@ import (
 // effect on the call that receives them and must not stick to a pooled or reused
 // Parser across calls.
 
-// --- WithUseNumber ---
+// --- UseNumber ---
 
-// TestWithUseNumber_BoxesAsJsonNumber confirms the option routes any/interface{}
+// TestUseNumber_BoxesAsJsonNumber confirms the option routes any/interface{}
 // numbers through the native BIND_OPT_USE_NUMBER path, which tags the eface
 // with json.Number (vbind/build.go NumberType) instead of float64.
-func TestWithUseNumber_BoxesAsJsonNumber(t *testing.T) {
+func TestUseNumber_BoxesAsJsonNumber(t *testing.T) {
 	src := `{"v":123}`
 
 	// Default: interface{} numbers decode as float64.
@@ -29,29 +31,29 @@ func TestWithUseNumber_BoxesAsJsonNumber(t *testing.T) {
 		t.Fatalf("default V = %T(%v), want float64(123)", def.V, def.V)
 	}
 
-	// WithUseNumber: interface{} numbers decode as json.Number.
+	// UseNumber: interface{} numbers decode as json.Number.
 	var num anyField
-	if err := Unmarshal([]byte(src), &num, WithUseNumber()); err != nil {
-		t.Fatalf("WithUseNumber Unmarshal: %v", err)
+	if err := Unmarshal([]byte(src), &num, vopt.UseNumber(true)); err != nil {
+		t.Fatalf("UseNumber Unmarshal: %v", err)
 	}
 	n, ok := num.V.(json.Number)
 	if !ok {
-		t.Fatalf("WithUseNumber V = %T, want json.Number", num.V)
+		t.Fatalf("UseNumber V = %T, want json.Number", num.V)
 	}
 	if s := n.String(); s != "123" {
 		t.Fatalf("json.Number = %q, want %q", s, "123")
 	}
 }
 
-// TestWithUseNumber_DoesNotStickAcrossCalls guards the pooled-Parser reset at
+// TestUseNumber_DoesNotStickAcrossCalls guards the pooled-Parser reset at
 // the package Unmarshal entry (bind.go optFlags=0). A prior call's option must
 // not leak into a later call that omits it. This is the regression that
 // Parser.UseNumber() silently failed: sticky-per-call is the contract here.
-func TestWithUseNumber_DoesNotStickAcrossCalls(t *testing.T) {
+func TestUseNumber_DoesNotStickAcrossCalls(t *testing.T) {
 	src := `{"v":1}`
 
 	var first anyField
-	if err := Unmarshal([]byte(src), &first, WithUseNumber()); err != nil {
+	if err := Unmarshal([]byte(src), &first, vopt.UseNumber(true)); err != nil {
 		t.Fatalf("first: %v", err)
 	}
 	if _, ok := first.V.(json.Number); !ok {
@@ -69,10 +71,10 @@ func TestWithUseNumber_DoesNotStickAcrossCalls(t *testing.T) {
 	}
 }
 
-// TestParser_WithUseNumber_PerCall confirms the Parser.Unmarshal entry also
+// TestParser_UseNumber_PerCall confirms the Parser.Unmarshal entry also
 // resets per call (bind.go optFlags=0), so a Parser reused with and without
 // the option behaves per-call, not sticky.
-func TestParser_WithUseNumber_PerCall(t *testing.T) {
+func TestParser_UseNumber_PerCall(t *testing.T) {
 	p, err := NewParser[anyField]()
 	if err != nil {
 		t.Fatalf("NewParser: %v", err)
@@ -80,7 +82,7 @@ func TestParser_WithUseNumber_PerCall(t *testing.T) {
 	src := []byte(`{"v":42}`)
 
 	var with anyField
-	if err := p.Unmarshal(src, &with, WithUseNumber()); err != nil {
+	if err := p.Unmarshal(src, &with, vopt.UseNumber(true)); err != nil {
 		t.Fatalf("with option: %v", err)
 	}
 	if _, ok := with.V.(json.Number); !ok {
@@ -96,17 +98,17 @@ func TestParser_WithUseNumber_PerCall(t *testing.T) {
 	}
 }
 
-// --- WithDisallowUnknownFields ---
+// --- RejectUnknownMembers ---
 
 type disallowTarget struct {
 	Name string `json:"name"`
 	Age  int    `json:"age"`
 }
 
-// TestWithDisallowUnknownFields_RejectsUnknownField confirms the option arms
+// TestRejectUnknownMembers_RejectsUnknownField confirms the option arms
 // the native BIND_OPT_DISALLOW_UNKNOWN check (bind.h), which yields
 // BIND_ERR_UNKNOWN_FIELD for a JSON member with no matching Go field.
-func TestWithDisallowUnknownFields_RejectsUnknownField(t *testing.T) {
+func TestRejectUnknownMembers_RejectsUnknownField(t *testing.T) {
 	src := `{"name":"Ada","age":36,"role":"admin"}`
 
 	// Without the option: unknown "role" is silently ignored.
@@ -120,7 +122,7 @@ func TestWithDisallowUnknownFields_RejectsUnknownField(t *testing.T) {
 
 	// With the option: unknown "role" is an error.
 	var strict disallowTarget
-	err := Unmarshal([]byte(src), &strict, WithDisallowUnknownFields())
+	err := Unmarshal([]byte(src), &strict, vopt.RejectUnknownMembers(true))
 	if err == nil {
 		t.Fatalf("strict Unmarshal: want error for unknown field, got nil")
 	}
@@ -131,12 +133,12 @@ func TestWithDisallowUnknownFields_RejectsUnknownField(t *testing.T) {
 	}
 }
 
-// TestWithDisallowUnknownFields_AcceptsKnownFields confirms the option does
+// TestRejectUnknownMembers_AcceptsKnownFields confirms the option does
 // not reject inputs whose fields all map.
-func TestWithDisallowUnknownFields_AcceptsKnownFields(t *testing.T) {
+func TestRejectUnknownMembers_AcceptsKnownFields(t *testing.T) {
 	src := `{"name":"Ada","age":36}`
 	var strict disallowTarget
-	if err := Unmarshal([]byte(src), &strict, WithDisallowUnknownFields()); err != nil {
+	if err := Unmarshal([]byte(src), &strict, vopt.RejectUnknownMembers(true)); err != nil {
 		t.Fatalf("strict Unmarshal: %v", err)
 	}
 	if strict.Name != "Ada" || strict.Age != 36 {
@@ -144,14 +146,14 @@ func TestWithDisallowUnknownFields_AcceptsKnownFields(t *testing.T) {
 	}
 }
 
-// TestWithDisallowUnknownFields_DoesNotStickAcrossCalls guards the pooled
+// TestRejectUnknownMembers_DoesNotStickAcrossCalls guards the pooled
 // reset: a strict call must not make a later lax call on the same pooled
 // Parser reject unknown fields.
-func TestWithDisallowUnknownFields_DoesNotStickAcrossCalls(t *testing.T) {
+func TestRejectUnknownMembers_DoesNotStickAcrossCalls(t *testing.T) {
 	src := `{"name":"Ada","age":36,"extra":true}`
 
 	var strict disallowTarget
-	if err := Unmarshal([]byte(src), &strict, WithDisallowUnknownFields()); err == nil {
+	if err := Unmarshal([]byte(src), &strict, vopt.RejectUnknownMembers(true)); err == nil {
 		t.Fatalf("strict: want error, got nil")
 	}
 
@@ -161,7 +163,7 @@ func TestWithDisallowUnknownFields_DoesNotStickAcrossCalls(t *testing.T) {
 	}
 }
 
-// --- WithStrictScan ---
+// --- AllowInvalidUTF8(false) ---
 
 type strictScanTarget struct {
 	S string `json:"s"`
@@ -171,7 +173,7 @@ type strictScanValueTarget struct {
 	V value.Value `json:"v"`
 }
 
-func TestWithStrictScan_ValidatesRawInput(t *testing.T) {
+func TestRejectInvalidUTF8_ValidatesRawInput(t *testing.T) {
 	tests := []struct {
 		name string
 		src  []byte
@@ -186,46 +188,46 @@ func TestWithStrictScan_ValidatesRawInput(t *testing.T) {
 				t.Fatalf("default scan: %v", err)
 			}
 			var strict strictScanTarget
-			if err := Unmarshal(tt.src, &strict, WithStrictScan()); err == nil {
+			if err := Unmarshal(tt.src, &strict, vopt.AllowInvalidUTF8(false)); err == nil {
 				t.Fatal("StrictScan accepted invalid raw input")
 			}
 		})
 	}
 }
 
-func TestWithStrictScan_AcceptsValidStrings(t *testing.T) {
+func TestRejectInvalidUTF8_AcceptsValidStrings(t *testing.T) {
 	for _, src := range []string{
 		`{"s":"世界"}`,
 		`{"s":"a\nb"}`,
 		`{"s":"a\u0001b"}`,
 	} {
 		var dst strictScanTarget
-		if err := Unmarshal([]byte(src), &dst, WithStrictScan()); err != nil {
+		if err := Unmarshal([]byte(src), &dst, vopt.AllowInvalidUTF8(false)); err != nil {
 			t.Fatalf("Unmarshal(%q): %v", src, err)
 		}
 	}
 }
 
-func TestWithStrictScan_CountedScan(t *testing.T) {
+func TestRejectInvalidUTF8_CountedScan(t *testing.T) {
 	src := []byte{'{', '"', 'v', '"', ':', '"', 0xff, '"', '}'}
 	var lax strictScanValueTarget
 	if err := Unmarshal(src, &lax); err != nil {
 		t.Fatalf("default counted scan: %v", err)
 	}
 	var strict strictScanValueTarget
-	if err := Unmarshal(src, &strict, WithStrictScan()); err == nil {
+	if err := Unmarshal(src, &strict, vopt.AllowInvalidUTF8(false)); err == nil {
 		t.Fatal("StrictScan counted path accepted invalid UTF-8")
 	}
 }
 
-func TestWithStrictScan_DoesNotStickAcrossParserCalls(t *testing.T) {
+func TestRejectInvalidUTF8_DoesNotStickAcrossParserCalls(t *testing.T) {
 	p, err := NewParser[strictScanTarget]()
 	if err != nil {
 		t.Fatalf("NewParser: %v", err)
 	}
 	src := []byte{'{', '"', 's', '"', ':', '"', 0xff, '"', '}'}
 	var strict strictScanTarget
-	if err := p.Unmarshal(src, &strict, WithStrictScan()); err == nil {
+	if err := p.Unmarshal(src, &strict, vopt.AllowInvalidUTF8(false)); err == nil {
 		t.Fatal("StrictScan accepted invalid UTF-8")
 	}
 	var lax strictScanTarget
@@ -234,22 +236,22 @@ func TestWithStrictScan_DoesNotStickAcrossParserCalls(t *testing.T) {
 	}
 }
 
-func TestWithStrictScan_UnmarshalPadded(t *testing.T) {
+func TestRejectInvalidUTF8_UnmarshalPadded(t *testing.T) {
 	src := Pad([]byte{'{', '"', 's', '"', ':', '"', 0xff, '"', '}'})
 	var dst strictScanTarget
-	if err := UnmarshalPadded(src, &dst, WithStrictScan()); err == nil {
+	if err := UnmarshalPadded(src, &dst, vopt.AllowInvalidUTF8(false)); err == nil {
 		t.Fatal("StrictScan accepted invalid UTF-8 from padded input")
 	}
 }
 
-func TestWithStrictScan_UnmarshalValueDoesNotRescan(t *testing.T) {
+func TestRejectInvalidUTF8_UnmarshalValueDoesNotRescan(t *testing.T) {
 	src := []byte{'{', '"', 'v', '"', ':', '"', 0xff, '"', '}'}
 	var doc strictScanValueTarget
 	if err := Unmarshal(src, &doc); err != nil {
 		t.Fatalf("build Value: %v", err)
 	}
 	var got string
-	if err := UnmarshalValue(doc.V, &got, WithStrictScan()); err != nil {
+	if err := UnmarshalValue(doc.V, &got, vopt.AllowInvalidUTF8(false)); err != nil {
 		t.Fatalf("UnmarshalValue: %v", err)
 	}
 	// The lax tape build preserves the malformed byte, so serving from the

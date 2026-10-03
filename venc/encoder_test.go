@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/velox-io/json/vopt"
 )
 
 func TestEncoder_Basic(t *testing.T) {
@@ -46,7 +48,7 @@ func TestEncoder_MultipleValues(t *testing.T) {
 
 func TestEncoder_Indent(t *testing.T) {
 	var buf bytes.Buffer
-	enc := NewEncoder(&buf, EncoderSetIndent("", "  "))
+	enc := NewEncoder(&buf, vopt.Indent("", "  "))
 
 	type Msg struct {
 		X int `json:"x"`
@@ -99,7 +101,7 @@ func TestEncoder_SetIndent_PostCreation(t *testing.T) {
 
 func TestEncoder_EscapeHTML(t *testing.T) {
 	var buf bytes.Buffer
-	enc := NewEncoder(&buf, EncoderSetEscapeHTML(true))
+	enc := NewEncoder(&buf, vopt.EscapeHTML(true))
 
 	s := "<script>alert('xss')</script>"
 	if err := enc.Encode(&s); err != nil {
@@ -127,7 +129,7 @@ func TestEncoder_SetEscapeHTML_PostCreation(t *testing.T) {
 	}
 
 	buf.Reset()
-	enc.SetEscapeHTML(true)
+	enc.SetOptions(vopt.EscapeHTML(true))
 	enc.Encode(&s)
 	if !strings.Contains(buf.String(), `\u003c`) {
 		t.Error("after SetEscapeHTML(true), should escape HTML")

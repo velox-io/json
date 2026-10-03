@@ -3,6 +3,8 @@ package bind
 import (
 	"testing"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/value"
 	"github.com/velox-io/json/vbind"
 )
@@ -161,7 +163,7 @@ func TestCaseSink_DiscLast(t *testing.T) {
 // key, and the host declining it is not the same as no one wanting it.
 func TestCaseSink_StrictMode(t *testing.T) {
 	var h caseSinkOnlyHost
-	err := Unmarshal([]byte(`{"name":"bob","greet":"hello","surprise":true}`), &h, WithDisallowUnknownFields())
+	err := Unmarshal([]byte(`{"name":"bob","greet":"hello","surprise":true}`), &h, vopt.RejectUnknownMembers(true))
 	if err != nil {
 		t.Fatalf("Unmarshal: %v; a case-side sink places the key, so strict mode must not reject", err)
 	}

@@ -282,7 +282,7 @@ func TestRawMessage_ByteIndependence(t *testing.T) {
 	}
 	input := []byte(`{"data":{"key":"value"}}`)
 	var msg Msg
-	if err := vjson.Unmarshal(input, &msg, vjson.WithZeroCopy(false)); err != nil {
+	if err := vjson.Unmarshal(input, &msg, vjson.ZeroCopy(false)); err != nil {
 		t.Fatal(err)
 	}
 	saved := string(msg.Data) // snapshot

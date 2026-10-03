@@ -7,13 +7,13 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/velox-io/json/decode/option"
 	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/internal/valueabi"
 	"github.com/velox-io/json/jerr"
 	"github.com/velox-io/json/native/ndec"
 	"github.com/velox-io/json/value"
 	"github.com/velox-io/json/vbind"
+	"github.com/velox-io/json/vopt"
 )
 
 // UnmarshalValue binds a pre-built value.Value (tape) into the value pointed
@@ -24,8 +24,8 @@ import (
 // the published StrArena extent are read-only. Ordinary strings may alias
 // Doc.StrArena; conversions that synthesize strings append to an owned arena.
 // This path consumes an existing tape rather than caller bytes, so
-// WithZeroCopy(true) is rejected with option.ErrZeroCopyUnsupported and
-// WithStrictScan leaves binding unchanged.
+// ZeroCopy(true) is rejected with vopt.ErrZeroCopyUnsupported and
+// AllowInvalidUTF8(false) leaves binding unchanged.
 func UnmarshalValue[T any](v value.Value, out T, opts ...UnmarshalOption) error {
 	rt := reflect.TypeFor[T]()
 	var ptr unsafe.Pointer
@@ -65,8 +65,8 @@ func UnmarshalValue[T any](v value.Value, out T, opts ...UnmarshalOption) error 
 	defer putParser(sh, p)
 	// The walk reads a Value doc rather than a caller-padded buffer, so its
 	// output cannot alias caller-owned input.
-	if cfg := applyOpts(p, opts); cfg.ZeroCopy == option.ZeroCopyOn {
-		return option.ErrZeroCopyUnsupported
+	if o := applyOpts(p, opts); o.Enabled(vopt.FlagZeroCopy) {
+		return vopt.ErrZeroCopyUnsupported
 	}
 	return p.unmarshalValue(v, &desc, ptr)
 }
@@ -88,8 +88,8 @@ func (p *Parser) UnmarshalValue(v value.Value, dst any, opts ...UnmarshalOption)
 	}
 	// The walk reads a Value doc rather than a caller-padded buffer, so its
 	// output cannot alias caller-owned input.
-	if cfg := applyOpts(p, opts); cfg.ZeroCopy == option.ZeroCopyOn {
-		return option.ErrZeroCopyUnsupported
+	if o := applyOpts(p, opts); o.Enabled(vopt.FlagZeroCopy) {
+		return vopt.ErrZeroCopyUnsupported
 	}
 	return p.unmarshalValue(v, &desc, dstPtr)
 }

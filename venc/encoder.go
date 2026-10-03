@@ -8,61 +8,27 @@ import (
 
 	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/native/encvm"
+	"github.com/velox-io/json/vopt"
 )
-
-type EncoderOption func(*Encoder)
-
-func EncoderSetIndent(prefix, indent string) EncoderOption {
-	return func(enc *Encoder) {
-		enc.indentPrefix = prefix
-		enc.indentString = indent
-	}
-}
-
-func EncoderSetEscapeHTML(on bool) EncoderOption {
-	return func(enc *Encoder) {
-		if on {
-			enc.flags |= uint32(escapeHTML)
-		} else {
-			enc.flags &^= uint32(escapeHTML)
-		}
-	}
-}
-
-func EncoderSetEscapeLineTerms(on bool) EncoderOption {
-	return func(enc *Encoder) {
-		if on {
-			enc.flags |= uint32(escapeLineTerms)
-		} else {
-			enc.flags &^= uint32(escapeLineTerms)
-		}
-	}
-}
-
-func EncoderSetFloatExpAuto(on bool) EncoderOption {
-	return func(enc *Encoder) {
-		if on {
-			enc.flags |= EncFloatExpAuto
-		} else {
-			enc.flags &^= EncFloatExpAuto
-		}
-	}
-}
 
 type Encoder struct {
 	w            io.Writer
 	err          error // sticky write error
 	indentPrefix string
 	indentString string
-	flags        uint32 // escapeFlags (bits 0-2) | vjEncFloatExpAuto (bit 3)
+	flags        uint32 // escapeFlags (bits 0-2) | EncFloatExpAuto (bit 3) | EncRawUTF8Repl (bit 5)
 }
 
-func NewEncoder(w io.Writer, opts ...EncoderOption) *Encoder {
+// NewEncoder creates an Encoder that writes to w. opts carry the same option
+// set as Marshal; options that do not apply to encoding are ignored.
+func NewEncoder(w io.Writer, opts ...vopt.Options) *Encoder {
 	enc := &Encoder{
 		w: w,
 	}
-	for _, opt := range opts {
-		opt(enc)
+	o := vopt.Join(opts...)
+	enc.flags = encFlagsOf(o)
+	if prefix, step, ok := o.Indent(); ok {
+		enc.indentPrefix, enc.indentString = prefix, step
 	}
 	return enc
 }
@@ -72,19 +38,14 @@ func (enc *Encoder) SetIndent(prefix, indent string) {
 	enc.indentString = indent
 }
 
-func (enc *Encoder) SetEscapeHTML(on bool) {
-	if on {
-		enc.flags |= uint32(escapeHTML)
-	} else {
-		enc.flags &^= uint32(escapeHTML)
-	}
-}
-
-func (enc *Encoder) SetEscapeLineTerms(on bool) {
-	if on {
-		enc.flags |= uint32(escapeLineTerms)
-	} else {
-		enc.flags &^= uint32(escapeLineTerms)
+// SetOptions rewrites the encoder's option state from opts. Every flag is
+// re-resolved, so flags left unnamed revert to their default. Indentation
+// is sticky encoder state: opts replace it only when they name Indent.
+func (enc *Encoder) SetOptions(opts ...vopt.Options) {
+	o := vopt.Join(opts...)
+	enc.flags = encFlagsOf(o)
+	if prefix, step, ok := o.Indent(); ok {
+		enc.indentPrefix, enc.indentString = prefix, step
 	}
 }
 

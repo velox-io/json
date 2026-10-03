@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/velox-io/json/vopt"
 )
 
 // repl is the JSON-level bytes for one invalid-UTF-8 replacement, matching
@@ -13,7 +15,7 @@ var repl = string(invalidUTF8Repl)
 
 // Low-level: appendEscapedString tests
 
-func TestEscape_StdCompat(t *testing.T) {
+func TestEscape_StdlibLike(t *testing.T) {
 	cases := []struct {
 		name string
 		s    string
@@ -43,7 +45,7 @@ func TestEscape_StdCompat(t *testing.T) {
 			if err != nil {
 				t.Fatalf("stdlib error: %v", err)
 			}
-			got := appendEscapedString(nil, tc.s, escapeStdCompat)
+			got := appendEscapedString(nil, tc.s, escapeStringFlags)
 			if string(got) != string(stdOut) {
 				t.Errorf("mismatch:\n  input:  %q\n  stdlib: %s\n  velox:  %s", tc.s, stdOut, got)
 			}
@@ -71,7 +73,7 @@ func TestEscape_Default(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := string(appendEscapedString(nil, tc.s, escapeStdCompat))
+			got := string(appendEscapedString(nil, tc.s, escapeStringFlags))
 			if got != tc.want {
 				t.Errorf("mismatch:\n  input: %q\n  want:  %s\n  got:   %s", tc.s, tc.want, got)
 			}
@@ -127,9 +129,9 @@ func TestEscape_HTMLOnly(t *testing.T) {
 
 // Marshal-level escape tests
 
-// TestMarshal_EscapeStdCompat verifies that Marshal with WithStdCompat()
+// TestMarshal_EscapeStdlibLike verifies that Marshal with vopt.EscapeHTML(true), vopt.EscapeLineTerms(true), vopt.AllowInvalidUTF8(false), vopt.FloatExpAuto(true)
 // produces identical output to encoding/json for all flag combinations.
-func TestMarshal_EscapeStdCompat(t *testing.T) {
+func TestMarshal_EscapeStdlibLike(t *testing.T) {
 	cases := []struct {
 		name string
 		s    string
@@ -206,7 +208,7 @@ func TestMarshal_EscapeStdCompat(t *testing.T) {
 			}
 			s := S{V: tc.s}
 
-			got, err := Marshal(s, WithStdCompat())
+			got, err := Marshal(s, vopt.EscapeHTML(true), vopt.EscapeLineTerms(true), vopt.AllowInvalidUTF8(false), vopt.FloatExpAuto(true))
 			if err != nil {
 				t.Fatalf("velox error: %v", err)
 			}
@@ -229,7 +231,7 @@ func TestMarshal_DefaultEscapesSafe(t *testing.T) {
 	}
 	s := S{V: "abc\xffdef"}
 
-	got, err := Marshal(s, WithStdCompat())
+	got, err := Marshal(s, vopt.EscapeHTML(true), vopt.EscapeLineTerms(true), vopt.AllowInvalidUTF8(false), vopt.FloatExpAuto(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +277,7 @@ func TestMarshal_EscapeDefault(t *testing.T) {
 	}
 }
 
-// TestMarshal_EscapeLineTerms verifies WithEscapeLineTerms escapes U+2028/U+2029
+// TestMarshal_EscapeLineTerms verifies vopt.EscapeLineTerms(true) escapes U+2028/U+2029
 // while leaving HTML and invalid UTF-8 untouched.
 func TestMarshal_EscapeLineTerms(t *testing.T) {
 	cases := []struct {
@@ -299,7 +301,7 @@ func TestMarshal_EscapeLineTerms(t *testing.T) {
 			type S struct {
 				V string `json:"v"`
 			}
-			got, err := Marshal(S{V: tc.s}, WithEscapeLineTerms())
+			got, err := Marshal(S{V: tc.s}, vopt.EscapeLineTerms(true))
 			if err != nil {
 				t.Fatalf("error: %v", err)
 			}
@@ -310,7 +312,7 @@ func TestMarshal_EscapeLineTerms(t *testing.T) {
 	}
 }
 
-// TestMarshal_EscapeFastPath verifies WithFastEscape (flags=0, VMExecFast path).
+// TestMarshal_EscapeFastPath verifies the default no-escape mode (flags=0, VMExecFast path).
 // Only mandatory JSON escapes: control chars, '"', '\\'. Everything else passes through.
 func TestMarshal_EscapeFastPath(t *testing.T) {
 	cases := []struct {
@@ -335,7 +337,7 @@ func TestMarshal_EscapeFastPath(t *testing.T) {
 			type S struct {
 				V string `json:"v"`
 			}
-			got, err := Marshal(S{V: tc.s}, WithFastEscape())
+			got, err := Marshal(S{V: tc.s})
 			if err != nil {
 				t.Fatalf("error: %v", err)
 			}
@@ -368,7 +370,7 @@ func TestMarshal_EscapeUTF8Only(t *testing.T) {
 			type S struct {
 				V string `json:"v"`
 			}
-			got, err := Marshal(S{V: tc.s}, WithFastEscape(), WithUTF8Correction())
+			got, err := Marshal(S{V: tc.s}, vopt.AllowInvalidUTF8(false))
 			if err != nil {
 				t.Fatalf("error: %v", err)
 			}
@@ -399,7 +401,7 @@ func TestMarshal_EscapeHTMLOnly(t *testing.T) {
 			type S struct {
 				V string `json:"v"`
 			}
-			got, err := Marshal(S{V: tc.s}, WithFastEscape(), WithEscapeHTML())
+			got, err := Marshal(S{V: tc.s}, vopt.EscapeHTML(true))
 			if err != nil {
 				t.Fatalf("error: %v", err)
 			}
@@ -425,8 +427,8 @@ func TestMarshal_EscapeLongStrings(t *testing.T) {
 	ascii := longString('x', 200)
 	asciiHTML := ascii[:50] + "<" + ascii[50:100] + ">" + ascii[100:150] + "&" + ascii[150:]
 
-	t.Run("StdCompat_long_cjk_with_sep", func(t *testing.T) {
-		got, err := Marshal(S{V: cjkWithSep}, WithStdCompat())
+	t.Run("StdlibLike_long_cjk_with_sep", func(t *testing.T) {
+		got, err := Marshal(S{V: cjkWithSep}, vopt.EscapeHTML(true), vopt.EscapeLineTerms(true), vopt.AllowInvalidUTF8(false), vopt.FloatExpAuto(true))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -436,8 +438,8 @@ func TestMarshal_EscapeLongStrings(t *testing.T) {
 		}
 	})
 
-	t.Run("StdCompat_long_ascii_html", func(t *testing.T) {
-		got, err := Marshal(S{V: asciiHTML}, WithStdCompat())
+	t.Run("StdlibLike_long_ascii_html", func(t *testing.T) {
+		got, err := Marshal(S{V: asciiHTML}, vopt.EscapeHTML(true), vopt.EscapeLineTerms(true), vopt.AllowInvalidUTF8(false), vopt.FloatExpAuto(true))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -463,7 +465,7 @@ func TestMarshal_EscapeLongStrings(t *testing.T) {
 	})
 
 	t.Run("FastEscape_long_passthrough", func(t *testing.T) {
-		got, err := Marshal(S{V: cjkWithSep}, WithFastEscape())
+		got, err := Marshal(S{V: cjkWithSep})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -517,8 +519,8 @@ func TestMarshal_EscapeLineTermTrailingBoundary(t *testing.T) {
 				V string `json:"v"`
 			}
 
-			// Test with WithEscapeLineTerms (line terms escaped, HTML/UTF8 passthrough)
-			got, err := Marshal(S{V: tc.input}, WithEscapeLineTerms())
+			// Test with vopt.EscapeLineTerms(true) (line terms escaped, HTML/UTF8 passthrough)
+			got, err := Marshal(S{V: tc.input}, vopt.EscapeLineTerms(true))
 			if err != nil {
 				t.Fatalf("Marshal error: %v", err)
 			}

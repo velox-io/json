@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/stream"
 )
 
@@ -66,7 +68,7 @@ func TestFeedOptions_UseNumberHoldsAcrossScopes(t *testing.T) {
 			}
 			return nil
 		})
-		if err := p.UnmarshalFeed(&chunkReader{data: data, chunk: chunk}, &h, WithUseNumber()); err != nil {
+		if err := p.UnmarshalFeed(&chunkReader{data: data, chunk: chunk}, &h, vopt.UseNumber(true)); err != nil {
 			t.Fatalf("chunk=%d: %v", chunk, err)
 		}
 		if len(held) != 40 {
@@ -144,7 +146,7 @@ func TestFeedOptions_UseNumberDoesNotStickAcrossFeeds(t *testing.T) {
 		}
 		return vals
 	}
-	for i, v := range run(WithUseNumber()) {
+	for i, v := range run(vopt.UseNumber(true)) {
 		if _, ok := v.(json.Number); !ok {
 			t.Fatalf("with option: vals[%d] = %T, want json.Number", i, v)
 		}
@@ -187,7 +189,7 @@ func TestFeedOptions_DisallowUnknownInsideStream(t *testing.T) {
 		}
 		return nil
 	})
-	err = p.Unmarshal(data, &oracle, WithDisallowUnknownFields())
+	err = p.Unmarshal(data, &oracle, vopt.RejectUnknownMembers(true))
 	var tee *UnmarshalTypeError
 	if !errors.As(err, &tee) {
 		t.Fatalf("contiguous: err = %v, want assignable to *UnmarshalTypeError", err)
@@ -209,7 +211,7 @@ func TestFeedOptions_DisallowUnknownInsideStream(t *testing.T) {
 			}
 			return nil
 		})
-		err = ps.UnmarshalFeed(&chunkReader{data: data, chunk: chunk}, &h, WithDisallowUnknownFields())
+		err = ps.UnmarshalFeed(&chunkReader{data: data, chunk: chunk}, &h, vopt.RejectUnknownMembers(true))
 		if !errors.As(err, &tee) {
 			t.Fatalf("chunk=%d: err = %v, want assignable to *UnmarshalTypeError", chunk, err)
 		}
@@ -269,7 +271,7 @@ func TestFeedOptions_DisallowUnknownBatchPreemption(t *testing.T) {
 		return nil
 	})
 	var tee *UnmarshalTypeError
-	if err := pc.Unmarshal(data, &contiguous, WithDisallowUnknownFields()); !errors.As(err, &tee) {
+	if err := pc.Unmarshal(data, &contiguous, vopt.RejectUnknownMembers(true)); !errors.As(err, &tee) {
 		t.Fatalf("contiguous: err = %v, want assignable to *UnmarshalTypeError", err)
 	}
 
@@ -289,7 +291,7 @@ func TestFeedOptions_DisallowUnknownBatchPreemption(t *testing.T) {
 			}
 			return nil
 		})
-		err = p.UnmarshalFeed(&chunkReader{data: data, chunk: chunk}, &h, WithDisallowUnknownFields())
+		err = p.UnmarshalFeed(&chunkReader{data: data, chunk: chunk}, &h, vopt.RejectUnknownMembers(true))
 		var tee *UnmarshalTypeError
 		if !errors.As(err, &tee) {
 			t.Fatalf("chunk=%d: err = %v, want assignable to *UnmarshalTypeError", chunk, err)
@@ -334,7 +336,7 @@ func TestFeedOptions_StrictScanRejectsStreamContent(t *testing.T) {
 			}
 			return nil
 		})
-		if err := p.Unmarshal(data, &oracle, WithStrictScan()); err == nil {
+		if err := p.Unmarshal(data, &oracle, vopt.AllowInvalidUTF8(false)); err == nil {
 			t.Fatalf("%s: contiguous strict scan accepted invalid input", name)
 		}
 
@@ -352,7 +354,7 @@ func TestFeedOptions_StrictScanRejectsStreamContent(t *testing.T) {
 				}
 				return nil
 			})
-			if err := ps.UnmarshalFeed(&chunkReader{data: data, chunk: chunk}, &h, WithStrictScan()); err == nil {
+			if err := ps.UnmarshalFeed(&chunkReader{data: data, chunk: chunk}, &h, vopt.AllowInvalidUTF8(false)); err == nil {
 				t.Fatalf("%s chunk=%d: strict feed scan accepted invalid input", name, chunk)
 			}
 
@@ -410,7 +412,7 @@ func TestFeedOptions_StrictScanSplitMultibyteValid(t *testing.T) {
 			}
 			return nil
 		})
-		if err := p.UnmarshalFeed(&chunkReader{data: data, chunk: chunk}, &h, WithStrictScan()); err != nil {
+		if err := p.UnmarshalFeed(&chunkReader{data: data, chunk: chunk}, &h, vopt.AllowInvalidUTF8(false)); err != nil {
 			t.Fatalf("chunk=%d: %v", chunk, err)
 		}
 		if len(got) != 33 {
@@ -464,7 +466,7 @@ func TestFeedOptions_EscapeSplitAcrossEdges(t *testing.T) {
 			var opts []UnmarshalOption
 			if strict {
 				label = "strict"
-				opts = append(opts, WithStrictScan())
+				opts = append(opts, vopt.AllowInvalidUTF8(false))
 			}
 			if err := p.UnmarshalFeed(&chunkReader{data: data, chunk: chunk}, &h, opts...); err != nil {
 				t.Fatalf("chunk=%d %s: %v", chunk, label, err)
@@ -502,7 +504,7 @@ func TestFeedOptions_StrictScanDoesNotStickAcrossFeeds(t *testing.T) {
 		})
 		return p.UnmarshalFeed(&chunkReader{data: data, chunk: 3}, &h, opts...)
 	}
-	if err := run(WithStrictScan()); err == nil {
+	if err := run(vopt.AllowInvalidUTF8(false)); err == nil {
 		t.Fatal("strict feed accepted invalid UTF-8")
 	}
 	if err := run(); err != nil {

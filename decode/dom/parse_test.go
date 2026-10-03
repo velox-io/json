@@ -6,6 +6,8 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/decode"
 	"github.com/velox-io/json/internal/valueabi"
 	"github.com/velox-io/json/value"
@@ -31,7 +33,7 @@ func mustParseTapeZC(t *testing.T, src string) value.Value {
 	p := parserPool.Get().(*Parser)
 	defer parserPool.Put(p)
 	padded := Pad([]byte(src))
-	v, err := p.ParsePadded(padded, WithZeroCopy(true))
+	v, err := p.ParsePadded(padded, vopt.ZeroCopy(true))
 	if err != nil {
 		t.Fatalf("ParsePadded(%q) zero-copy: %v", src, err)
 	}
@@ -82,7 +84,7 @@ func TestParseInvalidJSON(t *testing.T) {
 }
 
 // TestParseScanStrictness verifies that lax mode preserves raw string bytes and
-// WithStrictScan rejects invalid UTF-8 and unescaped control bytes.
+// AllowInvalidUTF8(false) rejects invalid UTF-8 and unescaped control bytes.
 func TestParseScanStrictness(t *testing.T) {
 	reject := map[string]string{
 		"lone continuation":  "[\"a\x80b\"]",
@@ -97,8 +99,8 @@ func TestParseScanStrictness(t *testing.T) {
 	}
 	for name, src := range reject {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Parse([]byte(src), WithStrictScan()); err == nil {
-				t.Fatalf("Parse(%q, WithStrictScan) accepted; want rejection", src)
+			if _, err := Parse([]byte(src), vopt.AllowInvalidUTF8(false)); err == nil {
+				t.Fatalf("Parse(%q, AllowInvalidUTF8(false)) accepted; want rejection", src)
 			}
 			// Inside a string the lax scan passes the raw bytes through.
 			v, err := Parse([]byte(src))
@@ -114,7 +116,7 @@ func TestParseScanStrictness(t *testing.T) {
 
 	// Outside a string an invalid byte is a malformed token the tape builder
 	// rejects regardless of scan strictness.
-	for _, opts := range [][]ParseOption{nil, {WithStrictScan()}} {
+	for _, opts := range [][]ParseOption{nil, {vopt.AllowInvalidUTF8(false)}} {
 		if _, err := Parse([]byte("[\xff]"), opts...); err == nil {
 			t.Fatalf("Parse([\\xff], opts=%v) accepted; want rejection", opts)
 		}
@@ -131,8 +133,8 @@ func TestParseScanStrictness(t *testing.T) {
 	}
 	for name, src := range accept {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Parse([]byte(src), WithStrictScan()); err != nil {
-				t.Fatalf("Parse(%q, WithStrictScan) rejected valid UTF-8: %v", src, err)
+			if _, err := Parse([]byte(src), vopt.AllowInvalidUTF8(false)); err != nil {
+				t.Fatalf("Parse(%q, AllowInvalidUTF8(false)) rejected valid UTF-8: %v", src, err)
 			}
 		})
 	}
@@ -373,13 +375,13 @@ func TestValueStringAtObjectKeys(t *testing.T) {
 
 // TestParseRejectsExplicitZeroCopy pins that zero-copy is a ParsePadded-only
 // contract: Parse scans an internal copy of src through reusable scratch, so
-// an explicit WithZeroCopy(true) demand is rejected instead of honored.
+// an explicit vopt.ZeroCopy(true) demand is rejected instead of honored.
 func TestParseRejectsExplicitZeroCopy(t *testing.T) {
 	p := NewParser()
-	if _, err := p.Parse([]byte(`{"a":"b"}`), WithZeroCopy(true)); !errors.Is(err, ErrZeroCopyUnsupported) {
+	if _, err := p.Parse([]byte(`{"a":"b"}`), vopt.ZeroCopy(true)); !errors.Is(err, ErrZeroCopyUnsupported) {
 		t.Errorf("Parser.Parse: got %v, want ErrZeroCopyUnsupported", err)
 	}
-	if _, err := Parse([]byte(`{"a":"b"}`), WithZeroCopy(true)); !errors.Is(err, ErrZeroCopyUnsupported) {
+	if _, err := Parse([]byte(`{"a":"b"}`), vopt.ZeroCopy(true)); !errors.Is(err, ErrZeroCopyUnsupported) {
 		t.Errorf("Parse: got %v, want ErrZeroCopyUnsupported", err)
 	}
 }
@@ -398,7 +400,7 @@ func TestParseCopyModePublishesNoSrc(t *testing.T) {
 }
 
 func TestParsePaddedZeroCopyFlagsDoc(t *testing.T) {
-	v, err := ParsePadded(Pad([]byte(`{"a":"b"}`)), WithZeroCopy(true))
+	v, err := ParsePadded(Pad([]byte(`{"a":"b"}`)), vopt.ZeroCopy(true))
 	if err != nil {
 		t.Fatalf("ParsePadded: %v", err)
 	}
@@ -419,7 +421,7 @@ func TestParsePaddedZeroCopyFlagsDoc(t *testing.T) {
 // without spare capacity past len is rejected.
 func TestParsePaddedRejectsCorruptTail(t *testing.T) {
 	padded := Pad([]byte(`{"a":"b"}`))
-	if _, err := ParsePadded(padded, WithZeroCopy(true)); err != nil {
+	if _, err := ParsePadded(padded, vopt.ZeroCopy(true)); err != nil {
 		t.Fatalf("clean pad: %v", err)
 	}
 	n := len(padded)

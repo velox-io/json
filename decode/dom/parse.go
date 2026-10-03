@@ -12,11 +12,11 @@ import (
 	"unsafe"
 
 	"github.com/velox-io/json/decode"
-	"github.com/velox-io/json/decode/option"
 	"github.com/velox-io/json/internal/valueabi"
 	"github.com/velox-io/json/jerr"
 	nativendec "github.com/velox-io/json/native/ndec"
 	"github.com/velox-io/json/value"
+	"github.com/velox-io/json/vopt"
 )
 
 // Value is an alias for value.Value; dom.Parse returns one.
@@ -30,24 +30,21 @@ const (
 	StrModeZeroCopy StrMode = 1 // escape-free strings alias src; escaped copied
 )
 
-// ParseOption is an alias for option.Option, the unified functional-option
-// type shared with bind and package vjson.
-type ParseOption = option.Option
+// ParseOption is an alias for vopt.Options, the unified option set shared
+// with bind and package vjson.
+type ParseOption = vopt.Options
 
-func WithZeroCopy(enabled bool) ParseOption { return option.WithZeroCopy(enabled) }
-
-func WithStrictScan() ParseOption { return option.WithStrictScan() }
-
-// resolveOpts resolves opts into the string mode and the scan strictness.
-// Zero-copy stays an explicit demand here: the default copies through the
-// parser's arenas, because a zero-copy Value is navigation-only and binds the
-// caller to preserving the source.
-func resolveOpts(opts []ParseOption) (mode StrMode, strictScan bool) {
-	cfg := option.Apply(opts)
-	if cfg.ZeroCopy == option.ZeroCopyOn {
+// resolveOpts resolves opts into the string mode and whether the scan must
+// reject invalid UTF-8. Zero-copy stays an explicit demand here: the default
+// copies through the parser's arenas, because a zero-copy Value is
+// navigation-only and binds the caller to preserving the source.
+func resolveOpts(opts []ParseOption) (mode StrMode, rejectInvalidUTF8 bool) {
+	o := vopt.Join(opts...)
+	if o.Enabled(vopt.FlagZeroCopy) {
 		mode = StrModeZeroCopy
 	}
-	return mode, cfg.StrictScan
+	allow, named := o.Get(vopt.FlagAllowInvalidUTF8)
+	return mode, named && !allow
 }
 
 // Parser owns reusable scratch and monotonic tape and string arenas. It is
@@ -130,13 +127,13 @@ func Pad(data []byte) []byte {
 	return out[:n:need]
 }
 
-// ErrZeroCopyUnsupported aliases option.ErrZeroCopyUnsupported: dom.Parse
-// rejects an explicit WithZeroCopy(true) demand because it scans an internal
+// ErrZeroCopyUnsupported aliases vopt.ErrZeroCopyUnsupported: dom.Parse
+// rejects an explicit ZeroCopy(true) demand because it scans an internal
 // copy of src through reusable scratch.
-var ErrZeroCopyUnsupported = option.ErrZeroCopyUnsupported
+var ErrZeroCopyUnsupported = vopt.ErrZeroCopyUnsupported
 
 // Parse returns a navigation Value using copy mode and lax scanning by
-// default. It scans an internal copy of src, so an explicit WithZeroCopy(true)
+// default. It scans an internal copy of src, so an explicit ZeroCopy(true)
 // is rejected with ErrZeroCopyUnsupported; ParsePadded owns the zero-copy
 // contract. Monotonic arena carves remain valid through the Value lifetime.
 func Parse(src []byte, opts ...ParseOption) (Value, error) {
@@ -153,7 +150,7 @@ func Parse(src []byte, opts ...ParseOption) (Value, error) {
 // length; use Pad to construct it. The parser reads up to 64 bytes past the
 // actual JSON end.
 //
-// WithZeroCopy(true) makes escape-free strings and Doc.Src alias paddedSrc.
+// ZeroCopy(true) makes escape-free strings and Doc.Src alias paddedSrc.
 // The Doc keeps its backing reachable; the caller preserves its bytes and
 // backing allocation through the lifetime of every derived Value, and the
 // Value is navigation-only (typed binding rejects it). Typed binding accepts
@@ -187,7 +184,7 @@ func (p *Parser) Parse(src []byte, opts ...ParseOption) (Value, error) {
 }
 
 // ParsePadded uses p's reusable scratch and a caller-padded buffer. Under
-// WithZeroCopy(true) the Doc roots paddedSrc, and callers preserve its bytes
+// ZeroCopy(true) the Doc roots paddedSrc, and callers preserve its bytes
 // and backing allocation through every derived Value's lifetime.
 func (p *Parser) ParsePadded(paddedSrc []byte, opts ...ParseOption) (Value, error) {
 	if err := checkPadded(paddedSrc); err != nil {

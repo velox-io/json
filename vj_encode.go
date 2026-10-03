@@ -4,44 +4,29 @@ import (
 	"io"
 
 	"github.com/velox-io/json/venc"
+	"github.com/velox-io/json/vopt"
 )
 
-// MarshalOption configures encoding behavior.
-type MarshalOption = venc.MarshalOption
+// MarshalOption aliases Options, retained for code written against the
+// encode-specific name.
+type MarshalOption = Options
 
-// WithEscapeHTML enables escaping of <, >, & in strings.
-func WithEscapeHTML() MarshalOption { return venc.WithEscapeHTML() }
+// EscapeHTML controls escaping of <, >, and & in encoded strings. Default
+// false: escaping for an HTML embedding context is the embedder's concern,
+// not a JSON encoder's.
+func EscapeHTML(v bool) Options { return vopt.EscapeHTML(v) }
 
-// WithoutEscapeHTML disables escaping of <, >, &.
-func WithoutEscapeHTML() MarshalOption { return venc.WithoutEscapeHTML() }
+// EscapeLineTerms controls escaping of U+2028 and U+2029. Default false.
+func EscapeLineTerms(v bool) Options { return vopt.EscapeLineTerms(v) }
 
-// WithEscapeLineTerms enables escaping of U+2028 and U+2029 line terminators in strings.
-func WithEscapeLineTerms() MarshalOption { return venc.WithEscapeLineTerms() }
+// FloatExpAuto selects scientific notation for floats with |f| < 1e-6 or
+// |f| >= 1e21. Default false: floats always use fixed-point notation.
+func FloatExpAuto(v bool) Options { return vopt.FloatExpAuto(v) }
 
-// WithoutEscapeLineTerms disables escaping of U+2028 and U+2029.
-func WithoutEscapeLineTerms() MarshalOption { return venc.WithoutEscapeLineTerms() }
-
-// WithUTF8Correction enables replacing invalid UTF-8 with U+FFFD in strings.
-// The replacement format (raw U+FFFD bytes on Go 1.27+, \ufffd escape on
-// earlier versions) is build-tag selected to match encoding/json.
-func WithUTF8Correction() MarshalOption { return venc.WithUTF8Correction() }
-
-// WithoutUTF8Correction disables replacing invalid UTF-8 in strings.
-func WithoutUTF8Correction() MarshalOption { return venc.WithoutUTF8Correction() }
-
-// WithStdCompat enables full encoding/json compatibility.
-func WithStdCompat() MarshalOption { return venc.WithStdCompat() }
-
-// WithFloatExpAuto enables encoding/json-compatible scientific notation
-// for floats with |f| < 1e-6 or |f| >= 1e21 (e.g. 1e-7, 1e+21).
-// By default, floats are always formatted in fixed-point notation.
-func WithFloatExpAuto() MarshalOption { return venc.WithFloatExpAuto() }
-
-// WithFastEscape disables all string-level escape features
-// (UTF-8 validation, line terminator escaping, HTML escaping).
-// Only mandatory JSON escapes (control chars, '"', '\\') are performed.
-// This enables the fastest string encoding path in the native encoder.
-func WithFastEscape() MarshalOption { return venc.WithFastEscape() }
+// BufSize fixes the starting size of the encoder's working buffer and opts the
+// call out of the zero-copy return: the result is copied into a tight-fit
+// allocation so the pooled buffer keeps its capacity.
+func BufSize(n int) Options { return vopt.BufSize(n) }
 
 // Marshal returns the compact JSON encoding of v.
 func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
@@ -62,33 +47,10 @@ func AppendMarshal[T any](dst []byte, v T, opts ...MarshalOption) ([]byte, error
 // Each Encode call writes one JSON value followed by a newline.
 type Encoder = venc.Encoder
 
-// EncoderOption configures an [Encoder].
-type EncoderOption = venc.EncoderOption
-
-// NewEncoder creates an Encoder that writes to w.
-func NewEncoder(w io.Writer, opts ...EncoderOption) *Encoder {
+// NewEncoder creates an Encoder that writes to w. opts carry the same option
+// set as Marshal; options that do not apply to encoding are ignored.
+func NewEncoder(w io.Writer, opts ...Options) *Encoder {
 	return venc.NewEncoder(w, opts...)
-}
-
-// EncoderSetIndent sets the indentation prefix and step for a new [Encoder].
-func EncoderSetIndent(prefix, indent string) EncoderOption {
-	return venc.EncoderSetIndent(prefix, indent)
-}
-
-// EncoderSetEscapeHTML enables or disables escaping of <, >, and &.
-func EncoderSetEscapeHTML(on bool) EncoderOption {
-	return venc.EncoderSetEscapeHTML(on)
-}
-
-// EncoderSetEscapeLineTerms enables or disables escaping of U+2028 and U+2029.
-func EncoderSetEscapeLineTerms(on bool) EncoderOption {
-	return venc.EncoderSetEscapeLineTerms(on)
-}
-
-// EncoderSetFloatExpAuto enables encoding/json-compatible scientific notation
-// for floats with |f| < 1e-6 or |f| >= 1e21.
-func EncoderSetFloatExpAuto(on bool) EncoderOption {
-	return venc.EncoderSetFloatExpAuto(on)
 }
 
 // EncodeValue is a generic, zero-allocation alternative to [Encoder.Encode].

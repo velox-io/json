@@ -2,6 +2,24 @@
 
 Velox is a high-performance JSON library for Go.
 
+## Quick start
+
+```go
+import vjson "github.com/velox-io/json"
+
+type User struct {
+    Name  string   `json:"name"`
+    Roles []string `json:"roles"`
+}
+
+var u User
+err := vjson.Unmarshal([]byte(`{"name":"alice","roles":["admin"]}`), &u)
+
+out, err := vjson.Marshal(u) // {"name":"alice","roles":["admin"]}
+```
+
+The import path ends in `json`, but the package name is `vjson`.
+
 ## Performance
 
 ![](docs/benchmarks/linux-amd64/unmarshal-4.svg)
@@ -17,50 +35,56 @@ Each library runs in its fastest decode mode:
 
 ## Design
 
-Velox focuses on **binding-style** conversion between JSON and typed Go values (`Unmarshal` and `Marshal`), targeting high throughput with few allocations. See [architecture](docs/arch_2_en.md).
+Velox focuses on **binding-style** conversion between JSON and typed Go values (`Unmarshal` and `Marshal`), targeting high throughput with few allocations. It uses native acceleration on supported platforms and pure Go elsewhere. Requires Go 1.24+. See [architecture](docs/arch_2_en.md).
 
-## Compatibility
-
-- field tags: custom names, `-`, `,string`, `,omitempty`, `,omitzero`
-- anonymous (embedded) structs, pointers, `json.Number`, `json.RawMessage`
-- `json.Marshaler`/`json.Unmarshaler` and `encoding.TextMarshaler`/`TextUnmarshaler`
-- boxing into `any` (`[]any`, `map[string]any`)
-- unmarshal errors can be inspected with `errors.As` against the `encoding/json` error types
-
-Deliberate differences:
-
-- **Case-sensitive field matching.**
-
-  For performance, Velox deliberately matches field names by exact bytes rather than performing the case-insensitive matching supported by `encoding/json`.
-
-- **Strict tag-option parsing.**
-
-  A misspelled option such as `omitEmpty` or `omit_zero` fails the type's build with a message naming the canonical spelling, where `encoding/json` v1 silently ignores it. An embedded field whose tag carries options (other than `embed`) is likewise rejected rather than promoted with the options dropped.
+### Options
 
 
-### Requirements
+| Option | Scope | Default | Description |
+| --- | --- | --- | --- |
+| `AllowInvalidUTF8(bool)` | encode + decode | `true` | `false` makes decode fail on invalid UTF-8 and encode replace it with U+FFFD |
+| `EscapeHTML(bool)` | encode | `false` | Escape `<` `>` `&` |
+| `EscapeLineTerms(bool)` | encode | `false` | Escape U+2028 / U+2029 |
+| `FloatExpAuto(bool)` | encode | `false` | Use scientific notation for `abs(f) < 1e-6` or `>= 1e21` |
+| `UseNumber(bool)` | decode | `false` | Decode numbers bound to `any` as `json.Number` |
+| `RejectUnknownMembers(bool)` | decode | `false` | Error on unknown fields |
+| `ZeroCopy(bool)` | decode | `true`| Whether strings alias the caller's buffer |
 
-- Golang Version: 1.24+
-- Platform: `linux/amd64`, `linux/arm64`, `windows/amd64`, `windows/arm64`, `darwin/amd64`, `darwin/arm64`.
 
+Options compose with `Join`. For output close to the standard library:
 
-## zero-copy
+```go
+var opts = vjson.Join(vjson.EscapeHTML(true), vjson.EscapeLineTerms(true), vjson.AllowInvalidUTF8(false), vjson.FloatExpAuto(true))
+out, err := vjson.Marshal(v, opts)
+```
+
+### Compatibility
+
+- **Invalid UTF-8 on decode is preserved as-is by default.** `AllowInvalidUTF8(false)` makes it an error.
+- **Invalid UTF-8 on encode is emitted as-is by default.** `AllowInvalidUTF8(false)` replaces it with U+FFFD, so the output meets RFC 8259's requirement that exchanged text be valid UTF-8.
+- **HTML escaping and line terminator escaping are off by default.** They serve HTML/JS embedding scenarios and are not required by the JSON spec, so enable them when needed.
+- **Floats uses fixed-point notation by default.** The JSON spec does not require scientific notation; it is off by default for performance.
+- **`MarshalJSON` output is written verbatim.** No validation, re-indenting or escaping: it must be compact JSON, and Indent and `EscapeHTML` do not apply to it. See [ROADMAP](ROADMAP.md) for the custom codec extension point.
+- **Field names are case-sensitive.** Matching is by exact bytes, with no case-insensitive fallback.
+- **Tag options are parsed strictly.** Misspelled options (such as `omitEmpty`, `omit_zero`) are an error; a tag on an embedded field with options other than `embed` is also an error rather than being dropped and promoted.
+
+### zero-copy
 
 `Unmarshal` is zero-copy by default: escape-free strings alias the caller's input buffer. Escaped strings are copied because their decoded bytes differ from the input. The caller must preserve the input's bytes while any decoded value remains reachable:
 
 ```go
 var pod KubePodList
-err := json.Unmarshal(src, &pod) // pod's clean strings alias src
+err := vjson.Unmarshal(src, &pod) // pod's clean strings alias src
 ```
 
-Pass `json.WithZeroCopy(false)` when the destination must own its bytes, for example when the input buffer is reused after decoding:
+Pass `vjson.ZeroCopy(false)` when the destination must own its bytes, for example when the input buffer is reused after decoding:
 
 ```go
 var pod KubePodList
-err := json.Unmarshal(src, &pod, json.WithZeroCopy(false)) // pod owns its strings
+err := vjson.Unmarshal(src, &pod, vjson.ZeroCopy(false)) // pod owns its strings
 ```
 
-## omitzero
+### omitzero
 
 A field is skipped when its value is zero, as decided by an `IsZero() bool`
 method if the field type or its pointer implements one, otherwise by `reflect.Value.IsZero`.
@@ -76,14 +100,12 @@ type Event struct {
 
 ## Extensions
 
-### `json.Value`
+### `Value`
 
 Velox provides `Value` for dynamic JSON and partial-access workloads where binding the entire document to a predefined Go type or `map[string]any` would be unnecessary. It is a tape-backed view for navigating parsed JSON directly:
 
 ```go
-import json "github.com/velox-io/json"
-
-doc, err := json.Parse(src)
+doc, err := vjson.Parse(src)
 if err != nil {
     return err
 }
@@ -98,12 +120,12 @@ A `Value` can also appear anywhere in a typed destination and is populated direc
 
 ```go
 type Envelope struct {
-    Code int        `json:"code"`
-    Data json.Value `json:"data"`
+    Code int         `json:"code"`
+    Data vjson.Value `json:"data"`
 }
 
 var envelope Envelope
-err := json.Unmarshal(src, &envelope)
+err := vjson.Unmarshal(src, &envelope)
 ```
 
 Tape-backed values have two representation limits:
@@ -121,8 +143,8 @@ A `Value` field tagged `json:",embed"` collects every key not matched by a named
 
 ```go
 type Foo struct {
-    Name string    `json:"name"`
-    Exts json.Value `json:",embed"` // unmatched keys land here
+    Name string      `json:"name"`
+    Exts vjson.Value `json:",embed"` // unmatched keys land here
 }
 ```
 
@@ -171,7 +193,7 @@ The call site stays an ordinary `Unmarshal` into the host. Afterwards `env.Data`
 
 ```go
 var env EventEnvelope
-err := json.Unmarshal([]byte(`{"type":"user","data":{"name":"Alice","role":"admin"}}`), &env)
+err := vjson.Unmarshal([]byte(`{"type":"user","data":{"name":"Alice","role":"admin"}}`), &env)
 // env.Type == "user", env.Data == User{Name: "Alice", Role: "admin"}
 ```
 
@@ -269,7 +291,7 @@ resp.Users.OnRead(func(users stream.Scope[User]) error { // stream.Scope[T] from
     return nil
 })
 
-if err := json.Unmarshal(src, &resp); err != nil {
+if err := vjson.Unmarshal(src, &resp); err != nil {
     return err
 }
 fmt.Println(resp.Message) // fields around the stream bind as usual

@@ -8,7 +8,7 @@ import (
 // streamTypePredicate identifies stream.Stream[T] field types so that
 // buildUniType can route them to KindStream instead of KindStruct.
 //
-// typ cannot import the stream package (stream imports decode/option which
+// typ cannot import the stream package (stream imports vopt which
 // would create cycles through downstream consumers), so the stream package
 // registers its predicate at init time via RegisterStreamTypePredicate.
 //

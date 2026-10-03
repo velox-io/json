@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 	"unsafe"
+
+	"github.com/velox-io/json/vopt"
 )
 
 // RawMessage diff tests. Compare bind.Unmarshal against encoding/json for
@@ -200,7 +202,7 @@ func TestBindRawMessage_AliasesInputByDefault(t *testing.T) {
 	}
 }
 
-// WithZeroCopy(false) restores byte independence: the RawMessage owns its
+// vopt.ZeroCopy(false) restores byte independence: the RawMessage owns its
 // bytes, so mutating the input afterwards must not change it.
 func TestBindRawMessage_ByteIndependence(t *testing.T) {
 	type Msg struct {
@@ -208,7 +210,7 @@ func TestBindRawMessage_ByteIndependence(t *testing.T) {
 	}
 	input := []byte(`{"data":{"key":"value"}}`)
 	var msg Msg
-	if err := Unmarshal(input, &msg, WithZeroCopy(false)); err != nil {
+	if err := Unmarshal(input, &msg, vopt.ZeroCopy(false)); err != nil {
 		t.Fatal(err)
 	}
 	saved := append([]byte(nil), msg.Data...)
@@ -331,7 +333,7 @@ func TestBindRawMessage_ReusesCapacity(t *testing.T) {
 	}
 }
 
-// A RawMessage decoded with WithZeroCopy(false) owns its bytes, so mutating
+// A RawMessage decoded with vopt.ZeroCopy(false) owns its bytes, so mutating
 // the input afterwards must not change it.
 func TestBindRawMessage_BytesAreCopied(t *testing.T) {
 	type Msg struct {
@@ -339,7 +341,7 @@ func TestBindRawMessage_BytesAreCopied(t *testing.T) {
 	}
 	input := []byte(`{"d":{"a":1}}`)
 	var got Msg
-	if err := Unmarshal(input, &got, WithZeroCopy(false)); err != nil {
+	if err := Unmarshal(input, &got, vopt.ZeroCopy(false)); err != nil {
 		t.Fatal(err)
 	}
 	before := string(got.D)

@@ -37,14 +37,14 @@ func (e *TapeBindUnsupportedError) Error() string {
 
 // ErrZeroCopyValue reports that typed binding would extend a zero-copy Value's
 // source immutability and reuse restrictions into the output.
-var ErrZeroCopyValue = errors.New("vjson: cannot bind a zero-copy Value; re-parse without option.WithZeroCopy(true)")
+var ErrZeroCopyValue = errors.New("vjson: cannot bind a zero-copy Value; re-parse without vopt.ZeroCopy(true)")
 
-// ErrZeroCopyTypedTree reports that an explicit WithZeroCopy(true) demand hit
+// ErrZeroCopyTypedTree reports that an explicit ZeroCopy(true) demand hit
 // a destination tree carrying value.Value or poly fields. Their content flows
 // through the tape machinery, which stays arena-backed, so zero-copy binds
 // typed trees only; the default silently falls back to the copying parse on
 // those trees.
-var ErrZeroCopyTypedTree = errors.New("vjson: WithZeroCopy(true) supports typed trees only; value.Value and poly fields stay arena-backed")
+var ErrZeroCopyTypedTree = errors.New("vjson: ZeroCopy(true) supports typed trees only; value.Value and poly fields stay arena-backed")
 
 // bindErrInfo is the engine-neutral error payload: native fills it from the
 // yield, and the Go engine returns it as a gbind.Error of the same layout.

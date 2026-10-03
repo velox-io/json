@@ -7,6 +7,8 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/native/encvm"
 )
 
@@ -30,7 +32,7 @@ func TestMapBufFull_EntryFirstResume(t *testing.T) {
 	ti := EncTypeInfoOf(reflect.TypeFor[mapBufFullPad]())
 
 	es := acquireEncodeState()
-	WithBufSize(20)(es)
+	es.applyOptions(vopt.BufSize(20))
 	defer releaseEncodeState(es)
 
 	es.buf = make([]byte, 0, 20)

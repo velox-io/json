@@ -171,7 +171,7 @@ func Benchmark_Unmarshal_KubePodsCompact_Velox_Padded(b *testing.B) {
 func Benchmark_Unmarshal_KubePodsCompact_Velox_Padded_StrictScan(b *testing.B) {
 	b.SetBytes(int64(len(kubePodsCompactPadded)))
 	b.ReportAllocs()
-	strictScan := vjson.WithStrictScan()
+	strictScan := vjson.AllowInvalidUTF8(false)
 	for b.Loop() {
 		var pl KubePodList
 		if err := vjson.UnmarshalPadded(kubePodsCompactPadded, &pl, strictScan); err != nil {

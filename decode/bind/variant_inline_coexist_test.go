@@ -3,6 +3,8 @@ package bind
 import (
 	"testing"
 
+	"github.com/velox-io/json/vopt"
+
 	"github.com/velox-io/json/value"
 	"github.com/velox-io/json/vbind"
 )
@@ -220,7 +222,7 @@ func TestCoexistInlineVariantReserveUnknown_AbsentDiscEmptyObject(t *testing.T) 
 func TestCoexistInlineVariantReserveUnknown_StrictMode(t *testing.T) {
 	src := `{"type":"user","name":"eve","surprise":true}`
 	var h coexistHost
-	if err := Unmarshal([]byte(src), &h, WithDisallowUnknownFields()); err != nil {
+	if err := Unmarshal([]byte(src), &h, vopt.RejectUnknownMembers(true)); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 	if h.Exts.Len() != 1 {

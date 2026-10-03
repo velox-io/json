@@ -92,16 +92,16 @@ func TestEscapeBehavior_HTML(t *testing.T) {
 	t.Logf("vjson.Marshal : %s", vjsonRes.Desc)
 	t.Logf("  output: %s", vjsonOut)
 
-	// vjson.Marshal with WithEscapeHTML
-	vjsonHTMLOut, _ := vjson.Marshal(v, vjson.WithEscapeHTML())
+	// vjson.Marshal with EscapeHTML(true)
+	vjsonHTMLOut, _ := vjson.Marshal(v, vjson.EscapeHTML(true))
 	vjsonHTMLRes := detectHTML(string(vjsonHTMLOut))
 	t.Logf("vjson+EscHTML  : %s", vjsonHTMLRes.Desc)
 	t.Logf("  output: %s", vjsonHTMLOut)
 
-	// vjson.Marshal with WithStdCompat
-	vjsonStdOut, _ := vjson.Marshal(v, vjson.WithStdCompat())
+	// vjson.Marshal with stdlibLikeOpts
+	vjsonStdOut, _ := vjson.Marshal(v, stdlibLikeOpts)
 	vjsonStdRes := detectHTML(string(vjsonStdOut))
-	t.Logf("vjson+StdCompat: %s", vjsonStdRes.Desc)
+	t.Logf("vjson+stdlibLike: %s", vjsonStdRes.Desc)
 	t.Logf("  output: %s", vjsonStdOut)
 }
 
@@ -130,14 +130,14 @@ func TestEscapeBehavior_LineTerminators(t *testing.T) {
 	t.Logf("vjson.Marshal : %s", detectLineTerminators(string(vjsonOut)).Desc)
 	t.Logf("  output: %q", vjsonOut)
 
-	// vjson.Marshal with WithFastEscape (all escape features off)
-	vjsonFastOut, _ := vjson.Marshal(v, vjson.WithFastEscape())
+	// vjson.Marshal with no options (all escape features off)
+	vjsonFastOut, _ := vjson.Marshal(v)
 	t.Logf("vjson+FastEsc : %s", detectLineTerminators(string(vjsonFastOut)).Desc)
 	t.Logf("  output: %q", vjsonFastOut)
 
-	// vjson.Marshal with WithStdCompat
-	vjsonStdOut, _ := vjson.Marshal(v, vjson.WithStdCompat())
-	t.Logf("vjson+StdCompat: %s", detectLineTerminators(string(vjsonStdOut)).Desc)
+	// vjson.Marshal with stdlibLikeOpts
+	vjsonStdOut, _ := vjson.Marshal(v, stdlibLikeOpts)
+	t.Logf("vjson+stdlibLike: %s", detectLineTerminators(string(vjsonStdOut)).Desc)
 	t.Logf("  output: %q", vjsonStdOut)
 }
 
@@ -166,14 +166,14 @@ func TestEscapeBehavior_InvalidUTF8(t *testing.T) {
 	t.Logf("vjson.Marshal  : %s", detectInvalidUTF8(string(vjsonOut), vjsonErr).Desc)
 	t.Logf("  output: %q", vjsonOut)
 
-	// vjson.Marshal with WithUTF8Correction
-	vjsonCorrOut, vjsonCorrErr := vjson.Marshal(v, vjson.WithUTF8Correction())
+	// vjson.Marshal with AllowInvalidUTF8(false)
+	vjsonCorrOut, vjsonCorrErr := vjson.Marshal(v, vjson.AllowInvalidUTF8(false))
 	t.Logf("vjson+UTF8Corr : %s", detectInvalidUTF8(string(vjsonCorrOut), vjsonCorrErr).Desc)
 	t.Logf("  output: %q", vjsonCorrOut)
 
-	// vjson.Marshal with WithStdCompat
-	vjsonStdOut, vjsonStdErr := vjson.Marshal(v, vjson.WithStdCompat())
-	t.Logf("vjson+StdCompat: %s", detectInvalidUTF8(string(vjsonStdOut), vjsonStdErr).Desc)
+	// vjson.Marshal with stdlibLikeOpts
+	vjsonStdOut, vjsonStdErr := vjson.Marshal(v, stdlibLikeOpts)
+	t.Logf("vjson+stdlibLike: %s", detectInvalidUTF8(string(vjsonStdOut), vjsonStdErr).Desc)
 	t.Logf("  output: %q", vjsonStdOut)
 }
 
@@ -213,15 +213,15 @@ func TestEscapeBehavior_Summary(t *testing.T) {
 	vjsonOut, vjsonErr := vjson.Marshal(v)
 	vjsonS := string(vjsonOut)
 
-	// vjson.Marshal + WithStdCompat
-	vjsonStdOut, vjsonStdErr := vjson.Marshal(v, vjson.WithStdCompat())
+	// vjson.Marshal + stdlibLikeOpts
+	vjsonStdOut, vjsonStdErr := vjson.Marshal(v, stdlibLikeOpts)
 	vjsonStdS := string(vjsonStdOut)
 
 	results := []result{
 		{"encoding/json     ", detectHTML(stdS), detectLineTerminators(stdS), detectInvalidUTF8(stdS, stdErr)},
 		{"sonic.Marshal     ", detectHTML(sonicS), detectLineTerminators(sonicS), detectInvalidUTF8(sonicS, sonicErr)},
 		{"vjson.Marshal     ", detectHTML(vjsonS), detectLineTerminators(vjsonS), detectInvalidUTF8(vjsonS, vjsonErr)},
-		{"vjson+StdCompat   ", detectHTML(vjsonStdS), detectLineTerminators(vjsonStdS), detectInvalidUTF8(vjsonStdS, vjsonStdErr)},
+		{"vjson+stdlibLike  ", detectHTML(vjsonStdS), detectLineTerminators(vjsonStdS), detectInvalidUTF8(vjsonStdS, vjsonStdErr)},
 	}
 
 	t.Log("")
