@@ -28,7 +28,8 @@ endif
 
 TEST_DEPS  = impl/ndec/core/*.h impl/ndec/*.h test/*.h
 TEST_CFLAGS = -g -O0 -march=native $(INCLUDES) -I$(CRITERION_INC)
-TEST_BINS  = $(BUILD)/sax_tests $(BUILD)/chunkfeed_tests $(BUILD)/dom_tests $(BUILD)/window_tests $(BUILD)/bind_tests
+TEST_BINS  = $(BUILD)/atof_tests $(BUILD)/sax_tests $(BUILD)/chunkfeed_tests $(BUILD)/dom_tests $(BUILD)/window_tests \
+             $(BUILD)/bind_tests
 
 FILTER  ?=
 VERBOSE ?= 2
@@ -38,6 +39,7 @@ TEST_FLAGS = $(if $(VERBOSE),--verbose=$(VERBOSE),) $(addprefix --filter=,$(FILT
 .PHONY: test bench bench-build jsonfmt jsondata data debug bind-debug clean gen gen-debug gen-pgo-instr-use stack-check stack-check-all gen-all-platforms
 
 test: $(TEST_BINS)
+	$(BUILD)/atof_tests $(TEST_FLAGS)
 	$(BUILD)/sax_tests $(TEST_FLAGS)
 	$(BUILD)/chunkfeed_tests $(TEST_FLAGS)
 	$(BUILD)/dom_tests $(TEST_FLAGS)

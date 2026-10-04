@@ -403,6 +403,7 @@ jobs:
         - FuzzMarshalStruct
         - FuzzMarshalNoCrash
         - FuzzUnmarshalAny
+        - FuzzUnmarshalNumber
         - FuzzUnmarshalStruct
         - FuzzUnmarshalNested
         - FuzzNoCrash

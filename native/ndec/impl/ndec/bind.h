@@ -1993,7 +1993,16 @@ any_value: {
         bind_write_str_header(data, num_data, num_len);
       }
     } else {
-      if (UNLIKELY(!__builtin_isfinite(dv))) BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+      /* Range overflow stores ±Inf, then reports the mismatch: parity with
+       * encoding/json (jsonv2 stores the parsed value before the type error)
+       * and with the typed float bind sites. The slot is already carved, so
+       * the boxing is published before the yield. */
+      if (UNLIKELY(!__builtin_isfinite(dv))) {
+        *(double *)data                = dv;
+        *(const void **)any_slot       = type_tag;
+        *(const void **)(any_slot + 8) = data;
+        BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+      }
       *(double *)data = dv;
     }
     *(const void **)any_slot       = type_tag;
@@ -3720,13 +3729,19 @@ t_any_value: {
     double dv;
     if (!use_number) {
       /* Decided before the slot is carved and before the cursor moves, so a
-       * rejection leaves both untouched. */
+       * parse rejection leaves both untouched. */
       if (UNLIKELY(ndec_parse_double(ntext, nlen, &dv, m->c.atof)))
         TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
-      /* Past float64's range. The JSON path rejects the same source for a float64
-       * target, so this is parity rather than a tape-specific limit. */
-      if (UNLIKELY(!__builtin_isfinite(dv)))
+      /* Past float64's range: store ±Inf and report the mismatch, the same
+       * policy as the JSON any path and the typed float bind sites. */
+      if (UNLIKELY(!__builtin_isfinite(dv))) {
+        uint8_t *data = sc->block + sc->offset;
+        sc->offset += sc->elem_size;
+        *(double *)data                = dv;
+        *(const void **)any_slot       = am->float64_type;
+        *(const void **)(any_slot + 8) = data;
         TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+      }
     }
     uint8_t *data = sc->block + sc->offset;
     sc->offset += sc->elem_size;

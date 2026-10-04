@@ -1,7 +1,8 @@
 /* Decimal conversion supports general and strict JSON grammars for binary32 and
  * binary64. readable_bytes bounds SWAR and literal probes rather than declaring
- * the token length; scanning stops at the first non-digit. Binary64 callers
- * provide one additional readable byte for scalar peeks.
+ * the token length; scanning stops at the first non-digit. The binary64 JSON
+ * entry needs one additional readable byte for scalar peeks; the other entries
+ * never read past readable_bytes.
  *
  * Callers also provide reusable atof_ctx storage with the reported size and
  * alignment for the multiprecision refinement path. */
@@ -939,6 +940,14 @@ static void atof_i_mp_add_word(atof_mpint *a, uint64_t word) {
   }
 }
 
+/* Significant digits kept in D. Every midpoint between adjacent binary64
+ * (and binary32) values has at most 767 significant decimal digits, so
+ * truncating the input to K >= 767 digits and appending one sticky digit
+ * for a nonzero tail preserves the sign of every midpoint comparison.
+ * The cap also bounds all mp operands well below ATOF_MP_MAX_LIMBS:
+ * D < 10^769 and both comparison sides stay under 2^2600. */
+#define ATOF_MP_MAX_DIGITS 768
+
 /* Build the bigint D from the significant-digit string described by ctx.
  *
  * Field semantics:
@@ -947,6 +956,9 @@ static void atof_i_mp_add_word(atof_mpint *a, uint64_t word) {
  *   dot_offset   byte offset of '.' relative to sig_start; if '.' lies
  *                outside the significant region, set to ndigits + 1
  *                as a sentinel that always exceeds i.
+ *   exp10        on entry the input equals digits * 10^exp10. When the
+ *                digits exceed ATOF_MP_MAX_DIGITS, exp10 is rebased so
+ *                that D * 10^exp10 keeps the midpoint ordering.
  *
  * Strategy:
  *   - First accumulate up to 19 digits in a 64-bit hi to avoid 19
@@ -962,6 +974,18 @@ static void atof_i_mp_set_from_input(atof_mpint *a, atof_ctx *ctx) {
   const char *s = ctx->sig_start;
   int dot       = ctx->dot_offset;
   int n         = ctx->ndigits;
+  int sticky    = 0;
+
+  if (n > ATOF_MP_MAX_DIGITS) {
+    for (int i = ATOF_MP_MAX_DIGITS; i < n; i++) {
+      if (s[i + (i >= dot)] != '0') {
+        sticky = 1;
+        break;
+      }
+    }
+    ctx->exp10 += n - ATOF_MP_MAX_DIGITS - sticky;
+    n = ATOF_MP_MAX_DIGITS;
+  }
 
   int firstK  = n < 19 ? n : 19;
   uint64_t hi = 0;
@@ -997,6 +1021,10 @@ static void atof_i_mp_set_from_input(atof_mpint *a, atof_ctx *ctx) {
     int idx = i + (i >= dot);
     atof_i_mp_mul_word(a, 10);
     atof_i_mp_add_word(a, (uint64_t)(s[idx] - '0'));
+  }
+  if (sticky) {
+    atof_i_mp_mul_word(a, 10);
+    atof_i_mp_add_word(a, 1);
   }
 }
 
@@ -1059,7 +1087,6 @@ NOINLINE static int atof_i_cmp_midpoint_f64(uint64_t lo_bits, uint64_t hi_bits, 
     }
   }
 
-  int e10         = ctx->exp10;
   atof_mpint *lhs = &ctx->lhs;
   atof_mpint *rhs = &ctx->rhs;
   int shift_l, shift_r;
@@ -1068,6 +1095,7 @@ NOINLINE static int atof_i_cmp_midpoint_f64(uint64_t lo_bits, uint64_t hi_bits, 
     atof_i_mp_set_from_input(&ctx->D, ctx);
     ctx->D_built = 1;
   }
+  int e10 = ctx->exp10; /* read after the build, which may rebase it */
 
   if (e10 >= 0) {
     atof_i_mp_copy(lhs, &ctx->D);
@@ -1187,7 +1215,6 @@ NOINLINE static int atof_i_cmp_midpoint_f32(uint32_t lo_bits, uint32_t hi_bits, 
     }
   }
 
-  int e10         = ctx->exp10;
   atof_mpint *lhs = &ctx->lhs;
   atof_mpint *rhs = &ctx->rhs;
   int shift_l, shift_r;
@@ -1196,6 +1223,7 @@ NOINLINE static int atof_i_cmp_midpoint_f32(uint32_t lo_bits, uint32_t hi_bits, 
     atof_i_mp_set_from_input(&ctx->D, ctx);
     ctx->D_built = 1;
   }
+  int e10 = ctx->exp10; /* read after the build, which may rebase it */
 
   if (e10 >= 0) {
     atof_i_mp_copy(lhs, &ctx->D);
@@ -1346,32 +1374,34 @@ INLINE atof_result_f64 atof_i_finalize_f64(uint64_t d, int nd, int dp, int exp, 
 }
 
 /* General decimal entry. Accepts NaN/Inf, '+'/'-' sign, and arbitrary
- * leading zeros. The caller guarantees readable padding past
- * s + readable_bytes so the scan does no lim checks. */
+ * leading zeros. Every read stays inside [s, s + readable_bytes), so the
+ * caller may pass an exact token span with no padding. */
 INLINE atof_result_f64 atof_parse_f64_ctx(const char *s, int readable_bytes, void *ctx) {
   atof_ctx *pc = (atof_ctx *)ctx;
   assert(pc != NULL);
   const char *p   = s;
   const char *lim = s + readable_bytes;
 
-  /* 1. Optional sign (branchless: cset/csel replace two b.eq/b.ne). */
-  unsigned char c0 = (unsigned char)*p;
-  int neg          = (c0 == '-');
-  int has_sg       = neg | (c0 == '+');
-  p += has_sg;
+#define ATOF_I_GP_PEEK() (p < lim ? (unsigned char)*p : 0)
 
-  /* 2. Special values. */
-  if (LIKELY((unsigned)(*p - '0') <= 9 || *p == '.')) {
+  int neg = 0;
+  if (ATOF_I_GP_PEEK() == '-') {
+    neg = 1;
+    p++;
+  } else if (ATOF_I_GP_PEEK() == '+') {
+    p++;
+  }
+
+  if (LIKELY((unsigned)(ATOF_I_GP_PEEK() - '0') <= 9 || ATOF_I_GP_PEEK() == '.')) {
     /* common case: a digit or '.', handled by the scan below */
-  } else if (atof_i_lower(*p) == 'i' && atof_i_has_prefix_ci_n(p, lim, "inf")) {
+  } else if (atof_i_lower(ATOF_I_GP_PEEK()) == 'i' && atof_i_has_prefix_ci_n(p, lim, "inf")) {
     const char *q = p + 3;
     if (atof_i_has_prefix_ci_n(q, lim, "inity")) q += 5;
     return (atof_result_f64){atof_i_apply_sign_f64(atof_i_pos_inf_f64(), neg), q};
-  } else if (atof_i_lower(*p) == 'n' && atof_i_has_prefix_ci_n(p, lim, "nan")) {
+  } else if (atof_i_lower(ATOF_I_GP_PEEK()) == 'n' && atof_i_has_prefix_ci_n(p, lim, "nan")) {
     return (atof_result_f64){atof_i_nan_f64(), p + 3};
   }
 
-  /* 3. Digit scan (no bounds-check version). */
   uint64_t d          = 0;
   int nd              = 0;
   int dp              = 0;
@@ -1379,96 +1409,64 @@ INLINE atof_result_f64 atof_parse_f64_ctx(const char *s, int readable_bytes, voi
   int sawdigits       = 0;
   const char *dot_ptr = NULL;
 
-  if (*p == '0') {
+  if (ATOF_I_GP_PEEK() == '0') {
     sawdigits = 1;
     p++;
-    while (*p == '0')
+    while (ATOF_I_GP_PEEK() == '0')
       p++;
   }
   const char *sig_start = p;
 
-  while ((unsigned)(*p - '0') <= 9) {
+  while ((unsigned)(ATOF_I_GP_PEEK() - '0') <= 9) {
     d = d * 10 + (unsigned char)(*p - '0');
     nd++;
     p++;
     sawdigits = 1;
   }
 
-  if (*p == '.') {
+  if (ATOF_I_GP_PEEK() == '.') {
     sawdot  = 1;
     dp      = nd;
     dot_ptr = p;
     p++;
     if (nd == 0) {
-      while (*p == '0') {
+      while (ATOF_I_GP_PEEK() == '0') {
         dp--;
         p++;
         sawdigits = 1;
       }
       sig_start = p;
     }
-    /* Single-shot SWAR: padding lets us read 8 bytes safely, but without
-     * a token-len contract atof_i_is_8digits is still needed to gate
-     * non-digit bytes (e.g. "1.5abc"). A second SWAR round would push
-     * nd past 19 and fall into finalize anyway. */
-    if (atof_i_is_8digits(p)) {
+    while (lim - p >= 8 && atof_i_is_8digits(p)) {
       d = d * 100000000 + atof_i_parse_8digits(p);
       nd += 8;
       p += 8;
       sawdigits = 1;
     }
-    /* Unroll the fractional by-byte tail four times: short fractions
-     * (the common case) finish without entering the loop below. */
-#define ATOF_I_FRAC_BYTE()                                                                                        \
-  do {                                                                                                            \
-    if ((unsigned)(*p - '0') > 9) goto frac_done_general;                                                         \
-    d = d * 10 + (unsigned char)(*p - '0');                                                                       \
-    nd++;                                                                                                         \
-    p++;                                                                                                          \
-    sawdigits = 1;                                                                                                \
-  } while (0)
-    ATOF_I_FRAC_BYTE();
-    ATOF_I_FRAC_BYTE();
-    ATOF_I_FRAC_BYTE();
-    ATOF_I_FRAC_BYTE();
-    ATOF_I_FRAC_BYTE();
-    ATOF_I_FRAC_BYTE();
-#undef ATOF_I_FRAC_BYTE
-    while ((unsigned)(*p - '0') <= 9) {
+    while ((unsigned)(ATOF_I_GP_PEEK() - '0') <= 9) {
       d = d * 10 + (unsigned char)(*p - '0');
       nd++;
       p++;
       sawdigits = 1;
-    }
-  frac_done_general:
-
-    if (LIKELY(sawdigits && ((*p | 0x20) != 'e') && nd <= 19 && d < ((uint64_t)1 << 53))) {
-      int power0 = dp - nd;
-      if (LIKELY((unsigned)(power0 + 22) <= 44u)) {
-        double fd = (double)d;
-        double v  = (power0 >= 0) ? fd * atof_i_f64_exact_pow10[power0] : fd / atof_i_f64_exact_pow10[-power0];
-        return (atof_result_f64){atof_i_apply_sign_f64(v, neg), p};
-      }
     }
   }
 
   if (!sawdigits) return (atof_result_f64){0.0, s};
   if (!sawdot) dp = nd;
 
-  /* 4. Exponent. */
   int exp = 0;
-  if (*p == 'e' || *p == 'E') {
+  if ((ATOF_I_GP_PEEK() | 0x20) == 'e') {
     const char *before_exp = p;
     p++;
     int eneg = 0;
-    if (*p == '-') {
+    if (ATOF_I_GP_PEEK() == '-') {
       eneg = 1;
       p++;
-    } else if (*p == '+') {
+    } else if (ATOF_I_GP_PEEK() == '+') {
       p++;
     }
-    if ((unsigned)(*p - '0') <= 9) {
-      while ((unsigned)(*p - '0') <= 9) {
+    if ((unsigned)(ATOF_I_GP_PEEK() - '0') <= 9) {
+      while ((unsigned)(ATOF_I_GP_PEEK() - '0') <= 9) {
         if (exp < 10000) exp = exp * 10 + (*p - '0');
         p++;
       }
@@ -1477,6 +1475,8 @@ INLINE atof_result_f64 atof_parse_f64_ctx(const char *s, int readable_bytes, voi
       p = before_exp;
     }
   }
+
+#undef ATOF_I_GP_PEEK
 
   return atof_i_finalize_f64(d, nd, dp, exp, neg, sig_start, dot_ptr, p, pc);
 }
@@ -1931,8 +1931,11 @@ INLINE atof_result_f32 atof_parse_f32_json_ctx(const char *s, int readable_bytes
   int ndMant = nd <= 19 ? nd : 19;
   int power  = dp - ndMant + exp;
 
+  /* d wraps modulo 2^64 once nd exceeds 19, so only a short mantissa may
+   * take the fast path. */
   float fast;
-  if (atof_i_f32_fast_path(d, power, &fast)) return (atof_result_f32){atof_i_apply_sign_f32(fast, neg), p};
+  if (LIKELY(nd <= 19) && atof_i_f32_fast_path(d, power, &fast))
+    return (atof_result_f32){atof_i_apply_sign_f32(fast, neg), p};
 
   if (UNLIKELY(d == 0 && nd <= 19)) return (atof_result_f32){atof_i_apply_sign_f32(0.0f, neg), p};
   if (UNLIKELY(power > 38)) return (atof_result_f32){atof_i_apply_sign_f32(atof_i_pos_inf_f32(), neg), p};
@@ -1957,5 +1960,6 @@ INLINE atof_result_f32 atof_parse_f32_json_ctx(const char *s, int readable_bytes
 
 #undef ATOF_F64_RETURN_BASIC
 #undef ATOF_MP_MAX_LIMBS
+#undef ATOF_MP_MAX_DIGITS
 
 #endif /* ATOF_H */

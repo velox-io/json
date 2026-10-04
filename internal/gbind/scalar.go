@@ -461,7 +461,7 @@ func (c *binder) writeQuotedScalar(dst unsafe.Pointer, k vbind.Kind, s string) b
 	case vbind.KindUint, vbind.KindUint8, vbind.KindUint16, vbind.KindUint32, vbind.KindUint64:
 		return storeUnsigned(dst, k, s)
 	case vbind.KindFloat32, vbind.KindFloat64:
-		if len(s) == 0 || len(s) > 128 || strings.ContainsAny(s, "xX_") {
+		if len(s) == 0 || strings.ContainsAny(s, "xX_") {
 			return false
 		}
 		return storeFloat(dst, k, s)

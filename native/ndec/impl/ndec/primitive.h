@@ -53,14 +53,25 @@ INLINE int bind_write_number(const uint8_t *src, uint8_t kind, uint8_t *dst, ato
   case BIND_KIND_FLOAT64: {
     double dv;
     if (UNLIKELY(ndec_parse_double_padded(src, &dv, atof, end_out))) return -1;
-    if (UNLIKELY(!__builtin_isfinite(dv))) return -1;
+    if (UNLIKELY(!__builtin_isfinite(dv))) {
+      /* Range overflow stores ±Inf before the mismatch is reported, matching
+       * encoding/json (jsonv2 stores the parsed value, then returns the type
+       * error). The caller's ON_MISMATCH skips only the remaining input, so
+       * the stored value survives. */
+      __builtin_memcpy(dst, &dv, sizeof(dv));
+      return -1;
+    }
     __builtin_memcpy(dst, &dv, sizeof(dv));
     return 0;
   }
   case BIND_KIND_FLOAT32: {
     float fv;
     if (UNLIKELY(ndec_parse_float32_padded(src, &fv, atof, end_out))) return -1;
-    if (UNLIKELY(!__builtin_isfinite(fv))) return -1;
+    if (UNLIKELY(!__builtin_isfinite(fv))) {
+      /* Same policy as FLOAT64 above. */
+      __builtin_memcpy(dst, &fv, sizeof(fv));
+      return -1;
+    }
     __builtin_memcpy(dst, &fv, sizeof(fv));
     return 0;
   }
@@ -164,17 +175,12 @@ INLINE int bind_write_number(const uint8_t *src, uint8_t kind, uint8_t *dst, ato
  * overflows the destination precision and any trailing content are
  * errors. Unsigned kinds take digits only, matching strconv.ParseUint.
  * Hex-float spellings stay unsupported, the one strconv.ParseFloat form
- * the atof core does not take. The general atof entry reads past the
- * token for its SWAR scan, so a stack copy supplies the padding. */
-#define BIND_QUOTED_NUM_MAX 128
+ * the atof core does not take. The general atof entries stay inside len,
+ * so the body parses in place at any length. */
 
 INLINE int bind_parse_quoted_f64(const uint8_t *data, uint32_t len, double *out, atof_ctx *ctx) {
-  uint8_t buf[BIND_QUOTED_NUM_MAX + 8];
-  if (len == 0 || len > BIND_QUOTED_NUM_MAX) return -1;
-  __builtin_memcpy(buf, data, len);
-  __builtin_memset(buf + len, 0x20, 8);
-  atof_result_f64 r = atof_parse_f64_ctx((const char *)buf, (int)len, ctx);
-  if (r.end == (const char *)buf || (const uint8_t *)r.end != buf + len) return -1;
+  atof_result_f64 r = atof_parse_f64_ctx((const char *)data, (int)len, ctx);
+  if (r.end == (const char *)data || (const uint8_t *)r.end != data + len) return -1;
   if (UNLIKELY(!__builtin_isfinite(r.val))) {
     const uint8_t *q = data + ((data[0] == '-') | (data[0] == '+'));
     uint8_t lc       = (uint8_t)(*q | 0x20);
@@ -185,12 +191,8 @@ INLINE int bind_parse_quoted_f64(const uint8_t *data, uint32_t len, double *out,
 }
 
 INLINE int bind_parse_quoted_f32(const uint8_t *data, uint32_t len, float *out, atof_ctx *ctx) {
-  uint8_t buf[BIND_QUOTED_NUM_MAX + 8];
-  if (len == 0 || len > BIND_QUOTED_NUM_MAX) return -1;
-  __builtin_memcpy(buf, data, len);
-  __builtin_memset(buf + len, 0x20, 8);
-  atof_result_f32 r = atof_parse_f32_ctx((const char *)buf, (int)len, ctx);
-  if (r.end == (const char *)buf || (const uint8_t *)r.end != buf + len) return -1;
+  atof_result_f32 r = atof_parse_f32_ctx((const char *)data, (int)len, ctx);
+  if (r.end == (const char *)data || (const uint8_t *)r.end != data + len) return -1;
   if (UNLIKELY(!__builtin_isfinite(r.val))) {
     const uint8_t *q = data + ((data[0] == '-') | (data[0] == '+'));
     uint8_t lc       = (uint8_t)(*q | 0x20);
@@ -1128,7 +1130,12 @@ INLINE int tape_bind_write_number(uint8_t kind, uint8_t tag, uint64_t word, uint
     } else {
       f = (float)iv;
     }
-    if (UNLIKELY(!__builtin_isfinite(f))) return -1;
+    if (UNLIKELY(!__builtin_isfinite(f))) {
+      /* Range overflow stores ±Inf before the mismatch is reported; the
+       * caller's ON_MISMATCH skips only the remaining input. */
+      __builtin_memcpy(dst, &f, sizeof(f));
+      return -1;
+    }
     __builtin_memcpy(dst, &f, sizeof(f));
     return 0;
   }
@@ -1161,14 +1168,23 @@ INLINE int tape_bind_write_num_raw(uint8_t kind, const uint8_t *text, uint32_t l
   case BIND_KIND_FLOAT32: {
     float f;
     if (UNLIKELY(ndec_parse_float32(text, len, &f, atof))) return -1;
-    if (UNLIKELY(!__builtin_isfinite(f))) return -1;
+    if (UNLIKELY(!__builtin_isfinite(f))) {
+      /* Range overflow stores ±Inf before the mismatch is reported; the
+       * caller's ON_MISMATCH skips only the remaining input. */
+      __builtin_memcpy(dst, &f, sizeof(f));
+      return -1;
+    }
     __builtin_memcpy(dst, &f, sizeof(f));
     return 0;
   }
   case BIND_KIND_FLOAT64: {
     double d;
     if (UNLIKELY(ndec_parse_double(text, len, &d, atof))) return -1;
-    if (UNLIKELY(!__builtin_isfinite(d))) return -1;
+    if (UNLIKELY(!__builtin_isfinite(d))) {
+      /* Same policy as FLOAT32 above. */
+      __builtin_memcpy(dst, &d, sizeof(d));
+      return -1;
+    }
     __builtin_memcpy(dst, &d, sizeof(d));
     return 0;
   }
@@ -1180,6 +1196,10 @@ INLINE int tape_bind_write_num_raw(uint8_t kind, const uint8_t *text, uint32_t l
  * and double tags carry a following value word; TAPE_NUM_RAW carries its source
  * span in the tag word itself. ON_MISMATCH supplies the site's container or root
  * policy.
+ *
+ * A float target past its range stores ±Inf before the write helpers report
+ * failure, so ON_MISMATCH may run with the destination already written. Every
+ * mismatch policy only skips the remaining input; none rolls the value back.
  */
 #define TAPE_BIND_NUMBER_ARM(m, kind_, dst_, cont_label, ON_MISMATCH)                                             \
   do {                                                                                                            \

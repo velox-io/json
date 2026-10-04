@@ -4,12 +4,31 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"math"
 	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
 )
+
+// longNumberSeeds reach the >19-digit truncation and multiprecision refine
+// paths, which byte-level mutation rarely grows into from short seeds.
+func longNumberSeeds() []string {
+	// Exact decimal of the midpoint between 1 and its float64 successor.
+	const mid64 = "1.00000000000000011102230246251565404236316680908203125"
+	return []string{
+		mid64,
+		mid64 + strings.Repeat("0", 800),
+		mid64 + strings.Repeat("0", 800) + "1",
+		"1." + strings.Repeat("0", 15) + strings.Repeat("5", 1538) + strings.Repeat("0", 31) + "5",
+		"1" + strings.Repeat("0", 70) + "e-60",
+		"9.4825950" + strings.Repeat("0", 62) + "1e+09",
+		strings.Repeat("9", 400) + "e-400",
+		"0." + strings.Repeat("0", 320) + strings.Repeat("4", 900),
+		"-" + strings.Repeat("3", 1000) + "e-700",
+	}
+}
 
 // FuzzUnmarshalAny: the primary differential fuzzer.
 //
@@ -78,6 +97,7 @@ func FuzzUnmarshalAny(f *testing.F) {
 		`tru`, `fals`, `nul`,
 		`NaN`, `Infinity`, `-Infinity`,
 	}
+	seeds = append(seeds, longNumberSeeds()...)
 	for _, s := range seeds {
 		f.Add([]byte(s))
 	}
@@ -276,6 +296,7 @@ func FuzzNoCrash(f *testing.F) {
 		string([]byte{0x22, 0x00, 0x22}),     // raw null in string
 		`{"a":` + string([]byte{0xff}) + `}`, // invalid byte
 	}
+	seeds = append(seeds, longNumberSeeds()...)
 	for _, s := range seeds {
 		f.Add([]byte(s))
 	}
@@ -291,6 +312,9 @@ func FuzzNoCrash(f *testing.F) {
 
 		var n float64
 		Unmarshal(data, &n)
+
+		var n32 float32
+		Unmarshal(data, &n32)
 
 		var b bool
 		Unmarshal(data, &b)
@@ -310,6 +334,77 @@ func FuzzNoCrash(f *testing.F) {
 		var ms map[string]string
 		Unmarshal(data, &ms)
 	})
+}
+
+// FuzzUnmarshalNumber: differential fuzzer for typed float binding.
+//
+// FuzzUnmarshalAny only reaches float64 through *any. This target decodes
+// the input as a bare token, a slice element and a struct field, at both
+// float32 and float64 precision, so each atof entry and its refine path is
+// compared against encoding/json. The ",string" form covers the general
+// entries, whose strconv grammar admits NaN and Inf.
+func FuzzUnmarshalNumber(f *testing.F) {
+	seeds := []string{
+		`0`, `-0`, `1`, `-1`, `0.1`, `1.5`, `1e10`, `1E-10`, `-1.5e+2`,
+		`16777217`, `9007199254740993`, `18446744073709551616`,
+		`3.4028235e+38`, `3.4028236e+38`, `1.4e-45`, `7e-46`,
+		`1.7976931348623157e+308`, `1.8e308`, `5e-324`, `2.4703282292062328e-324`,
+		`9100000000000000.999`, `100.0000000000800`,
+		`1,2.5,-3e2`, `01`, `1.`, `.5`, `1e`, `+1`, `-`, `NaN`, `-Inf`, `infinity`,
+	}
+	seeds = append(seeds, longNumberSeeds()...)
+	for _, s := range seeds {
+		f.Add([]byte(s))
+	}
+
+	type fields struct {
+		F32 float32 `json:"f32"`
+		F64 float64 `json:"f64"`
+	}
+	type quoted struct {
+		Q32 float32 `json:"q32,string"`
+		Q64 float64 `json:"q64,string"`
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		checkNumberParity[float32](t, "float32", data)
+		checkNumberParity[float64](t, "float64", data)
+		checkNumberParity[[]float32](t, "[]float32", wrapBytes("[", data, "]"))
+		checkNumberParity[[]float64](t, "[]float64", wrapBytes("[", data, "]"))
+		doc := wrapBytes(`{"f32":`, data, "")
+		doc = append(append(doc, `,"f64":`...), data...)
+		checkNumberParity[fields](t, "struct", append(doc, '}'))
+		// Hex floats and digit separators are the documented ",string"
+		// divergence: strconv takes them, the native atof does not.
+		if !bytes.ContainsAny(data, "xX_") {
+			q := wrapBytes(`{"q32":"`, data, `","q64":"`)
+			checkNumberParity[quoted](t, "quoted", append(append(q, data...), `"}`...))
+		}
+	})
+}
+
+func wrapBytes(pre string, data []byte, post string) []byte {
+	b := make([]byte, 0, len(pre)+len(data)+len(post))
+	return append(append(append(b, pre...), data...), post...)
+}
+
+// checkNumberParity fails when vjson rejects what encoding/json accepts or
+// when both accept with different values. Leniency stays unchecked, as in
+// FuzzUnmarshalAny.
+func checkNumberParity[T any](t *testing.T, kind string, data []byte) {
+	t.Helper()
+	var vj, std T
+	vjErr := Unmarshal(data, &vj)
+	stdErr := json.Unmarshal(data, &std)
+	if vjErr != nil && stdErr == nil {
+		t.Errorf("%s: vjson rejected but encoding/json accepted\ninput: %q\nvjson error: %v\nstdlib: %v",
+			kind, data, vjErr, std)
+		return
+	}
+	// Shortest round-trip formatting is injective on floats and equates NaN.
+	if vjErr == nil && stdErr == nil && fmt.Sprint(vj) != fmt.Sprint(std) {
+		t.Errorf("%s: value mismatch\ninput:  %q\nvjson:  %v\nstdlib: %v", kind, data, vj, std)
+	}
 }
 
 // FuzzMarshalString: differential fuzzer for string escaping.

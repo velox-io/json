@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
 	vjson "github.com/velox-io/json"
+	"github.com/velox-io/json/decode/dom"
 )
 
 // expectOverflowError checks that err is an *UnmarshalTypeError (or bridges to
@@ -613,5 +615,126 @@ func TestTypeMismatch_StdlibErrorType(t *testing.T) {
 				t.Fatalf("stdlib returned %T, not *json.UnmarshalTypeError", err)
 			}
 		})
+	}
+}
+
+// A number past the float target's range stores ±Inf and still reports the
+// type error, matching encoding/json (jsonv2 stores the parsed value before
+// the error; Go <= 1.26 with jsonv1 left the destination untouched). Checked
+// at top level, in struct fields, and through interface{}, on both the JSON
+// bind path and the tape path.
+func TestOverflow_FloatStoresInf(t *testing.T) {
+	type sf64 struct{ X float64 }
+	type sf32 struct{ X float32 }
+	type san struct{ X any }
+
+	cases := []struct{ name, input string }{
+		{"pos_1e400", "1e400"},
+		{"neg_1e400", "-1e400"},
+		{"long_mantissa", strings.Repeat("7", 3000) + "e2600"},
+	}
+
+	check := func(t *testing.T, label string, got, want interface{}, gotErr, wantErr error) {
+		t.Helper()
+		if (gotErr != nil) != (wantErr != nil) {
+			t.Errorf("%s: err=%v, stdlib err=%v", label, gotErr, wantErr)
+			return
+		}
+		if gotErr == nil && !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: v=%#v, stdlib v=%#v", label, got, want)
+		}
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			data := []byte(c.input)
+
+			// top level, JSON path
+			var rj64, vj64 float64
+			stdErr := json.Unmarshal(data, &rj64)
+			vjErr := vjson.Unmarshal(data, &vj64)
+			check(t, "top f64", vj64, rj64, vjErr, stdErr)
+
+			var rj32, vj32 float32
+			stdErr = json.Unmarshal(data, &rj32)
+			vjErr = vjson.Unmarshal(data, &vj32)
+			check(t, "top f32", vj32, rj32, vjErr, stdErr)
+
+			var rjAny, vjAny any
+			stdErr = json.Unmarshal(data, &rjAny)
+			vjErr = vjson.Unmarshal(data, &vjAny)
+			check(t, "top any", vjAny, rjAny, vjErr, stdErr)
+
+			// struct field, JSON path
+			f64in := []byte(`{"X":` + c.input + `}`)
+			var rjsf, vjsf sf64
+			stdErr = json.Unmarshal(f64in, &rjsf)
+			vjErr = vjson.Unmarshal(f64in, &vjsf)
+			check(t, "field f64", vjsf, rjsf, vjErr, stdErr)
+
+			var rjs32, vjs32 sf32
+			stdErr = json.Unmarshal(f64in, &rjs32)
+			vjErr = vjson.Unmarshal(f64in, &vjs32)
+			check(t, "field f32", vjs32, rjs32, vjErr, stdErr)
+
+			var rjsa, vjsa san
+			stdErr = json.Unmarshal(f64in, &rjsa)
+			vjErr = vjson.Unmarshal(f64in, &vjsa)
+			check(t, "field any", vjsa, rjsa, vjErr, stdErr)
+
+			// tape path
+			val, err := dom.Parse(data)
+			if err != nil {
+				t.Fatalf("dom.Parse: %v", err)
+			}
+			var tv64 float64
+			vjErr = vjson.UnmarshalValue(val, &tv64)
+			check(t, "tape f64", tv64, rj64, vjErr, stdErr)
+
+			var tv32 float32
+			vjErr = vjson.UnmarshalValue(val, &tv32)
+			check(t, "tape f32", tv32, rj32, vjErr, stdErr)
+
+			var tvAny any
+			vjErr = vjson.UnmarshalValue(val, &tvAny)
+			check(t, "tape any", tvAny, rjAny, vjErr, stdErr)
+
+			// every stored value must be the signed Inf
+			if math.IsInf(rj64, 0) && vj64 != rj64 {
+				t.Errorf("top f64: v=%v, stdlib v=%v", vj64, rj64)
+			}
+		})
+	}
+}
+
+// A quoted number past the float range keeps the legacy semantics: the error is
+// reported and the destination stays untouched, on both sides.
+func TestOverflow_StringTagFloatKeepsZero(t *testing.T) {
+	type sf64 struct {
+		X float64 `json:"x,string"`
+	}
+	var v sf64
+	if err := vjson.Unmarshal([]byte(`{"x":"1e400"}`), &v); err == nil {
+		t.Errorf("quoted overflow: expected an error")
+	}
+	if v.X != 0 {
+		t.Errorf("quoted overflow: X = %v, want 0", v.X)
+	}
+}
+
+// The stored ±Inf must survive when the overflow is only the first error: a
+// later sibling field still binds, like encoding/json's saveError semantics.
+// Array and map elements do not share this: their mismatch policy aborts the
+// decode (BIND_ERR_VALUE_OR_EOF), an independent difference from encoding/json
+// that predates the ±Inf store.
+func TestOverflow_FloatStoresInfThenContinues(t *testing.T) {
+	type S struct{ A, B float32 }
+	var v S
+	err := vjson.Unmarshal([]byte(`{"A":1e300,"B":2}`), &v)
+	if err == nil {
+		t.Fatalf("expected an overflow error")
+	}
+	if !math.IsInf(float64(v.A), 1) || v.B != 2 {
+		t.Errorf("v = %+v, want {A:+Inf B:2}", v)
 	}
 }

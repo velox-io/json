@@ -295,6 +295,24 @@ func TestUnmarshal_StringTagFloatGrammar(t *testing.T) {
 	assertSameDecode(t, "string float range overflow", []byte(`{"Q":"1e1000"}`), func() any { return new(doc) })
 	assertSameDecode(t, "string float inner space", []byte(`{"Q":" 10"}`), func() any { return new(doc) })
 
+	// Bodies of any length parse in place, at both precisions; the escaped
+	// body is decoded into scratch before the number parse.
+	type doc32 struct {
+		Q float32 `json:",string"`
+	}
+	long := []string{
+		"1." + strings.Repeat("0", 126) + "1",
+		"0." + strings.Repeat("0", 200) + "1e200",
+		"1." + strings.Repeat("0", 15) + strings.Repeat("5", 1538) + strings.Repeat("0", 31) + "5",
+		`\u0031.` + strings.Repeat("0", 300) + "1",
+		"1." + strings.Repeat("0", 300) + "1x",
+	}
+	for _, body := range long {
+		in := []byte(`{"Q":"` + body + `"}`)
+		assertSameDecode(t, "string float long body", in, func() any { return new(doc) })
+		assertSameDecode(t, "string float32 long body", in, func() any { return new(doc32) })
+	}
+
 	var plus, frac doc
 	if err := vjson.Unmarshal([]byte(`{"Q":"+10"}`), &plus); err != nil || plus.Q != 10 {
 		t.Errorf("string float plus sign: vjson got=%v err=%v", plus.Q, err)
