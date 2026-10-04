@@ -2,6 +2,7 @@ package bind
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -215,5 +216,38 @@ func TestSliceSlotCursorNeverExposesWrittenBytes(t *testing.T) {
 				t.Fatalf("round %d: Rows[%d] = %v, want [%d]", round, i, row, want)
 			}
 		}
+	}
+}
+
+// staleFrameRoot is large enough to own its span, so once collected the span
+// is released and any read through a pointer into it is a bad pointer that
+// checkptr (-race builds) rejects.
+type staleFrameRoot struct {
+	Pad  [64 << 10]byte
+	Rows [][]int `json:"rows"`
+}
+
+// TestSealIgnoresStaleFrameAboveDepth pins the frame stack bound sealOpenSlices
+// walks. A push saves the parent at frames[depth] before raising depth, so at
+// depth d the saved parents are frames[0..d-1] and frames[d] still holds what an
+// earlier, deeper parse saved there. The first parse leaves frames[2] naming
+// the Rows header of a root that is then collected; the second dies at depth
+// two, inside Rows. Reading frames[2] dereferences the freed root.
+func TestSealIgnoresStaleFrameAboveDepth(t *testing.T) {
+	p, err := NewParser[staleFrameRoot]()
+	if err != nil {
+		t.Fatalf("NewParser: %v", err)
+	}
+	for round := range 16 {
+		if err := p.Unmarshal([]byte(`{"rows":[[1,2],[3]]}`), new(staleFrameRoot)); err != nil {
+			t.Fatalf("round %d: first parse: %v", round, err)
+		}
+		runtime.GC()
+		runtime.GC()
+		live := new(staleFrameRoot)
+		if err := p.Unmarshal([]byte(`{"rows":[,]}`), live); err == nil {
+			t.Fatalf("round %d: malformed input parsed without error", round)
+		}
+		runtime.KeepAlive(live)
 	}
 }

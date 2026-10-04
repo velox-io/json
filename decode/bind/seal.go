@@ -33,9 +33,13 @@ func sealOpenSlices(p *Parser, m *ndec.BindMachine) {
 		unsafe.Pointer(m.Core.CurDst), m.Core.CurAux)
 
 	// Document completion and BindYieldError spill Depth, so the frame stack is
-	// current. Frame zero is the root sentinel.
+	// current. A push saves the parent at frames[depth] and then raises depth,
+	// so the saved parents are frames[0..Depth-1] and frames[Depth] is whatever
+	// an earlier, deeper descent left there, possibly naming a header of a
+	// collected root. Frame zero is the root sentinel, a copy of the root that
+	// frames[1] or the live locals supersede.
 	frames := ndec.FramesBase(m)
-	for d := int32(1); d <= m.Core.Depth; d++ {
+	for d := int32(1); d < m.Core.Depth; d++ {
 		f := (*ndec.BindFrame)(unsafe.Add(unsafe.Pointer(frames), uintptr(d)*unsafe.Sizeof(ndec.BindFrame{})))
 		sealSliceFrame(p, tree, vbind.Kind(f.Kind), uint32(f.TypeIdx),
 			f.Dst, *(*uintptr)(unsafe.Pointer(&f.U[0])))
