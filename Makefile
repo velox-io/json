@@ -30,6 +30,9 @@ fmt:
 test:
 	@./scripts/run-test.sh
 
+test-nondec:
+	@./scripts/run-test-nondec.sh
+
 test-coverage:
 	go test -race -coverprofile=coverage.out .
 	go tool cover -html=coverage.out -o coverage.html

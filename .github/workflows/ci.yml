@@ -36,6 +36,35 @@ jobs:
     - name: Run unit tests
       run: make test
 
+  test-nondec:
+    # The pure-Go engine (vj_nondec) is plain Go, so one OS/arch stands in for
+    # every platform. Its exposure is to the runtime internals gort links
+    # against (swissmap and noswissmap layouts), so it spans the oldest
+    # supported toolchain and the newest.
+    name: Test (pure-Go decoder, Go ${{ matrix.go-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ['1.24', 'stable']
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Setup Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: ${{ matrix.go-version }}
+
+    - name: Print Go version
+      run: go version
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Run unit tests
+      run: make test-nondec
+
   test-linux-arm64:
     name: Test (Linux ARM64, Go stable)
     runs-on: ubuntu-24.04-arm
@@ -452,12 +481,13 @@ jobs:
   pr-check:
     name: PR Check
     runs-on: ubuntu-latest
-    needs: [test-linux-amd64, test-linux-arm64, test-macos, test-macos-amd64, test-windows, test-windows-arm64, gc-soak, gc-stress, gc-stress-nondec, lint, fuzz, fuzz-nondec]
+    needs: [test-linux-amd64, test-nondec, test-linux-arm64, test-macos, test-macos-amd64, test-windows, test-windows-arm64, gc-soak, gc-stress, gc-stress-nondec, lint, fuzz, fuzz-nondec]
     if: always() && github.event_name == 'pull_request'
     steps:
     - name: Check all jobs passed
       run: |
         if [[ "${{ needs.test-linux-amd64.result }}" != "success" || \
+              "${{ needs.test-nondec.result }}" != "success" || \
               "${{ needs.test-linux-arm64.result }}" != "success" || \
               "${{ needs.test-macos.result }}" != "success" || \
               "${{ needs.test-macos-amd64.result }}" != "success" || \
