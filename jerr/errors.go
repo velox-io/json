@@ -47,15 +47,25 @@ type UnmarshalTypeError struct {
 	Offset int64
 	Struct string // struct being decoded (may be empty)
 	Field  string // struct field (may be empty)
+	Err    error  // why the value could not be assigned (may be nil)
 }
 
 func (e *UnmarshalTypeError) Error() string {
+	var s string
 	if e.Struct != "" || e.Field != "" {
-		return fmt.Sprintf("vjson: cannot unmarshal %s into Go struct field %s.%s of type %s",
+		s = fmt.Sprintf("vjson: cannot unmarshal %s into Go struct field %s.%s of type %s",
 			e.Value, e.Struct, e.Field, e.Type)
+	} else {
+		s = fmt.Sprintf("vjson: cannot unmarshal %s into Go value of type %s", e.Value, e.Type)
 	}
-	return fmt.Sprintf("vjson: cannot unmarshal %s into Go value of type %s", e.Value, e.Type)
+	if e.Err != nil {
+		s += ": " + e.Err.Error()
+	}
+	return s
 }
+
+// Unwrap returns the cause in Err, or nil when there is none.
+func (e *UnmarshalTypeError) Unwrap() error { return e.Err }
 
 // As supports errors.As bridging to *json.UnmarshalTypeError.
 func (e *UnmarshalTypeError) As(target any) bool {

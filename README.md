@@ -15,7 +15,7 @@ Velox focuses on **binding-style** conversion between JSON and typed Go values (
 
 ## Compatibility
 
-- field tags: custom names, `-`, `,string`, `,omitempty`, `,omitzero`
+- field tags: custom names, `-`, `,string`, `,omitempty`, `,omitzero`, and the [`format` option](#format) from `encoding/json/v2`
 - anonymous (embedded) structs, pointers, `json.Number`, `json.RawMessage`
 - `json.Marshaler`/`json.Unmarshaler` and `encoding.TextMarshaler`/`TextUnmarshaler`
 - boxing into `any` (`[]any`, `map[string]any`)
@@ -30,6 +30,8 @@ Deliberate differences:
 - **Strict tag-option parsing.**
 
   A misspelled option such as `omitEmpty` or `omit_zero` fails the type's build with a message naming the canonical spelling, where `encoding/json` v1 silently ignores it. An embedded field whose tag carries options (other than `embed`) is likewise rejected rather than promoted with the options dropped.
+
+  Velox checks the `format` option the same way. If a `format` value is malformed, or doesn't apply to the field's type, `Marshal` and `Unmarshal` return an error for any value that contains the struct. `encoding/json/v2` reports a format that doesn't apply only when it encodes or decodes that field, so it accepts, for example, such a format on a pointer field that is always nil.
 
 
 ### Requirements
@@ -67,6 +69,46 @@ type Event struct {
     Tags []string  `json:"tags,omitzero"` // nil → absent; empty non-nil → "tags":[]
 }
 ```
+
+## format
+
+The `format` option from `encoding/json/v2` selects a different JSON representation for a field's value. `encoding/json/v2` honors the option only behind an experimental setting ([go.dev/issue/79071](https://go.dev/issue/79071)); velox always honors it. Each format encodes and decodes as it does in `encoding/json/v2` with that setting on, and everything else follows `encoding/json`.
+
+Put `format` last in the tag. Its value is either an identifier, such as `format:unix`, or a single-quoted string, such as `format:'2006-01-02'`. A quoted value can contain commas and Go escape sequences.
+
+| Field type | Formats |
+| --- | --- |
+| `[]byte`, `[N]byte` | `base64`, `base64url`, `base32`, `base32hex`, `base16` (alias `hex`), or `array` for a JSON array of numbers |
+| `float32`, `float64` | `nonfinite`, which represents NaN, +Inf, and -Inf as the strings `"NaN"`, `"Infinity"`, and `"-Infinity"` |
+| Other slices, maps | `emitnull` or `emitempty`, which encode a nil value as `null` or as an empty array or object |
+| `time.Time` | The name of a layout constant in package `time`, such as `RFC3339`, `RFC1123`, or `DateOnly`; a quoted layout; or `unix`, `unixmilli`, `unixmicro`, or `unixnano` for a number of units since the Unix epoch, which can be fractional |
+| `time.Duration` | `units` for a string such as `"1h30m0s"`, `iso8601` for a string such as `"PT1H30M"`, or `sec`, `milli`, `micro`, or `nano` for a number of those units, which can be fractional |
+
+The following example encodes one value of each kind:
+
+```go
+type Event struct {
+    At      time.Time     `json:"at,format:unixmilli"`
+    Day     time.Time     `json:"day,format:'2006-01-02'"`
+    Timeout time.Duration `json:"timeout,format:units"`
+    Digest  []byte        `json:"digest,format:hex"`
+    Tags    []string      `json:"tags,format:emitempty"`
+}
+
+at := time.Date(2020, 1, 2, 3, 4, 5, 600_000_000, time.UTC)
+out, err := json.Marshal(Event{At: at, Day: at, Timeout: 90 * time.Second, Digest: []byte{0xca, 0xfe}})
+// out: {"at":1577934245600,"day":"2020-01-02","timeout":"1m30s","digest":"cafe","tags":[]}
+```
+
+`go vet` reports any space in a `json` tag value. To use a layout that contains spaces, write each space as `\\x20` in the tag. Go's tag parsing turns it into `\x20`, which the quoted value then decodes to a space. For example, `` `json:"at,format:'2006-01-02\\x2015:04'"` `` encodes `"2020-01-02 03:04"`.
+
+A format applies only to the field's own value:
+
+- A pointer field passes its format to the value that it points to. Elements of slices, arrays, and maps don't receive the format.
+- With `,string`, a numeric representation such as `unix` or `sec` is written as a JSON string. Like `,string` on a plain number, it applies through at most one pointer.
+- If the field's type marshals or unmarshals itself through JSON or text methods, those methods take precedence over the format in the direction they cover. The same holds for the types that velox handles specially, such as `json.RawMessage` and `json.Number`. `time.Time` and `time.Duration` always use the format.
+
+Except for `emitnull`, `emitempty`, and `array` on a `[N]byte` field, velox decodes a field with a format the same way it decodes a `json.Unmarshaler` field, so the same limits apply. `UnmarshalValue` can't bind the field, and neither can an inline (`,embed`) variant case, or a variant case that is buffered because its discriminator appears after it in the input.
 
 ## Extensions
 

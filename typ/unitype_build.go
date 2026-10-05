@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/velox-io/json/gort"
+	"github.com/velox-io/json/internal/jsonfmt"
 	"github.com/velox-io/json/value"
 )
 
@@ -460,7 +461,7 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 			// the same name and option set.
 			var (
 				jopts        jsonOptions
-				jmutants     []string
+				jproblems    []string
 				jsonTagName  string
 				jsonTagDrops bool
 			)
@@ -468,7 +469,7 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 				if raw == "-" {
 					jsonTagDrops = true
 				} else {
-					jsonTagName, jopts, jmutants = parseJSONTag(raw)
+					jsonTagName, jopts, jproblems = parseJSONTag(raw)
 				}
 			}
 
@@ -499,7 +500,7 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 					if jsonTagName != "" {
 						goto namedField
 					}
-					if !jopts.onlyEmbed() || len(jmutants) > 0 {
+					if !jopts.onlyEmbed() || len(jproblems) > 0 {
 						rejects = append(rejects, fmt.Sprintf(
 							"struct %s field %s: `json:%q` gives an embedded field options besides `%s`; embedding has no member of its own, so drop the options",
 							st, rf.Name, rf.Tag.Get("json"), EmbedOption))
@@ -583,10 +584,8 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 				}
 				continue
 			}
-			for _, m := range jmutants {
-				rejects = append(rejects, fmt.Sprintf(
-					"struct %s field %s has misspelled `json` option %q; specify `%s` instead",
-					st, rf.Name, m, jsonOptionCanonical(m)))
+			for _, p := range jproblems {
+				rejects = append(rejects, fmt.Sprintf("struct %s field %s %s", st, rf.Name, p))
 			}
 			if jsonTagName != "" {
 				jsonName = jsonTagName
@@ -644,6 +643,20 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 				}
 			}
 
+			var marshalFormat, unmarshalFormat *jsonfmt.Format
+			if jopts.format != "" {
+				var err error
+				marshalFormat, unmarshalFormat, err = jsonfmt.Resolve(rf.Type, jopts.format, jopts.quoted, jsonMethods(building))
+				if err != nil {
+					rejects = append(rejects, fmt.Sprintf("struct %s field %s: %v", st, rf.Name, err))
+				}
+				// A format that changes decoding reads `,string` itself, so the
+				// native quoted-scalar path must not unwrap the value first.
+				if unmarshalFormat != nil {
+					quoted = false
+				}
+			}
+
 			if quoted {
 				switch fieldUT.Kind {
 				case KindPointer:
@@ -691,6 +704,9 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 				IsZeroFn:       makeIsZero(rf.Type),
 				OmitZeroFn:     ozFn,
 				OmitZeroMethod: ozMethod,
+
+				MarshalFormat:   marshalFormat,
+				UnmarshalFormat: unmarshalFormat,
 			}
 			// Value is a struct (tape-backed) but, like encoding/json's
 			// treatment of struct types, omitempty must NOT elide it: a zero
@@ -755,6 +771,24 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 		}
 	}
 	return result, rejects
+}
+
+// jsonMethods returns the jsonfmt.Resolve hook reporting whether a type
+// marshals or unmarshals through its own JSON or text methods, or through
+// velox's built-in handling of a special type. Either way the type ignores a
+// `format` option in that direction.
+func jsonMethods(building map[reflect.Type]*UniType) func(reflect.Type) (marshal, unmarshal bool) {
+	return func(t reflect.Type) (marshal, unmarshal bool) {
+		ut := partialUniTypeOf(t, building)
+		switch ut.Kind {
+		case KindRawMessage, KindNumber, KindValue, KindStream:
+			return true, true
+		}
+		if h := ut.Hooks; h != nil {
+			return h.MarshalFn != nil || h.TextMarshalFn != nil, h.UnmarshalFn != nil || h.TextUnmarshalFn != nil
+		}
+		return false, false
+	}
 }
 
 // encodeKeyBytes returns compact `"name":`.

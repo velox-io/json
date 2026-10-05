@@ -158,16 +158,8 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 	if idx, ok := b.seen[ut]; ok {
 		return idx, nil
 	}
-	idx := uint32(len(b.types))
+	idx := b.addType(ut.Type)
 	b.seen[ut] = idx
-	b.types = append(b.types, BindType{})
-	b.typeMeta = append(b.typeMeta, TypeMeta{})
-	b.reflectTypes = append(b.reflectTypes, ut.Type)
-	b.unmarshalHooks = append(b.unmarshalHooks, nil)
-	b.containsUnmarshaler = append(b.containsUnmarshaler, false)
-	b.writesStr = append(b.writesStr, false)
-	b.writesTape = append(b.writesTape, false)
-	b.publishesValue = append(b.publishesValue, false)
 
 	var info BindType
 	var meta TypeMeta
@@ -178,15 +170,7 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 	info.TypeIdx = uint16(idx)
 
 	if ut.Hooks != nil && ut.Hooks.UnmarshalFn != nil {
-		info.Kind = KindUnmarshaler
-		info.flags = bindFlagCold
-		b.unmarshalHooks[idx] = ut.Hooks
-		b.containsUnmarshaler[idx] = true
-		// Reached only for types in the tree, so this settles
-		// TypeTree.HasRawSpan without a second pass over Types.
-		b.hasRawSpan = true
-		b.types[idx] = info
-		b.typeMeta[idx] = meta
+		b.setRawSpanEntry(idx, ut.Size, ut.Hooks)
 		return idx, nil
 	}
 	if ut.Hooks != nil && ut.Hooks.TextUnmarshalFn != nil {
@@ -266,6 +250,10 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 		// Children must be collected first so this struct's fields remain contiguous.
 		fieldTypeIdxs := make([]uint32, len(si.Fields))
 		for i := range si.Fields {
+			if si.Fields[i].UnmarshalFormat != nil {
+				fieldTypeIdxs[i] = b.collectFormat(&si.Fields[i])
+				continue
+			}
 			fIdx, err := b.collect(si.Fields[i].FieldType)
 			if err != nil {
 				return 0, err
@@ -645,6 +633,45 @@ func (b *builder) propagateArenaUse() {
 			}
 		}
 	}
+}
+
+// addType appends a zeroed entry for rt to types and every table parallel to
+// it, returning the entry's index.
+func (b *builder) addType(rt reflect.Type) uint32 {
+	idx := uint32(len(b.types))
+	b.types = append(b.types, BindType{})
+	b.typeMeta = append(b.typeMeta, TypeMeta{})
+	b.reflectTypes = append(b.reflectTypes, rt)
+	b.unmarshalHooks = append(b.unmarshalHooks, nil)
+	b.containsUnmarshaler = append(b.containsUnmarshaler, false)
+	b.writesStr = append(b.writesStr, false)
+	b.writesTape = append(b.writesTape, false)
+	b.publishesValue = append(b.publishesValue, false)
+	return idx
+}
+
+// collectFormat adds the entry for a struct field whose `format` tag option
+// changes its decoding. Native captures the field's raw JSON span as it does
+// for a json.Unmarshaler, and the drain hands that span to the format's
+// decoder. The entry belongs to the field, so it bypasses seen: another field
+// of the same type may carry a different format, or none.
+func (b *builder) collectFormat(sf *typ.StructField) uint32 {
+	idx := b.addType(sf.FieldType.Type)
+	b.setRawSpanEntry(idx, sf.FieldType.Size, &typ.InterfaceHooks{UnmarshalFn: sf.UnmarshalFormat.Decode})
+	return idx
+}
+
+// setRawSpanEntry makes entry idx a value decoded in Go from its raw JSON span,
+// the way a json.Unmarshaler is: native captures the span, and the drain hands
+// it to hooks.UnmarshalFn.
+func (b *builder) setRawSpanEntry(idx uint32, size uintptr, hooks *typ.InterfaceHooks) {
+	b.types[idx] = BindType{Kind: KindUnmarshaler, flags: bindFlagCold, TypeIdx: uint16(idx)}
+	b.typeMeta[idx] = TypeMeta{Size: uint32(size)}
+	b.unmarshalHooks[idx] = hooks
+	b.containsUnmarshaler[idx] = true
+	// Reached only for types in the tree, so this settles TypeTree.HasRawSpan
+	// without a second pass over Types.
+	b.hasRawSpan = true
 }
 
 // mapValueNeedsIndirection defines both sides of the map staging representation.

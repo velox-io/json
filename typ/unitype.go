@@ -3,6 +3,8 @@ package typ
 import (
 	"reflect"
 	"unsafe"
+
+	"github.com/velox-io/json/internal/jsonfmt"
 )
 
 // ElemTypeKind drives JSON encode/decode dispatch.
@@ -197,6 +199,16 @@ type StructField struct {
 	// emission native; the reflect walk may run natively where a kind-level
 	// check exists.
 	OmitZeroMethod bool
+
+	// MarshalFormat and UnmarshalFormat hold the field's `format` tag option,
+	// resolved against the field's type, for each direction that it changes.
+	// Each is nil when the tag has no format, or when the formatted type
+	// marshals or unmarshals itself in that direction. UnmarshalFormat is
+	// also nil for a format that changes only encoding. They belong to the
+	// field rather than its type, because two fields of one type can carry
+	// different formats.
+	MarshalFormat   *jsonfmt.Format
+	UnmarshalFormat *jsonfmt.Format
 }
 
 // SliceTypeInfo describes a slice.

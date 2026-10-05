@@ -48,6 +48,7 @@ func fieldFBInfo(fi *EncFieldInfo, fc fieldContext, reason int32) *fbInfo {
 		IsZeroFn:   fi.IsZeroFn,
 		OmitZeroFn: fi.OmitZeroFn,
 		PtrPath:    fi.PtrPath,
+		ValueFn:    fi.ValueFn,
 	}
 }
 
@@ -277,6 +278,13 @@ func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 		fc, ok := addKeyForField(b, fi, fieldOff)
 		if !ok {
 			emitFieldFallbackOverflow(b, fi, fieldOff)
+			continue
+		}
+
+		// A `format` option is encoded in Go; the fallback site applies the
+		// omitempty and omitzero checks there too.
+		if fi.Format != nil {
+			emitFieldFallback(b, fc, fieldFBInfo(fi, fc, fbReasonFormat))
 			continue
 		}
 

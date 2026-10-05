@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"unsafe"
 
+	"github.com/velox-io/json/internal/jsonfmt"
 	"github.com/velox-io/json/jerr"
 	"github.com/velox-io/json/typ"
 	"github.com/velox-io/json/value"
@@ -121,63 +122,172 @@ func (es *encodeState) encodeQuotedString(s string) {
 	es.buf = appendEscapedString(es.buf, unsafeString(inner), escapeFlags(es.flags))
 }
 
-func (es *encodeState) encodeValueQuoted(ti *EncTypeInfo, ptr unsafe.Pointer) error {
+// fieldValueFn returns the encoder a field of type ti runs in place of
+// ti.Encode when its tag options change its representation: the `format`
+// encoder, or the `,string` quoting. It returns nil for a field its type
+// encodes as is.
+func fieldValueFn(ti *EncTypeInfo, tagFlags typ.TagFlag, format *jsonfmt.Format) EncodeFn {
+	switch {
+	case format != nil:
+		return formatEncodeFn(format, ti)
+	case tagFlags&EncTagFlagQuoted != 0:
+		return quotedEncodeFn(ti)
+	}
+	return nil
+}
+
+// encodeFieldValue writes a struct field's value with valueFn, its
+// fieldValueFn encoder, or by its type when that is nil. Every Go-side field
+// emission goes through here so the fallback, interpreter, and unfold paths
+// agree with the compiled one. ti.Encode is read per call: it is bound only
+// once its type build completes.
+func (es *encodeState) encodeFieldValue(ti *EncTypeInfo, valueFn EncodeFn, ptr unsafe.Pointer) error {
+	if valueFn == nil {
+		valueFn = ti.Encode
+	}
+	return valueFn(es, ptr)
+}
+
+// quotedEncodeFn returns the `,string` encoder of a quotable kind, which
+// writes the value inside a JSON string, or nil for a kind `,string` leaves
+// alone. The kind is settled here, once per field, so a quoted field costs a
+// single call per value. A type that marshals itself ignores `,string`, as
+// in encoding/json: its JSON or text method still runs.
+func quotedEncodeFn(ti *EncTypeInfo) EncodeFn {
+	if ti.TypeFlags&(EncTypeFlagHasMarshalFn|EncTypeFlagHasTextMarshalFn) != 0 {
+		return nil
+	}
 	switch ti.Kind {
 	case typ.KindBool:
-		if *(*bool)(ptr) {
-			es.buf = append(es.buf, `"true"`...)
-		} else {
-			es.buf = append(es.buf, `"false"`...)
-		}
+		return fnEncodeQuotedBool
 	case typ.KindInt:
-		es.appendQuotedInt64(int64(*(*int)(ptr)))
+		return fnEncodeQuotedInt
 	case typ.KindInt8:
-		es.appendQuotedInt64(int64(*(*int8)(ptr)))
+		return fnEncodeQuotedInt8
 	case typ.KindInt16:
-		es.appendQuotedInt64(int64(*(*int16)(ptr)))
+		return fnEncodeQuotedInt16
 	case typ.KindInt32:
-		es.appendQuotedInt64(int64(*(*int32)(ptr)))
+		return fnEncodeQuotedInt32
 	case typ.KindInt64:
-		es.appendQuotedInt64(*(*int64)(ptr))
+		return fnEncodeQuotedInt64
 	case typ.KindUint:
-		es.appendQuotedUint64(uint64(*(*uint)(ptr)))
+		return fnEncodeQuotedUint
 	case typ.KindUint8:
-		es.appendQuotedUint64(uint64(*(*uint8)(ptr)))
+		return fnEncodeQuotedUint8
 	case typ.KindUint16:
-		es.appendQuotedUint64(uint64(*(*uint16)(ptr)))
+		return fnEncodeQuotedUint16
 	case typ.KindUint32:
-		es.appendQuotedUint64(uint64(*(*uint32)(ptr)))
+		return fnEncodeQuotedUint32
 	case typ.KindUint64:
-		es.appendQuotedUint64(*(*uint64)(ptr))
+		return fnEncodeQuotedUint64
 	case typ.KindFloat32:
-		f := float64(*(*float32)(ptr))
-		if math.IsNaN(f) || math.IsInf(f, 0) {
-			return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
-		}
-		es.buf = append(es.buf, '"')
-		es.appendJSONFloat32(f)
-		es.buf = append(es.buf, '"')
+		return fnEncodeQuotedFloat32
 	case typ.KindFloat64:
-		f := *(*float64)(ptr)
-		if math.IsNaN(f) || math.IsInf(f, 0) {
-			return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
-		}
-		es.buf = append(es.buf, '"')
-		es.appendJSONFloat64(f)
-		es.buf = append(es.buf, '"')
+		return fnEncodeQuotedFloat64
 	case typ.KindString:
-		es.encodeQuotedString(*(*string)(ptr))
+		return fnEncodeQuotedString
 	case typ.KindPointer:
-		pi := ti.ResolvePointer()
-		elemPtr := *(*unsafe.Pointer)(ptr)
-		if elemPtr == nil {
-			es.buf = append(es.buf, litNull...)
-			return nil
+		// The pointee is resolved per call: a pointer type may still be under
+		// construction while the struct holding it is built.
+		return func(es *encodeState, ptr unsafe.Pointer) error {
+			elemPtr := *(*unsafe.Pointer)(ptr)
+			if elemPtr == nil {
+				es.buf = append(es.buf, litNull...)
+				return nil
+			}
+			elem := ti.ResolvePointer().ElemType
+			if fn := quotedEncodeFn(elem); fn != nil {
+				return fn(es, elemPtr)
+			}
+			return elem.Encode(es, elemPtr)
 		}
-		return es.encodeValueQuoted(pi.ElemType, elemPtr)
-	default:
-		return ti.Encode(es, ptr)
 	}
+	return nil
+}
+
+func fnEncodeQuotedBool(es *encodeState, ptr unsafe.Pointer) error {
+	if *(*bool)(ptr) {
+		es.buf = append(es.buf, `"true"`...)
+	} else {
+		es.buf = append(es.buf, `"false"`...)
+	}
+	return nil
+}
+
+func fnEncodeQuotedInt(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendQuotedInt64(int64(*(*int)(ptr)))
+	return nil
+}
+
+func fnEncodeQuotedInt8(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendQuotedInt64(int64(*(*int8)(ptr)))
+	return nil
+}
+
+func fnEncodeQuotedInt16(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendQuotedInt64(int64(*(*int16)(ptr)))
+	return nil
+}
+
+func fnEncodeQuotedInt32(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendQuotedInt64(int64(*(*int32)(ptr)))
+	return nil
+}
+
+func fnEncodeQuotedInt64(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendQuotedInt64(*(*int64)(ptr))
+	return nil
+}
+
+func fnEncodeQuotedUint(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendQuotedUint64(uint64(*(*uint)(ptr)))
+	return nil
+}
+
+func fnEncodeQuotedUint8(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendQuotedUint64(uint64(*(*uint8)(ptr)))
+	return nil
+}
+
+func fnEncodeQuotedUint16(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendQuotedUint64(uint64(*(*uint16)(ptr)))
+	return nil
+}
+
+func fnEncodeQuotedUint32(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendQuotedUint64(uint64(*(*uint32)(ptr)))
+	return nil
+}
+
+func fnEncodeQuotedUint64(es *encodeState, ptr unsafe.Pointer) error {
+	es.appendQuotedUint64(*(*uint64)(ptr))
+	return nil
+}
+
+func fnEncodeQuotedFloat32(es *encodeState, ptr unsafe.Pointer) error {
+	f := float64(*(*float32)(ptr))
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
+	}
+	es.buf = append(es.buf, '"')
+	es.appendJSONFloat32(f)
+	es.buf = append(es.buf, '"')
+	return nil
+}
+
+func fnEncodeQuotedFloat64(es *encodeState, ptr unsafe.Pointer) error {
+	f := *(*float64)(ptr)
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return &UnsupportedValueError{Str: fmt.Sprintf("%v", f)}
+	}
+	es.buf = append(es.buf, '"')
+	es.appendJSONFloat64(f)
+	es.buf = append(es.buf, '"')
+	return nil
+}
+
+func fnEncodeQuotedString(es *encodeState, ptr unsafe.Pointer) error {
+	es.encodeQuotedString(*(*string)(ptr))
 	return nil
 }
 

@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/velox-io/json/internal/jsonfmt"
 	"github.com/velox-io/json/typ"
 )
 
@@ -113,6 +114,18 @@ type EncFieldInfo struct {
 	// OmitZeroMethod records that OmitZeroFn came from an IsZero method
 	// binding, which only Go can run.
 	OmitZeroMethod bool
+
+	// Format is the field's `format` tag option for encoding. It is nil when
+	// the field has no format, its type marshals itself, or the format leaves
+	// encoding unchanged.
+	Format *jsonfmt.Format
+
+	// ValueFn encodes the value in place of Type.Encode when the field's tag
+	// options change its representation: it runs the Format encoder or the
+	// `,string` quoting. It is nil when the type's own encoding applies. Every
+	// Go-side emission of the field goes through encodeFieldValue, which
+	// honors it.
+	ValueFn EncodeFn
 }
 
 type EncStructInfo struct {

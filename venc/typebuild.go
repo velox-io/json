@@ -133,6 +133,8 @@ func buildStructInfo(info *typ.StructTypeInfo, building map[uintptr]*EncTypeInfo
 			OmitZeroFn:     sf.OmitZeroFn,
 			OmitZeroMethod: sf.OmitZeroMethod,
 			TagFlags:       sf.TagFlags,
+			Format:         sf.MarshalFormat,
+			ValueFn:        fieldValueFn(elemET, sf.TagFlags, sf.MarshalFormat),
 		})
 	}
 

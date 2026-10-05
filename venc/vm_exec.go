@@ -425,14 +425,8 @@ func (es *encodeState) handleFallbackYield(ctx *VjExecCtx, bp *Blueprint) error 
 		es.writeKeySpace(ctx)
 	}
 
-	if fb.TagFlags&EncTagFlagQuoted != 0 {
-		if err := es.encodeValueQuoted(fb.TI, fieldPtr); err != nil {
-			return err
-		}
-	} else {
-		if err := fb.TI.Encode(es, fieldPtr); err != nil {
-			return err
-		}
+	if err := es.encodeFieldValue(fb.TI, fb.ValueFn, fieldPtr); err != nil {
+		return err
 	}
 
 	ctx.PC += 8
@@ -588,7 +582,7 @@ func (es *encodeState) unfoldFromYield(ctx *VjExecCtx, fb *fbInfo, isFirst bool)
 		if es.indentString != "" {
 			es.buf = append(es.buf, ' ')
 		}
-		if err := fi.Type.Encode(es, fptr); err != nil {
+		if err := es.encodeFieldValue(fi.Type, fi.ValueFn, fptr); err != nil {
 			return err
 		}
 	}

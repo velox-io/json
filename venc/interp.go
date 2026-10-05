@@ -736,14 +736,8 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 				}
 			}
 
-			if fb.TagFlags&EncTagFlagQuoted != 0 {
-				if err := es.encodeValueQuoted(fb.TI, fieldPtr); err != nil {
-					return err
-				}
-			} else {
-				if err := fb.TI.Encode(es, fieldPtr); err != nil {
-					return err
-				}
+			if err := es.encodeFieldValue(fb.TI, fb.ValueFn, fieldPtr); err != nil {
+				return err
 			}
 			first = false
 			pc += 8

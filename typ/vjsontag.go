@@ -1,8 +1,14 @@
 package typ
 
 import (
+	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/velox-io/json/internal/jsonfmt"
 )
 
 // VJSONTagKey is the single struct-tag key for every velox-json extension that
@@ -31,6 +37,7 @@ type jsonOptions struct {
 	omitZero  bool
 	quoted    bool
 	embed     bool
+	format    string // value of the `format:<value>` option; "" when absent
 }
 
 // onlyEmbed reports whether the option list is empty or carries nothing but
@@ -55,19 +62,34 @@ func jsonOptionCanonical(opt string) string {
 		return "string"
 	case "embed":
 		return "embed"
+	case "format":
+		return "format"
 	}
 	return ""
 }
 
 // parseJSONTag splits a `json` tag value into its name and option set.
 // Options are matched exactly, as the standard library does, so a
-// space-padded option is absent rather than active. Misspelled appearances
-// of known options are collected for the caller to reject; unrecognized
-// options are ignored, which the standard library reserves for future
-// meaning.
-func parseJSONTag(raw string) (name string, opts jsonOptions, mutants []string) {
-	name, optList, _ := strings.Cut(raw, ",")
-	for opt := range strings.SplitSeq(optList, ",") {
+// space-padded option is absent rather than active. Unrecognized options are
+// ignored, which the standard library reserves for future meaning.
+//
+// problems describes tag mistakes the caller must reject, each phrased to
+// follow "struct S field F": misspelled appearances of known options, and a
+// malformed `format` option.
+func parseJSONTag(raw string) (name string, opts jsonOptions, problems []string) {
+	name, rest, _ := strings.Cut(raw, ",")
+	for {
+		// The format option comes last and its value may be a quoted string
+		// holding commas, so it owns the remainder of the tag.
+		if value, ok := strings.CutPrefix(rest, "format:"); ok {
+			var problem string
+			opts.format, problem = parseFormatValue(value)
+			if problem != "" {
+				problems = append(problems, problem)
+			}
+			break
+		}
+		opt, next, more := strings.Cut(rest, ",")
 		switch opt {
 		case "":
 		case "omitempty":
@@ -78,13 +100,84 @@ func parseJSONTag(raw string) (name string, opts jsonOptions, mutants []string) 
 			opts.quoted = true
 		case "embed":
 			opts.embed = true
+		case "format":
+			problems = append(problems, "has a `format` tag option without a value; add one, as in `format:RFC3339`")
 		default:
-			if canon := jsonOptionCanonical(opt); canon != "" {
-				mutants = append(mutants, opt)
+			optName, _, _ := strings.Cut(opt, ":")
+			if canon := jsonOptionCanonical(optName); canon != "" {
+				problems = append(problems, fmt.Sprintf("has misspelled `json` option %q; specify `%s` instead", opt, canon))
 			}
 		}
+		if !more {
+			break
+		}
+		rest = next
 	}
-	return name, opts, mutants
+	return name, opts, problems
+}
+
+// parseFormatValue parses the value of a `format:<value>` option, which runs
+// to the end of the tag. As in encoding/json/v2, the value is either a Go
+// identifier (format:RFC3339) or a single-quoted string (format:'2006-01-02'),
+// whose body takes Go string escapes plus \' for a quote. problem is non-empty
+// when the value is malformed.
+func parseFormatValue(raw string) (value, problem string) {
+	if raw == "" {
+		return "", formatEmptyProblem
+	}
+	n := 0 // length of the value as written; zero when it starts badly
+	switch r, _ := utf8.DecodeRuneInString(raw); {
+	case r == '_' || unicode.IsLetter(r):
+		n = len(raw) - len(strings.TrimLeftFunc(raw, jsonfmt.IsLetterOrDigit))
+		value = raw[:n]
+	case r == '\'':
+		var ok bool
+		if value, n, ok = unquoteTagString(raw); !ok {
+			return "", fmt.Sprintf("has a `format` tag option with an invalid quoted value %s; end it with a single quote and use only Go escape sequences inside it", raw)
+		}
+		if value == "" {
+			return "", formatEmptyProblem
+		}
+	}
+	switch rest := raw[n:]; {
+	case n > 0 && rest == "":
+		return value, ""
+	case n > 0 && rest[0] == ',':
+		return "", "has a `format` tag option that is not last; move it to the end of the tag"
+	}
+	return "", fmt.Sprintf("has a `format` tag option with an invalid value %q; quote a value that is not a Go identifier, as in `format:'2006-01-02'`", raw)
+}
+
+const formatEmptyProblem = "has a `format` tag option with an empty value; add one, as in `format:RFC3339`"
+
+// unquoteTagString decodes the single-quoted string at the start of s,
+// returning its value and the byte length it spans. The grammar is a Go
+// double-quoted string literal with single quotes as delimiters: neither
+// a backtick nor a double quote can appear unescaped in a struct tag.
+func unquoteTagString(s string) (value string, n int, ok bool) {
+	b := []byte{'"'}
+	n = len("'")
+	var inEscape bool
+	for n < len(s) {
+		r, rn := utf8.DecodeRuneInString(s[n:])
+		switch {
+		case inEscape:
+			if r == '\'' {
+				b = b[:len(b)-1] // `\'` becomes `'`
+			}
+			inEscape = false
+		case r == '\\':
+			inEscape = true
+		case r == '"':
+			b = append(b, '\\') // `"` becomes `\"`
+		case r == '\'':
+			value, err := strconv.Unquote(string(append(b, '"')))
+			return value, n + len("'"), err == nil
+		}
+		b = append(b, s[n:n+rn]...)
+		n += rn
+	}
+	return "", 0, false // unterminated
 }
 
 // ReserveUnknownName is the JSON name given to a value.Value field carrying

@@ -136,6 +136,7 @@ const (
 	fbReasonUnfold                     // inline variant unfold via pointer hops or over the offset limit
 	fbReasonStream                     // stream.Stream[T] producer activation (lazy member prefix)
 	fbReasonOmitZero                   // omitzero check whose IsZero closure runs in Go
+	fbReasonFormat                     // field has a `format` tag option, encoded in Go
 )
 
 // VjOpHdr.flags bits, mirroring native VJ_OP_FLAG_*.
@@ -221,6 +222,9 @@ type fbInfo struct {
 	// Offset is then relative to the base the hops reach rather than to the
 	// struct, so the hops must be walked before it is applied.
 	PtrPath []typ.PtrHop
+
+	// ValueFn is the field's tag-specific encoder; see EncFieldInfo.ValueFn.
+	ValueFn EncodeFn
 }
 
 // resolveFieldBase walks a promoted field's embedded-pointer hops and reports

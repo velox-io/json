@@ -42,6 +42,7 @@ var fbReasonLabels = [...]string{
 	fbReasonViaPtr:        "via_ptr",
 	fbReasonStream:        "stream",
 	fbReasonOmitZero:      "omit_zero",
+	fbReasonFormat:        "format",
 }
 
 func expandFallbackReasons(data []byte) []byte {

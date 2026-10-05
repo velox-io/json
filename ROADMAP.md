@@ -11,6 +11,3 @@ This file lists current high-impact improvement areas for contributors.
 2. **Expand documentation**
 
    Improve the documentation, particularly for polymorphic decoding.
-
-3. **Support JSON v2 `format` tag**
-
