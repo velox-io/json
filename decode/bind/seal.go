@@ -72,33 +72,20 @@ func sealSliceFrame(p *Parser, tree *vbind.TypeTree, kind vbind.Kind, typeIdx ui
 	// The backing must be inside the block still installed on this class. A
 	// slice whose backing predates the current block, or came from the
 	// standalone bypass path, must not move this cursor: the same check
-	// array_close makes via `off < sc->limit`.
+	// array_close makes via bind_slot_close.
 	data := *(*unsafe.Pointer)(dst)
 	if data == nil {
 		return
 	}
 	base := uintptr(sc.Block)
-	off := uintptr(data) - base
-	if uintptr(data) < base || off >= uintptr(sc.Limit) {
+	if uintptr(data) < base || uintptr(data)-base >= uintptr(sc.Limit) {
 		return
 	}
 	// aux is the next write position, so it is the end of the written region.
 	// It must lie within the block and at or past the backing start.
-	end := aux - base
-	if aux < uintptr(data) || end > uintptr(sc.Limit) {
+	if aux < uintptr(data) || aux-base > uintptr(sc.Limit) || sc.ElemSize == 0 {
 		return
 	}
-	// Never raise the cursor: another slice of this class may already have been
-	// charged past this point, and only a lower cursor reclaims anything.
-	if uint32(end) >= sc.Offset {
-		return
-	}
-	// Offset and Len must name the same boundary: array_begin derives the
-	// backing base from Offset but the capacity from Cap - Len, so a
-	// half-applied move hands out a capacity running past the block end.
-	if sc.ElemSize == 0 || end%uintptr(sc.ElemSize) != 0 {
-		return
-	}
-	sc.Offset = uint32(end)
-	sc.Len = uint32(end / uintptr(sc.ElemSize))
+	n := (aux - uintptr(data)) / uintptr(sc.ElemSize)
+	sc.CommitBump(data, aux, int(n))
 }

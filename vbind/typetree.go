@@ -556,7 +556,7 @@ type SlotTemplate struct {
 	IsStream bool           // stream.Stream[T] uses a fixed Go-allocated batch buffer
 }
 
-// SlotClass is the 48 byte BindSlotClass Go/C ABI sum type. Mode selects the
+// SlotClass is the 56 byte BindSlotClass Go/C ABI sum type. Mode selects the
 // valid overlay. Do not reorder or resize these fields.
 //
 // Layout:
@@ -573,19 +573,21 @@ type SlotTemplate struct {
 //	@36 Cap       4  elem capacity                          [Bump]
 //	@40 Aux       4  MuBlock [Bump] | Group [RecBump, RecBatch] (Go-only)
 //	@44 LenHint   4  cross-parse slice length prediction [Bump] (Go-only)
+//	@48 BorrowStart 4  backing start of the open borrower [Bump]
 type SlotClass struct {
-	Block    unsafe.Pointer // off 0  8  bump arena OR *RecBatchMatrix
-	RType    unsafe.Pointer // off 8  8  runtime *_type (Go-only; C never reads)
-	ElemSize uint32         // off 16 4  immutable
-	Mode     slotMode       // off 20 1  Bump/RecBump/RecBatch
-	Flags    SlotFlag       // off 21 1  SlotIsMap (Go-only; C never reads)
-	_pad0    [2]byte        // off 22 2
-	Offset   uint32         // off 24 4  byte cursor [Bump, RecBump]
-	Limit    uint32         // off 28 4  byte limit  [Bump, RecBump]
-	Len      uint32         // off 32 4  cumulative elem count [Bump]
-	Cap      uint32         // off 36 4  elem cap [Bump]
-	Aux      uint32         // off 40 4  MuBlock [Bump] | Group [RecBump, RecBatch]
-	LenHint  uint32         // off 44 4  slice length prediction [Bump]
+	Block       unsafe.Pointer // off 0  8  bump arena OR *RecBatchMatrix
+	RType       unsafe.Pointer // off 8  8  runtime *_type (Go-only; C never reads)
+	ElemSize    uint32         // off 16 4  immutable
+	Mode        slotMode       // off 20 1  Bump/RecBump/RecBatch
+	Flags       SlotFlag       // off 21 1  SlotIsMap (Go-only; C never reads)
+	_pad0       [2]byte        // off 22 2
+	Offset      uint32         // off 24 4  byte cursor [Bump, RecBump]
+	Limit       uint32         // off 28 4  byte limit  [Bump, RecBump]
+	Len         uint32         // off 32 4  cumulative elem count [Bump]
+	Cap         uint32         // off 36 4  elem cap [Bump]
+	Aux         uint32         // off 40 4  MuBlock [Bump] | Group [RecBump, RecBatch]
+	LenHint     uint32         // off 44 4  slice length prediction [Bump]
+	BorrowStart uint32         // off 48 4  borrower start [Bump]
 }
 
 // IsBumpTail reports whether this class hands out slice backings by borrowing
@@ -596,21 +598,43 @@ func (sc *SlotClass) IsBumpTail() bool {
 	return sc.Mode == slotBump && sc.Block != nil
 }
 
-// This overlay is valid only when Mode is slotBump. Offset 40 holds MuBlock
-// and offset 44 the final length of the last slice that outgrew its backing.
+// CommitBump commits a closing slice of n elements at data, ending at end, to
+// the bump ledger, mirroring native bind_slot_close. The open that borrowed
+// the tail recorded its start in BorrowStart and charged the cursor to Limit,
+// so the borrower is exactly the slice whose data sits at BorrowStart while
+// the cursor is charged. Only it returns the unwritten tail, and its commit
+// retires BorrowStart to Limit: a block left exactly exhausted at rest also
+// has Offset == Limit with no borrower, and a rebind of the last borrower's
+// backing would otherwise match the stale start. A slice rebound in place
+// over a backing it found in the block, from a repeated key or a caller
+// header, borrowed nothing and leaves the ledger alone.
+func (sc *SlotClass) CommitBump(data unsafe.Pointer, end uintptr, count int) {
+	off := uintptr(data) - uintptr(sc.Block)
+	if sc.Offset != sc.Limit || off != uintptr(sc.BorrowStart) || off >= uintptr(sc.Limit) {
+		return
+	}
+	sc.Offset = uint32(end - uintptr(sc.Block))
+	sc.Len += uint32(count)
+	sc.BorrowStart = sc.Limit
+}
+
+// This overlay is valid only when Mode is slotBump. Offset 40 holds MuBlock,
+// offset 44 the final length of the last slice that outgrew its backing, and
+// offset 48 the backing start of the open borrower.
 type BumpSlotClass struct {
-	Block    unsafe.Pointer
-	RType    unsafe.Pointer
-	ElemSize uint32
-	Mode     slotMode
-	Flags    SlotFlag
-	_pad0    [2]byte
-	Offset   uint32
-	Limit    uint32
-	Len      uint32
-	Cap      uint32
-	MuBlock  uint32
-	LenHint  uint32
+	Block       unsafe.Pointer
+	RType       unsafe.Pointer
+	ElemSize    uint32
+	Mode        slotMode
+	Flags       SlotFlag
+	_pad0       [2]byte
+	Offset      uint32
+	Limit       uint32
+	Len         uint32
+	Cap         uint32
+	MuBlock     uint32
+	LenHint     uint32
+	BorrowStart uint32
 }
 
 // This overlay is valid only when Mode is slotRecBump. Offset 40 holds Group;
@@ -821,7 +845,7 @@ var (
 	_ = [1]struct{}{}[unsafe.Sizeof(PointerPayload{})-4]
 	_ = [1]struct{}{}[unsafe.Sizeof(MapPayload{})-4]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindField{})-16]
-	_ = [1]struct{}{}[unsafe.Sizeof(SlotClass{})-48]
+	_ = [1]struct{}{}[unsafe.Sizeof(SlotClass{})-56]
 	_ = [1]struct{}{}[unsafe.Offsetof(SlotClass{}.Block)-0]
 	_ = [1]struct{}{}[unsafe.Offsetof(SlotClass{}.RType)-8]
 	_ = [1]struct{}{}[unsafe.Offsetof(SlotClass{}.ElemSize)-16]
@@ -832,10 +856,12 @@ var (
 	_ = [1]struct{}{}[unsafe.Offsetof(SlotClass{}.Cap)-36]
 	_ = [1]struct{}{}[unsafe.Offsetof(SlotClass{}.Aux)-40]
 	_ = [1]struct{}{}[unsafe.Offsetof(SlotClass{}.LenHint)-44]
-	_ = [1]struct{}{}[unsafe.Sizeof(BumpSlotClass{})-48]
+	_ = [1]struct{}{}[unsafe.Offsetof(SlotClass{}.BorrowStart)-48]
+	_ = [1]struct{}{}[unsafe.Sizeof(BumpSlotClass{})-56]
 	_ = [1]struct{}{}[unsafe.Offsetof(BumpSlotClass{}.Flags)-21]
 	_ = [1]struct{}{}[unsafe.Offsetof(BumpSlotClass{}.MuBlock)-40]
 	_ = [1]struct{}{}[unsafe.Offsetof(BumpSlotClass{}.LenHint)-44]
+	_ = [1]struct{}{}[unsafe.Offsetof(BumpSlotClass{}.BorrowStart)-48]
 	_ = [1]struct{}{}[unsafe.Sizeof(RecBumpSlotClass{})-48]
 	_ = [1]struct{}{}[unsafe.Offsetof(RecBumpSlotClass{}.Flags)-21]
 	_ = [1]struct{}{}[unsafe.Offsetof(RecBumpSlotClass{}.Group)-40]

@@ -219,6 +219,84 @@ func TestSliceSlotCursorNeverExposesWrittenBytes(t *testing.T) {
 	}
 }
 
+// checkSlotLedger fails when a bump class's two cursors disagree. array_begin
+// takes the backing base from Offset and the capacity from Cap - Len, so a
+// split hands out capacity past the block end, and Len past Cap wraps it.
+func checkSlotLedger(t *testing.T, p *Parser, tag string) {
+	t.Helper()
+	for i := range p.alloc.Slots {
+		sc := &p.alloc.Slots[i]
+		if !sc.IsBumpTail() || sc.ElemSize == 0 {
+			continue
+		}
+		if sc.Offset != sc.Len*sc.ElemSize || sc.Len > sc.Cap {
+			t.Fatalf("%s: slot %d ledger split: Offset=%d elems, Len=%d, Cap=%d",
+				tag, i, sc.Offset/sc.ElemSize, sc.Len, sc.Cap)
+		}
+	}
+}
+
+type repeatKeyRoot struct {
+	S []string `json:"s"`
+}
+
+// TestRepeatedSliceKeyKeepsLedger rebinds one slice field in place within a
+// parse. The repeated key reuses the backing the first occurrence took, which
+// borrowed nothing, so its close must not count its elements a second time.
+// Counting them let Len outrun Offset until Cap - Len wrapped and a later
+// slice took a capacity reaching past the block.
+func TestRepeatedSliceKeyKeepsLedger(t *testing.T) {
+	for _, in := range []string{
+		`{"s":["a","b"],"s":["c"]}`,
+		`{"s":["a"],"s":["b","c","d"]}`,
+		`{"s":["a","b"],"s":[]}`,
+	} {
+		p, err := NewParser[repeatKeyRoot]()
+		if err != nil {
+			t.Fatalf("NewParser: %v", err)
+		}
+		for round := range 200 {
+			var v repeatKeyRoot
+			if err := p.Unmarshal([]byte(in), &v); err != nil {
+				t.Fatalf("%s round %d: %v", in, round, err)
+			}
+			checkSlotLedger(t, p, fmt.Sprintf("%s round %d", in, round))
+		}
+	}
+}
+
+type twinSliceRoot struct {
+	A []string `json:"a"`
+	B []string `json:"b"`
+}
+
+// TestRepeatedSliceKeyKeepsSiblings reopens A after its sibling B, of the
+// same class, borrowed the tail A returned. A rebound in place must not pull
+// the cursor back to its own end: that reissues B's live elements to the next
+// slice, which overwrites them.
+func TestRepeatedSliceKeyKeepsSiblings(t *testing.T) {
+	p, err := NewParser[twinSliceRoot]()
+	if err != nil {
+		t.Fatalf("NewParser: %v", err)
+	}
+	for round := range 200 {
+		var v twinSliceRoot
+		in := `{"a":["a0","a1","a2"],"b":["b0","b1"],"a":["x"]}`
+		if err := p.Unmarshal([]byte(in), &v); err != nil {
+			t.Fatalf("round %d: %v", round, err)
+		}
+		checkSlotLedger(t, p, fmt.Sprintf("round %d", round))
+		var next twinSliceRoot
+		if err := p.Unmarshal([]byte(`{"a":["n0","n1","n2","n3"]}`), &next); err != nil {
+			t.Fatalf("round %d: %v", round, err)
+		}
+		checkSlotLedger(t, p, fmt.Sprintf("round %d next", round))
+		if len(v.A) != 1 || v.A[0] != "x" || len(v.B) != 2 || v.B[0] != "b0" || v.B[1] != "b1" {
+			t.Fatalf("round %d: earlier result overwritten by a later parse: A=%q B=%q", round, v.A, v.B)
+		}
+	}
+}
+
 // staleFrameRoot is large enough to own its span, so once collected the span
 // is released and any read through a pointer into it is a bad pointer that
 // checkptr (-race builds) rejects.

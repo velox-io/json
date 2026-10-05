@@ -18,8 +18,8 @@ func TestBindBridgeSizes(t *testing.T) {
 	if sz := unsafe.Sizeof(nativendec.BindField{}); sz != 16 {
 		t.Errorf("sizeof BindField = %d, want 16", sz)
 	}
-	if sz := unsafe.Sizeof(nativendec.BindSlotClass{}); sz != 48 {
-		t.Errorf("sizeof BindSlotClass = %d, want 48", sz)
+	if sz := unsafe.Sizeof(nativendec.BindSlotClass{}); sz != 56 {
+		t.Errorf("sizeof BindSlotClass = %d, want 56", sz)
 	}
 	if sz := unsafe.Sizeof(nativendec.BindContext{}); sz != 72 {
 		t.Errorf("sizeof BindContext = %d, want 72", sz)

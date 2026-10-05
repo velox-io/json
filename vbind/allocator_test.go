@@ -946,3 +946,59 @@ func TestServeSliceGrowKeepsCallerBacking(t *testing.T) {
 		t.Fatal("caller backing cleared")
 	}
 }
+
+// A commit must retire BorrowStart. A block left exactly exhausted at rest
+// has Offset == Limit just like a live borrow, so a rebind of the last
+// borrower's backing (repeated key, reused destination) would match a stale
+// start and pull the cursor back under live elements. Only a fresh borrow
+// after retirement may commit again.
+func TestCommitBumpRetiresBorrower(t *testing.T) {
+	a := NewAllocator(makeTreeForGrow(t))
+	sc := &a.Slots[0]
+
+	var hdr gort.SliceHeader
+	a.OpenSlice(sc, &hdr)
+	if hdr.Data == nil {
+		t.Fatal("OpenSlice left hdr.Data nil")
+	}
+	start := sc.BorrowStart
+	if sc.Offset != sc.Limit {
+		t.Fatalf("Offset = %d, want Limit %d (open charges the tail)", sc.Offset, sc.Limit)
+	}
+
+	// A length that exactly exhausts the block leaves it charged to the end.
+	full := (sc.Limit - start) / sc.ElemSize
+	a.CloseSlice(sc, hdr.Data, int(full))
+	if sc.Offset != sc.Limit || sc.Len != full {
+		t.Fatalf("after commit: Offset=%d Len=%d, want Offset=Limit=%d Len=%d",
+			sc.Offset, sc.Len, sc.Limit, full)
+	}
+	if sc.BorrowStart != sc.Limit {
+		t.Fatalf("BorrowStart = %d, want Limit %d (commit retires the borrower)",
+			sc.BorrowStart, sc.Limit)
+	}
+
+	// The rebind closes on the exhausted-at-rest block. Its ledger must not
+	// move: the cursor would reissue published elements and Len would pass
+	// Cap, the exact split the repeated-key close bug produced.
+	a.CloseSlice(sc, hdr.Data, 1)
+	if sc.Offset != sc.Limit || sc.Len != full {
+		t.Fatalf("rebind close moved the ledger: Offset=%d Len=%d, want unchanged Offset=%d Len=%d",
+			sc.Offset, sc.Len, sc.Limit, full)
+	}
+
+	// A fresh borrow on the exhausted block installs a new one and commits
+	// normally, so retirement rejects only the stale start, not new work.
+	var fresh gort.SliceHeader
+	a.OpenSlice(sc, &fresh)
+	start2 := sc.BorrowStart
+	if fresh.Data == nil || uintptr(fresh.Data)-uintptr(sc.Block) != uintptr(start2) || sc.Offset != sc.Limit {
+		t.Fatalf("fresh borrow broken: BorrowStart=%d Offset=%d Limit=%d",
+			start2, sc.Offset, sc.Limit)
+	}
+	a.CloseSlice(sc, fresh.Data, 1)
+	if sc.Offset != start2+sc.ElemSize || sc.Len != 1 || sc.BorrowStart != sc.Limit {
+		t.Fatalf("fresh close broken: Offset=%d want %d, Len=%d want 1, BorrowStart=%d want Limit=%d",
+			sc.Offset, start2+sc.ElemSize, sc.Len, sc.BorrowStart, sc.Limit)
+	}
+}

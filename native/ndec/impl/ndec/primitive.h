@@ -346,6 +346,25 @@ INLINE int bind_slot_block_owns(const BindSlotClass *sc, const uint8_t *p) {
   return (uintptr_t)p - (uintptr_t)sc->block < (uintptr_t)sc->limit;
 }
 
+/* Commit a closing bump slice to its class ledger. data is the backing, end
+ * its next write position, count its length. The open that borrowed the tail
+ * recorded its start in borrow_start and charged the cursor to limit, so the
+ * borrower is exactly the slice whose data sits at borrow_start while the
+ * cursor is charged. Only it returns the unwritten tail, and its commit
+ * retires borrow_start to limit: a block left exactly exhausted at rest also
+ * has offset == limit with no borrower, and a rebind of the last borrower's
+ * backing would otherwise match the stale start. A slice rebound in place
+ * over a backing it found in the block, from a repeated key or a caller
+ * header, borrowed nothing and leaves the ledger alone. Go mirrors this in
+ * SlotClass.CommitBump. */
+INLINE void bind_slot_close(BindSlotClass *sc, const uint8_t *data, const uint8_t *end, uint32_t count) {
+  if (sc->offset == sc->limit && data == sc->block + sc->borrow_start && bind_slot_block_owns(sc, data)) {
+    sc->offset = (uint32_t)(end - sc->block);
+    sc->len += count;
+    sc->borrow_start = sc->limit;
+  }
+}
+
 /* Each RecBatch row owns fixed-size backings for one power-of-two capacity.
  * Allocation transfers a bitmap slot to a slice. Growth returns only pointers
  * within the row's current allocation; pointers from retained refill arrays or

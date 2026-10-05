@@ -644,8 +644,8 @@ func (a *Allocator) ServeSliceGrow(sc *SlotClass, hdr *gort.SliceHeader) error {
 	a.installBlock(sc, blockCap)
 	data := sc.Block
 	// Reserving the whole block prevents sibling allocations until close returns
-	// the unused tail.
-	sc.Offset = sc.Limit
+	// the unused tail. The grown slice is the new block's borrower.
+	sc.BorrowStart, sc.Offset = sc.Offset, sc.Limit
 
 	if hdr.Data == nil {
 		hdr.Data = data
@@ -687,7 +687,7 @@ func (a *Allocator) OpenSlice(sc *SlotClass, hdr *gort.SliceHeader) {
 		return
 	}
 	*hdr = gort.SliceHeader{Data: unsafe.Add(sc.Block, uintptr(sc.Offset)), Cap: int(sc.Cap - sc.Len)}
-	sc.Offset = sc.Limit
+	sc.BorrowStart, sc.Offset = sc.Offset, sc.Limit
 }
 
 // GrowSlice moves the full slice hdr of class sc, whose Len equals its Cap,
@@ -718,18 +718,14 @@ func (a *Allocator) GrowSlice(sc *SlotClass, hdr *gort.SliceHeader) {
 	r.free(old, uint32(oldCap))
 }
 
-// CloseSlice returns the unwritten tail past the first n elements at data
-// when data borrowed the bump block still installed on sc. A failed bind
-// closes its open slices the same way, as their written elements stay
-// charged.
+// CloseSlice commits the first n elements at data to the class ledger; see
+// SlotClass.CommitBump. A failed bind closes its open slices the same way, as
+// their written elements stay charged.
 func (a *Allocator) CloseSlice(sc *SlotClass, data unsafe.Pointer, n int) {
 	if sc.Mode != slotBump {
 		return
 	}
-	if off := uintptr(data) - uintptr(sc.Block); off < uintptr(sc.Limit) {
-		sc.Offset = uint32(off + uintptr(n)*uintptr(sc.ElemSize))
-		sc.Len += uint32(n)
-	}
+	sc.CommitBump(data, uintptr(data)+uintptr(n)*uintptr(sc.ElemSize), n)
 }
 
 // takeSpare removes and returns the smallest spare of sc holding at least n

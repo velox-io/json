@@ -383,10 +383,11 @@ typedef struct BindSlotClass {
   uint32_t limit;     /* off 28, BUMP and RECBUMP byte limit */
   uint32_t len;       /* off 32, BUMP completed element count */
   uint32_t cap;       /* off 36, BUMP element capacity */
-  uint32_t aux;       /* off 40, BUMP predictor or recursive group */
-  uint32_t len_hint;  /* off 44, BUMP slice length prediction; Go only */
+  uint32_t aux;          /* off 40, BUMP predictor or recursive group */
+  uint32_t len_hint;    /* off 44, BUMP slice length prediction; Go only */
+  uint32_t borrow_start; /* off 48, BUMP backing start of the open borrower */
 } BindSlotClass;
-_Static_assert(sizeof(BindSlotClass) == 48, "BindSlotClass size drift");
+_Static_assert(sizeof(BindSlotClass) == 56, "BindSlotClass size drift");
 _Static_assert(offsetof(BindSlotClass, block) == 0, "BindSlotClass.block off 0");
 _Static_assert(offsetof(BindSlotClass, rtype) == 8, "BindSlotClass.rtype off 8");
 _Static_assert(offsetof(BindSlotClass, elem_size) == 16, "BindSlotClass.elem_size off 16");
@@ -397,6 +398,7 @@ _Static_assert(offsetof(BindSlotClass, len) == 32, "BindSlotClass.len off 32");
 _Static_assert(offsetof(BindSlotClass, cap) == 36, "BindSlotClass.cap off 36");
 _Static_assert(offsetof(BindSlotClass, aux) == 40, "BindSlotClass.aux off 40");
 _Static_assert(offsetof(BindSlotClass, len_hint) == 44, "BindSlotClass.len_hint off 44");
+_Static_assert(offsetof(BindSlotClass, borrow_start) == 48, "BindSlotClass.borrow_start off 48");
 
 /*
  * RecBatch provides bounded typed backings for recursive slices at capacities 1

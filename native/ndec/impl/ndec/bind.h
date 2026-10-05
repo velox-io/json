@@ -1291,7 +1291,8 @@ array_begin: {
         /* Charge the borrowed tail before any element write. A parse error may
          * bypass close, so deferred charging could expose written slots to the
          * next parse. Close returns only the unused tail. */
-        sc->offset = sc->limit;
+        sc->borrow_start = sc->offset;
+        sc->offset       = sc->limit;
       }
     } else {
       __builtin_memcpy(&cur_aux, cur_dst, sizeof(uint8_t *));
@@ -1422,13 +1423,9 @@ array_continue: {
       BindSlotClass *sc   = &m->b.alloc.slot_classes[alloc_class];
 
       if (LIKELY(sc->mode != BIND_SLOT_RECBATCH)) {
-        /* Return the unused bump tail from the next-write cursor. */
         const uint8_t *data;
         __builtin_memcpy(&data, cur_dst, sizeof(data));
-        if (bind_slot_block_owns(sc, data)) {
-          sc->offset = (uint32_t)((uint8_t *)cur_aux - sc->block);
-          sc->len += cur_count;
-        }
+        bind_slot_close(sc, data, (const uint8_t *)cur_aux, cur_count);
       }
     }
     /* An empty root stream resumes here without a pushed frame, so depth zero
@@ -3031,6 +3028,7 @@ t_array_begin: {
     *(intptr_t *)(cur_dst + 8)  = 0;
     *(intptr_t *)(cur_dst + 16) = (intptr_t)(sc->cap - sc->len);
     cur_aux                     = bk;
+    sc->borrow_start            = sc->offset;
     sc->offset                  = sc->limit; /* charge before writing; close returns the tail */
   }
   cur_count = 0;
@@ -3239,15 +3237,9 @@ t_array_continue: {
       int32_t ci                  = m->b.ctx.type_meta[cur_type.type_idx].u.slice.alloc_class;
       BindSlotClass *sc           = &m->b.alloc.slot_classes[ci];
       if (sc->mode == BIND_SLOT_BUMP) {
-        /* Reclaim a bump tail only when the slice backing belongs to the
-         * current block. A standalone bypass cursor must not update the
-         * SlotClass offset or length. */
         const uint8_t *data;
         __builtin_memcpy(&data, cur_dst, sizeof(data));
-        if (bind_slot_block_owns(sc, data)) {
-          sc->offset = (uint32_t)((uint8_t *)cur_aux - sc->block);
-          sc->len += cur_count;
-        }
+        bind_slot_close(sc, data, (const uint8_t *)cur_aux, cur_count);
       }
     }
     /* Generic pop: parent may be STRUCT (slice field of a struct, pushed via

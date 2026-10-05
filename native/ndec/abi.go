@@ -639,7 +639,7 @@ const (
 var (
 	_ = [1]struct{}{}[unsafe.Sizeof(BindType{})-16]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindField{})-16]
-	_ = [1]struct{}{}[unsafe.Sizeof(BindSlotClass{})-48]
+	_ = [1]struct{}{}[unsafe.Sizeof(BindSlotClass{})-56]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindContext{})-72]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindAllocator{})-120]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindYield{})-32]
