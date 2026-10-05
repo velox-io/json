@@ -2,6 +2,7 @@ package gbind
 
 import (
 	"encoding/binary"
+	"errors"
 	"math/bits"
 	"strconv"
 	"strings"
@@ -244,7 +245,7 @@ func (c *binder) numberAt(s text, p int, dst unsafe.Pointer, k vbind.Kind) (next
 		}
 		if exact && k == vbind.KindFloat64 {
 			*(*float64)(dst) = f
-		} else if !storeFloat(dst, k, unsafe.String(s.ptr(p), end-p)) {
+		} else if !storeFloatNum(dst, k, unsafe.String(s.ptr(p), end-p)) {
 			return p, true, nil
 		}
 	default:
@@ -364,20 +365,43 @@ func storeUnsigned(dst unsafe.Pointer, k vbind.Kind, s string) bool {
 }
 
 func storeFloat(dst unsafe.Pointer, k vbind.Kind, s string) bool {
-	bits := 64
-	if k == vbind.KindFloat32 {
-		bits = 32
-	}
-	f, err := strconv.ParseFloat(s, bits)
+	f, err := strconv.ParseFloat(s, floatBits(k))
 	if err != nil {
 		return false
 	}
+	setFloat(dst, k, f)
+	return true
+}
+
+// storeFloatNum is the direct JSON number path's store. A range overflow
+// stores the ±Inf while still reporting the mismatch, like the native
+// bind_write_number and encoding/json. The quoted number path keeps the
+// destination untouched instead, so it stays on storeFloat.
+func storeFloatNum(dst unsafe.Pointer, k vbind.Kind, s string) bool {
+	f, err := strconv.ParseFloat(s, floatBits(k))
+	if err != nil {
+		if errors.Is(err, strconv.ErrRange) {
+			setFloat(dst, k, f)
+		}
+		return false
+	}
+	setFloat(dst, k, f)
+	return true
+}
+
+func floatBits(k vbind.Kind) int {
+	if k == vbind.KindFloat32 {
+		return 32
+	}
+	return 64
+}
+
+func setFloat(dst unsafe.Pointer, k vbind.Kind, f float64) {
 	if k == vbind.KindFloat32 {
 		*(*float32)(dst) = float32(f)
 	} else {
 		*(*float64)(dst) = f
 	}
-	return true
 }
 
 func intBits(k vbind.Kind) int {

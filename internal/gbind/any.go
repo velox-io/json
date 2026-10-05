@@ -1,6 +1,7 @@
 package gbind
 
 import (
+	"errors"
 	"strconv"
 	"unsafe"
 
@@ -48,6 +49,13 @@ func (c *binder) bindAny(s text, p int, dst unsafe.Pointer, ctr uint32) (int, er
 		if !exact {
 			var err error
 			if f, err = strconv.ParseFloat(unsafe.String(s.ptr(p), end-p), 64); err != nil {
+				// A range overflow stores the ±Inf box before the mismatch
+				// is reported, like the native any_value.
+				if errors.Is(err, strconv.ErrRange) {
+					box := c.carve(am.Float64SlotClass)
+					*(*float64)(box) = f
+					*eface = [2]unsafe.Pointer{am.Float64Type, box}
+				}
 				return p, c.failType(ndec.BindErrTypeMismatch, uint64(p), ctr)
 			}
 		}
