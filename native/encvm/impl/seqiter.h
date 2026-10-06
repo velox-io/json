@@ -183,7 +183,9 @@ NOINLINE static VjSeqResult vj_seq_iterate_string(uint8_t *buf, const uint8_t *b
   OP_LABEL: {                                                                                                     \
     VM_TRACE_KEY(TRACE_LABEL);                                                                                    \
     int32_t _depth = VJ_ST_GET_STACK_DEPTH(vmstate);                                                              \
-    int is_resume  = (_depth > 0 && (ctx->stack[_depth - 1].state & 1));                                          \
+    /* The slot below an empty stack is the zero guard, which reads as "not                                       \
+     * a resume", so this needs no depth test. */                                                                 \
+    int is_resume = (VJ_STACK(ctx)[_depth - 1].state & 1);                                                        \
                                                                                                                   \
     const uint8_t *seq_data;                                                                                      \
     int64_t seq_count;                                                                                            \
@@ -192,7 +194,7 @@ NOINLINE static VjSeqResult vj_seq_iterate_string(uint8_t *buf, const uint8_t *b
                                                                                                                   \
     if (is_resume) {                                                                                              \
       /* Resume from BUF_FULL: read saved state from frame */                                                     \
-      VjStackFrame *f = &ctx->stack[_depth - 1];                                                                  \
+      VjStackFrame *f = &VJ_STACK(ctx)[_depth - 1];                                                               \
       seq_data        = f->seq.iter_data;                                                                         \
       seq_count       = f->seq.iter_count;                                                                        \
       seq_start_idx   = f->seq.iter_idx;                                                                          \
@@ -248,7 +250,14 @@ NOINLINE static VjSeqResult vj_seq_iterate_string(uint8_t *buf, const uint8_t *b
       if (__builtin_expect(VJ_ST_GET_STACK_DEPTH(vmstate) >= VJ_MAX_STACK_DEPTH, 0)) {                            \
         VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);                                                               \
       }                                                                                                           \
-      VjStackFrame *f = &ctx->stack[is_resume ? (_depth - 1) : _depth];                                           \
+      VjStackFrame *f = &VJ_STACK(ctx)[is_resume ? (_depth - 1) : _depth];                                        \
+      /* A fresh push owns the slot from here on, so clear the previous                                           \
+       * occupant's bits before the resume marker goes in: a stale WALK or                                        \
+       * ACTIVE bit would make OP_VALUE read this seq frame as its own                                            \
+       * mid-walk frame. */                                                                                       \
+      if (!is_resume) {                                                                                           \
+        f->state = 0;                                                                                             \
+      }                                                                                                           \
                                                                                                                   \
       /* Compound literal passed by value: 12-byte POD lands in 2 GPRs per                                        \
        * AAPCS64, so no stack slot escapes here (unlike prior &ind form                                           \

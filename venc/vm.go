@@ -96,11 +96,12 @@ func kindToOpcode(k typ.ElemTypeKind) uint16 {
 }
 
 const (
-	vjExitOK        int32 = 0
-	vjExitBufFull   int32 = 1
-	vjExitStackOvfl int32 = 3
-	vjExitNanInf    int32 = 5
-	vjExitYieldToGo int32 = 6
+	vjExitOK         int32 = 0
+	vjExitBufFull    int32 = 1
+	vjExitStackOvfl  int32 = 3
+	vjExitNanInf     int32 = 5
+	vjExitYieldToGo  int32 = 6
+	vjExitStackUndfl int32 = 7
 )
 
 const (
@@ -279,7 +280,7 @@ const maxIndentDepth = VJ_MAX_STACK_DEPTH
 // the buffer's own backing array. Must match native VJ_WINDOW_SLACK.
 const vjWindowSlack = 16
 
-// VjExecCtx matches the native 2152-byte exec ABI. Field order and offsets are fixed.
+// VjExecCtx matches the native 2184-byte exec ABI. Field order and offsets are fixed.
 type VjExecCtx struct {
 	// Hot registers.
 	// BufCur is uintptr (not unsafe.Pointer) because the VM may advance it to
@@ -308,11 +309,20 @@ type VjExecCtx struct {
 	KeyPoolBase     unsafe.Pointer //  88: global key pool base pointer
 
 	// Unified stack and optional trace buffer.
-	Stack    [VJ_MAX_STACK_DEPTH]VjStackFrame //  96: 64 x 32 = 2048 bytes
-	TraceBuf unsafe.Pointer                   // 2144: Go-allocated VjTraceBuf
+	// StackGuard is the all-zero slot the native VM addresses as
+	// VJ_STACK(ctx)[-1]: it makes the read below an empty stack in-bounds, so
+	// the C loops can test the slot under depth 0 without a depth check. It
+	// must stay zero, so nothing may ever write it.
+	StackGuard VjStackFrame                     //  96: zero guard; see VJ_STACK in types.h
+	Stack      [VJ_MAX_STACK_DEPTH]VjStackFrame // 128: 64 x 32 = 2048 bytes
+	TraceBuf   unsafe.Pointer                   // 2176: Go-allocated VjTraceBuf
 }
 
-var _ [2152]byte = [unsafe.Sizeof(VjExecCtx{})]byte{}
+var _ [2184]byte = [unsafe.Sizeof(VjExecCtx{})]byte{}
+
+// Stack starts one frame past StackGuard; the native VJ_STACK origin assert
+// pins the same offset on the C side.
+var _ [0]byte = [unsafe.Offsetof(VjExecCtx{}.Stack) - 128]byte{}
 
 type VjIfaceCacheEntry struct {
 	TypePtr unsafe.Pointer //  0

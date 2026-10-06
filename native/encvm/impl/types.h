@@ -293,6 +293,13 @@ enum VjExitCode {
   VJ_EXIT_STACK_OVERFLOW = 3,
   VJ_EXIT_CYCLE          = 4,
   VJ_EXIT_NAN_INF        = 5,
+  /* A pop op reached stack depth 0. VJ_ST_DEC_STACK_DEPTH decrements the
+   * whole vmstate register, so a decrement at depth 0 borrows out of the
+   * depth field and into every field above it: depth reads back as 255 and
+   * the flags, exit code and yield reason are destroyed with it. Reported as
+   * a distinct code so this invariant break never reads as the legitimate
+   * depth limit. */
+  VJ_EXIT_STACK_UNDERFLOW = 7,
 };
 
 /* ================================================================
@@ -344,8 +351,12 @@ enum VjExitCode {
 #define VJ_ST_SET_EXIT(st, v)  ((st) = ((st) & ~VJ_ST_EXIT_MASK) | (((uint64_t)(v) & 0xFF) << VJ_ST_EXIT_SHIFT))
 #define VJ_ST_SET_YIELD(st, v) ((st) = ((st) & ~VJ_ST_YIELD_MASK) | (((uint64_t)(v) & 0xFF) << VJ_ST_YIELD_SHIFT))
 
-/* Depth increment/decrement: stack_depth at bits [0..7], so +1/-1 works directly.
- * Callers MUST check overflow BEFORE incrementing. */
+/* Depth increment/decrement: stack_depth at bits [0..7], so +1/-1 works
+ * directly on the whole register as long as the field does not over- or
+ * underflow. Callers MUST check overflow BEFORE incrementing, and a pop that
+ * is its own opcode MUST reject depth 0 before decrementing: a borrow out of
+ * the depth field destroys every field above it (see
+ * VJ_EXIT_STACK_UNDERFLOW). */
 #define VJ_ST_INC_STACK_DEPTH(st) ((st) += 1)
 #define VJ_ST_DEC_STACK_DEPTH(st) ((st) -= 1)
 
@@ -435,6 +446,7 @@ _Static_assert(sizeof(VjOpExt) == 8, "VjOpExt must be 8 bytes");
  *  Frame type constants are only used for debug/documentation purposes.
  *
  *  Stack depth limit:  VJ_MAX_STACK_DEPTH
+ *  Addressing:         VJ_STACK(ctx), whose index -1 is the zero guard
  * */
 
 /* Frame type constants, documentation/debug only, not stored in vmstate. */
@@ -504,7 +516,13 @@ ALIGN_TYPEDEF(8) typedef struct VjStackFrame {
 
   int32_t state; /* 28: bit 0 = iter active (resume detect);
                   *     bits 24-31 = trace_obj_depth (debug builds only;
-                  * unrelated to indent_depth) */
+                  * unrelated to indent_depth).
+                  * Every push must initialize this field. Frames are slots in
+                  * a long-lived ctx, so a slot carries the previous occupant's
+                  * bits, and the C-native loops identify their own resume
+                  * frame by these bits alone. The guard slot below
+                  * VJ_STACK(ctx) covers only depth 0; it says nothing about a
+                  * stale slot at any depth above it. */
 } ALIGN_TYPEDEF_END(8) VjStackFrame;
 
 _Static_assert(sizeof(VjStackFrame) == 32, "VjStackFrame must be 32 bytes");
@@ -600,15 +618,34 @@ typedef struct VjExecCtx {
   const void *yield_type_ptr;   /*  80: eface.type_ptr on iface miss */
   const uint8_t *key_pool_base; /*  88: global key pool base pointer */
 
-  /* ===== Unified Stack (96-2143) ===== */
-  VjStackFrame stack[VJ_MAX_STACK_DEPTH]; /*  96: 64 x 32 = 2048 bytes */
+  /* ===== Unified Stack (96-2175) ===== */
+  /* Slot 0 is the zero guard; frames live at 1..VJ_MAX_STACK_DEPTH and are
+   * addressed through VJ_STACK(). Never index this member directly. */
+  VjStackFrame stack_store[VJ_MAX_STACK_DEPTH + 1]; /*  96: 65 x 32 = 2080 bytes */
 
   /* Debug trace (always present for layout stability; only written when
    * VJ_DEBUG is defined and the pointer is non-NULL). */
-  VjTraceBuf *trace_buf; /* 2144: Go-allocated trace buffer */
+  VjTraceBuf *trace_buf; /* 2176: Go-allocated trace buffer */
 } VjExecCtx;
 
-_Static_assert(sizeof(VjExecCtx) == 2152, "VjExecCtx size check");
+/* VJ_STACK: the frame stack with depth 0 as its origin, so every indexing
+ * form reads exactly as the depth arithmetic does: VJ_STACK(ctx)[depth] is
+ * the next free slot and VJ_STACK(ctx)[depth - 1] the current top frame.
+ *
+ * The origin sits one slot into stack_store, which leaves VJ_STACK(ctx)[-1]
+ * pointing at stack_store[0]: in-bounds, permanently all-zero memory. That
+ * is what lets the loops read the slot below an empty stack without a depth
+ * test. A zero frame reads as "not a resume" (state bit 0 clear) and as an
+ * exhausted iterator (iter_count / remaining == 0), so a depth-0 read falls
+ * through to the close path, where the underflow check lives.
+ *
+ * Nothing may ever write stack_store[0]. Pushes address VJ_STACK(ctx)[depth]
+ * with depth >= 0 and pops VJ_STACK(ctx)[depth - 1] with depth >= 1, so the
+ * guard is write-unreachable as long as the depth-0 close paths stay
+ * read-only before their underflow check. */
+#define VJ_STACK(ctx) ((ctx)->stack_store + 1)
+
+_Static_assert(sizeof(VjExecCtx) == 2184, "VjExecCtx size check");
 _Static_assert(offsetof(VjExecCtx, buf_cur) == 0, "buf_cur offset");
 _Static_assert(offsetof(VjExecCtx, buf_end) == 8, "buf_end offset");
 _Static_assert(offsetof(VjExecCtx, ops_ptr) == 16, "ops_ptr offset");
@@ -623,7 +660,11 @@ _Static_assert(offsetof(VjExecCtx, indent_step) == 74, "indent_step offset");
 _Static_assert(offsetof(VjExecCtx, indent_prefix_len) == 75, "indent_prefix_len offset");
 _Static_assert(offsetof(VjExecCtx, yield_type_ptr) == 80, "yield_type_ptr offset");
 _Static_assert(offsetof(VjExecCtx, key_pool_base) == 88, "key_pool_base offset");
-_Static_assert(offsetof(VjExecCtx, stack) == 96, "stack offset");
-_Static_assert(offsetof(VjExecCtx, trace_buf) == 2144, "trace_buf offset");
+_Static_assert(offsetof(VjExecCtx, stack_store) == 96, "stack_store offset");
+/* The guard occupies stack_store[0], so VJ_STACK (the depth-0 origin) starts
+ * one frame in. The Go mirror splits the same bytes into a StackGuard field
+ * plus a Stack array at this offset. */
+_Static_assert(offsetof(VjExecCtx, stack_store) + sizeof(VjStackFrame) == 128, "VJ_STACK origin offset");
+_Static_assert(offsetof(VjExecCtx, trace_buf) == 2176, "trace_buf offset");
 
 #endif /* VJ_ENCVM_TYPES_H */

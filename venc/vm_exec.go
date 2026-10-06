@@ -228,6 +228,12 @@ func (es *encodeState) execVMLoop(ctx *VjExecCtx, bp *Blueprint, vmExec func(uns
 			return fmt.Errorf("venc: nesting depth exceeds limit (depth=%d/%d)",
 				vmstateGetStackDepth(ctx.VMState), VJ_MAX_STACK_DEPTH)
 
+		case vjExitStackUndfl:
+			// A pop op ran with no frame to pop. The byte stream pairs every
+			// push with one pop, so this is a VM or compiler invariant break,
+			// never a property of the value being encoded.
+			return fmt.Errorf("venc: internal error: VM frame stack underflow at PC=%d", ctx.PC)
+
 		case vjExitNanInf:
 			return &UnsupportedValueError{Str: "NaN or Inf float value"}
 

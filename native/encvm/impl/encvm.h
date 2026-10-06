@@ -478,11 +478,12 @@ vj_op_slice_begin: {
   if (UNLIKELY(VJ_ST_GET_STACK_DEPTH(vmstate) >= VJ_MAX_STACK_DEPTH)) {
     VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);
   }
-  VjStackFrame *frame   = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)];
+  VjStackFrame *frame   = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate)];
   frame->ret_base       = base;
   frame->seq.iter_data  = sl->data;
   frame->seq.iter_count = sl->len;
   frame->seq.iter_idx   = 0;
+  frame->state          = 0;
   VM_SAVE_TRACE_DEPTH(frame);
   VJ_ST_INC_STACK_DEPTH(vmstate);
 
@@ -708,7 +709,7 @@ vj_op_skip_if_zero: {
   /* slice/array loop body */
 
 vj_op_slice_end: {
-  VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
+  VjStackFrame *frame = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
   const VjOpExt *ext  = VJ_OP_EXT(op);
 
   if (frame->seq.iter_idx + 1 < frame->seq.iter_count) {
@@ -728,6 +729,16 @@ vj_op_slice_end: {
     VJ_ST_SET_FIRST_1(vmstate); /* reset for element-level encoding (no struct comma) */
     VM_DISPATCH();
   }
+
+#if 0
+  /* The underflow check sits here rather than at the op's entry so it stays
+   * off the per-element loop-back path above. An unpaired SLICE_END at depth
+   * 0 reads the zero guard, whose iter_count of 0 ends the loop immediately,
+   * so it always arrives here, and it arrives before any write. */
+  if (UNLIKELY(VJ_ST_GET_STACK_DEPTH(vmstate) <= 0)) {
+    VM_SAVE_AND_RETURN(VJ_EXIT_STACK_UNDERFLOW);
+  }
+#endif
 
   /* Done: write indent + ']', pop frame */
   VM_CHECK_CLOSE();
@@ -863,8 +874,9 @@ vj_op_ptr_deref: {
   if (UNLIKELY(VJ_ST_GET_STACK_DEPTH(vmstate) >= VJ_MAX_STACK_DEPTH)) {
     VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);
   }
-  ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)].ret_base = base;
-  VM_SAVE_TRACE_DEPTH(&ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)]);
+  VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate)].ret_base = base;
+  VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate)].state    = 0;
+  VM_SAVE_TRACE_DEPTH(&VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate)]);
   VJ_ST_INC_STACK_DEPTH(vmstate);
 
   base = (const uint8_t *)ptr;
@@ -873,9 +885,17 @@ vj_op_ptr_deref: {
 }
 
 vj_op_ptr_end: {
-  /* Pop the ptr-deref frame, restore parent base */
+  /* Pop the ptr-deref frame, restore parent base. */
+#if 0
+  /* PTR_END has no loop path, so the check stays at the entry: it must gate
+   * the decrement itself, and the guard slot does not make a borrow out of
+   * the depth field safe. */
+  if (UNLIKELY(VJ_ST_GET_STACK_DEPTH(vmstate) <= 0)) {
+    VM_SAVE_AND_RETURN(VJ_EXIT_STACK_UNDERFLOW);
+  }
+#endif
   VJ_ST_DEC_STACK_DEPTH(vmstate);
-  VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)];
+  VjStackFrame *frame = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate)];
   VM_RESTORE_TRACE_DEPTH(frame);
   VM_TRACE("PTR_END");
   base            = frame->ret_base;
@@ -891,7 +911,7 @@ vj_op_call: {
   if (UNLIKELY(VJ_ST_GET_STACK_DEPTH(vmstate) >= VJ_MAX_STACK_DEPTH)) {
     VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);
   }
-  VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)];
+  VjStackFrame *frame = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate)];
   frame->call.ret_ops = ops;
   frame->call.ret_pc  = (int32_t)((const uint8_t *)op - ops) + 16; /* CALL is always 16 bytes */
   frame->ret_base     = base;
@@ -911,7 +931,7 @@ vj_op_ret: {
     /* Subroutine return: pop CALL frame, restore ops/pc/base. */
     VM_TRACE("RET");
     VJ_ST_DEC_STACK_DEPTH(vmstate);
-    VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)];
+    VjStackFrame *frame = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate)];
     VM_RESTORE_TRACE_DEPTH(frame);
     ops             = frame->call.ret_ops;
     op              = (const VjOpHdr *)(ops + frame->call.ret_pc);
@@ -970,7 +990,7 @@ vj_op_unfold: {
   }
 
   {
-    VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)];
+    VjStackFrame *frame = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate)];
     frame->call.ret_ops = ops;
     frame->call.ret_pc  = (int32_t)((const uint8_t *)op - ops) + 8; /* UNFOLD is 8 bytes */
     frame->ret_base     = base;
@@ -1078,11 +1098,12 @@ vj_op_array_begin: {
   if (UNLIKELY(VJ_ST_GET_STACK_DEPTH(vmstate) >= VJ_MAX_STACK_DEPTH)) {
     VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);
   }
-  VjStackFrame *frame   = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)];
+  VjStackFrame *frame   = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate)];
   frame->ret_base       = base;
   frame->seq.iter_data  = arr_data;
   frame->seq.iter_count = array_len;
   frame->seq.iter_idx   = 0;
+  frame->state          = 0;
   VM_SAVE_TRACE_DEPTH(frame);
   VJ_ST_INC_STACK_DEPTH(vmstate);
 
@@ -1097,12 +1118,14 @@ vj_op_array_begin: {
   OP_LABEL: {                                                                                                     \
     VM_TRACE_KEY(TRACE_LABEL);                                                                                    \
     int32_t _depth = VJ_ST_GET_STACK_DEPTH(vmstate);                                                              \
-    int is_resume  = (_depth > 0 && (ctx->stack[_depth - 1].state & 1));                                          \
+    /* Zero guard below an empty stack: reads as "not a resume" without a                                         \
+     * depth test. */                                                                                             \
+    int is_resume = (VJ_STACK(ctx)[_depth - 1].state & 1);                                                        \
     const GoSwissMap *m;                                                                                          \
     int32_t remaining, di, gi, si;                                                                                \
     int entry_first;                                                                                              \
     if (is_resume) {                                                                                              \
-      VjStackFrame *f = &ctx->stack[_depth - 1];                                                                  \
+      VjStackFrame *f = &VJ_STACK(ctx)[_depth - 1];                                                               \
       m               = (const GoSwissMap *)f->map.map_ptr;                                                       \
       remaining       = f->map.remaining;                                                                         \
       di              = f->map.dir_idx;                                                                           \
@@ -1142,7 +1165,7 @@ vj_op_array_begin: {
       if (UNLIKELY(VJ_ST_GET_STACK_DEPTH(vmstate) >= VJ_MAX_STACK_DEPTH)) {                                       \
         VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);                                                               \
       }                                                                                                           \
-      VjStackFrame *f    = &ctx->stack[is_resume ? (_depth - 1) : _depth];                                        \
+      VjStackFrame *f    = &VJ_STACK(ctx)[is_resume ? (_depth - 1) : _depth];                                     \
       f->ret_base        = base;                                                                                  \
       f->map.map_ptr     = m;                                                                                     \
       f->map.remaining   = remaining;                                                                             \
@@ -1206,10 +1229,12 @@ vj_op_map_str_iter: {
                                : (SWISS_CTRL_SIZE + SWISS_GROUP_SLOTS * operand);
 
   int32_t _depth = VJ_ST_GET_STACK_DEPTH(vmstate);
-  int is_resume  = (_depth > 0 && (ctx->stack[_depth - 1].state & 1));
+  /* Zero guard below an empty stack: reads as "not a resume" without a depth
+   * test. */
+  int is_resume = (VJ_STACK(ctx)[_depth - 1].state & 1);
 
   if (is_resume) {
-    VjStackFrame *f     = &ctx->stack[_depth - 1];
+    VjStackFrame *f     = &VJ_STACK(ctx)[_depth - 1];
     const GoSwissMap *m = (const GoSwissMap *)f->map.map_ptr;
     int32_t remaining   = f->map.remaining;
 
@@ -1279,7 +1304,7 @@ vj_op_map_str_iter: {
     if (UNLIKELY(VJ_ST_GET_STACK_DEPTH(vmstate) >= VJ_MAX_STACK_DEPTH)) {
       VM_SAVE_AND_RETURN(VJ_EXIT_STACK_OVERFLOW);
     }
-    VjStackFrame *frame  = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)];
+    VjStackFrame *frame  = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate)];
     frame->ret_base      = base;
     frame->map.map_ptr   = m;
     frame->map.remaining = (int32_t)m->used;
@@ -1340,7 +1365,7 @@ vj_op_map_str_iter: {
 
 map_str_iter_done_resume: {
   /* Resume path: no more entries */
-  VjStackFrame *f = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
+  VjStackFrame *f = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
   VM_CHECK_CLOSE();
   VM_INDENT_DEC();
   VM_WRITE_INDENT();
@@ -1370,7 +1395,7 @@ vj_op_map_str_iter_end: {
   int32_t group_size  = _split ? (SWISS_SPLIT_ELEMS_OFF + SWISS_GROUP_SLOTS * operand)
                                : (SWISS_CTRL_SIZE + SWISS_GROUP_SLOTS * operand);
 
-  VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
+  VjStackFrame *frame = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
   int32_t remaining   = frame->map.remaining;
 
   if (remaining > 0) {
@@ -1423,6 +1448,15 @@ vj_op_map_str_iter_end: {
   }
 
 map_str_iter_end_done:
+#if 0
+  /* The underflow check sits here rather than at the op's entry so it stays
+   * off the per-entry jump-back path above. An unpaired MAP_STR_ITER_END at
+   * depth 0 reads the zero guard, whose remaining of 0 ends the iteration
+   * immediately, so it always arrives here, and before any write. */
+  if (UNLIKELY(VJ_ST_GET_STACK_DEPTH(vmstate) <= 0)) {
+    VM_SAVE_AND_RETURN(VJ_EXIT_STACK_UNDERFLOW);
+  }
+#endif
   VM_CHECK_CLOSE();
   VM_INDENT_DEC();
   VM_WRITE_INDENT();
@@ -1561,7 +1595,7 @@ vj_op_interface: {
   VM_WRITE_KEY();
 
   {
-    VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)];
+    VjStackFrame *frame = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate)];
     frame->call.ret_ops = ops;
     frame->call.ret_pc  = (int32_t)((const uint8_t *)op - ops) + 8;
     frame->ret_base     = base;
@@ -1597,7 +1631,7 @@ vj_op_skip_if_zero_go: {
   /* Inline state machine for OP_MAP_STR_INT / OP_MAP_STR_INT64 */
 
 vj_state_swiss_str_int_iter: {
-  VjStackFrame *f     = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
+  VjStackFrame *f     = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
   const GoSwissMap *m = (const GoSwissMap *)f->map.map_ptr;
   VjSwissIndent ind   = {indent_tpl, indent_depth, indent_step, indent_prefix_len};
   VjSwissMapResult r =
@@ -1613,7 +1647,7 @@ vj_state_swiss_str_int_iter: {
 }
 
 vj_state_swiss_str_int_done: {
-  VjStackFrame *f = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
+  VjStackFrame *f = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
   VM_CHECK_CLOSE();
   VM_INDENT_DEC();
   VM_WRITE_INDENT();
@@ -1629,7 +1663,7 @@ vj_state_swiss_str_int_done: {
    *      that also goes through escape, and layout consts use STR_STR) ---- */
 
 vj_state_swiss_str_str_iter: {
-  VjStackFrame *f     = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
+  VjStackFrame *f     = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
   const GoSwissMap *m = (const GoSwissMap *)f->map.map_ptr;
   VjSwissIndent ind   = {indent_tpl, indent_depth, indent_step, indent_prefix_len};
   VjSwissMapResult r =
@@ -1645,7 +1679,7 @@ vj_state_swiss_str_str_iter: {
 }
 
 vj_state_swiss_str_str_done: {
-  VjStackFrame *f = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
+  VjStackFrame *f = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
   VM_CHECK_CLOSE();
   VM_INDENT_DEC();
   VM_WRITE_INDENT();
@@ -1689,11 +1723,12 @@ vj_state_value_walk_enter: {
 
   /* Resume: a walk frame on top means this op re-executes mid-walk after a
    * window-full exit. The frame is uniquely recognizable by its state bits,
-   * so an enclosing loop frame below never aliases. */
+   * so an enclosing loop frame below never aliases, and the zero guard below
+   * an empty stack matches neither bit. */
   {
     int32_t d = VJ_ST_GET_STACK_DEPTH(vmstate);
-    if (d > 0 && (ctx->stack[d - 1].state & (VJ_FRAME_STATE_ACTIVE | VJ_FRAME_STATE_WALK)) ==
-                     (VJ_FRAME_STATE_ACTIVE | VJ_FRAME_STATE_WALK)) {
+    if ((VJ_STACK(ctx)[d - 1].state & (VJ_FRAME_STATE_ACTIVE | VJ_FRAME_STATE_WALK)) ==
+        (VJ_FRAME_STATE_ACTIVE | VJ_FRAME_STATE_WALK)) {
       goto vj_state_value_walk_run;
     }
   }
@@ -1747,7 +1782,7 @@ vj_state_value_walk_enter: {
   }
 
   {
-    VjStackFrame *frame = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate)];
+    VjStackFrame *frame = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate)];
     VjTapeWalkCtx c0;
     c0.tape               = (const uint64_t *)v->doc->tape.data;
     c0.base               = v->base;
@@ -1770,7 +1805,7 @@ vj_state_value_walk_enter: {
 }
 
 vj_state_value_walk_run: {
-  VjStackFrame *f  = &ctx->stack[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
+  VjStackFrame *f  = &VJ_STACK(ctx)[VJ_ST_GET_STACK_DEPTH(vmstate) - 1];
   const GoValue *v = (const GoValue *)f->walk.value;
 
   VjTapeWalkCtx c;

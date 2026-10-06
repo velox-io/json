@@ -429,7 +429,6 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 
 		case opSliceBegin:
 			ext := opExtAt(ops, pc)
-			elemSize := uintptr(ext.OperandA)
 			bodyLen := ext.OperandB
 			sh := (*gort.SliceHeader)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 
@@ -476,7 +475,6 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			*(*unsafe.Pointer)(unsafe.Pointer(&frame.Payload[0])) = sh.Data
 			*(*int64)(unsafe.Pointer(&frame.Payload[8])) = int64(sh.Len)
 			*(*int32)(unsafe.Pointer(&frame.Payload[16])) = 0 // idx = 0
-			frame.State = int32(elemSize)                     // stash elemSize in State for SliceEnd
 			depth++
 
 			base = sh.Data // point to first element
@@ -490,7 +488,11 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			frame := &ctx.Stack[depth]
 			idx := *(*int32)(unsafe.Pointer(&frame.Payload[16])) + 1
 			count := *(*int64)(unsafe.Pointer(&frame.Payload[8]))
-			elemSize := uintptr(frame.State)
+			// SLICE_END flips the operand layout SLICE_BEGIN uses: operand_a is
+			// the jump back, operand_b the element size. Reading the size from
+			// the op keeps Frame.State free for its native meaning, a bit field
+			// the C loops probe on neighboring frames.
+			elemSize := uintptr(ext.OperandB)
 
 			if int64(idx) < count {
 				// Continue iteration
@@ -518,7 +520,6 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 		case opArrayBegin:
 			ext := opExtAt(ops, pc)
 			packed := uint32(ext.OperandA)
-			elemSize := uintptr(packed & 0xFFFF)
 			arrayLen := int32(packed >> 16)
 			bodyLen := ext.OperandB
 
@@ -560,7 +561,6 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			*(*unsafe.Pointer)(unsafe.Pointer(&frame.Payload[0])) = fieldPtr
 			*(*int64)(unsafe.Pointer(&frame.Payload[8])) = int64(arrayLen)
 			*(*int32)(unsafe.Pointer(&frame.Payload[16])) = 0
-			frame.State = int32(elemSize)
 			depth++
 
 			base = fieldPtr
