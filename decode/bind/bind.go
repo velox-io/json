@@ -922,13 +922,15 @@ func (p *Parser) serveYield(m *ndec.BindMachine) (done bool, err error) {
 			// Immediate errors carry a window-local position; a recorded skip
 			// error was promoted to an absolute document offset at the first
 			// input yield after its recording, so only the local form is
-			// rebased before translation.
+			// rebased before translation. The sliding window is not
+			// value-rooted, so the mismatch identity comes from the facts
+			// the walk recorded rather than a pointer rebuild.
 			if m.Yield.FirstErrorPos != ^uint64(0) && m.Yield.FirstErrorPromoted == 0 {
 				m.Yield.FirstErrorPos += p.feed.base
 			}
-			return false, mkBindErr(p, machineErrInfo(m), p.feed.src(), p.feed.base)
+			return false, mkBindErr(p, machineErrInfo(m), p.feed.src(), p.feed.base, false)
 		}
-		return false, mkBindErr(p, machineErrInfo(m), p.curSrc(), 0)
+		return false, mkBindErr(p, machineErrInfo(m), p.curSrc(), 0, true)
 	case ndec.BindYieldBlockFull:
 		return false, p.alloc.ServeNewBlock(m.Yield.Arg0, m.Yield.Arg1)
 	case ndec.BindYieldTapeArena:

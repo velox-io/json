@@ -319,8 +319,10 @@ func TestUnmarshalValueTypeMismatchHasNoSourceOffset(t *testing.T) {
 	if !errors.As(err, &typeErr) {
 		t.Fatalf("JSON error = %v, want *UnmarshalTypeError", err)
 	}
-	if typeErr.Offset != 0 || typeErr.Value != "string" {
-		t.Errorf("JSON error = {Offset:%d Value:%q}, want {Offset:0 Value:string}", typeErr.Offset, typeErr.Value)
+	// The contiguous path reports one past the offending token, matching
+	// encoding/json; the token spans the whole input here.
+	if typeErr.Offset != 12 || typeErr.Value != "string" {
+		t.Errorf("JSON error = {Offset:%d Value:%q}, want {Offset:12 Value:string}", typeErr.Offset, typeErr.Value)
 	}
 }
 

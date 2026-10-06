@@ -30,7 +30,7 @@ func (c *binder) bindAny(s text, p int, dst unsafe.Pointer, ctr uint32) (int, er
 		return q, nil
 	case ch == '-' || gdec.IsDigit(ch):
 		if c.opt&ndec.BindOptUseNumber != 0 {
-			str, q, err := c.numberTextAt(s, p, ctr)
+			str, q, err := c.numberTextAt(s, p)
 			if err != nil {
 				return q, err
 			}
@@ -41,7 +41,7 @@ func (c *binder) bindAny(s text, p int, dst unsafe.Pointer, ctr uint32) (int, er
 		}
 		f, end, ok, exact := gdec.FloatToken(unsafe.Slice((*byte)(s.b), s.n), p)
 		if !ok {
-			return p, c.failType(ndec.BindErrTypeMismatch, uint64(p), ctr)
+			return p, c.fail(ndec.BindErrSyntax, uint64(p))
 		}
 		if gdec.IsNonDelim(s.peek(end)) {
 			return p, c.fail(ndec.BindErrSyntax, uint64(p))

@@ -301,10 +301,11 @@ type binder struct {
 	strKey string
 
 	// The first recorded type mismatch surfaces at document end against
-	// rootType, the type the native machine holds there.
-	mismatch    bool
-	mismatchPos uint64
-	rootType    uint32
+	// mismatchType, the leaf destination that rejected the value.
+	mismatch     bool
+	mismatchPos  uint64
+	mismatchType uint32
+	rootType     uint32
 
 	info Error
 	// caseLift marks a mismatch abort already lifted to its innermost case
@@ -333,7 +334,7 @@ type binder struct {
 // data, ahead of the final report point.
 func (c *binder) finish() error {
 	if c.mismatch {
-		return c.failType(ndec.BindErrTypeMismatch, c.mismatchPos, c.rootType)
+		return c.failType(ndec.BindErrTypeMismatch, c.mismatchPos, c.mismatchType)
 	}
 	if !c.eof() {
 		return c.fail(ndec.BindErrTrailing, c.pos())

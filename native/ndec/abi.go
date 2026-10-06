@@ -257,18 +257,26 @@ type BindCoreHeader struct {
 	CurDst         *byte    // off 24
 	CurCount       uint32   // off 32
 	FirstErrorKind uint32   // off 36
+	// FirstErrorTypeIdx is the TypeTree index of the destination the first
+	// recorded mismatch rejected, 0xFFFFFFFF while none was recorded. The
+	// Go driver reads it when a promoted BIND_ERR_TYPE_MISMATCH translates.
+	FirstErrorTypeIdx uint32 // off 40
+	// FirstErrorEndDelta is the distance from the mismatch position to one
+	// past the offending token, zero when the recording window held less
+	// than the whole token.
+	FirstErrorEndDelta uint32 // off 44
 	// StrUsed is the next-free byte offset in StrArena, spilled across yields.
-	StrUsed uint64 // off 40
+	StrUsed uint64 // off 48
 	// Atof is a non-owning address into parser-owned scratch. The Parser retains
 	// that backing for the machine lifetime.
-	Atof  uintptr  // off 48
-	Stash [16]byte // off 56
+	Atof  uintptr  // off 56
+	Stash [16]byte // off 64
 	// CurAux is a kind-tagged native address: map region, slice or stream write
 	// cursor, or struct lookup. Frames preserve it across descent. It is uintptr
 	// because it is non-owning and intentionally unscanned. Reachability must come
 	// from the typed allocator, TypeTree, destination, or retained backing that
 	// owns the referenced storage.
-	CurAux uintptr // off 72
+	CurAux uintptr // off 80
 }
 
 // UnmarshalRecord defers Go callbacks and RawMessage publication. Target must
@@ -635,8 +643,8 @@ var (
 	_ = [1]struct{}{}[unsafe.Sizeof(BindContext{})-72]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindAllocator{})-120]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindYield{})-32]
-	_ = [1]struct{}{}[unsafe.Sizeof(BindMachine{})-304]
-	_ = [1]struct{}{}[unsafe.Sizeof(BindCoreHeader{})-80]
+	_ = [1]struct{}{}[unsafe.Sizeof(BindMachine{})-312]
+	_ = [1]struct{}{}[unsafe.Sizeof(BindCoreHeader{})-88]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindFrame{})-32]
 	_ = [1]struct{}{}[unsafe.Sizeof(BindMapRegionHeader{})-32]
 	_ = [1]struct{}{}[unsafe.Sizeof(UnmarshalRecord{})-24]

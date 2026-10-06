@@ -118,19 +118,23 @@ func (c *binder) failNoPos(kind uint32) error {
 	return errAbort
 }
 
-// failValueOrEOF is BIND_ERR_VALUE_OR_EOF: a mismatch at the end sentinel
-// is truncation.
-func (c *binder) failValueOrEOF(kind uint32, ctr uint32) error {
+// failValueOrEOF mirrors BIND_ERR_VALUE_OR_EOF and BIND_ELEM_TYPE_MISMATCH:
+// an error at the end sentinel is truncation, any other reports kind
+// against typeIdx.
+func (c *binder) failValueOrEOF(kind uint32, typeIdx uint32) error {
 	if c.eof() {
 		return c.fail(ndec.BindErrEOF, c.pos())
 	}
-	return c.failType(kind, c.pos(), ctr)
+	return c.failType(kind, c.pos(), typeIdx)
 }
 
-func (c *binder) record(pos uint64) {
+// record keeps the first mismatch, its position, and the leaf destination
+// that rejected the value, for finish to surface.
+func (c *binder) record(pos uint64, typeIdx uint32) {
 	if !c.mismatch {
 		c.mismatch = true
 		c.mismatchPos = pos
+		c.mismatchType = typeIdx
 	}
 }
 

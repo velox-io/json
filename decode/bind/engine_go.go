@@ -48,7 +48,12 @@ func (p *Parser) goBind(src, alias []byte, base uint64, tape bool, dst unsafe.Po
 	settled, err = gbind.Bind(p.goPlan(), (*goHost)(p), &in, dst)
 	p.alloc.Release()
 	if e, ok := err.(*gbind.Error); ok {
-		err = mkBindErr(p, bindErrInfo(*e), src, base)
+		// The Go engine binds one complete value per call, so its source is
+		// always value-rooted and the mismatch identity can be rebuilt by
+		// walking it. It records no token-end delta; the value-rooted
+		// window supplies the extent directly.
+		err = mkBindErr(p, bindErrInfo{Kind: e.Kind, Detail: e.Detail, Pos: e.Pos,
+			TypeIdx: e.TypeIdx, Target: e.Target}, src, base, true)
 	}
 	return settled, err
 }

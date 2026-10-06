@@ -645,11 +645,33 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
  * engine.
  */
 
-#define BIND_ERR_VALUE_OR_EOF(m, kind, pos)                                                                       \
+/* A value no binding accepts: the end sentinel is truncation, any other
+ * byte malformed input. */
+#define BIND_ERR_VALUE_OR_EOF(m, pos)                                                                             \
   do {                                                                                                            \
     BIND_INPUT_EOF_CHECK(m);                                                                                      \
     if (UNLIKELY(SRC_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, (pos));                                              \
-    BIND_YIELD_ERR(m, (kind), (pos));                                                                             \
+    BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (pos));                                                                    \
+  } while (0)
+
+/* An element-site mismatch aborts here, reporting ct, the leaf destination
+ * that rejected the value. The streaming window cannot back the driver's
+ * pointer rebuild, so the leaf must travel in the yield itself. A number
+ * token the grammar rejects is malformed input, not a value the
+ * destination rejected, and classifies as a syntax error before the
+ * mismatch is reported; the field site's skip value surfaces the same
+ * check for recorded errors.
+ */
+#define BIND_ELEM_TYPE_MISMATCH(m, pos, ct)                                                                       \
+  do {                                                                                                            \
+    BIND_INPUT_EOF_CHECK(m);                                                                                      \
+    if (UNLIKELY(SRC_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, (pos));                                              \
+    {                                                                                                             \
+      uint8_t _c = SRC_PEEK();                                                                                    \
+      if ((_c == '-' || (_c >= '0' && _c <= '9')) && UNLIKELY(ndec_valid_number(SRC_PTR()) != 0))                 \
+        BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (pos));                                                                \
+    }                                                                                                             \
+    BIND_IMMEDIATE_TYPE_MISMATCH(m, (pos), (ct)->type_idx);                                                       \
   } while (0)
 
 #define BIND_MAP_OPEN(m, type_ptr_, body_, push_fn)                                                               \
@@ -803,6 +825,38 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
     }                                                                                                             \
   } while (0)
 
+/* bind_mismatch_end_delta returns the distance from a recorded mismatch
+ * position to one past the offending token. A bracket's end is one byte on;
+ * a string scans its closing quote; any other scalar runs to its delimiter.
+ * The window scanner publishes only token-complete stable prefixes, so the
+ * token at the position lies wholly inside the window. Zero reports that it
+ * does not, which leaves the report at the token start.
+ */
+INLINE uint32_t bind_mismatch_end_delta(const NdecBindMachine *m, uint64_t pos) {
+  const uint8_t *base = m->b.ctx.src;
+  uint64_t len        = m->b.ctx.src_len;
+  if (pos >= len) return 0;
+  const uint8_t *s   = base + pos;
+  const uint8_t *end = base + len;
+  if (*s == '{' || *s == '[') return 1;
+  if (*s == '"') {
+    const uint8_t *p = s + 1;
+    while (p + 1 < end) {
+      if (*p == '\\') {
+        p += 2;
+        continue;
+      }
+      if (*p == '"') return (uint32_t)(p - s) + 1;
+      p++;
+    }
+    return 0;
+  }
+  const uint8_t *p = s;
+  while (p < end && *p > ' ' && *p != ',' && *p != '}' && *p != ']' && *p != ':')
+    p++;
+  return (uint32_t)(p - s);
+}
+
 /* Preserve only the first type mismatch, then skip the value. Syntax errors
  * still abort immediately. At a non-final window end the mismatch site
  * yields input before recording anything, so a value arriving in a later
@@ -810,15 +864,38 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
  * edges, so entry runs through skip_value to install BIND_PHASE_SKIP_RESUME
  * before any input yield.
  */
-#define BIND_TYPE_MISMATCH_SKIP(m, pos)                                                                           \
+#define BIND_TYPE_MISMATCH_SKIP(m, pos, ct)                                                                       \
   do {                                                                                                            \
     BIND_INPUT_EOF_CHECK(m);                                                                                      \
     if (m->c.first_error_kind == 0) {                                                                             \
       m->c.first_error_kind           = BIND_ERR_TYPE_MISMATCH;                                                   \
+      m->c.first_error_type_idx       = (uint32_t)(ct)->type_idx;                                                 \
+      m->c.first_error_end_delta      = bind_mismatch_end_delta(m, (pos));                                        \
       m->b.yield.first_error_pos      = (pos);                                                                    \
       m->b.yield.first_error_promoted = 0;                                                                        \
     }                                                                                                             \
     goto skip_value;                                                                                              \
+  } while (0)
+
+/* An immediate type mismatch aborts rather than skip-and-continue, so the
+ * destination travels through the same core field the promoted first error
+ * uses. The assignment is unconditional: an immediate error preempts any
+ * earlier recorded mismatch. Without it the Go driver grafts the recorded
+ * destination onto the immediate error's position.
+ * The extent is left for the driver to scan: the token sits in the live
+ * window at the yield, so the driver-side TokenEnd measurement both
+ * engines already share applies, unlike a recorded error whose window may
+ * have retired. The delta must still be cleared, or the driver would take
+ * the recorded extent of the mismatch being preempted.
+ * The caller passes the type index the mismatch reports against: the
+ * leaf being bound, or the container cur_type holds where the site has
+ * no leaf of its own.
+ */
+#define BIND_IMMEDIATE_TYPE_MISMATCH(m, pos, type_idx_)                                                           \
+  do {                                                                                                            \
+    m->c.first_error_type_idx  = (uint32_t)(type_idx_);                                                           \
+    m->c.first_error_end_delta = 0;                                                                               \
+    BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (pos));                                                             \
   } while (0)
 
 /* Root-level mismatch: record the error, then consume the complete value
@@ -829,10 +906,12 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
  * are advance-then-compare, so an input yield there would re-enter the
  * dispatch with the bracket already consumed. root_skip_value owns every
  * window edge from here on. */
-#define BIND_ROOT_TYPE_MISMATCH_SKIP(m, pos, bracket_consumed)                                                    \
+#define BIND_ROOT_TYPE_MISMATCH_SKIP(m, pos, bracket_consumed, ct)                                                \
   do {                                                                                                            \
     if (m->c.first_error_kind == 0) {                                                                             \
       m->c.first_error_kind           = BIND_ERR_TYPE_MISMATCH;                                                   \
+      m->c.first_error_type_idx       = (uint32_t)(ct)->type_idx;                                                 \
+      m->c.first_error_end_delta      = bind_mismatch_end_delta(m, (pos));                                        \
       m->b.yield.first_error_pos      = (pos);                                                                    \
       m->b.yield.first_error_promoted = 0;                                                                        \
     }                                                                                                             \
@@ -840,11 +919,20 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
     goto root_skip_value;                                                                                         \
   } while (0)
 
+/* A write failure is a mismatch only for a token the grammar accepts: a
+ * value the kind cannot hold, including float range overflow, where the
+ * store already holds the ±Inf. A token outside the number grammar is
+ * malformed input and aborts as a syntax error regardless of the
+ * destination, as encoding/json reports it.
+ */
 #define BIND_WRITE_NUMBER(ct, body, err_pos, cont_label, ON_MISMATCH)                                             \
   do {                                                                                                            \
     const uint8_t *_tok = SRC_PTR();                                                                              \
     const uint8_t *_end;                                                                                          \
-    if (bind_write_number(_tok, (ct)->kind, (body), m->c.atof, &_end) < 0) ON_MISMATCH;                           \
+    if (bind_write_number(_tok, (ct)->kind, (body), m->c.atof, &_end) < 0) {                                      \
+      if (UNLIKELY(ndec_valid_number(_tok) != 0)) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (err_pos));                  \
+      ON_MISMATCH;                                                                                                \
+    }                                                                                                             \
     if (UNLIKELY(is_non_delim(*_end))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (err_pos));                             \
     SRC_ADVANCE();                                                                                                \
     goto cont_label;                                                                                              \
@@ -859,7 +947,7 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
     const uint8_t *_end;                                                                                          \
     double _dv;                                                                                                   \
     if (UNLIKELY(ndec_parse_double_padded(_tok, &_dv, m->c.atof, &_end)))                                         \
-      BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (err_pos));                                                       \
+      BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (err_pos));                                                              \
     if (UNLIKELY(is_non_delim(*_end))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (err_pos));                             \
     (void)_dv;                                                                                                    \
     uint32_t _nlen = (uint32_t)(_end - _tok);                                                                     \
@@ -1003,10 +1091,11 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
     goto t_map_open;                                                                                              \
   } while (0)
 
-#define TAPE_BIND_TYPE_MISMATCH_SKIP(m, pos)                                                                      \
+#define TAPE_BIND_TYPE_MISMATCH_SKIP(m, pos, ct)                                                                  \
   do {                                                                                                            \
     if (m->c.first_error_kind == 0) {                                                                             \
       m->c.first_error_kind           = BIND_ERR_TYPE_MISMATCH;                                                   \
+      m->c.first_error_type_idx       = (uint32_t)(ct)->type_idx;                                                 \
       m->b.yield.first_error_pos      = (pos);                                                                    \
       m->b.yield.first_error_promoted = 0;                                                                        \
     }                                                                                                             \
@@ -1017,10 +1106,11 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
  * instead of entering the nested skip continuation. Use tape_value_end because
  * consuming a following seam would move past cursor_end and report trailing data.
  */
-#define TAPE_BIND_ROOT_TYPE_MISMATCH_SKIP(m, pos)                                                                 \
+#define TAPE_BIND_ROOT_TYPE_MISMATCH_SKIP(m, pos, ct)                                                             \
   do {                                                                                                            \
     if (m->c.first_error_kind == 0) {                                                                             \
       m->c.first_error_kind           = BIND_ERR_TYPE_MISMATCH;                                                   \
+      m->c.first_error_type_idx       = (uint32_t)(ct)->type_idx;                                                 \
       m->b.yield.first_error_pos      = (pos);                                                                    \
       m->b.yield.first_error_promoted = 0;                                                                        \
     }                                                                                                             \

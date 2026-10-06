@@ -55,6 +55,8 @@ NDEC_FN_DECL void ndec_bind_parse(void *_m_) {
     m->c.cur_count                  = 0;
     m->c.cur_aux                    = NULL;
     m->c.first_error_kind           = 0;
+    m->c.first_error_type_idx       = 0xFFFFFFFFu;
+    m->c.first_error_end_delta      = 0;
     m->b.yield.first_error_pos      = BIND_ERROR_NO_POS;
     m->b.yield.first_error_promoted = 0;
     /* Reset both auxiliary stacks. Live aux slots initialize lazily, so only
@@ -127,6 +129,8 @@ NDEC_FN_DECL void ndec_bind_parse(void *_m_) {
     m->c.cur_count                  = 0;
     m->c.cur_aux                    = NULL;
     m->c.first_error_kind           = 0;
+    m->c.first_error_type_idx       = 0xFFFFFFFFu;
+    m->c.first_error_end_delta      = 0;
     m->b.yield.first_error_pos      = BIND_ERROR_NO_POS;
     m->b.yield.first_error_promoted = 0;
     m->rebind_top                   = 0;
@@ -159,6 +163,8 @@ NDEC_FN_DECL void ndec_bind_parse_stream(void *_m_) {
     m->c.cur_count                  = 0;
     m->c.cur_aux                    = NULL;
     m->c.first_error_kind           = 0;
+    m->c.first_error_type_idx       = 0xFFFFFFFFu;
+    m->c.first_error_end_delta      = 0;
     m->b.yield.first_error_pos      = BIND_ERROR_NO_POS;
     m->b.yield.first_error_promoted = 0;
     m->rebind_top                   = 0;
@@ -545,7 +551,7 @@ document_start: {
     }
     SRC_ADVANCE();
     if (cur_type.kind != BIND_KIND_STRUCT) {
-      BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_PREV_POS(), 1);
+      BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_PREV_POS(), 1, &cur_type);
     }
     /* Even an empty object must enter phase2 when the type can owe deferred
      * inline-variant or reserve-unknown work. */
@@ -564,7 +570,7 @@ document_start: {
      * other array. */
     if (UNLIKELY(cur_type.kind != BIND_KIND_SLICE && cur_type.kind != BIND_KIND_STREAM &&
                  cur_type.kind != BIND_KIND_ARRAY)) {
-      BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_PREV_POS(), 1);
+      BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_PREV_POS(), 1, &cur_type);
     }
     if (SRC_ACCEPT(']')) {
       /* Stream empty array at root: yield to activate the handler with an
@@ -825,22 +831,22 @@ object_field_value: {
         qn = (uint32_t)qn_i;
       quoted_body:
         if (bind_write_quoted_scalar(&str_p, qd, qn, child_type->kind, body, m->c.atof) < 0)
-          BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+          BIND_IMMEDIATE_TYPE_MISMATCH(m, SRC_POS(), child_type->type_idx);
         SRC_ADVANCE();
         goto object_continue;
       }
-      BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+      BIND_IMMEDIATE_TYPE_MISMATCH(m, SRC_POS(), child_type->type_idx);
     }
   }
 
-  BIND_DISPATCH_STRING(child_type, body, ch, object_continue, BIND_TYPE_MISMATCH_SKIP(m, SRC_POS()));
+  BIND_DISPATCH_STRING(child_type, body, ch, object_continue, BIND_TYPE_MISMATCH_SKIP(m, SRC_POS(), child_type));
   switch (child_type->kind) {
-    BIND_VALUE_SWITCH_COMMON(child_type, body, ch, object_continue, 0, BIND_TYPE_MISMATCH_SKIP(m, SRC_POS()),
-                             bind_push_struct);
+    BIND_VALUE_SWITCH_COMMON(child_type, body, ch, object_continue, 0,
+                             BIND_TYPE_MISMATCH_SKIP(m, SRC_POS(), child_type), bind_push_struct);
   case BIND_KIND_SLICE:
   case BIND_KIND_ARRAY:
   case BIND_KIND_STREAM:
-    if (ch != '[') BIND_TYPE_MISMATCH_SKIP(m, SRC_POS());
+    if (ch != '[') BIND_TYPE_MISMATCH_SKIP(m, SRC_POS(), child_type);
 
     if (bind_push_struct(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
@@ -1364,17 +1370,16 @@ array_value_bind_body: {
     cur_aux   = (uint8_t *)cur_aux + cur_type.u.slice.child_size;
   }
 
-  BIND_DISPATCH_STRING(child_type, body, ch, array_continue,
-                       BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, SRC_POS()));
+  BIND_DISPATCH_STRING(child_type, body, ch, array_continue, BIND_ELEM_TYPE_MISMATCH(m, SRC_POS(), child_type));
   switch (child_type->kind) {
     // clang-format off
     /* zero_size is zero so reused slice or stream backing and fixed arrays retain
      * omitted struct fields. Newly allocated backing is already zeroed. */
-    BIND_VALUE_SWITCH_COMMON(child_type, body, ch, array_continue, 0, BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, SRC_POS()), bind_push_array_or_slice);
+    BIND_VALUE_SWITCH_COMMON(child_type, body, ch, array_continue, 0, BIND_ELEM_TYPE_MISMATCH(m, SRC_POS(), child_type), bind_push_array_or_slice);
     // clang-format on
   case BIND_KIND_SLICE:
   case BIND_KIND_ARRAY:
-    if (ch != '[') BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+    if (ch != '[') BIND_ELEM_TYPE_MISMATCH(m, SRC_POS(), child_type);
     /* Save elem_idx + 1 as the parent's live count before descending. */
     if (bind_push_array_or_slice(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
@@ -1388,7 +1393,7 @@ array_value_bind_body: {
     }
     goto array_begin;
   }
-  BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_SYNTAX, SRC_POS());
+  BIND_ERR_VALUE_OR_EOF(m, SRC_POS());
 }
 }
 
@@ -1674,7 +1679,7 @@ map_value: {
         BIND_DESCEND_STRUCT(target_slot, child_type, map_continue, bind_push_map);
       }
       if (child_type->kind == BIND_KIND_ARRAY || child_type->kind == BIND_KIND_SLICE) {
-        if (ch != '[') BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+        if (ch != '[') BIND_ELEM_TYPE_MISMATCH(m, SRC_POS(), child_type);
         if (bind_push_map(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
           BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
         cur_dst   = target_slot;
@@ -1688,7 +1693,7 @@ map_value: {
       }
       if (child_type->kind == BIND_KIND_MAP) {
         /* Store a nested *hmap in the typed intermediate that map drain copies by value. */
-        if (ch != '{') BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+        if (ch != '{') BIND_ELEM_TYPE_MISMATCH(m, SRC_POS(), child_type);
         BIND_MAP_OPEN(m, child_type, target_slot, bind_push_map);
       }
     }
@@ -1701,14 +1706,13 @@ map_value: {
     }
   }
 
-  BIND_DISPATCH_STRING(child_type, body, ch, map_continue,
-                       BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, SRC_POS()));
+  BIND_DISPATCH_STRING(child_type, body, ch, map_continue, BIND_ELEM_TYPE_MISMATCH(m, SRC_POS(), child_type));
   switch (child_type->kind) {
     BIND_VALUE_SWITCH_COMMON(child_type, body, ch, map_continue, (size_t)stride - BIND_MAP_VAL_OFF,
-                             BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, SRC_POS()), bind_push_map);
+                             BIND_ELEM_TYPE_MISMATCH(m, SRC_POS(), child_type), bind_push_map);
   case BIND_KIND_SLICE:
   case BIND_KIND_ARRAY:
-    if (ch != '[') BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+    if (ch != '[') BIND_ELEM_TYPE_MISMATCH(m, SRC_POS(), child_type);
     __builtin_memset(body, 0, (size_t)stride - BIND_MAP_VAL_OFF);
     if (bind_push_map(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
@@ -1721,7 +1725,7 @@ map_value: {
     }
     goto array_begin;
   }
-  BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_SYNTAX, SRC_POS());
+  BIND_ERR_VALUE_OR_EOF(m, SRC_POS());
 }
 
 map_continue: {
@@ -1977,7 +1981,7 @@ any_value: {
     const uint8_t *_end;
     double dv;
     if (UNLIKELY(ndec_parse_double_padded(SRC_PTR(), &dv, m->c.atof, &_end)))
-      BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+      BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     if (UNLIKELY(is_non_delim(*_end))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     if (UNLIKELY(use_number)) {
       (void)dv;
@@ -2001,7 +2005,7 @@ any_value: {
         *(double *)data                = dv;
         *(const void **)any_slot       = type_tag;
         *(const void **)(any_slot + 8) = data;
-        BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+        BIND_IMMEDIATE_TYPE_MISMATCH(m, SRC_POS(), cur_type.type_idx);
       }
       *(double *)data = dv;
     }
@@ -2067,7 +2071,7 @@ any_value: {
     *(const void **)any_slot = am->map_type;
     BIND_MAP_OPEN(m, &types[am->map_any_type_idx], any_slot + 8, bind_push);
   }
-  BIND_ERR_VALUE_OR_EOF(m, BIND_ERR_SYNTAX, SRC_POS());
+  BIND_ERR_VALUE_OR_EOF(m, SRC_POS());
 }
 
 /* Deferred values are staged until FLUSH_UNMARSHAL or document end.
@@ -2115,8 +2119,10 @@ deferred_value: {
   } else {
     /* TextUnmarshaler and base64 []byte read decoded string bytes. Under the
      * zero-copy opt an escape-free body borrows the source span; escaped and
-     * oversized bodies intern into str_arena behind the strarena label. */
-    if (ch != '"') BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, SRC_POS());
+     * oversized bodies intern into str_arena behind the strarena label.
+     * The mismatch carries the container as its destination, preempting any
+     * recorded field error, whose leaf must not surface here. */
+    if (ch != '"') BIND_IMMEDIATE_TYPE_MISMATCH(m, SRC_POS(), cur_type.type_idx);
     uint32_t zlen, zbp;
     int32_t zst =
         (m->b.ctx.opt_flags & BIND_OPT_ZERO_COPY_STR) ? ndec_str_parse_zc_scan(SRC_PTR() + 1, &zlen, &zbp, 0) : 0;
@@ -2459,13 +2465,13 @@ poly_field_bind: {
   uint32_t zero_size = ct->kind == BIND_KIND_STRUCT ? m->b.ctx.type_meta[ct->type_idx].size : 0;
 
   /* Keep cur_type on the host until the descent saves its frame. */
-  BIND_DISPATCH_STRING(ct, body, ch, object_continue, BIND_TYPE_MISMATCH_SKIP(m, SRC_POS()));
+  BIND_DISPATCH_STRING(ct, body, ch, object_continue, BIND_TYPE_MISMATCH_SKIP(m, SRC_POS(), ct));
   switch (ct->kind) {
-    BIND_VALUE_SWITCH_COMMON(ct, body, ch, object_continue, zero_size, BIND_TYPE_MISMATCH_SKIP(m, SRC_POS()),
+    BIND_VALUE_SWITCH_COMMON(ct, body, ch, object_continue, zero_size, BIND_TYPE_MISMATCH_SKIP(m, SRC_POS(), ct),
                              bind_push_struct);
   case BIND_KIND_SLICE:
   case BIND_KIND_ARRAY:
-    if (ch != '[') BIND_TYPE_MISMATCH_SKIP(m, SRC_POS());
+    if (ch != '[') BIND_TYPE_MISMATCH_SKIP(m, SRC_POS(), ct);
     if (bind_push_struct(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
     cur_dst   = body;
@@ -2523,7 +2529,7 @@ root_scalar: {
         }
         goto deferred_value;
       }
-      BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_POS(), 0);
+      BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_POS(), 0, ct);
     }
     if (BIND_VISIT_STR(m, SRC_PTR(), cur_dst) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     SRC_ADVANCE();
@@ -2531,7 +2537,7 @@ root_scalar: {
   }
   if (ch == '-' || (ch >= '0' && ch <= '9')) {
     if (ct->kind == BIND_KIND_NUMBER) BIND_WRITE_NUMBER_AS_STR(cur_dst, SRC_POS(), document_end);
-    BIND_WRITE_NUMBER(ct, cur_dst, SRC_POS(), document_end, BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_POS(), 0));
+    BIND_WRITE_NUMBER(ct, cur_dst, SRC_POS(), document_end, BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_POS(), 0, ct));
   }
   if (ch == 'n') {
     if (bind_validate_atom(SRC_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
@@ -2539,14 +2545,14 @@ root_scalar: {
     goto document_end;
   }
   if (ch == 't') {
-    if (ct->kind != BIND_KIND_BOOL) BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_POS(), 0);
+    if (ct->kind != BIND_KIND_BOOL) BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_POS(), 0, ct);
     if (bind_validate_atom(SRC_PTR(), 't') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     *(uint8_t *)cur_dst = 1;
     SRC_ADVANCE();
     goto document_end;
   }
   if (ch == 'f') {
-    if (ct->kind != BIND_KIND_BOOL) BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_POS(), 0);
+    if (ct->kind != BIND_KIND_BOOL) BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_POS(), 0, ct);
     if (bind_validate_atom(SRC_PTR(), 'f') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
     *(uint8_t *)cur_dst = 0;
     SRC_ADVANCE();
@@ -2655,7 +2661,7 @@ t_document_start: {
     }
     TAP_ADVANCE();
     if (cur_type.kind != BIND_KIND_STRUCT) {
-      TAPE_BIND_ROOT_TYPE_MISMATCH_SKIP(m, 0);
+      TAPE_BIND_ROOT_TYPE_MISMATCH_SKIP(m, 0, &cur_type);
     }
     int empty = (TAP_TAG() == (TAPE_END_OBJECT >> 56));
     if (empty) {
@@ -2671,7 +2677,7 @@ t_document_start: {
   if (tag == (TAPE_START_ARRAY >> 56)) {
     TAP_ADVANCE();
     if (cur_type.kind != BIND_KIND_SLICE && cur_type.kind != BIND_KIND_ARRAY) {
-      TAPE_BIND_ROOT_TYPE_MISMATCH_SKIP(m, 0);
+      TAPE_BIND_ROOT_TYPE_MISMATCH_SKIP(m, 0, &cur_type);
     }
     if (TAP_TAG() == (TAPE_END_ARRAY >> 56)) {
       TAP_ADVANCE();
@@ -2873,11 +2879,11 @@ t_field_value_cold_gate:
       uint32_t qlen;
       const uint8_t *qd = tape_bind_string_ptr(word, m->b.alloc.str_arena, src, &qlen);
       if (bind_write_quoted_scalar(&str_p, qd, qlen, ct->kind, body, m->c.atof) < 0)
-        TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+        TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape), ct);
       TAP_ADVANCE();
       goto t_object_continue;
     }
-    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape), ct);
   }
 
   if (LIKELY(ct->kind == BIND_KIND_STRING)) {
@@ -2889,7 +2895,7 @@ t_field_value_cold_gate:
       TAP_ADVANCE();
       goto t_object_continue;
     }
-    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape), ct);
   }
 
   switch (ct->kind) {
@@ -2904,7 +2910,7 @@ t_field_value_cold_gate:
       TAP_ADVANCE();
       goto t_object_continue;
     }
-    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape), ct);
   case BIND_KIND_INT:
   case BIND_KIND_INT8:
   case BIND_KIND_INT16:
@@ -2918,25 +2924,25 @@ t_field_value_cold_gate:
   case BIND_KIND_FLOAT32:
   case BIND_KIND_FLOAT64: {
     TAPE_BIND_NUMBER_ARM(m, ct->kind, body, t_object_continue,
-                         TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape)));
+                         TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape), ct));
   }
   case BIND_KIND_STRUCT: {
     if (tag != (TAPE_START_OBJECT >> 56))
-      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape), ct);
     uint32_t zero_size = m->b.ctx.type_meta[ct->type_idx].size;
     __builtin_memset(body, 0, zero_size);
     TAPE_BIND_DESCEND_STRUCT(body, ct, t_object_continue, bind_push_struct);
   }
   case BIND_KIND_MAP: {
     if (tag != (TAPE_START_OBJECT >> 56))
-      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape), ct);
     TAP_ADVANCE();
     TAPE_BIND_MAP_OPEN(m, ct, body, bind_push_map);
   }
   case BIND_KIND_SLICE:
   case BIND_KIND_ARRAY: {
     if (tag != (TAPE_START_ARRAY >> 56))
-      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+      TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape), ct);
     if (bind_push(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       TAPE_BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
     cur_dst  = body;
@@ -2951,7 +2957,7 @@ t_field_value_cold_gate:
     goto t_array_begin;
   }
   case BIND_KIND_PTR:
-    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape), ct);
   default:
     goto t_unsupported;
   }

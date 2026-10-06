@@ -122,6 +122,18 @@ var gcDiffInputs = []string{
 	`{}`, `{"A":1}{}`, `{"A":1} `, `{"HM":{"a":"fail"}}`, `{"MS":{"k":{"B":"x"}}}`, `{"A":1,"A":"x","A":3}`,
 	`{"Any":{"a":1,"a":2}}`, `{"Raw":[1,{"a":2}], "A":1}`, `{"\u0041":7}`, `{"A\u0000":1}`,
 	`{"PP":null}`, `{"PS":[]}`, `{"X":[]}`, `{"M":{}}`, `{"AL":[]}`, `{"N":{}}`, `{"Y":[]}`,
+	// An any-path number mismatch must carry its own destination, not the
+	// leaf of an earlier recorded field error, and the reported extent is
+	// the driver's token scan. The well-formed variant also exercises the
+	// pointer rebuild over the same site. A token outside the number
+	// grammar is a syntax error on every path, so only range overflow
+	// reaches the any mismatch below.
+	`{"T":5,"Any":{"z":1.`, `{"P":{"B":1},"Any":{"z":1.}`, `{"Any":{"k":[1,-"s",true`,
+	`{"T":5,"Any":{"z":1e999`, `{"T":5,"Any":{"k":[1e999`,
+	// An element-site mismatch yield must carry its own destination too:
+	// this document is one brace short, so Raw and Num become map entries
+	// and the Num value mismatches an MS element after the recorded B error.
+	`{"MS":{"k":{"B":{,"C":"x"},"j":{"D":[]}},"Raw":null,"Num":"7"}`,
 	// Walk errors outrank hook failures, hook failures outrank map-key
 	// failures, and hooks inside a grown or reused backing land in the
 	// final one.
@@ -132,6 +144,10 @@ var gcDiffInputs = []string{
 	`{"H":"fail","A":"s"}`, `{"MI":{"x":"1","2":"b","y":"3"}}`,
 	// An unclosed string anywhere outranks a walk error ahead of it.
 	`{"A":tru,"S":"abc`, `{"A":1}x"`, `{"A":"x","X":[1,]"`, `{"A" 1,"S":"x`, `{"Raw":[a\"],"A":"`,
+	// An element-site deferred mismatch must carry its own destination: the
+	// recorded P error is still pending, and the EOF position leaves the
+	// pointer rebuild without a value to resolve.
+	`{"P":[1],"TxS":[`,
 }
 
 // gcHooks stages more hooks than a drain holds, in a fixed array and in a

@@ -166,49 +166,58 @@ typedef struct NdecBindCore {
   uint32_t cur_count;        /* off 32 */
   uint32_t first_error_kind; /* off 36  First mismatch, with zero meaning none; promoted
                               * to Yield at document end. Placed here to keep str_used aligned. */
-  size_t str_used;           /* off 40  Next-free string-arena byte offset. */
-  atof_ctx *atof;            /* off 48  Driver-owned floating-point scratch. */
+  /* Type index of the destination the first mismatch rejected. The walk
+   * records it beside the kind because the frame state at promotion time no
+   * longer names it: the value was skipped and its containers closed. 0xFFFFFFFF
+   * while none was recorded. */
+  uint32_t first_error_type_idx; /* off 40 */
+  /* Distance from the recorded mismatch position to one past the offending
+   * token, which the report needs as its offset. Zero when the token does
+   * not lie wholly inside the recording window. */
+  uint32_t first_error_end_delta; /* off 44 */
+  size_t str_used;                /* off 48  Next-free string-arena byte offset. */
+  atof_ctx *atof;                 /* off 56  Driver-owned floating-point scratch. */
 
   union {
     struct {
-      uint8_t *field; /* off 56 Field needed by OBJECT_FIELD_VALUE resume; cur_dst
+      uint8_t *field; /* off 64 Field needed by OBJECT_FIELD_VALUE resume; cur_dst
                        * already preserves the struct base. */
     } field_value;
     struct {
-      uint8_t *slot; /* off 56 Parent slot for eface publication. The any metadata
+      uint8_t *slot; /* off 64 Parent slot for eface publication. The any metadata
                       * is the TypeTree singleton and need not be stashed. */
     } any_yield;
     struct {
-      uint8_t *slot;        /* off 56 Receiver for deferred Unmarshal. It must remain
+      uint8_t *slot;        /* off 64 Receiver for deferred Unmarshal. It must remain
                              * GC-scannable while the closure may publish pointers. */
-      const BindType *type; /* off 64 Resolved site-specific type needed after
+      const BindType *type; /* off 72 Resolved site-specific type needed after
                              * FLUSH_UNMARSHAL, outside the standard spill set. */
     } deferred_yield;
     struct {
-      uint8_t *slot;      /* off 56 Destination for a Value alias yield. */
-      uint32_t view_mode; /* off 64 Active view mode including flag bits. */
-      uint32_t _pad;      /* off 68 */
+      uint8_t *slot;      /* off 64 Destination for a Value alias yield. */
+      uint32_t view_mode; /* off 72 Active view mode including flag bits. */
+      uint32_t _pad;      /* off 76 */
     } tape_value_yield;
-  } stash; /* off 56  Site-specific state that must survive a yield. */
+  } stash; /* off 64  Site-specific state that must survive a yield. */
 
   /* Kind-tagged pointer to the active container's side state. */
-  void *cur_aux; /* off 72 */
+  void *cur_aux; /* off 80 */
   /* frames[0] is the root sentinel. depth is zero outside the root and equals
    * container nesting inside it, making every unconditional push and pop slot
    * access valid without a lower-bound branch. */
-  BindFrame frames[BIND_MAX_DEPTH + 1]; /* off 80  8 KiB (32B * 256, [0]=sentinel) */
+  BindFrame frames[BIND_MAX_DEPTH + 1]; /* off 88  8 KiB (32B * 256, [0]=sentinel) */
 } NdecBindCore;
-_Static_assert(offsetof(NdecBindCore, str_used) == 40, "NdecBindCore.str_used offset");
-_Static_assert(offsetof(NdecBindCore, atof) == 48, "NdecBindCore.atof offset");
-_Static_assert(offsetof(NdecBindCore, stash) == 56, "NdecBindCore.stash offset");
-_Static_assert(offsetof(NdecBindCore, cur_aux) == 72, "NdecBindCore.cur_aux offset");
-_Static_assert(offsetof(NdecBindCore, frames) == 80, "NdecBindCore.frames offset");
+_Static_assert(offsetof(NdecBindCore, str_used) == 48, "NdecBindCore.str_used offset");
+_Static_assert(offsetof(NdecBindCore, atof) == 56, "NdecBindCore.atof offset");
+_Static_assert(offsetof(NdecBindCore, stash) == 64, "NdecBindCore.stash offset");
+_Static_assert(offsetof(NdecBindCore, cur_aux) == 80, "NdecBindCore.cur_aux offset");
+_Static_assert(offsetof(NdecBindCore, frames) == 88, "NdecBindCore.frames offset");
 
 typedef struct NdecBindMachine {
   NdecBindBridge b;      /* off 0    driver-engine bridge (ctx 72 + alloc 120 + yield 32 = 224B) */
-  NdecBindCore c;        /* off 224  binding state machine internals (scalars 80 + frames 8KiB = 8272B) */
-  NdecCursor cursor;     /* off 8496 input position of the active pass */
-  NdecCursor cursor_end; /* off 8504 count of real input; the walk reads past it */
+  NdecBindCore c;        /* off 224  binding state machine internals (scalars 88 + frames 8KiB = 8280B) */
+  NdecCursor cursor;     /* off 8504 input position of the active pass */
+  NdecCursor cursor_end; /* off 8512 count of real input; the walk reads past it */
 
   /* Streaming-input state. The Go driver owns the window coordinates:
    * window_base is the absolute document offset of ctx.src[0] so cold error
@@ -229,17 +238,17 @@ typedef struct NdecBindMachine {
    * and raw_cap and guarantees cap >= raw_used + window_len at every install:
    * one run's appends cover disjoint byte ranges of a single window, because a
    * completing value's tail ends at or before the next deferred value's start. */
-  uint64_t window_base;       /* off 8512, absolute document offset of ctx.src[0] */
-  uint32_t skip_depth;        /* off 8520 */
-  uint8_t window_final;       /* off 8524 */
-  uint8_t _pad2[3];           /* off 8525 */
-  uint32_t window_stable_end; /* off 8528 */
-  uint32_t raw_depth;         /* off 8532 */
-  uint32_t raw_scratch_start; /* off 8536 */
-  uint32_t _pad3;             /* off 8540, aligns raw_arena to 8 */
-  uint8_t *raw_arena;         /* off 8544 */
-  uint32_t raw_cap;           /* off 8552 */
-  uint32_t raw_used;          /* off 8556 */
+  uint64_t window_base;       /* off 8520, absolute document offset of ctx.src[0] */
+  uint32_t skip_depth;        /* off 8528 */
+  uint8_t window_final;       /* off 8532 */
+  uint8_t _pad2[3];           /* off 8533 */
+  uint32_t window_stable_end; /* off 8536 */
+  uint32_t raw_depth;         /* off 8540 */
+  uint32_t raw_scratch_start; /* off 8544 */
+  uint32_t _pad3;             /* off 8548, aligns raw_arena to 8 */
+  uint8_t *raw_arena;         /* off 8552 */
+  uint32_t raw_cap;           /* off 8560 */
+  uint32_t raw_used;          /* off 8564 */
 
   int32_t aux_depth; /* Current struct auxiliary slot; zero is the sentinel. Cold
                       * poly paths update it in memory, so it consumes no hot register
@@ -276,18 +285,18 @@ typedef struct NdecBindMachine {
    * alloc.tape_used, committed at each vd yield: arena growth between windows
    * would dangle a raw pointer. Frames above the parent bind depth carry the
    * container stack, so only the current container's scalar state lives here. */
-  uint8_t _pad4[3];           /* off 9509 */
-  int32_t vd_depth;           /* off 9512 */
-  uint32_t vd_cur_count;      /* off 9516 */
-  uint32_t vd_cur_tape_index; /* off 9520 */
-  uint32_t vd_base_off;       /* off 9524 */
-  uint32_t vd_lifecycle;      /* off 9528 */
+  uint8_t _pad4[3];           /* off 9517 */
+  int32_t vd_depth;           /* off 9520 */
+  uint32_t vd_cur_count;      /* off 9524 */
+  uint32_t vd_cur_tape_index; /* off 9528 */
+  uint32_t vd_base_off;       /* off 9532 */
+  uint32_t vd_lifecycle;      /* off 9536 */
 
   /* Retired string backings of the current streaming parse, addressed by the
    * Go driver at install time. The retained set keeps the backings alive; the
    * noscan machine cannot. */
-  uint32_t str_prov_count;                 /* off 9532 */
-  BindStrProv str_prov[BIND_STR_PROV_MAX]; /* off 9536 */
+  uint32_t str_prov_count;                 /* off 9540 */
+  BindStrProv str_prov[BIND_STR_PROV_MAX]; /* off 9544 */
 
   /* Key transition memo the Go driver owns for the Parser's lifetime. Each
    * struct's row, at its type_meta key_memo offset, holds one word per field
@@ -296,24 +305,24 @@ typedef struct NdecBindMachine {
    * parses, since a stale one only mispredicts. A word is one byte, so a
    * struct past two hundred fifty four fields wraps its resolutions to the
    * empty word, where the memo merely stops helping. */
-  uint8_t *key_memo; /* off 9792 */
+  uint8_t *key_memo; /* off 9800 */
 } NdecBindMachine;
 _Static_assert(offsetof(NdecBindMachine, b) == 0, "bridge must be at offset 0");
-_Static_assert(offsetof(NdecBindMachine, cursor) == 8496, "cursor offset must match Go BindMachineCursorOffset");
-_Static_assert(offsetof(NdecBindMachine, window_base) == 8512, "window_base offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, skip_depth) == 8520, "skip_depth offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, window_final) == 8524, "window_final offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, window_stable_end) == 8528,
+_Static_assert(offsetof(NdecBindMachine, cursor) == 8504, "cursor offset must match Go BindMachineCursorOffset");
+_Static_assert(offsetof(NdecBindMachine, window_base) == 8520, "window_base offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, skip_depth) == 8528, "skip_depth offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, window_final) == 8532, "window_final offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, window_stable_end) == 8536,
                "window_stable_end offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, raw_arena) == 8544, "raw_arena offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, raw_cap) == 8552, "raw_cap offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, raw_used) == 8556, "raw_used offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, vd_depth) == 9512, "vd_depth offset");
-_Static_assert(offsetof(NdecBindMachine, vd_base_off) == 9524, "vd_base_off offset");
-_Static_assert(offsetof(NdecBindMachine, vd_lifecycle) == 9528, "vd_lifecycle offset");
-_Static_assert(offsetof(NdecBindMachine, str_prov_count) == 9532, "str_prov_count offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, str_prov) == 9536, "str_prov offset must match Go mirror");
-_Static_assert(offsetof(NdecBindMachine, key_memo) == 9792, "key_memo offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, raw_arena) == 8552, "raw_arena offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, raw_cap) == 8560, "raw_cap offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, raw_used) == 8564, "raw_used offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, vd_depth) == 9520, "vd_depth offset");
+_Static_assert(offsetof(NdecBindMachine, vd_base_off) == 9532, "vd_base_off offset");
+_Static_assert(offsetof(NdecBindMachine, vd_lifecycle) == 9536, "vd_lifecycle offset");
+_Static_assert(offsetof(NdecBindMachine, str_prov_count) == 9540, "str_prov_count offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, str_prov) == 9544, "str_prov offset must match Go mirror");
+_Static_assert(offsetof(NdecBindMachine, key_memo) == 9800, "key_memo offset must match Go mirror");
 
 /* The memo word a misprediction at cursor next reads and records, or NULL
  * when the struct has no memo row. The row holds field_count + 1 words, so

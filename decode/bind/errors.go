@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strings"
 	"unsafe"
 
 	"github.com/velox-io/json/decode"
+	"github.com/velox-io/json/internal/gdec"
 	"github.com/velox-io/json/jerr"
 	"github.com/velox-io/json/native/ndec"
 	"github.com/velox-io/json/vbind"
@@ -50,30 +52,46 @@ var ErrZeroCopyTypedTree = errors.New("vjson: ZeroCopy(true) supports typed tree
 // yield, and the Go engine returns it as a gbind.Error of the same layout.
 // Pos is ^0 when the error has no source position. TypeIdx names the type
 // the error reports against; Target is the variant host for discriminator
-// errors.
+// errors. EndDelta is the distance from Pos to one past the offending token,
+// recorded by the engine beside the position, zero when unknown.
 type bindErrInfo struct {
-	Kind    uint32
-	Detail  uint32
-	Pos     uint64
-	TypeIdx int
-	Target  unsafe.Pointer
+	Kind     uint32
+	Detail   uint32
+	Pos      uint64
+	TypeIdx  int
+	Target   unsafe.Pointer
+	EndDelta uint32
 }
 
 func machineErrInfo(m *ndec.BindMachine) bindErrInfo {
+	typeIdx := int(m.Core.CurType.TypeIdx)
+	endDelta := uint32(0)
+	// A promoted mismatch reports the destination that rejected the value,
+	// which the walk recorded beside the kind. Everything else keeps the
+	// container current at the yield.
+	if m.Yield.Arg0 == ndec.BindErrTypeMismatch && m.Core.FirstErrorTypeIdx != 0xFFFFFFFF {
+		typeIdx = int(m.Core.FirstErrorTypeIdx)
+		endDelta = m.Core.FirstErrorEndDelta
+	}
 	return bindErrInfo{
-		Kind:    m.Yield.Arg0,
-		Detail:  m.Yield.Arg1,
-		Pos:     m.Yield.FirstErrorPos,
-		TypeIdx: int(m.Core.CurType.TypeIdx),
-		Target:  m.Yield.Target,
+		Kind:     m.Yield.Arg0,
+		Detail:   m.Yield.Arg1,
+		Pos:      m.Yield.FirstErrorPos,
+		TypeIdx:  typeIdx,
+		Target:   m.Yield.Target,
+		EndDelta: endDelta,
 	}
 }
 
 // mkBindErr translates an error payload. srcBase is the document offset of
 // src[0], zero for the contiguous engine's whole-document view and the
-// window base for the streaming engine. EOF errors wrap io.ErrUnexpectedEOF
-// for errors.Is.
-func mkBindErr(p *Parser, e bindErrInfo, src []byte, srcBase uint64) error {
+// window base for the streaming engine. valueRooted reports that src spans
+// exactly one complete value starting at its root, which is what the
+// pointer rebuild of a mismatch site requires: the contiguous and Go-engine
+// drivers pass whole documents or whole values, while the streaming window
+// slides mid-value and cannot back the rebuild. EOF errors wrap
+// io.ErrUnexpectedEOF for errors.Is.
+func mkBindErr(p *Parser, e bindErrInfo, src []byte, srcBase uint64, valueRooted bool) error {
 	kind := e.Kind
 	pos, hasPos := e.Pos, e.Pos != ^uint64(0)
 	if !hasPos {
@@ -100,11 +118,49 @@ func mkBindErr(p *Parser, e bindErrInfo, src []byte, srcBase uint64) error {
 		if hasPos {
 			value = jsonValueName(src, pos, srcBase)
 		}
-		return &UnmarshalTypeError{
+		e2 := &UnmarshalTypeError{
 			Value:  value,
 			Type:   rt,
 			Offset: int64(pos),
 		}
+		if !hasPos {
+			return e2
+		}
+		// The reported offset points one past the offending token rather
+		// than at it, matching encoding/json. The engine recorded the
+		// distance beside the position; zero leaves the token start.
+		if e.EndDelta != 0 {
+			e2.Offset = int64(pos + uint64(e.EndDelta))
+		} else if local := int(pos - srcBase); pos >= srcBase && local < len(src) {
+			// The recording window held the whole token but carried no
+			// distance, as with the Go engine, whose window still spans the
+			// value: scan the extent directly.
+			if end, ok := gdec.TokenEnd(src, local); ok {
+				e2.Offset = int64(srcBase + uint64(end))
+			}
+		}
+		// The rebuilt identity of the mismatch site names the field path,
+		// the leaf type that rejected the value, and the ,string wording.
+		// Any part the rebuild cannot supply keeps the fallbacks above.
+		// It runs only over a value-rooted source: a window that began
+		// mid-value would make the walk resolve the pointer against the
+		// wrong root.
+		if valueRooted {
+			if mc, ok := p.rebuildMismatchContext(src, srcBase, pos); ok {
+				if mc.leaf < uint32(len(p.tt.ReflectTypes)) {
+					e2.Type = p.tt.ReflectTypes[mc.leaf]
+				}
+				if len(mc.tokens) > 0 {
+					if p.tt.Root < uint32(len(p.tt.ReflectTypes)) {
+						e2.Struct = p.tt.ReflectTypes[p.tt.Root].Name()
+					}
+					e2.Field = strings.Join(mc.tokens, ".")
+				}
+				e2.Offset = int64(mc.tokenEnd)
+				e2.Value, e2.Err = mismatchValueName(value, mc, &p.tt.Types[mc.leaf])
+			}
+		}
+		return e2
 	case ndec.BindErrUnknownField:
 		// Name the struct the offending key was rejected by. FirstErrorPos carries
 		// the source offset when the error came from the JSON path.

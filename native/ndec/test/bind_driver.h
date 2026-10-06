@@ -20,10 +20,13 @@
 
 #include "bind_fixture.h"
 
-/* Instantiate both engines from the one machine body. The undefs keep the
- * literals this file owns, whatever the caller predefined. */
+/* Instantiate both engines from the one machine body. valid.h supplies the
+ * grammar check the bind macros call, exactly as entry/ndec.c includes it
+ * before the engine body. The undefs keep the literals this file owns,
+ * whatever the caller predefined. */
 #undef NDEC_STREAM_MODE
 #define NDEC_STREAM_MODE 0
+#include "ndec/valid.h"
 #include "ndec/bind.h"
 #undef NDEC_STREAM_MODE
 

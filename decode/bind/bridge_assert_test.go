@@ -30,11 +30,11 @@ func TestBindBridgeSizes(t *testing.T) {
 	if sz := unsafe.Sizeof(nativendec.BindYield{}); sz != 32 {
 		t.Errorf("sizeof BindYield = %d, want 32", sz)
 	}
-	if sz := unsafe.Sizeof(nativendec.BindMachine{}); sz != 304 {
-		t.Errorf("sizeof BindMachine = %d, want 304", sz)
+	if sz := unsafe.Sizeof(nativendec.BindMachine{}); sz != 312 {
+		t.Errorf("sizeof BindMachine = %d, want 312", sz)
 	}
-	if sz := unsafe.Sizeof(nativendec.BindCoreHeader{}); sz != 80 {
-		t.Errorf("sizeof BindCoreHeader = %d, want 80", sz)
+	if sz := unsafe.Sizeof(nativendec.BindCoreHeader{}); sz != 88 {
+		t.Errorf("sizeof BindCoreHeader = %d, want 88", sz)
 	}
 	if sz := unsafe.Sizeof(nativendec.BindMapRegionHeader{}); sz != 32 {
 		t.Errorf("sizeof BindMapRegionHeader = %d, want 32", sz)
@@ -100,9 +100,11 @@ func TestBindMachineOffsets(t *testing.T) {
 	check("Yield.Target", unsafe.Offsetof(a.Yield.Target), 24)
 
 	check("Core.Phase", unsafe.Offsetof(a.Core.Phase), 0)
-	check("Core.StrUsed", unsafe.Offsetof(a.Core.StrUsed), 40)
-	check("Core.Atof", unsafe.Offsetof(a.Core.Atof), 48)
-	check("Core.CurAux", unsafe.Offsetof(a.Core.CurAux), 72)
+	check("Core.FirstErrorTypeIdx", unsafe.Offsetof(a.Core.FirstErrorTypeIdx), 40)
+	check("Core.FirstErrorEndDelta", unsafe.Offsetof(a.Core.FirstErrorEndDelta), 44)
+	check("Core.StrUsed", unsafe.Offsetof(a.Core.StrUsed), 48)
+	check("Core.Atof", unsafe.Offsetof(a.Core.Atof), 56)
+	check("Core.CurAux", unsafe.Offsetof(a.Core.CurAux), 80)
 
 	var r nativendec.BindMapRegionHeader
 	check("BindMapRegionHeader.Stride", unsafe.Offsetof(r.Stride), 0)
@@ -121,9 +123,9 @@ func TestBindMachineOffsets(t *testing.T) {
 
 	// The retired-generation history lives in the C-private machine tail; the
 	// literals pin the Go offset constants to the native static asserts.
-	check("StrProvCountOffset", nativendec.BindMachineStrProvCountOffset, 9532)
-	check("StrProvOffset", nativendec.BindMachineStrProvOffset, 9536)
-	check("KeyMemoOffset", nativendec.BindMachineKeyMemoOffset, 9792)
+	check("StrProvCountOffset", nativendec.BindMachineStrProvCountOffset, 9540)
+	check("StrProvOffset", nativendec.BindMachineStrProvOffset, 9544)
+	check("KeyMemoOffset", nativendec.BindMachineKeyMemoOffset, 9800)
 	if end := nativendec.BindMachineKeyMemoOffset + 8; end > nativendec.BindMachineSize {
 		t.Errorf("machine tail ends at %d, machine budget %d", end, nativendec.BindMachineSize)
 	}

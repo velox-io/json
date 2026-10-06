@@ -9,6 +9,7 @@ package tests
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -234,6 +235,32 @@ func TestUnmarshal_StringTagEscapedPayload(t *testing.T) {
 func TestUnmarshal_TrailingGarbageAfterNumber(t *testing.T) {
 	for _, in := range []string{"1e2e3", "[1e2e3]", `{"a":1e2e3}`} {
 		assertSameDecode(t, "trailing garbage "+in, []byte(in), func() any { return new(any) })
+	}
+}
+
+// A number token outside the grammar is malformed input whatever the
+// destination: the stdlib reports a syntax error, never a type mismatch,
+// including at map values, slice elements, and any slots, where an aborting
+// mismatch has no skip to surface the grammar check.
+func TestUnmarshal_InvalidNumberGrammar(t *testing.T) {
+	type doc struct {
+		Any any
+		M   map[string]int
+		S   []string
+		F   []float64
+	}
+	for _, in := range []string{
+		`{"Any":{"z":1.}}`, `{"Any":[1.]}`, `{"Any":1.}`,
+		`{"M":{"a":1.}}`, `{"S":[1.]}`, `{"F":[1.]}`,
+		`{"Any":{"z":-}}`, `{"Any":{"z":01.}}`, `{"Any":{"z":1.e5}}`,
+	} {
+		assertSameDecode(t, "invalid number "+in, []byte(in), func() any { return new(doc) })
+		stdErr := json.Unmarshal([]byte(in), new(doc))
+		vjErr := vjson.Unmarshal([]byte(in), new(doc))
+		var stdSyn, vjSyn *json.SyntaxError
+		if errors.As(stdErr, &stdSyn) != errors.As(vjErr, &vjSyn) {
+			t.Errorf("%s: class divergence: std=%T vjson=%T", in, stdErr, vjErr)
+		}
 	}
 }
 

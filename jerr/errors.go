@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 )
 
 // ErrUnexpectedEOF is an internal sentinel used by the parser/decoder retry
@@ -47,17 +48,39 @@ type UnmarshalTypeError struct {
 	Offset int64
 	Struct string // struct being decoded (may be empty)
 	Field  string // struct field (may be empty)
+	// Err is the underlying error, for example strconv.ErrSyntax under a
+	// `,string` bool binding. It may be nil.
+	Err error
 }
 
 func (e *UnmarshalTypeError) Error() string {
+	var s string
 	if e.Struct != "" || e.Field != "" {
-		return fmt.Sprintf("vjson: cannot unmarshal %s into Go struct field %s.%s of type %s",
-			e.Value, e.Struct, e.Field, e.Type)
+		// A path whose last step is an array index (for example "S.1") does
+		// not name a struct field, so the message drops the phrase. The same
+		// heuristic encoding/json applies when it renders the path.
+		intoWhat := "Go struct field "
+		i := strings.LastIndexByte(e.Field, '.') + len(".")
+		if len(e.Field[i:]) > 0 && strings.TrimRight(e.Field[i:], "0123456789") == "" {
+			intoWhat = ""
+		}
+		s = fmt.Sprintf("vjson: cannot unmarshal %s into %s%s.%s of type %s",
+			e.Value, intoWhat, e.Struct, e.Field, e.Type)
+	} else {
+		s = fmt.Sprintf("vjson: cannot unmarshal %s into Go value of type %s", e.Value, e.Type)
 	}
-	return fmt.Sprintf("vjson: cannot unmarshal %s into Go value of type %s", e.Value, e.Type)
+	if e.Err != nil {
+		s += ": " + e.Err.Error()
+	}
+	return s
 }
 
-// As supports errors.As bridging to *json.UnmarshalTypeError.
+// Unwrap exposes the underlying error, mirroring the stdlib field.
+func (e *UnmarshalTypeError) Unwrap() error { return e.Err }
+
+// As supports errors.As bridging to *json.UnmarshalTypeError. The wrapped
+// Err travels through Unwrap rather than the bridge, which the stdlib type
+// gained a field for only in go1.27.
 func (e *UnmarshalTypeError) As(target any) bool {
 	if t, ok := target.(**json.UnmarshalTypeError); ok {
 		*t = &json.UnmarshalTypeError{
@@ -67,6 +90,7 @@ func (e *UnmarshalTypeError) As(target any) bool {
 			Struct: e.Struct,
 			Field:  e.Field,
 		}
+		bridgeUnmarshalTypeErrorErr(*t, e.Err)
 		return true
 	}
 	return false

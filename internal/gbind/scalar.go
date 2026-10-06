@@ -232,8 +232,8 @@ func (c *binder) storeString(s text, p int, dst unsafe.Pointer) (int, error) {
 
 // numberAt parses the number at token start p into a numeric kind and
 // returns the token start past it. A value the kind cannot hold reports
-// mismatch and leaves p; a token that runs into a non-delimiter is a syntax
-// error.
+// mismatch and leaves p; a token outside the number grammar is a syntax
+// error, as is a token that runs into a non-delimiter.
 func (c *binder) numberAt(s text, p int, dst unsafe.Pointer, k vbind.Kind) (next int, mismatch bool, err error) {
 	src := unsafe.Slice((*byte)(s.b), s.n)
 	var end int
@@ -241,7 +241,7 @@ func (c *binder) numberAt(s text, p int, dst unsafe.Pointer, k vbind.Kind) (next
 	case vbind.KindFloat32, vbind.KindFloat64:
 		f, e, ok, exact := gdec.FloatToken(src, p)
 		if end = e; !ok {
-			return p, true, nil
+			return p, false, c.fail(ndec.BindErrSyntax, uint64(p))
 		}
 		if exact && k == vbind.KindFloat64 {
 			*(*float64)(dst) = f
@@ -251,6 +251,11 @@ func (c *binder) numberAt(s text, p int, dst unsafe.Pointer, k vbind.Kind) (next
 	default:
 		mag, neg, e, bad, long := gdec.IntToken(src, p)
 		if end = e; bad {
+			// A fraction or exponent is a well-formed number the integer
+			// kind rejects; every other bad shape is outside the grammar.
+			if _, valid := gdec.ValidNumber(src, p); !valid {
+				return p, false, c.fail(ndec.BindErrSyntax, uint64(p))
+			}
 			return p, true, nil
 		}
 		var fits bool
@@ -417,9 +422,9 @@ func intBits(k vbind.Kind) int {
 }
 
 // storeNumberText keeps the text of the number token at the cursor in a
-// json.Number. A token outside the grammar is a mismatch against ctr.
-func (c *binder) storeNumberText(dst unsafe.Pointer, ctr uint32) error {
-	str, q, err := c.numberTextAt(c.txt, c.p, ctr)
+// json.Number. A token outside the grammar is a syntax error.
+func (c *binder) storeNumberText(dst unsafe.Pointer) error {
+	str, q, err := c.numberTextAt(c.txt, c.p)
 	if err != nil {
 		return err
 	}
@@ -430,10 +435,10 @@ func (c *binder) storeNumberText(dst unsafe.Pointer, ctr uint32) error {
 
 // numberTextAt returns the text of the number token at p, aliasing the
 // zero-copy base or copied into the arena, and the token start past it.
-func (c *binder) numberTextAt(s text, p int, ctr uint32) (string, int, error) {
+func (c *binder) numberTextAt(s text, p int) (string, int, error) {
 	_, end, ok, _ := gdec.FloatToken(unsafe.Slice((*byte)(s.b), s.n), p)
 	if !ok {
-		return "", p, c.failType(ndec.BindErrTypeMismatch, uint64(p), ctr)
+		return "", p, c.fail(ndec.BindErrSyntax, uint64(p))
 	}
 	if gdec.IsNonDelim(s.peek(end)) {
 		return "", p, c.fail(ndec.BindErrSyntax, uint64(p))

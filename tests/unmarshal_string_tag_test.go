@@ -406,6 +406,79 @@ func TestStringTag_StdlibCompat_Unmarshal(t *testing.T) {
 	}
 }
 
+// TestStringTag_StdlibCompat_Edges pins the surprising stdlib edges: a bare
+// number or bool still binds through `,string`, only the quoted payload must
+// parse as the target type, and a string destination demands the double
+// encoding `,string` itself produces.
+func TestStringTag_StdlibCompat_Edges(t *testing.T) {
+	type i64 struct {
+		V int64 `json:"v,string"`
+	}
+	type f64 struct {
+		V float64 `json:"v,string"`
+	}
+	type bl struct {
+		V bool `json:"v,string"`
+	}
+	type str struct {
+		V string `json:"v,string"`
+	}
+	cases := []struct {
+		input string
+		mk    func() any
+	}{
+		{`{"v":123}`, func() any { return new(i64) }}, // bare number binds
+		{`{"v":"123"}`, func() any { return new(i64) }},
+		{`{"v":"1.5"}`, func() any { return new(i64) }}, // payload must parse as int
+		{`{"v":"abc"}`, func() any { return new(i64) }},
+		{`{"v":"99999999999999999999"}`, func() any { return new(i64) }},
+		{`{"v":true}`, func() any { return new(i64) }},
+		{`{"v":"1e21"}`, func() any { return new(f64) }},
+		{`{"v":1.5}`, func() any { return new(f64) }}, // bare float binds
+		{`{"v":"NaN"}`, func() any { return new(f64) }},
+		{`{"v":true}`, func() any { return new(bl) }}, // bare bool binds
+		{`{"v":"true"}`, func() any { return new(bl) }},
+		{`{"v":"yes"}`, func() any { return new(bl) }},
+		{`{"v":123}`, func() any { return new(str) }},  // bare number is not double encoded
+		{`{"v":"hi"}`, func() any { return new(str) }}, // one layer is not enough
+		{`{"v":"\"hi\""}`, func() any { return new(str) }},
+	}
+	for _, tc := range cases {
+		// A quoted NaN binds through strconv.ParseFloat, which encoding/json
+		// accepts only since go1.27, so vjson's acceptance is pinned directly
+		// and parity is asserted only when the running std accepts it.
+		if tc.input == `{"v":"NaN"}` && !stdQuotedNaN() {
+			vjV := tc.mk()
+			if err := vjson.Unmarshal([]byte(tc.input), vjV); err != nil {
+				t.Errorf("input %s: vjson rejected a quoted NaN: %v", tc.input, err)
+			}
+			continue
+		}
+		stdV, vjV := tc.mk(), tc.mk()
+		stdErr := json.Unmarshal([]byte(tc.input), stdV)
+		vjErr := vjson.Unmarshal([]byte(tc.input), vjV)
+		if (stdErr == nil) != (vjErr == nil) {
+			t.Errorf("input %s: error divergence: std=%v vjson=%v", tc.input, stdErr, vjErr)
+			continue
+		}
+		if stdErr == nil {
+			stdStr, vjStr := dbgAny(stdV), dbgAny(vjV)
+			if stdStr != vjStr {
+				t.Errorf("input %s: value divergence:\n  std:   %s\n  vjson: %s", tc.input, stdStr, vjStr)
+			}
+		}
+	}
+}
+
+// stdQuotedNaN reports whether the running encoding/json accepts a quoted
+// NaN under ,string, which arrived in go1.27.
+func stdQuotedNaN() bool {
+	var d struct {
+		V float64 `json:"v,string"`
+	}
+	return json.Unmarshal([]byte(`{"v":"NaN"}`), &d) == nil
+}
+
 func TestStringTag_StdlibCompat_Pointer(t *testing.T) {
 	n := 42
 	v := StringTagPtr{Ptr: &n}
