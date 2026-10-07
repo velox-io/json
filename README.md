@@ -7,6 +7,12 @@ Velox is a high-performance JSON library for Go.
 ![](docs/benchmarks/linux-amd64/unmarshal-3.svg)
 ![](docs/benchmarks/linux-amd64/marshal-3.svg)
 
+Each library runs in its fastest decode mode:
+
+- Sonic: `sonic.ConfigFastest.UnmarshalFromString(s, &v)` (string input avoids the initial copy)
+- GoJSON: `gojson.UnmarshalOf(data, &v, gojson.DecodeNoCopyString())`
+- Velox: `vjson.Unmarshal(data, &v)` (zero-copy by default)
+
 [docs/benchmarks](docs/benchmarks).
 
 ## Design

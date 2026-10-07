@@ -275,6 +275,22 @@ func LoadLLMResponseJSON() []byte {
 	return llmResponseJSONData
 }
 
+// =============================================================================
+// GitHub REST API: a page of 30 issues of a repository
+// =============================================================================
+
+var (
+	githubIssuesJSONOnce sync.Once
+	githubIssuesJSONData []byte
+)
+
+// LoadGitHubIssuesJSON is the compact JSON of a page of 30 issues of the
+// GitHub REST API, in the key order of the response.
+func LoadGitHubIssuesJSON() []byte {
+	githubIssuesJSONOnce.Do(func() { githubIssuesJSONData = corpus.GitHubIssuesJSON() })
+	return githubIssuesJSONData
+}
+
 // loadLLMToolsValue is the value of the definitions of the five tools of the
 // session: a map[string]JSONSchema per tool, and nothing else.
 func loadLLMToolsValue() *ChatCompletionRequest {

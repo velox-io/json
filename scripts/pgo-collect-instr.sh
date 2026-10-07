@@ -482,10 +482,14 @@ if [ "$PGO_ITERS_REGEN" = "1" ]; then
 
   while IFS= read -r _name; do
     [ -n "$_name" ] || continue
-    _ns=$(LLVM_PROFILE_FILE="$_cal_dir/cal-%p.profraw" \
+    # Capture first, then match (same doctrine as the nm check above):
+    # awk's exit closes the pipe mid-run, the bench binary then dies with
+    # SIGPIPE, and pipefail turns that into a spurious 141 abort.
+    _cal_out="$_cal_dir/bench.out"
+    LLVM_PROFILE_FILE="$_cal_dir/cal-%p.profraw" \
       "$BENCH_TEST" -test.run='^$' -test.bench="^$_name\$" \
-      -test.benchtime="$PGO_ITERS_CAL" -test.count=1 |
-      awk -v n="$_name" '$1 ~ "^" n "-" { for (i = 2; i < NF; i++) if ($(i + 1) == "ns/op") { print $i; exit } }')
+      -test.benchtime="$PGO_ITERS_CAL" -test.count=1 >"$_cal_out"
+    _ns=$(awk -v n="$_name" '$1 ~ "^" n "-" { for (i = 2; i < NF; i++) if ($(i + 1) == "ns/op") { print $i; exit } }' "$_cal_out")
     if [ -z "$_ns" ] || [ "$_ns" -le 0 ] 2>/dev/null; then
       echo "pgo-collect-instr: calibration of '$_name' produced no ns/op" >&2
       rm -f "$_tmp_table"

@@ -492,3 +492,17 @@ type (
 	Choice                 = corpus.Choice
 	Usage                  = corpus.Usage
 )
+
+// =============================================================================
+// GitHub REST API: the types of the issues payload
+// =============================================================================
+
+type (
+	GitHubTimestamp        = corpus.GitHubTimestamp
+	GitHubUser             = corpus.GitHubUser
+	GitHubLabel            = corpus.GitHubLabel
+	GitHubMilestone        = corpus.GitHubMilestone
+	GitHubPullRequestLinks = corpus.GitHubPullRequestLinks
+	GitHubReactions        = corpus.GitHubReactions
+	GitHubIssue            = corpus.GitHubIssue
+)

@@ -160,28 +160,37 @@ func Benchmark_Marshal_TwitterTyped_Velox(b *testing.B) {
 }
 
 // =============================================================================
-// MapAny: map[string]any – exercises encodeAnyMap / encodeAnyVal path
-// Uses KubePods JSON decoded into map[string]any for realistic nested data.
+// GitHubIssues: GitHub REST API issues (~186KB, 30 issues). Pointer-heavy
+// go-github types; every field has omitempty, and the times marshal by the
+// embedded time.Time.
 // =============================================================================
 
 var (
-	mapAnyValueOnce sync.Once
-	mapAnyValue     map[string]any
+	githubIssuesValueOnce sync.Once
+	githubIssuesValue     []*GitHubIssue
 )
 
-func loadMapAnyValue() *map[string]any {
-	mapAnyValueOnce.Do(func() {
-		if err := json.Unmarshal(LoadPodsCompactJSON(), &mapAnyValue); err != nil {
-			panic("load map[string]any: " + err.Error())
+func loadGitHubIssuesValue() []*GitHubIssue {
+	githubIssuesValueOnce.Do(func() {
+		if err := json.Unmarshal(LoadGitHubIssuesJSON(), &githubIssuesValue); err != nil {
+			panic("load github issues: " + err.Error())
 		}
 	})
-	return &mapAnyValue
+	return githubIssuesValue
 }
 
-func Benchmark_Marshal_MapAny_Sonic(b *testing.B)  { benchMarshalSonic(b, loadMapAnyValue()) }
-func Benchmark_Marshal_MapAny_GoJSON(b *testing.B) { benchMarshalGoJSON(b, loadMapAnyValue()) }
-func Benchmark_Marshal_MapAny_JSONv2(b *testing.B) { benchMarshalJSONv2(b, loadMapAnyValue()) }
-func Benchmark_Marshal_MapAny_Velox(b *testing.B)  { benchMarshalVelox(b, loadMapAnyValue()) }
+func Benchmark_Marshal_GitHubIssues_Sonic(b *testing.B) {
+	benchMarshalSonic(b, loadGitHubIssuesValue())
+}
+func Benchmark_Marshal_GitHubIssues_GoJSON(b *testing.B) {
+	benchMarshalGoJSON(b, loadGitHubIssuesValue())
+}
+func Benchmark_Marshal_GitHubIssues_JSONv2(b *testing.B) {
+	benchMarshalJSONv2(b, loadGitHubIssuesValue())
+}
+func Benchmark_Marshal_GitHubIssues_Velox(b *testing.B) {
+	benchMarshalVelox(b, loadGitHubIssuesValue())
+}
 
 // =============================================================================
 // SmallMapAny: small flat map[string]any (database audit log line, 24 keys).
@@ -211,3 +220,27 @@ func Benchmark_Marshal_SmallMapAny_JSONv2(b *testing.B) {
 	benchMarshalJSONv2(b, loadSmallMapAnyValue())
 }
 func Benchmark_Marshal_SmallMapAny_Velox(b *testing.B) { benchMarshalVelox(b, loadSmallMapAnyValue()) }
+
+// =============================================================================
+// MapAny: map[string]any – exercises encodeAnyMap / encodeAnyVal path
+// Uses KubePods JSON decoded into map[string]any for realistic nested data.
+// =============================================================================
+
+var (
+	mapAnyValueOnce sync.Once
+	mapAnyValue     map[string]any
+)
+
+func loadMapAnyValue() *map[string]any {
+	mapAnyValueOnce.Do(func() {
+		if err := json.Unmarshal(LoadPodsCompactJSON(), &mapAnyValue); err != nil {
+			panic("load map[string]any: " + err.Error())
+		}
+	})
+	return &mapAnyValue
+}
+
+func Benchmark_Marshal_MapAny_Sonic(b *testing.B)  { benchMarshalSonic(b, loadMapAnyValue()) }
+func Benchmark_Marshal_MapAny_GoJSON(b *testing.B) { benchMarshalGoJSON(b, loadMapAnyValue()) }
+func Benchmark_Marshal_MapAny_JSONv2(b *testing.B) { benchMarshalJSONv2(b, loadMapAnyValue()) }
+func Benchmark_Marshal_MapAny_Velox(b *testing.B)  { benchMarshalVelox(b, loadMapAnyValue()) }
