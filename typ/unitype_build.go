@@ -229,13 +229,40 @@ func detectInterfaceHooks(t reflect.Type) *InterfaceHooks {
 	return &hooks
 }
 
+// isDirectIface reports whether an interface holding a t stores the value
+// itself in its data word rather than a pointer to it. It mirrors the
+// compiler's rule: pointer-shaped kinds, and single-element arrays or
+// single-field structs of a pointer-shaped type.
+func isDirectIface(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Chan, reflect.Func, reflect.UnsafePointer:
+		return true
+	case reflect.Array:
+		return t.Len() == 1 && isDirectIface(t.Elem())
+	case reflect.Struct:
+		return t.NumField() == 1 && isDirectIface(t.Field(0).Type)
+	}
+	return false
+}
+
+// valueReceiverData returns the interface data word for a value-receiver
+// call on the t-typed value at ptr: the value's own word when t is stored
+// directly in an interface, its address otherwise.
+func valueReceiverData(t reflect.Type) func(unsafe.Pointer) unsafe.Pointer {
+	if isDirectIface(t) {
+		return func(ptr unsafe.Pointer) unsafe.Pointer { return *(*unsafe.Pointer)(ptr) }
+	}
+	return func(ptr unsafe.Pointer) unsafe.Pointer { return ptr }
+}
+
 func bindMarshalerValue(t reflect.Type) func(unsafe.Pointer) ([]byte, error) {
 	sentinel := reflect.New(t)
 	iface := sentinel.Elem().Interface().(json.Marshaler)
 	itab := gort.ExtractItab(unsafe.Pointer(&iface))
+	recv := valueReceiverData(t)
 	return func(ptr unsafe.Pointer) ([]byte, error) {
 		var m json.Marshaler
-		*(*gort.GoIface)(unsafe.Pointer(&m)) = gort.GoIface{Tab: itab, Data: ptr}
+		*(*gort.GoIface)(unsafe.Pointer(&m)) = gort.GoIface{Tab: itab, Data: recv(ptr)}
 		return m.MarshalJSON()
 	}
 }
@@ -255,9 +282,10 @@ func bindUnmarshalerValue(t reflect.Type) func(unsafe.Pointer, []byte) error {
 	sentinel := reflect.New(t)
 	iface := sentinel.Elem().Interface().(json.Unmarshaler)
 	itab := gort.ExtractItab(unsafe.Pointer(&iface))
+	recv := valueReceiverData(t)
 	return func(ptr unsafe.Pointer, data []byte) error {
 		var u json.Unmarshaler
-		*(*gort.GoIface)(unsafe.Pointer(&u)) = gort.GoIface{Tab: itab, Data: ptr}
+		*(*gort.GoIface)(unsafe.Pointer(&u)) = gort.GoIface{Tab: itab, Data: recv(ptr)}
 		return u.UnmarshalJSON(data)
 	}
 }
@@ -277,9 +305,10 @@ func bindTextMarshalerValue(t reflect.Type) func(unsafe.Pointer) ([]byte, error)
 	sentinel := reflect.New(t)
 	iface := sentinel.Elem().Interface().(encoding.TextMarshaler)
 	itab := gort.ExtractItab(unsafe.Pointer(&iface))
+	recv := valueReceiverData(t)
 	return func(ptr unsafe.Pointer) ([]byte, error) {
 		var tm encoding.TextMarshaler
-		*(*gort.GoIface)(unsafe.Pointer(&tm)) = gort.GoIface{Tab: itab, Data: ptr}
+		*(*gort.GoIface)(unsafe.Pointer(&tm)) = gort.GoIface{Tab: itab, Data: recv(ptr)}
 		return tm.MarshalText()
 	}
 }
@@ -299,9 +328,10 @@ func bindTextUnmarshalerValue(t reflect.Type) func(unsafe.Pointer, []byte) error
 	sentinel := reflect.New(t)
 	iface := sentinel.Elem().Interface().(encoding.TextUnmarshaler)
 	itab := gort.ExtractItab(unsafe.Pointer(&iface))
+	recv := valueReceiverData(t)
 	return func(ptr unsafe.Pointer, data []byte) error {
 		var tu encoding.TextUnmarshaler
-		*(*gort.GoIface)(unsafe.Pointer(&tu)) = gort.GoIface{Tab: itab, Data: ptr}
+		*(*gort.GoIface)(unsafe.Pointer(&tu)) = gort.GoIface{Tab: itab, Data: recv(ptr)}
 		return tu.UnmarshalText(data)
 	}
 }
@@ -960,8 +990,9 @@ func makeOmitZeroFn(t reflect.Type, ut *UniType) (fn func(unsafe.Pointer) bool, 
 		}, true
 	case t.Implements(isZeroerType):
 		itab := fieldReceiverItab(t)
+		recv := valueReceiverData(t)
 		return func(ptr unsafe.Pointer) bool {
-			return isZeroerCall(itab, ptr)
+			return isZeroerCall(itab, recv(ptr))
 		}, true
 	case reflect.PointerTo(t).Implements(isZeroerType):
 		// Pointer-receiver method: the receiver is the field's address.

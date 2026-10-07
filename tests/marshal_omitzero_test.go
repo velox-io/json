@@ -800,3 +800,39 @@ func TestMarshal_EmbeddedEmbedOptionStillPromotes(t *testing.T) {
 	stdRaw, vjRaw := encodeWithBoth(t, obj)
 	assertJSONEqual(t, "anonymous embed option promotes", stdRaw, vjRaw)
 }
+
+// Pointer-shaped types with a value-receiver IsZero: the receiver is the
+// field's own word, so the method sees the map or pointer it holds.
+type ozMap map[string]int
+
+func (m ozMap) IsZero() bool { return len(m) == 0 }
+
+type ozPtrBox struct{ p *int }
+
+func (b ozPtrBox) IsZero() bool { return b.p == nil || *b.p == 0 }
+
+func TestOmitZeroValueReceiverPointerShaped(t *testing.T) {
+	type host struct {
+		M ozMap    `json:"m,omitzero"`
+		P ozPtrBox `json:"p,omitzero"`
+		K int      `json:"k"`
+	}
+	one, zero := 1, 0
+	for _, h := range []host{
+		{},
+		{M: ozMap{}, P: ozPtrBox{&zero}},
+		{M: ozMap{"a": 1}, P: ozPtrBox{&one}},
+	} {
+		want, err := json.Marshal(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := vjson.Marshal(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != string(want) {
+			t.Errorf("%+v: got %s, want %s", h, got, want)
+		}
+	}
+}
