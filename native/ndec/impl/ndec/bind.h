@@ -835,6 +835,8 @@ object_field_value: {
         SRC_ADVANCE();
         goto object_continue;
       }
+      /* The abort classifies its token as an element abort does. */
+      if (!SRC_EOF() && UNLIKELY(bind_elem_token_invalid(SRC_PTR()))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
       BIND_IMMEDIATE_TYPE_MISMATCH(m, SRC_POS(), child_type->type_idx);
     }
   }
@@ -1765,6 +1767,23 @@ map_continue_resume: {
   goto map_key;
 }
 
+/* Validating skip state, packed into m->skip_depth: the nesting below
+ * VSKIP_STATE_SHIFT, the expectation above it, and the root flag on top. A
+ * packed state is never 0 or 1, the fresh-entry conventions. */
+#ifndef VSKIP_PACK
+#define VSKIP_VALUE          1u /* a value: after ':' or an array ',' */
+#define VSKIP_VALUE_OR_CLOSE 2u /* an array's first element or its ']' */
+#define VSKIP_KEY            3u /* a key: after an object ',' */
+#define VSKIP_KEY_OR_CLOSE   4u /* an object's first key or its '}' */
+#define VSKIP_COLON          5u
+#define VSKIP_AFTER          6u /* ',' or the container's close */
+#define VSKIP_STATE_SHIFT    16
+#define VSKIP_ROOT_SHIFT     19
+#define VSKIP_DEPTH_MASK     0xFFFFu
+#define VSKIP_PACK(sd, st, root)                                                                                  \
+  ((uint32_t)(sd) | ((uint32_t)(st) << VSKIP_STATE_SHIFT) | ((uint32_t)(root) << VSKIP_ROOT_SHIFT))
+#endif
+
 /* Root mismatch skip: consume the complete root value, then surface the
  * recorded first error at document_end so the cursor addresses the next value
  * and a multi-value stream keeps decoding. Entry from a scalar site reads the
@@ -1776,6 +1795,20 @@ root_skip_value: {
   NDEC_SET_INPUT_PHASE(BIND_PHASE_ROOT_SKIP_RESUME);
   uint32_t root_skip_depth = m->skip_depth;
   m->skip_depth            = 0;
+  if (!(m->b.ctx.opt_flags & BIND_OPT_SKIP_LENIENT)) {
+    /* The default skip validates the whole root value. A resumed walk
+     * carries its state; a consumed bracket opens the walk's first level. */
+    if (root_skip_depth > 1) {
+      m->skip_depth = root_skip_depth;
+    } else if (root_skip_depth == 1) {
+      uint8_t open                       = src[SRC_PREV_POS()];
+      ((uint8_t *)&frames[depth + 1])[0] = (open == '[');
+      m->skip_depth = VSKIP_PACK(1, open == '[' ? VSKIP_VALUE_OR_CLOSE : VSKIP_KEY_OR_CLOSE, 1);
+    } else {
+      m->skip_depth = VSKIP_PACK(0, VSKIP_VALUE, 1);
+    }
+    goto valid_skip;
+  }
   if (root_skip_depth == 0) {
     if (UNLIKELY(SRC_EOF())) {
       BIND_INPUT_PHASE_EXPECT(BIND_PHASE_ROOT_SKIP_RESUME);
@@ -1885,76 +1918,114 @@ unsafe_skip_value: {
 }
 
 safe_skip_value: {
-  uint32_t skip_depth = 0;
-  if (NDEC_STREAM_MODE && m->skip_depth != 0) {
-    skip_depth = m->skip_depth;
-    goto safe_skip_loop;
+  if (!(NDEC_STREAM_MODE && m->skip_depth != 0)) m->skip_depth = VSKIP_PACK(0, VSKIP_VALUE, 0);
+  goto valid_skip;
+}
+
+/* The validating skip checks the whole value against the grammar, keys,
+ * colons, commas and bracket kinds included, as encoding/json does before it
+ * discards a value. Each label is one expectation, so the state exists only
+ * at an input yield, packed into m->skip_depth with the root flag that
+ * selects where a finished skip continues. Each skipped container counts
+ * toward BIND_MAX_DEPTH and keeps its kind in the frame slots above the live
+ * bind depth, as the Value walk does. */
+valid_skip: {
+  uint32_t vs_word = m->skip_depth;
+  m->skip_depth    = 0;
+  uint32_t vs_sd   = vs_word & VSKIP_DEPTH_MASK;
+  uint32_t vs_st   = (vs_word >> VSKIP_STATE_SHIFT) & 7u;
+  uint32_t vs_root = vs_word >> VSKIP_ROOT_SHIFT;
+  uint8_t *vs_kind = (uint8_t *)&frames[depth + 1];
+  uint32_t vs_pos;
+  uint8_t vs_c;
+  switch (vs_st) {
+  case VSKIP_KEY_OR_CLOSE:
+    goto vs_key_or_close;
+  case VSKIP_KEY:
+    goto vs_key;
+  case VSKIP_COLON:
+    goto vs_colon;
+  case VSKIP_VALUE_OR_CLOSE:
+    goto vs_value_or_close;
+  case VSKIP_VALUE:
+    goto vs_value;
+  default:
+    goto vs_after;
   }
-  if (UNLIKELY(SRC_EOF())) {
-    BIND_INPUT_PHASE_EXPECT(BIND_PHASE_SKIP_RESUME);
-    BIND_INPUT_EOF_CHECK(m);
-    BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+#define VS_NEED(state)                                                                                            \
+  do {                                                                                                            \
+    if (UNLIKELY(SRC_EOF())) {                                                                                    \
+      vs_st = (state);                                                                                            \
+      goto vs_eof;                                                                                                \
+    }                                                                                                             \
+  } while (0)
+vs_value_or_close:
+  VS_NEED(VSKIP_VALUE_OR_CLOSE);
+  if (SRC_PEEK() == ']') {
+    SRC_ADVANCE();
+    goto vs_close;
   }
-  uint8_t ch = SRC_PEEK();
-  if (ch == '{' || ch == '[') {
-    skip_depth = 1;
-    SRC_ADVANCE();
-  } else {
-    /* str_p is scratch (not advanced); decoded bytes are discarded. The raw
-     * policy serves the verdict-only walk. Padded parsers rely on the 64-byte
-     * 0x20 tail on ctx.src. */
-    if (ch == '"') {
-      if (UNLIKELY(ndec_str_parse(SRC_PTR() + 1, str_p, NULL, 0) < 0))
-        BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-    } else if (ch == 't' || ch == 'f' || ch == 'n') {
-      if (UNLIKELY(bind_validate_atom(SRC_PTR(), ch) < 0)) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-    } else if (ch == '-' || (ch >= '0' && ch <= '9')) {
-      const uint8_t *_end;
-      double _dv;
-      if (UNLIKELY(ndec_parse_double_padded(SRC_PTR(), &_dv, m->c.atof, &_end)))
-        BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-      if (UNLIKELY(is_non_delim(*_end))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-      (void)_dv;
-    } else {
-      BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-    }
-    SRC_ADVANCE();
+vs_value:
+  VS_NEED(VSKIP_VALUE);
+  vs_pos = SRC_POS();
+  vs_c   = SRC_ADVANCE_CHAR();
+  if (vs_c == '{' || vs_c == '[') {
+    if (UNLIKELY((uint32_t)depth + vs_sd + 1 > BIND_MAX_DEPTH)) BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
+    vs_kind[vs_sd++] = (vs_c == '[');
+    if (vs_c == '[') goto vs_value_or_close;
+    goto vs_key_or_close;
+  }
+  if (vs_c == '"') {
+    if (UNLIKELY(!bind_skip_string_ok(src + vs_pos + 1))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, vs_pos);
+  } else if (UNLIKELY(bind_elem_token_invalid(src + vs_pos))) {
+    BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, vs_pos);
+  }
+vs_after:
+  if (vs_sd == 0) {
+    if (vs_root) goto document_end;
     goto json_parent_continue;
   }
-  for (;;) {
-  safe_skip_loop:
-    if (UNLIKELY(SRC_EOF())) {
-      if (NDEC_STREAM_MODE && !m->window_final) {
-        BIND_INPUT_PHASE_EXPECT(BIND_PHASE_SKIP_RESUME);
-        m->skip_depth = skip_depth;
-        BIND_INPUT_EOF_YIELD(m);
-      }
-      BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
-    }
-    ch = SRC_ADVANCE_CHAR();
-    if (ch == '{' || ch == '[') skip_depth++;
-    else if (ch == '}' || ch == ']') {
-      if (--skip_depth == 0) {
-        if (NDEC_STREAM_MODE) m->skip_depth = 0;
-        goto json_parent_continue;
-      }
-    } else if (ch == ',') {
-      if (UNLIKELY(SRC_EOF())) {
-        if (NDEC_STREAM_MODE && !m->window_final) {
-          BIND_INPUT_PHASE_EXPECT(BIND_PHASE_SKIP_RESUME);
-          /* Leave the comma unconsumed: the resumed loop re-reads it together
-           * with its successor, so the successor check below still runs. */
-          cursor.idx--;
-          m->skip_depth = skip_depth;
-          BIND_INPUT_EOF_YIELD(m);
-        }
-        BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
-      }
-      uint8_t next = SRC_PEEK();
-      if (next == ']' || next == '}' || next == ',') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-    }
+  VS_NEED(VSKIP_AFTER);
+  vs_c = SRC_ADVANCE_CHAR();
+  if (vs_kind[vs_sd - 1]) {
+    if (vs_c == ',') goto vs_value;
+    if (vs_c == ']') goto vs_close;
+  } else {
+    if (vs_c == ',') goto vs_key;
+    if (vs_c == '}') goto vs_close;
   }
+  BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+vs_key_or_close:
+  VS_NEED(VSKIP_KEY_OR_CLOSE);
+  if (SRC_PEEK() == '}') {
+    SRC_ADVANCE();
+    goto vs_close;
+  }
+vs_key:
+  VS_NEED(VSKIP_KEY);
+  vs_pos = SRC_POS();
+  if (src[vs_pos] != '"' || UNLIKELY(!bind_skip_string_ok(src + vs_pos + 1)))
+    BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, vs_pos);
+  SRC_ADVANCE();
+vs_colon:
+  VS_NEED(VSKIP_COLON);
+  vs_pos = SRC_POS();
+  if (SRC_ADVANCE_CHAR() != ':') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, vs_pos);
+  goto vs_value;
+vs_close:
+  vs_sd--;
+  goto vs_after;
+vs_eof:
+  if (NDEC_STREAM_MODE && !m->window_final) {
+    BIND_INPUT_PHASE_EXPECT2(BIND_PHASE_SKIP_RESUME, BIND_PHASE_ROOT_SKIP_RESUME);
+    m->skip_depth = VSKIP_PACK(vs_sd, vs_st, vs_root);
+    BIND_INPUT_EOF_YIELD(m);
+  }
+  if (vs_st == VSKIP_COLON) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+  BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+#undef VS_NEED
 }
+
 /* any_value boxes scalars in registered typed or static storage and publishes
  * container interfaces before descending through registered []any or
  * map[string]any metadata. The unchanged parent kind selects continuation. */
@@ -2529,6 +2600,10 @@ root_scalar: {
       BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_POS(), 0, ct);
     }
     if (BIND_VISIT_STR(m, SRC_PTR(), cur_dst) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+    if (ct->kind == BIND_KIND_NUMBER && UNLIKELY(!bind_number_body_ok(cur_dst))) {
+      __builtin_memset(cur_dst, 0, 16);
+      BIND_ROOT_TYPE_MISMATCH_SKIP(m, SRC_POS(), 0, ct);
+    }
     SRC_ADVANCE();
     goto document_end;
   }

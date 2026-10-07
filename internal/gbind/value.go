@@ -59,7 +59,7 @@ func (c *binder) root(dst unsafe.Pointer) error {
 			return err
 		}
 		c.record(pos, ti)
-		return c.rootSkip(1)
+		return c.rootSkip(int(pos))
 	case '[':
 		c.next()
 		switch k {
@@ -71,22 +71,28 @@ func (c *binder) root(dst unsafe.Pointer) error {
 			return c.bindStream(dst, ti)
 		}
 		c.record(pos, ti)
-		return c.rootSkip(1)
+		return c.rootSkip(int(pos))
 	case '"':
 		switch {
 		case k == vbind.KindString || k == vbind.KindNumber:
+			p0 := c.p
 			var err error
-			c.p, err = c.storeString(c.txt, c.p, dst)
-			return err
+			if c.p, err = c.storeString(c.txt, c.p, dst); err != nil || k == vbind.KindString || numberText(dst) {
+				return err
+			}
+			*(*string)(dst) = ""
+			c.p = p0
+			c.record(pos, ti)
+			return c.rootSkip(int(pos))
 		case c.isByteSlice(ti):
 			return c.deferValue(dst, ti, ti)
 		}
 		c.record(pos, ti)
-		return c.rootSkip(0)
+		return c.rootSkip(int(pos))
 	case 't', 'f':
 		if k != vbind.KindBool {
 			c.record(pos, ti)
-			return c.rootSkip(0)
+			return c.rootSkip(int(pos))
 		}
 		if err := c.atom(); err != nil {
 			return err
@@ -99,8 +105,14 @@ func (c *binder) root(dst unsafe.Pointer) error {
 			return c.storeNumberText(dst)
 		}
 		if !isNumericKind(k) {
+			// A token outside the number grammar is a syntax error whatever
+			// the destination, ahead of the mismatch, as root_scalar's
+			// number write checks it for every kind.
+			if _, ok := gdec.ValidNumber(c.src, c.p); !ok {
+				return c.fail(ndec.BindErrSyntax, pos)
+			}
 			c.record(pos, ti)
-			return c.rootSkip(0)
+			return c.rootSkip(int(pos))
 		}
 		var mis bool
 		var err error
@@ -110,7 +122,7 @@ func (c *binder) root(dst unsafe.Pointer) error {
 		}
 		if mis {
 			c.record(pos, ti)
-			return c.rootSkip(0)
+			return c.rootSkip(int(pos))
 		}
 		return nil
 	}
@@ -247,8 +259,15 @@ func (c *binder) bindSlow(dst unsafe.Pointer, ti, ctr uint32, site siteKind, quo
 		}
 	case vbind.KindNumber:
 		if ch == '"' {
-			c.p, err = c.storeString(s, c.p, dst)
-			return err
+			p0 := c.p
+			if c.p, err = c.storeString(s, c.p, dst); err != nil || numberText(dst) {
+				return err
+			}
+			// A json.Number holds number text only, as encoding/json
+			// requires: any other string is a value it cannot hold.
+			*(*string)(dst) = ""
+			c.p = p0
+			return c.typeMismatch(ti, site)
 		}
 		if ch == '-' || gdec.IsDigit(ch) {
 			return c.storeNumberText(dst)
@@ -299,6 +318,13 @@ func (c *binder) bindSlow(dst unsafe.Pointer, ti, ctr uint32, site siteKind, quo
 	return c.typeMismatch(ti, site)
 }
 
+// numberText reports whether the json.Number at dst holds one JSON number.
+func numberText(dst unsafe.Pointer) bool {
+	s := *(*string)(dst)
+	end, ok := gdec.ValidNumber(unsafe.Slice(unsafe.StringData(s), len(s)), 0)
+	return ok && end == len(s)
+}
+
 // typeMismatch handles a value at the cursor its destination cannot hold: a
 // field records it and skips the value, anything else aborts. Either way
 // the error reports ti, the leaf destination that rejected the value.
@@ -307,12 +333,13 @@ func (c *binder) typeMismatch(ti uint32, site siteKind) error {
 		c.record(c.pos(), ti)
 		return c.skipValue()
 	}
-	// A number token the grammar rejects is malformed input, not a value
-	// the destination rejected. The field site's skip surfaces the same
-	// check; an element abort must classify before it reports.
-	if ch := c.peek(); ch == '-' || gdec.IsDigit(ch) {
-		if _, ok := gdec.ValidNumber(unsafe.Slice((*byte)(c.txt.b), c.txt.n), c.p); !ok {
-			return c.fail(ndec.BindErrSyntax, c.pos())
+	// A token the grammar rejects is malformed input, not a value the
+	// destination rejected. The field site's skip surfaces the same check;
+	// an element abort must classify before it reports. A container's
+	// contents stay unread, as the abort leaves them.
+	if ch := c.peek(); !c.eof() && ch != '{' && ch != '[' {
+		if _, err := c.scalarAt(c.txt, c.p); err != nil {
+			return err
 		}
 	}
 	return c.failValueOrEOF(ndec.BindErrTypeMismatch, ti)
@@ -321,7 +348,13 @@ func (c *binder) typeMismatch(ti uint32, site siteKind) error {
 // bindQuoted binds a `,string` value at the cursor.
 func (c *binder) bindQuoted(dst unsafe.Pointer, ti uint32, k vbind.Kind, ctr uint32) error {
 	pos := c.pos()
-	if c.peek() != '"' {
+	if ch := c.peek(); ch != '"' {
+		// The abort classifies its token as an element abort does.
+		if !c.eof() && ch != '{' && ch != '[' {
+			if _, err := c.scalarAt(c.txt, c.p); err != nil {
+				return err
+			}
+		}
 		return c.failType(ndec.BindErrTypeMismatch, pos, ti)
 	}
 	s, err := c.string(false)

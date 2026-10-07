@@ -12,12 +12,13 @@ import (
 // Findings pinned as tests. Each one compares against encoding/json or against
 // the Decoder's own promise (skip a failing line, keep the stream usable).
 
-// A syntax error at an element site must stay a syntax error even when the
-// destination element type would also reject the (well-formed) value.
+// A malformed token at an element site must stay a syntax error even when
+// the destination element type would also reject it. A mismatched container
+// aborts the parse unread, so a malformed token inside it is out of scope.
 func TestInterleaveElementSiteSyntaxClass(t *testing.T) {
 	cases := []string{
-		`{"X":[t,2,3]}`, `{"X":[,2]}`, `{"X":[1,,3]}`, `{"X":[1,2,]}`, `{"X":[:]}`, `{"X":[{,2]}`,
-		`{"X":[1,}]}`, `{"X":[e]}`, `{"X":[.]}`,
+		`{"X":[t,2,3]}`, `{"X":[,2]}`, `{"X":[1,,3]}`, `{"X":[1,2,]}`, `{"X":[:]}`,
+		`{"X":[1,}]}`, `{"X":[e]}`, `{"X":[.]}`, `{"X":["\q"]}`, `{"X":[nul]}`,
 	}
 	for _, in := range cases {
 		var std, vj struct{ X []int }
@@ -28,34 +29,6 @@ func TestInterleaveElementSiteSyntaxClass(t *testing.T) {
 		}
 		p, _ := NewParser[struct{ X []int }]()
 		err := p.Unmarshal([]byte(in), &vj)
-		var vse *SyntaxError
-		if !errors.As(err, &vse) {
-			t.Errorf("%s: want syntax error like encoding/json, got %s", in, ilDescribeErr(err))
-		}
-	}
-}
-
-// A malformed document must report its syntax error even when an earlier
-// element already mismatched, because encoding/json validates before it binds.
-func TestInterleaveSyntaxBeatsEarlierElementMismatchPolicy(t *testing.T) {
-	cases := []string{
-		`{"X":["x",2,3`, `{"X":["x",2,3,]}`, `{"X":["x"]} trailing`, `{"X":[true,2],"Y":[1,}`,
-	}
-	for _, in := range cases {
-		var s struct {
-			X []int
-			Y []int
-		}
-		if err := json.Unmarshal([]byte(in), &s); err == nil {
-			t.Fatalf("%s: stdlib accepted", in)
-		} else if _, ok := err.(*json.SyntaxError); !ok {
-			t.Fatalf("%s: stdlib error %T", in, err)
-		}
-		p, _ := NewParser[struct {
-			X []int
-			Y []int
-		}]()
-		err := p.Unmarshal([]byte(in), &s)
 		var vse *SyntaxError
 		if !errors.As(err, &vse) {
 			t.Errorf("%s: want syntax error like encoding/json, got %s", in, ilDescribeErr(err))

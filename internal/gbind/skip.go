@@ -17,21 +17,22 @@ func (c *binder) skipValue() error {
 
 // skipAt skips the field value at token start p, leniently under
 // BindOptSkipLenient: brackets count without validating scalars or
-// commas.
+// commas. The default validates the whole value against the grammar.
 func (c *binder) skipAt(s text, p int) (int, error) {
 	if p >= s.n {
 		return p, c.fail(ndec.BindErrEOF, uint64(p))
 	}
-	lenient := c.opt&ndec.BindOptSkipLenient != 0
-	if ch := s.at(p); ch == '{' || ch == '[' {
-		return c.nestedAt(s, p+1, !lenient)
-	}
-	if lenient {
+	if c.opt&ndec.BindOptSkipLenient == 0 {
 		c.p = p
-		err := c.skipToken()
+		err := c.validValue()
 		return c.p, err
 	}
-	return c.scalarAt(s, p)
+	if ch := s.at(p); ch == '{' || ch == '[' {
+		return c.nestedAt(s, p+1, false)
+	}
+	c.p = p
+	err := c.skipToken()
+	return c.p, err
 }
 
 // skipNested moves past the container opening at the cursor without
@@ -42,11 +43,16 @@ func (c *binder) skipNested() error {
 	return err
 }
 
-// rootSkip consumes the root value after a recorded mismatch. Scalars
-// validate under the strict skip; containers count brackets. depth is one
-// when the opening bracket is already consumed.
-func (c *binder) rootSkip(depth int) error {
-	if depth == 0 {
+// rootSkip consumes the root value starting at start after a recorded
+// mismatch, with the cursor at start or, when the root's opening bracket is
+// already consumed, just past it. The default validates the whole value;
+// the lenient opt validates nothing and counts brackets.
+func (c *binder) rootSkip(start int) error {
+	if c.opt&ndec.BindOptSkipLenient == 0 {
+		c.p = start
+		return c.validValue()
+	}
+	if c.p == start {
 		return c.skipChecked(false)
 	}
 	p, err := c.nestedAt(c.txt, c.p, false)

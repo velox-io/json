@@ -487,6 +487,15 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
   default:                                                                                                        \
     ON_MISMATCH
 
+/* bind_number_body_ok checks the string header a json.Number visit wrote. */
+INLINE int bind_number_body_ok(const uint8_t *body) {
+  const uint8_t *d;
+  size_t n;
+  __builtin_memcpy(&d, body, sizeof(d));
+  __builtin_memcpy(&n, body + 8, sizeof(n));
+  return ndec_number_text_ok(d, n);
+}
+
 /* STRING stays ahead of the kind switch so its common path uses a predicted
  * branch instead of the jump table clang emits for the remaining kinds. */
 #define BIND_DISPATCH_STRING(ct, body, ch, cont_label, ON_MISMATCH)                                               \
@@ -502,6 +511,12 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
     if ((ct)->kind == BIND_KIND_NUMBER) {                                                                         \
       if ((ch) == '"') {                                                                                          \
         if (BIND_VISIT_STR(m, SRC_PTR(), (body)) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());              \
+        /* Number text only, as encoding/json requires; the site judges the                                       \
+         * rest with the cursor still on the string. */                                                           \
+        if (UNLIKELY(!bind_number_body_ok(body))) {                                                               \
+          __builtin_memset((body), 0, 16);                                                                        \
+          ON_MISMATCH;                                                                                            \
+        }                                                                                                         \
         SRC_ADVANCE();                                                                                            \
         goto cont_label;                                                                                          \
       }                                                                                                           \
@@ -681,15 +696,37 @@ INLINE void recbatch_free(BindSlotClass *sc, void *ptr, uint32_t cap) {
  * mismatch is reported; the field site's skip value surfaces the same
  * check for recorded errors.
  */
+/* An element abort classifies its token first: a token the grammar rejects
+ * is malformed input whatever the destination, as encoding/json reports it.
+ * A container's contents are not walked; the abort leaves them unread. */
+INLINE int bind_elem_token_invalid(const uint8_t *p) {
+  uint8_t c = *p;
+  if (c == '{' || c == '[') return 0;
+  if (c == '"') return ndec_valid_string(p + 1) != 0;
+  if (c == 't' || c == 'f' || c == 'n') return bind_validate_atom(p, c) != 0;
+  if (c == '-' || (c >= '0' && c <= '9')) return ndec_valid_number(p) != 0;
+  return 1;
+}
+
+/* bind_skip_string_ok checks a skipped string body for valid escapes. The
+ * common short, escape-free body closes within the first chunk and returns
+ * inline; anything else takes the full walk. */
+INLINE int bind_skip_string_ok(const uint8_t *body) {
+#if NDEC_STR_CHUNK
+  ndec_str_mask bs, qt;
+  int hi;
+  ndec_str_chunk_scan_noload(body, &bs, &qt, &hi);
+  (void)hi;
+  if (((bs - 1) & qt) != 0) return 1;
+#endif
+  return ndec_valid_string(body) == 0;
+}
+
 #define BIND_ELEM_TYPE_MISMATCH(m, pos, ct)                                                                       \
   do {                                                                                                            \
     BIND_INPUT_EOF_CHECK(m);                                                                                      \
     if (UNLIKELY(SRC_EOF())) BIND_YIELD_ERR(m, BIND_ERR_EOF, (pos));                                              \
-    {                                                                                                             \
-      uint8_t _c = SRC_PEEK();                                                                                    \
-      if ((_c == '-' || (_c >= '0' && _c <= '9')) && UNLIKELY(ndec_valid_number(SRC_PTR()) != 0))                 \
-        BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (pos));                                                                \
-    }                                                                                                             \
+    if (UNLIKELY(bind_elem_token_invalid(SRC_PTR()))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (pos));                  \
     BIND_IMMEDIATE_TYPE_MISMATCH(m, (pos), (ct)->type_idx);                                                       \
   } while (0)
 

@@ -325,6 +325,20 @@ func TestSkipLenient_RootMismatchReportsTheMismatch(t *testing.T) {
 	}
 }
 
+// TestSkipLenient_RootMalformedNumberIsSyntax pins the other side of that
+// rule: a root number outside the grammar is a syntax error at its first
+// byte under lenient too, before any mismatch with the destination.
+func TestSkipLenient_RootMalformedNumberIsSyntax(t *testing.T) {
+	for _, src := range []string{`0x`, `-x`, `1.5"a"`, `0"X":[1]}`} {
+		var lenient skipLaxTarget
+		err := Unmarshal([]byte(src), &lenient, vopt.SkipLenient(true))
+		var se *SyntaxError
+		if !errors.As(err, &se) || se.Offset != 0 {
+			t.Errorf("lenient Unmarshal(%q) = %T (%v), want a *SyntaxError at offset 0", src, err, err)
+		}
+	}
+}
+
 // TestSkipLenient_ValidInputIsIdentical guards the other half of the contract:
 // over well-formed input the lenient skip changes nothing.
 func TestSkipLenient_ValidInputIsIdentical(t *testing.T) {
