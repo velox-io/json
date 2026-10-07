@@ -116,7 +116,10 @@ func (d *streamDriver) ElemHasStream() bool { return d.elemHasStream }
 func (d *streamDriver) PeekAnyBreak() *stream.BreakSignal { return d.c.host.PeekAnyScopeBreak() }
 
 func (d *streamDriver) GrowBatch(reuse bool) error {
-	if !reuse {
+	if reuse {
+		// The reused backing starts zero, like a fresh one.
+		gort.MemclrHasPointers(d.hdr.Data, uintptr(d.batch)*d.esz)
+	} else {
 		d.hdr.Data = gort.UnsafeNewArray(d.elemRT, d.batch)
 		d.hdr.Cap = d.batch
 	}

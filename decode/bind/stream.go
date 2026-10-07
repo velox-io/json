@@ -242,7 +242,11 @@ func (d *streamScopeDriver) restoreViews() {
 // the handler's *T pointers.
 func (d *streamScopeDriver) GrowBatch(reuse bool) error {
 	sc, hdr := d.p.slotForGrow(d.m)
-	if !reuse {
+	if reuse {
+		// The reused backing starts zero, like a fresh one: an element
+		// omitting a field must not keep the previous batch's value.
+		gort.MemclrHasPointers(hdr.Data, uintptr(sc.Cap)*uintptr(sc.ElemSize))
+	} else {
 		hdr.Data = gort.UnsafeNewArray(sc.RType, int(sc.Cap))
 		hdr.Cap = int(sc.Cap)
 	}
@@ -353,7 +357,7 @@ func (p *Parser) serveStreamBatch(m *ndec.BindMachine) error {
 	// ']' so native pops to the parent. The signal stays stashed and
 	// propagates up as each layer returns.
 	if p.peekAnyScopeBreak() != nil {
-		m.Core.CurType.SetStreamSkip()
+		armStreamDrain(m)
 		return nil
 	}
 
@@ -370,9 +374,11 @@ func (p *Parser) serveStreamBatch(m *ndec.BindMachine) error {
 	// BindYieldSliceGrow with hdr.Data nil. Allocate the
 	// fixed-cap backing (leaf = batch size, non-leaf = 1) and drive to fill
 	// the first batch (leaf) or reach the first element (non-leaf) before
-	// ActivateRead.
+	// ActivateRead. An empty array yields its close directly: it activates
+	// with no elements, and the close resumes only after the handler returns,
+	// since driving it here would run on into the parent.
 	reason := driver.reason()
-	if hdr.Data == nil {
+	if hdr.Data == nil && reason != stream.StopClosed {
 		sc, _ := p.slotForGrow(m)
 		hdr.Data = gort.UnsafeNewArray(sc.RType, int(sc.Cap))
 		hdr.Cap = int(sc.Cap)
@@ -414,7 +420,7 @@ func (p *Parser) serveStreamBatch(m *ndec.BindMachine) error {
 	// the target scope's Item.Decode surfaces it via PeekAnyBreak.
 	var sig *stream.BreakSignal
 	if errors.As(err, &sig) {
-		m.Core.CurType.SetStreamSkip()
+		armStreamDrain(m)
 		if !p.stashScopeBreak(sig) {
 			return sig
 		}
@@ -441,13 +447,19 @@ func (p *Parser) serveStreamBatch(m *ndec.BindMachine) error {
 		if err := p.driveBind(m, driver.drainStop); err != nil {
 			return err
 		}
-		m.Core.CurType.SetStreamSkip()
-		// At a cap-full yield (ARRAY_VALUE), native runs
-		// BIND_SLICE_GROW_CHECK before STREAM_SKIP; reset CurCount so
-		// cur_count < cap and the skip check runs.
-		if m.Core.Phase == ndec.BindPhaseArrayValue {
-			m.Core.CurCount = 0
-		}
+		armStreamDrain(m)
 	}
 	return nil
+}
+
+// armStreamDrain makes the stream array the machine stopped on skip its
+// remaining elements. A cap-full yield resumes at ARRAY_VALUE, where native
+// runs BIND_SLICE_GROW_CHECK before the STREAM_SKIP check, so the element
+// count resets below the cap: the skip writes no element, and a count left at
+// the cap would re-yield the cap-full forever.
+func armStreamDrain(m *ndec.BindMachine) {
+	m.Core.CurType.SetStreamSkip()
+	if m.Core.Phase == ndec.BindPhaseArrayValue {
+		m.Core.CurCount = 0
+	}
 }

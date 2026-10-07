@@ -50,6 +50,9 @@ func (it *Item[T]) Target() *T {
 // handler that called outer.Break), Decode returns it unmodified. The handler
 // must propagate it via IsBreak so the target scope recognizes it.
 //
+// A decode error is sticky: the iteration ends after the current item and
+// the handler's activation reports the error even when the handler drops it.
+//
 // Decode must be called at most once per item and cannot be combined with Skip.
 // Calling Decode on a terminated item panics.
 func (it *Item[T]) Decode() error {
@@ -66,7 +69,7 @@ func (it *Item[T]) Decode() error {
 	if it.scope.elemHasStream {
 		reason, err := it.scope.driver.DriveBind()
 		if err != nil {
-			return err
+			return it.scope.fail(err)
 		}
 		if reason != StopElement {
 			it.scope.atEnd = true
@@ -75,7 +78,7 @@ func (it *Item[T]) Decode() error {
 		// parsing (map entries, deferred fields) have not reached it yet, and
 		// Target() is readable the moment this returns.
 		if err := it.scope.driver.SettleBatch(); err != nil {
-			return err
+			return it.scope.fail(err)
 		}
 	}
 	// Surface a stashed BreakSignal from an inner stream handler. The signal

@@ -188,6 +188,17 @@ type scope[T any] struct {
 	err error
 }
 
+// fail makes err sticky: the machine stopped inside the element, so the
+// iteration ends after the current item and ActivateRead returns err even
+// when the handler drops it.
+func (s *scope[T]) fail(err error) error {
+	if s.err == nil {
+		s.err = err
+	}
+	s.atEnd = true
+	return err
+}
+
 func (s *scope[T]) Iter() iter.Seq[*Item[T]] {
 	return func(yield func(*Item[T]) bool) {
 		for {
@@ -221,7 +232,7 @@ func (s *scope[T]) Iter() iter.Seq[*Item[T]] {
 			if err != nil {
 				// iter.Seq has no error channel, so stash it: ActivateRead
 				// returns it once the handler unwinds.
-				s.err = err
+				_ = s.fail(err)
 				return
 			}
 			if done {
@@ -250,8 +261,13 @@ func (s *scope[T]) nextBatch() (data unsafe.Pointer, length int, done bool, err 
 	}
 	if s.elemHasStream {
 		// Per-element: Item.Decode bound the body, settled it, and advanced
-		// native to the next element's slot. Hand that slot back.
+		// native to the next element's slot. Hand that slot back zeroed, as
+		// a fresh backing would be: the previous element stays readable
+		// until this step, and the next one must not inherit the fields it
+		// omits. The handler registers nested OnRead on it after this.
 		bd, _ := s.driver.CurrentBatch()
+		var zero T
+		*(*T)(bd) = zero
 		return bd, 1, false, nil
 	}
 	// Leaf: grow a fresh block, then drive native to fill the next batch.
