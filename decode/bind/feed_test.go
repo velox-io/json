@@ -188,6 +188,54 @@ func TestFeedSplitParityInvalid(t *testing.T) {
 	}
 }
 
+// A missing colon whose follower is a scalar exercises the colon checks after
+// a fetched key: the scanner can withhold that follower as an unterminated
+// scalar, and a check reading the window sentinel instead reports the edge as
+// truncation, not the offending token. Every chunking must report exactly the
+// contiguous verdict.
+func TestFeedColonEdgeParity(t *testing.T) {
+	t.Run("struct", func(t *testing.T) {
+		feedColonParity[feedDoc](t)
+	})
+	t.Run("map", func(t *testing.T) {
+		feedColonParity[map[string]int](t)
+	})
+	t.Run("anyMap", func(t *testing.T) {
+		feedColonParity[map[string]any](t)
+	})
+	t.Run("any", func(t *testing.T) {
+		feedColonParity[any](t)
+	})
+}
+
+func feedColonParity[T any](t *testing.T) {
+	t.Helper()
+	for _, doc := range []string{
+		`{"i" 1}`,        // a number standing in the ':' place
+		`{"i" 1`,         // and truncated right after it
+		`{"i" tru}`,      // a keyword prefix whose letters may still arrive
+		`{"i":1,"i" 2}`,  // a later member
+		`{"i":1,"zz" 2}`, // an unknown key skipped before its colon
+	} {
+		data := []byte(doc)
+		_, wantErr := feedUnmarshal[T](t, data)
+		if wantErr == nil {
+			t.Fatalf("contiguous parse of %q unexpectedly succeeded", doc)
+		}
+		wantKind, wantOff := feedErrKind(t, wantErr)
+		for _, chunk := range feedChunkSizes {
+			_, err := feedRun[T](t, data, chunk)
+			if err == nil {
+				t.Fatalf("feed chunk=%d doc=%q: unexpectedly succeeded", chunk, doc)
+			}
+			kind, off := feedErrKind(t, err)
+			if kind != wantKind || off != wantOff {
+				t.Fatalf("feed chunk=%d doc=%q: error (%s,%d), contiguous (%s,%d)", chunk, doc, kind, off, wantKind, wantOff)
+			}
+		}
+	}
+}
+
 // A mismatch token landing at a non-final window edge exercises the
 // advance-then-compare dispatch sites (root brackets, array and map element
 // dispatch). The token must produce the same definite error as the contiguous

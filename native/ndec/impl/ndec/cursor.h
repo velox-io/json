@@ -35,9 +35,15 @@
     cursor.idx++;                                                                                                 \
     _c;                                                                                                           \
   })
+/* A missing byte is a syntax error at the structural standing in its place,
+ * or the end of input when none remains. */
 #define SRC_EXPECT(c)                                                                                             \
   do {                                                                                                            \
-    if (src[*cursor.idx++] != (c)) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, 0);                                         \
+    if (UNLIKELY(src[*cursor.idx] != (c))) {                                                                      \
+      if (SRC_EOF()) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());                                                  \
+      BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());                                                              \
+    }                                                                                                             \
+    cursor.idx++;                                                                                                 \
   } while (0)
 #define SRC_ACCEPT(c)                                                                                             \
   ({                                                                                                              \

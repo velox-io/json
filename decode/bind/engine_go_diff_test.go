@@ -15,6 +15,7 @@ import (
 	"testing/iotest"
 	"time"
 
+	"github.com/velox-io/json/value"
 	"github.com/velox-io/json/vbind"
 	"github.com/velox-io/json/vopt"
 
@@ -228,15 +229,14 @@ func init() {
 	}]()
 }
 
-// The deferred case fields a poly host binds in phase 2 currently lose
-// their mismatch identity on the native side, which reports the fallback
-// UnmarshalTypeError (zero value and offset) where the Go engine and
-// encoding/json carry the leaf value and its token end, and a truncation
-// right after a colon reports a plain syntax error where every other
-// native path and encoding/json report the end of input. The inputs that
-// hit either shape stay out of the suite until the native poly path
-// catches up: {"type":"user","id":"x"}, {"type":"product","price":1e400},
-// and a member whose value is cut off at the end of input.
+// The native engine binds a poly host's deferred case members by replaying
+// the merged tape, which carries no source position. A member mismatch
+// there reports the fallback UnmarshalTypeError (value "json", offset 0)
+// where the Go engine's source re-walk names the leaf value and its token
+// end, and a truncation right after a colon reports a plain syntax error
+// where every other path reports the end of input. Inputs of either shape
+// stay outside this corpus: {"type":"user","id":"x"},
+// {"type":"product","price":1e400}, and a member cut off at the end of input.
 var gcPolyInputs = []string{
 	`{"type":"user","id":1,"name":"ann"}`,
 	`{"type":"product","sku":"s","price":1.5,"tags":["a"]}`,
@@ -413,6 +413,29 @@ func TestGoCoreDiffMapAbort(t *testing.T) {
 	}
 }
 
+// gcValueHost routes a value.Value field through the native vd walk, whose
+// error sites must name the offending token like the Go engine's validValue:
+// the key check and its scan report the key's own byte, the colon check the
+// structural standing in its place. A well-formed Value has no DeepEqual
+// contract here: the engines' Doc internals differ by construction, so only
+// the error outcomes compare.
+type gcValueHost struct {
+	V value.Value
+}
+
+func TestGoCoreDiffValueErrors(t *testing.T) {
+	needNativeForDiff(t)
+	for _, in := range []string{
+		`{"V":{"a":1,}}`,      // a key expected where '}' stands
+		`{"V":{"a" 1}}`,       // a colon expected where '1' stands
+		`{"V":{"a":1 "b":2}}`, // a member separator expected
+		`{"V":[1,]}`,          // an element expected where ']' stands
+		`{"V":{"a":x}}`,       // a malformed primitive
+	} {
+		diffEngines[gcValueHost](t, []byte(in), nil)
+	}
+}
+
 // decodeSeq drains a Decoder, one value per step, through the listed target
 // types (cycling). While the stream stays usable each outcome also records
 // where the next value starts: the input neither the reader nor Buffered
@@ -496,9 +519,8 @@ func TestGoCoreDiffMutations(t *testing.T) {
 	r := rand.New(rand.NewPCG(1, uint64(time.Now().UnixNano())))
 	alphabet := []byte(`{}[],:"\ 0123456789.eE+-truefalsnxu`)
 	fails := 0
-	// Poly documents stay out of the sweep for now: a truncation lands on
-	// the native poly path's end-of-input divergence documented at
-	// gcPolyInputs, which random cuts hit too often to tolerate.
+	// Poly documents stay outside the sweep: random cuts land on the
+	// end-of-input divergence documented at gcPolyInputs too often.
 	for i := 0; i < 60000 && fails < 10; i++ {
 		base := []byte(gcDiffInputs[r.IntN(len(gcDiffInputs))])
 		b := append([]byte(nil), base...)

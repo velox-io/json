@@ -14,6 +14,7 @@ import (
 
 	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/internal/gbind"
+	"github.com/velox-io/json/internal/gdec"
 	"github.com/velox-io/json/internal/valueabi"
 	"github.com/velox-io/json/jerr"
 	"github.com/velox-io/json/native/ndec"
@@ -601,6 +602,14 @@ func syncStrArena(alloc *vbind.Allocator, allocABI *ndec.BindAllocator, srcLen i
 	alloc.EnsureStrArena(srcLen)
 	allocABI.StrArena = (*byte)(unsafe.SliceData(alloc.StrArena))
 	allocABI.StrArenaCap = uint64(cap(alloc.StrArena))
+}
+
+// scanMode is the structural scan policy of the current call.
+func (p *Parser) scanMode() gdec.ScanMode {
+	if p.optFlags&ndec.BindOptStrictScan != 0 {
+		return gdec.ScanStrict
+	}
+	return gdec.ScanLax
 }
 
 // walkCompleted reports whether err is a recorded type mismatch the walk

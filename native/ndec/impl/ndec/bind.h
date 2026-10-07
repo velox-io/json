@@ -620,25 +620,20 @@ object_field:
   NDEC_SET_INPUT_PHASE(BIND_PHASE_OBJECT_FIELD);
 object_field_key: {
 #if NDEC_STREAM_MODE
-  /* Wait for the key unconsumed: an advanced cursor marks the next
-   * structural consumed and the relocation drops it. A real non-quote
-   * byte is a definite error at any window position, so only a missing
-   * key (cursor at the sentinel) yields. */
-  if (UNLIKELY(SRC_EOF())) {
+  /* Wait for the key, its follower, and for a phase2 host the first value
+   * token, before fetching the key: the relocation discards the consumed
+   * stable prefix, so a window edge after the fetch cannot recover the key
+   * bytes, and a merged-tape entry consumes the key, colon, and value
+   * together. Ordinary fields need the follower because the scanner can
+   * withhold it as an unterminated scalar, and a colon check reading the
+   * sentinel reports the edge instead of the token standing in the ':'
+   * place. A valid document never waits, as a colon is never withheld. An
+   * empty final window is truncation. */
+  uint32_t key_lookahead = (cur_type.flags & BIND_FLAG_MAY_PHASE2) ? 3 : 2;
+  if (UNLIKELY(cursor.idx + key_lookahead > m->cursor_end.idx)) {
     BIND_INPUT_PHASE_EXPECT2(BIND_PHASE_OBJECT_FIELD_FIRST, BIND_PHASE_OBJECT_FIELD);
     if (!m->window_final) BIND_INPUT_EOF_YIELD(m);
-    BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
-  }
-  /* A merged-tape entry consumes the key bytes when its value dispatches, and
-   * a window edge after the key is fetched cannot recover them: the driver
-   * discards the consumed stable prefix. Fields of a phase2 host therefore
-   * wait until the key, colon, and first value token are all visible, so the
-   * key write and the value dispatch share one window with the fetched key.
-   * Ordinary structs are unaffected; their keys never reach the tape. */
-  if (UNLIKELY((cur_type.flags & BIND_FLAG_MAY_PHASE2) && !m->window_final &&
-               cursor.idx + 3 > m->cursor_end.idx)) {
-    BIND_INPUT_PHASE_EXPECT2(BIND_PHASE_OBJECT_FIELD_FIRST, BIND_PHASE_OBJECT_FIELD);
-    BIND_INPUT_EOF_YIELD(m);
+    if (SRC_EOF()) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
   }
 #endif
   const uint8_t *key = SRC_ADVANCE_PTR();
@@ -1562,12 +1557,17 @@ map_key: {
   }
   uint8_t *slot = (uint8_t *)map_region + BIND_MAP_REGION_HEADER_SIZE + next_entry_off;
 #if NDEC_STREAM_MODE
-  /* Same contract as object_field_key: wait for the key unconsumed, and a
-   * real non-quote byte is a definite error at any window position. */
-  if (UNLIKELY(SRC_EOF())) {
+  /* Wait for the key and its follower before fetching either: the scanner
+   * can withhold the key as a trailing quote and the follower, which stands
+   * in the ':' place, as an unterminated scalar, so a verdict read at the
+   * edge names the sentinel instead. An empty final window is truncation; a
+   * key whose follower never arrives falls through to the colon check,
+   * which reports it at the sentinel. A valid document never waits, as a
+   * colon is never withheld. */
+  if (UNLIKELY(cursor.idx + 2 > m->cursor_end.idx)) {
     BIND_INPUT_PHASE_EXPECT(BIND_PHASE_MAP_CONTINUE);
     if (!m->window_final) BIND_INPUT_EOF_YIELD(m);
-    BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
+    if (SRC_EOF()) BIND_YIELD_ERR(m, BIND_ERR_EOF, SRC_POS());
   }
 #endif
   const uint8_t *key = SRC_ADVANCE_PTR();
@@ -2429,16 +2429,27 @@ vd_arr_open: {
 }
 
 /* Fetch one object key and its colon. The count already covers the entry whose
- * value follows, so a resume does not recount it. The scanner withholds a
- * trailing key quote lacking its successor, which keeps the key and ':' atomic
- * within the stable prefix. */
+ * value follows, so a resume does not recount it. The window wait covers the
+ * key and its follower together, the contract object_field_key and map_key
+ * keep: the scanner can withhold the key as a trailing quote and the
+ * follower, which stands in the ':' place, as an unterminated scalar, so a
+ * verdict read at the edge names the sentinel instead. A valid document
+ * never waits, as a colon is never withheld. Errors name the offending
+ * token, as validValue does: the key check and its scan report the key's
+ * own byte, the colon check the structural standing in its place, not the
+ * one after it. */
 vd_obj_key: {
-  VD_INPUT_EOF_CHECK(m, BIND_PHASE_VD_OBJ_KEY);
+#if NDEC_STREAM_MODE
+  if (UNLIKELY(cursor.idx + 2 > m->cursor_end.idx && !m->window_final)) {
+    VD_INPUT_EOF_YIELD(m, BIND_PHASE_VD_OBJ_KEY);
+  }
+#endif
   const uint8_t *key = SRC_ADVANCE_PTR();
-  if (*key != '"') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+  if (*key != '"') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (uint32_t)(key - src));
   if (bind_emit_string_copy(vd_str_arena, &vd_str_p, &vd_tape_p, key))
-    BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-  if (SRC_ADVANCE_CHAR() != ':') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+    BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, (uint32_t)(key - src));
+  uint32_t colon_pos = SRC_POS();
+  if (SRC_ADVANCE_CHAR() != ':') BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, colon_pos);
   goto vd_elem;
 }
 

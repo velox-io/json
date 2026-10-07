@@ -136,13 +136,13 @@ func applyDeferred(p *Parser, kind vbind.Kind, typeIdx uint16, target unsafe.Poi
 	case vbind.KindSlice:
 		// A []byte target staged from a JSON string: decode base64 from the
 		// string bytes, like encoding/json. An empty string yields a non-nil
-		// empty slice. The span carries no document position, so the syntax
-		// error claims none.
+		// empty slice. The error names the string's document offset when
+		// the span has one.
 		dbuf := make([]byte, base64.StdEncoding.DecodedLen(len(data)))
 		n, err := base64.StdEncoding.Decode(dbuf, data)
 		if err != nil {
 			return jerr.NewSyntaxErrorWrap(
-				fmt.Sprintf("vjson: invalid base64 in []byte field: %v", err), 0, err)
+				fmt.Sprintf("vjson: invalid base64 in []byte field: %v", err), int(docOff), err)
 		}
 		*(*[]byte)(target) = dbuf[:n]
 		return nil

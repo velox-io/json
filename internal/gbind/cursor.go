@@ -69,10 +69,20 @@ func (c *binder) skipToken() error {
 	return nil
 }
 
-// expectColon mirrors SRC_EXPECT(':'), whose failure names no position.
+// colonErr reports a colon missing at offset p of s, as SRC_EXPECT(':')
+// does: a syntax error at the token in its place, or the end of input when
+// none remains.
+func (c *binder) colonErr(s text, p int) error {
+	if p = s.skip(p); p >= s.n {
+		return c.fail(ndec.BindErrEOF, uint64(p))
+	}
+	return c.fail(ndec.BindErrSyntax, uint64(p))
+}
+
+// expectColon mirrors SRC_EXPECT(':').
 func (c *binder) expectColon() error {
 	if c.peek() != ':' {
-		return c.fail(ndec.BindErrSyntax, 0)
+		return c.colonErr(c.txt, c.p)
 	}
 	c.next()
 	return nil

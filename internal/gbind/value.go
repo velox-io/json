@@ -437,13 +437,13 @@ func (c *binder) bindStruct(s text, p int, dst unsafe.Pointer, ti uint32) (int, 
 		} else if c.opt&ndec.BindOptDisallowUnknown != 0 {
 			return p, c.failType(ndec.BindErrUnknownField, uint64(kpos), ti)
 		}
-		// SRC_EXPECT(':'), whose failure names no position.
+		// SRC_EXPECT(':').
 		if p < s.n && s.at(p) == ':' {
 			p = s.skip(p + 1)
 		} else if p = s.skip(p); s.peek(p) == ':' {
 			p = s.skip(p + 1)
 		} else {
-			return p, c.fail(ndec.BindErrSyntax, 0)
+			return p, c.colonErr(s, p)
 		}
 		var err error
 		switch {
@@ -734,7 +734,7 @@ func (c *binder) mapEntries(s text, p int, m unsafe.Pointer, ti uint32) (int, er
 		}
 		if p = q; s.peek(p) != ':' {
 			c.closeRegion(mp, m, r, n, n)
-			return p, c.fail(ndec.BindErrSyntax, 0)
+			return p, c.colonErr(s, p)
 		}
 		p = s.skip(p + 1)
 		e := unsafe.Add(r, uintptr(n)*mp.stride)
@@ -776,7 +776,7 @@ func (c *binder) deferredEntries(s text, p int, m unsafe.Pointer, ti uint32, mp 
 			return q, err
 		}
 		if p = q; s.peek(p) != ':' {
-			return p, c.fail(ndec.BindErrSyntax, 0)
+			return p, c.colonErr(s, p)
 		}
 		p = s.skip(p + 1)
 		val := c.carve(mp.info.ValSlotClass)

@@ -2,11 +2,14 @@ package bind
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/velox-io/json/internal/gdec"
 )
 
 // Findings pinned as tests. Each one compares against encoding/json or against
@@ -227,6 +230,49 @@ func TestInterleaveDecoderRootMismatchChunkIndependent(t *testing.T) {
 				if got := run(script, chunk, skip); strings.Join(got, " ") != strings.Join(want, " ") {
 					t.Errorf("script %q skip=%v chunk=%d: got %v, whole-buffer read gives %v", script, skip, chunk, got, want)
 					break
+				}
+			}
+		}
+	}
+}
+
+// Every syntax error names where the document breaks, through the
+// contiguous and the streaming driver alike. The structural scan's verdict
+// and a missing colon used to report offset 0 wherever the defect was.
+func TestInterleaveSyntaxErrorNamesPosition(t *testing.T) {
+	bad := 0
+	for _, g := range ilPlainGood {
+		for _, m := range ilMutants(g) {
+			var se *json.SyntaxError
+			if !errors.As(json.Unmarshal([]byte(m), new(ilPlain)), &se) {
+				continue
+			}
+			p, _ := NewParser[ilPlain]()
+			cerr := p.Unmarshal([]byte(m), new(ilPlain))
+			derr := NewDecoder(&chunkReader{data: []byte(m), chunk: 7}).Decode(new(ilPlain))
+			for _, e := range []struct {
+				name string
+				err  error
+			}{{"Unmarshal", cerr}, {"Decoder", derr}} {
+				var vse *SyntaxError
+				if !errors.As(e.err, &vse) {
+					continue
+				}
+				// The streaming driver stages a base64 body off the source, so
+				// its decode failure has no document offset to name.
+				if e.name == "Decoder" && errors.As(e.err, new(base64.CorruptInputError)) {
+					continue
+				}
+				// Offset 0 is a position when the defect is the token there or
+				// the byte right after it.
+				first, _ := gdec.TokenEnd([]byte(m), 0)
+				if vse.Offset == 0 && se.Offset > int64(first)+1 && bad < 8 {
+					bad++
+					t.Errorf("%s %q: offset 0 (%v), encoding/json stops at %d (%v)", e.name, m, vse, se.Offset, se)
+				}
+				if vse.Offset > int64(len(m)) && bad < 8 {
+					bad++
+					t.Errorf("%s %q: offset %d past the input", e.name, m, vse.Offset)
 				}
 			}
 		}

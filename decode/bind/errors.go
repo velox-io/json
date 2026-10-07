@@ -99,6 +99,16 @@ func mkBindErr(p *Parser, e bindErrInfo, src []byte, srcBase uint64, valueRooted
 	}
 	switch kind {
 	case ndec.BindErrSyntax:
+		if !hasPos && p.pathSrc != nil {
+			// The scan verdict names no position; the drive's source holds
+			// the document from its root, so the first defect locates.
+			if off, eof, ok := gdec.Locate(p.pathSrc, p.scanMode()); ok {
+				pos = p.pathBase + uint64(off)
+				if eof {
+					return jerr.NewSyntaxErrorWrap("bind: unexpected end of input", int(pos), io.ErrUnexpectedEOF)
+				}
+			}
+		}
 		return jerr.NewSyntaxError("bind: syntax error", int(pos))
 	case ndec.BindErrEOF:
 		return jerr.NewSyntaxErrorWrap("bind: unexpected end of input", int(pos), io.ErrUnexpectedEOF)

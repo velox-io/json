@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/velox-io/json/gort"
+	"github.com/velox-io/json/internal/gdec"
 	"github.com/velox-io/json/internal/valueabi"
 	"github.com/velox-io/json/jerr"
 	"github.com/velox-io/json/native/ndec"
@@ -207,9 +208,14 @@ func (f *feedState) mountWindow(p *Parser, m *ndec.BindMachine) error {
 	f.scan = wctx.Result
 
 	if f.scan.Status == ndec.WindowInvalid {
-		// Scan-level failures mirror the contiguous scan error: a
-		// syntax error without a source position.
-		return jerr.NewSyntaxError("bind: syntax error", 0)
+		// The window scan names no position. The window starts at a value
+		// boundary, outside any string, so its first string-level defect
+		// locates from there.
+		off, eof, _ := gdec.CheckAt(f.win[:f.n], p.scanMode())
+		if eof {
+			return jerr.NewSyntaxErrorWrap("bind: unexpected end of input", int(f.base)+off, io.ErrUnexpectedEOF)
+		}
+		return jerr.NewSyntaxError("bind: syntax error", int(f.base)+off)
 	}
 
 	m.Ctx.Src = unsafe.SliceData(f.win[:f.n])
