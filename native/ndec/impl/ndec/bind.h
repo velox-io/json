@@ -2705,6 +2705,8 @@ t_object_field: {
     uint16_t iv_idx              = m->b.ctx.type_meta[cur_type.type_idx].u.strct.inline_variant_idx;
     uint32_t reserve_unknown_off = m->b.ctx.type_meta[cur_type.type_idx].u.strct.reserve_unknown_field_off;
     if (iv_idx != 0xFFFFu || reserve_unknown_off != 0xFFFFFFFF) goto t_route_field_to_variant;
+    if (UNLIKELY(m->b.ctx.opt_flags & BIND_OPT_DISALLOW_UNKNOWN))
+      TAPE_BIND_YIELD_ERR_NO_POS(m, BIND_ERR_UNKNOWN_FIELD, 0);
     goto t_skip_value_after_key;
   }
   cur_struct_field = &((const BindField *)cur_type.child)[fidx];
@@ -2991,13 +2993,23 @@ t_object_close_drain: {
 }
 
 t_array_begin: {
+  /* The count belongs to this array from its first word: a backing yield
+   * below saves the locals, and the ARRAY_VALUE resume must count this
+   * array's elements from zero rather than continue the parent's count. */
+  cur_count = 0;
   if (cur_type.kind == BIND_KIND_ARRAY) {
-    cur_aux   = cur_dst;
-    cur_count = 0;
+    cur_aux = cur_dst;
     goto t_array_value;
   }
   int32_t ci        = m->b.ctx.type_meta[cur_type.type_idx].u.slice.alloc_class;
   BindSlotClass *sc = &m->b.alloc.slot_classes[ci];
+  /* The walk always binds into a fresh backing, so the header opens empty
+   * before any backing yield: Go serves an open from the header it reads,
+   * and a stale one (a recycled map staging slot, a caller's slice) would
+   * read as a slice outgrowing its elements. */
+  *(void **)cur_dst           = NULL;
+  *(intptr_t *)(cur_dst + 8)  = 0;
+  *(intptr_t *)(cur_dst + 16) = 0;
   if (sc->mode == BIND_SLOT_RECBATCH) {
     void *bk = recbatch_alloc(sc, 0);
     if (UNLIKELY(bk == NULL)) {
@@ -3031,7 +3043,6 @@ t_array_begin: {
     sc->borrow_start            = sc->offset;
     sc->offset                  = sc->limit; /* charge before writing; close returns the tail */
   }
-  cur_count = 0;
   goto t_array_value;
 }
 
@@ -3589,6 +3600,13 @@ t_root_scalar: {
         m, cur_type.kind, cur_dst, t_document_end,
         TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape)));
   }
+  case BIND_KIND_STRUCT:
+  case BIND_KIND_SLICE:
+  case BIND_KIND_ARRAY:
+  case BIND_KIND_MAP:
+    /* A scalar root under a container destination is a type mismatch, as
+     * the object and array roots above report a kind that does not fit. */
+    TAPE_BIND_ROOT_TYPE_MISMATCH_SKIP(m, 0, &cur_type);
   default:
     goto t_unsupported;
   }
