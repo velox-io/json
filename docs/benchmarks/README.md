@@ -15,19 +15,19 @@ make benchviz
 
 | suite | chart | raw |
 | --- | --- | --- |
-| Unmarshal | [unmarshal.svg](linux-amd64/unmarshal-3.svg) | [unmarshal.txt](linux-amd64/unmarshal-3.txt) |
-| Marshal | [marshal.svg](linux-amd64/marshal-3.svg) | [marshal.txt](linux-amd64/marshal-3.txt) |
+| Unmarshal | [unmarshal.svg](linux-amd64/unmarshal-4.svg) | [unmarshal.txt](linux-amd64/unmarshal-4.txt) |
+| Marshal | [marshal.svg](linux-amd64/marshal-4.svg) | [marshal.txt](linux-amd64/marshal-4.txt) |
 
-![](linux-amd64/unmarshal-3.svg)
-![](linux-amd64/marshal-3.svg)
+![](linux-amd64/unmarshal-4.svg)
+![](linux-amd64/marshal-4.svg)
 
 ## darwin-arm64
 
 | suite | chart | raw |
 | --- | --- | --- |
-| Unmarshal | [unmarshal.svg](darwin-arm64/unmarshal-3.svg) | [unmarshal.txt](darwin-arm64/unmarshal-3.txt) |
-| Marshal | [marshal.svg](darwin-arm64/marshal-3.svg) | [marshal.txt](darwin-arm64/marshal-3.txt) |
+| Unmarshal | [unmarshal.svg](darwin-arm64/unmarshal-4.svg) | [unmarshal.txt](darwin-arm64/unmarshal-4.txt) |
+| Marshal | [marshal.svg](darwin-arm64/marshal-4.svg) | [marshal.txt](darwin-arm64/marshal-4.txt) |
 
-![](darwin-arm64/unmarshal-3.svg)
-![](darwin-arm64/marshal-3.svg)
+![](darwin-arm64/unmarshal-4.svg)
+![](darwin-arm64/marshal-4.svg)
 

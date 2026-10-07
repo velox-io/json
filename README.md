@@ -22,8 +22,8 @@ The import path ends in `json`, but the package name is `vjson`.
 
 ## Performance
 
-![](docs/benchmarks/linux-amd64/unmarshal-3.svg)
-![](docs/benchmarks/linux-amd64/marshal-3.svg)
+![](docs/benchmarks/linux-amd64/unmarshal-4.svg)
+![](docs/benchmarks/linux-amd64/marshal-4.svg)
 
 Each library runs in its fastest decode mode:
 
