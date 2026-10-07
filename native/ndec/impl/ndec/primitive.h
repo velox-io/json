@@ -202,19 +202,47 @@ INLINE int bind_parse_quoted_f32(const uint8_t *data, uint32_t len, float *out, 
   return 0;
 }
 
+/* Reports whether the string token at data, a quote, is exactly "null",
+ * the raw unescaped spelling. Word compare over the body, as
+ * bind_validate_atom; the trailing 0x20 padding keeps the read in bounds. */
+INLINE int bind_src_is_null_string(const uint8_t *data) {
+  uint32_t sv, av;
+  __builtin_memcpy(&sv, data + 1, 4);
+  __builtin_memcpy(&av, "null", 4);
+  return sv == av && data[5] == '"';
+}
+
+/* Reports whether a `,string` body (data, len) spells null. */
+INLINE int bind_quoted_body_is_null(const uint8_t *data, uint32_t len) {
+  uint32_t sv, av;
+  if (len != 4) return 0;
+  __builtin_memcpy(&sv, data, 4);
+  __builtin_memcpy(&av, "null", 4);
+  return sv == av;
+}
+
 INLINE int bind_write_quoted_scalar(uint8_t **str_pp, const uint8_t *data, uint32_t len, uint8_t kind,
                                     uint8_t *dst, atof_ctx *atof) {
   switch (kind) {
-  case BIND_KIND_BOOL:
-    if (len == 4 && data[0] == 't' && data[1] == 'r' && data[2] == 'u' && data[3] == 'e') {
-      *(uint8_t *)dst = 1;
-      return 0;
-    }
-    if (len == 5 && data[0] == 'f' && data[1] == 'a' && data[2] == 'l' && data[3] == 's' && data[4] == 'e') {
-      *(uint8_t *)dst = 0;
-      return 0;
+  case BIND_KIND_BOOL: {
+    uint32_t sv, av;
+    if (len == 4) {
+      __builtin_memcpy(&sv, data, 4);
+      __builtin_memcpy(&av, "true", 4);
+      if (sv == av) {
+        *(uint8_t *)dst = 1;
+        return 0;
+      }
+    } else if (len == 5) {
+      __builtin_memcpy(&sv, data, 4);
+      __builtin_memcpy(&av, "fals", 4);
+      if (sv == av && data[4] == 'e') {
+        *(uint8_t *)dst = 0;
+        return 0;
+      }
     }
     return -1;
+  }
   case BIND_KIND_STRING:
     return bind_write_quoted_string(str_pp, data, len, dst);
   case BIND_KIND_INT:

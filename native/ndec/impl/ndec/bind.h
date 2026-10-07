@@ -729,6 +729,15 @@ object_field_value: {
     if (ch != 'n') {
       int _depth = 0;
       while (child_type->kind == BIND_KIND_PTR) {
+        /* A quoted pointer field takes a `"null"` value as the null at its
+         * own slot, decided before the layer resolves. Escaped spellings
+         * decode at quoted_body and land on the pointee, the division
+         * go1.27's raw-token comparison draws. */
+        if ((cur_struct_field->flags & BIND_FF_QUOTED) && ch == '"' && bind_src_is_null_string(SRC_PTR())) {
+          SRC_ADVANCE();
+          BIND_NULL_ZERO(body, m, child_type);
+          goto object_continue;
+        }
         if (UNLIKELY(++_depth > 32)) BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
         uint8_t *pointee = *(uint8_t **)body;
         if (pointee == NULL) {
@@ -827,6 +836,11 @@ object_field_value: {
         if (qn_i < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
         qn = (uint32_t)qn_i;
       quoted_body:
+        if (bind_quoted_body_is_null(qd, qn)) {
+          BIND_NULL_ZERO(body, m, child_type);
+          SRC_ADVANCE();
+          goto object_continue;
+        }
         if (bind_write_quoted_scalar(&str_p, qd, qn, child_type->kind, body, m->c.atof) < 0)
           BIND_TYPE_MISMATCH_SKIP(m, SRC_POS(), child_type);
         SRC_ADVANCE();
@@ -2958,11 +2972,19 @@ t_field_value_cold_gate:
   }
 
   /* QUOTED (`,string`): only a JSON string is accepted, re-parsed as the
-   * target scalar. Null was already handled in the cold gate above. */
+   * target scalar. A bare null tag was handled in the cold gate above; a
+   * body spelling null applies null semantics at the reached destination,
+   * which for a pointer field keeps its resolved pointee, as the direct
+   * path does for escaped spellings. */
   if (cur_struct_field->flags & BIND_FF_QUOTED) {
     if (TAPE_IS_STRING_TAG(tag)) {
       uint32_t qlen;
       const uint8_t *qd = tape_bind_string_ptr(word, m->b.alloc.str_arena, src, &qlen);
+      if (bind_quoted_body_is_null(qd, qlen)) {
+        BIND_NULL_ZERO(body, m, ct);
+        TAP_ADVANCE();
+        goto t_object_continue;
+      }
       if (bind_write_quoted_scalar(&str_p, qd, qlen, ct->kind, body, m->c.atof) < 0)
         TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape), ct);
       TAP_ADVANCE();

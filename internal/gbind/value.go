@@ -220,6 +220,9 @@ func (c *binder) bindValue(s text, p int, dst unsafe.Pointer, ti, ctr uint32, si
 // bindSlow is bindValue in full: pointers, null, hooks, `,string`, and
 // mismatches.
 func (c *binder) bindSlow(dst unsafe.Pointer, ti, ctr uint32, site siteKind, quoted bool, ch byte) error {
+	if quoted && ch == '"' {
+		return c.bindQuoted(dst, ti)
+	}
 	if ch != 'n' && c.typ(ti).Kind == vbind.KindPointer {
 		var err error
 		if dst, ti, err = c.resolvePtrChain(dst, ti); err != nil {
@@ -247,7 +250,7 @@ func (c *binder) bindSlow(dst unsafe.Pointer, ti, ctr uint32, site siteKind, quo
 		return nil
 	}
 	if quoted {
-		return c.bindQuoted(dst, ti, k)
+		return c.typeMismatch(ti, site)
 	}
 	s := c.txt
 	var err error
@@ -345,20 +348,39 @@ func (c *binder) typeMismatch(ti uint32, site siteKind) error {
 	return c.failValueOrEOF(ndec.BindErrTypeMismatch, ti)
 }
 
-// bindQuoted binds a `,string` field value at the cursor. Anything but a
-// string holding the target scalar is a field-site mismatch: recorded, the
-// value skipped, the walk continued.
-func (c *binder) bindQuoted(dst unsafe.Pointer, ti uint32, k vbind.Kind) error {
-	if c.peek() != '"' {
-		return c.typeMismatch(ti, siteField)
-	}
-	pos := c.pos()
+// bindQuoted binds a `,string` field value at the cursor, a JSON string
+// whose body reparses as the target scalar. A body of "null" is a JSON
+// null: the raw spelling takes the field slot, a pointer cleared as a bare
+// null would clear it, while an escaped spelling resolves the pointee and
+// leaves it at zero, the division go1.27's raw-token comparison draws.
+// Anything but a string holding the target scalar is a field-site
+// mismatch: recorded, the value skipped, the walk continued.
+func (c *binder) bindQuoted(dst unsafe.Pointer, ti uint32) error {
+	p0 := c.p
 	s, err := c.string(false)
 	if err != nil {
 		return err
 	}
-	if !c.writeQuotedScalar(dst, k, s) {
-		c.record(pos, ti)
+	if s == "null" {
+		if c.p-p0 == len(`"null"`) {
+			c.nullZero(dst, ti)
+			return nil
+		}
+		if c.typ(ti).Kind == vbind.KindPointer {
+			if dst, ti, err = c.resolvePtrChain(dst, ti); err != nil {
+				return err
+			}
+		}
+		c.nullZero(dst, ti)
+		return nil
+	}
+	if c.typ(ti).Kind == vbind.KindPointer {
+		if dst, ti, err = c.resolvePtrChain(dst, ti); err != nil {
+			return err
+		}
+	}
+	if !c.writeQuotedScalar(dst, c.typ(ti).Kind, s) {
+		c.record(uint64(p0), ti)
 	}
 	return nil
 }

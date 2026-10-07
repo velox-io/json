@@ -363,6 +363,56 @@ func stdLaxStringFloat() bool {
 	return json.Unmarshal([]byte(`{"Q":"+10"}`), &d) == nil
 }
 
+// A `,string` body spelling null binds as a JSON null: no error, scalars
+// keep their value. The pointer rule follows go1.27's raw-token
+// comparison: the unescaped spelling clears the pointer itself, an escaped
+// one resolves the pointee and leaves it at zero.
+func TestUnmarshal_StringTagNullBody(t *testing.T) {
+	type scalars struct {
+		I int64   `json:",string"`
+		F float64 `json:",string"`
+		B bool    `json:",string"`
+		S string  `json:",string"`
+	}
+	type ptr struct {
+		P *float64 `json:",string"`
+	}
+	for _, body := range []string{`null`, `\u006eull`} {
+		in := []byte(`{"I":"` + body + `","F":"` + body + `","B":"` + body + `","S":"` + body + `"}`)
+		assertSameDecode(t, "string null body "+body, in, func() any { return new(scalars) })
+	}
+	assertSameDecode(t, "string null pointer raw", []byte(`{"P":"null"}`), func() any { return new(ptr) })
+	// Earlier encoding/json clears the pointer for the escaped spelling too,
+	// so vjson's result is pinned directly and parity is asserted only when
+	// the running std follows the go1.27 rule.
+	escaped := []byte(`{"P":"\u006eull"}`)
+	var esc ptr
+	if err := vjson.Unmarshal(escaped, &esc); err != nil || esc.P == nil || *esc.P != 0 {
+		t.Errorf("string null pointer escaped: vjson got=%v err=%v, want a pointer to 0", esc.P, err)
+	}
+	if stdEscapedNullResolvesPointee() {
+		assertSameDecode(t, "string null pointer escaped", escaped, func() any { return new(ptr) })
+	}
+
+	// Null semantics leave scalars untouched rather than zeroing them.
+	var pre scalars
+	pre.I, pre.F, pre.B, pre.S = 7, 1.5, true, "x"
+	if err := vjson.Unmarshal([]byte(`{"I":"null","F":"\u006eull"}`), &pre); err != nil ||
+		pre.I != 7 || pre.F != 1.5 || !pre.B || pre.S != "x" {
+		t.Errorf("string null preset: got=%v/%v/%v/%q err=%v", pre.I, pre.F, pre.B, pre.S, err)
+	}
+}
+
+// stdEscapedNullResolvesPointee reports whether the running encoding/json
+// resolves the pointee for an escaped null body under ,string, which arrived
+// in go1.27.
+func stdEscapedNullResolvesPointee() bool {
+	var d struct {
+		P *float64 `json:",string"`
+	}
+	return json.Unmarshal([]byte(`{"P":"\u006eull"}`), &d) == nil && d.P != nil
+}
+
 // ---------------------------------------------------------------------------
 // Valid
 // ---------------------------------------------------------------------------

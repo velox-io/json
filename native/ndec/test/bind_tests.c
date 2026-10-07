@@ -82,6 +82,55 @@ Test(bind_m1, struct_fields, .init = fx_setup) {
   hx_destroy(&d);
 }
 
+/* A `,string` body spelling null binds as null: scalars keep their value, a
+ * pointer field takes the raw spelling as its own null, and an escaped
+ * spelling leaves the reached pointee untouched. */
+Test(bind_m1, quoted_null, .init = fx_setup) {
+  FxTree *fx = &g_fx;
+  uint16_t t_iptr = fx_ptr(fx, fx->t_i64);
+
+  typedef struct {
+    int32_t q;   /* off 0, `,string` */
+    double f;    /* off 8, `,string` */
+    int64_t *p;  /* off 16, `,string` */
+  } Dst;
+  uint16_t ts = fx_struct(fx, sizeof(Dst));
+  fx_fld(fx, ts, "q", fx->t_i32, offsetof(Dst, q), BIND_FF_QUOTED);
+  fx_fld(fx, ts, "f", fx->t_f64, offsetof(Dst, f), BIND_FF_QUOTED);
+  fx_fld(fx, ts, "p", t_iptr, offsetof(Dst, p), BIND_FF_QUOTED);
+  fx_struct_done(fx, ts);
+  fx_build(fx);
+
+  HxDriver d;
+  hx_init(&d, fx, (HxOpts){0});
+  Dst dst;
+  int64_t pointee = 42;
+
+  memset(&dst, 0, sizeof(dst));
+  dst.q = 7;
+  dst.f = 1.5;
+  dst.p = &pointee;
+  const char *raw = "{\"q\":\"null\",\"f\":\"\\u006eull\",\"p\":\"null\"}";
+  cr_assert(hx_run_json(&d, raw, strlen(raw), ts, &dst, 0) == 0);
+  cr_assert(dst.q == 7);
+  cr_assert(dst.f == 1.5);
+  cr_assert(dst.p == NULL);
+
+  memset(&dst, 0, sizeof(dst));
+  dst.p = &pointee;
+  const char *escaped = "{\"p\":\"\\u006eull\"}";
+  cr_assert(hx_run_json(&d, escaped, strlen(escaped), ts, &dst, 0) == 0);
+  cr_assert(dst.p != NULL && *dst.p == 42);
+
+  /* A non-string value naming null must not trip the raw spelling check. */
+  memset(&dst, 0, sizeof(dst));
+  const char *notnull = "{\"p\":{\"null\":1}}";
+  cr_assert(hx_run_json(&d, notnull, strlen(notnull), ts, &dst, 0) == 1);
+  cr_assert(d.err == BIND_ERR_TYPE_MISMATCH);
+
+  hx_destroy(&d);
+}
+
 Test(bind_m1, nested_slice_array_ptr, .init = fx_setup) {
   FxTree *fx = &g_fx;
   typedef struct {
