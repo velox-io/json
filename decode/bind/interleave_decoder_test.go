@@ -89,7 +89,9 @@ type ilDecRes struct {
 }
 
 func ilDecodeAll[T any](t *testing.T, data []byte, rd io.Reader, bufSize int, n int) []ilDecRes {
-	t.Helper()
+	if t != nil {
+		t.Helper()
+	}
 	opts := []DecoderOption{WithSkipErrors(func(error) bool { return true })}
 	if bufSize > 0 {
 		opts = append(opts, WithBufferSize(bufSize))
@@ -112,16 +114,20 @@ func ilDecodeAll[T any](t *testing.T, data []byte, rd io.Reader, bufSize int, n 
 	return out
 }
 
+// ilModel decodes each line alone through a fresh Decoder over a whole
+// buffer. The oracle is the streaming driver itself rather than a contiguous
+// Parser: an element-site mismatch aborts before the rest of a line is read,
+// and only the contiguous driver's structural prepass sees a syntax error
+// past that point.
 func ilModel[T any](lines []ilLine) []ilDecRes {
 	var out []ilDecRes
 	for _, l := range lines {
-		p, _ := NewParser[T]()
-		o := ilRun[T](p, l.text, nil)
-		r := ilDecRes{err: ilClass(o.err)}
-		if o.err == "" {
-			r.val = o.json
+		one := []byte(l.text + "\n")
+		got := ilDecodeAll[T](nil, one, bytes.NewReader(one), 0, 1)
+		if len(got) == 0 {
+			got = []ilDecRes{{err: "ok"}}
 		}
-		out = append(out, r)
+		out = append(out, got[0])
 	}
 	return out
 }

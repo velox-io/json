@@ -1,6 +1,7 @@
 package bind
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -59,6 +60,52 @@ type feedState struct {
 	// finished with: the machine cursor's value at the last value boundary.
 	// Bytes before it are dead; a refill compacts from it.
 	consumed int
+
+	// skip anchors a Decoder's error recovery to the line the current value
+	// starts on, whatever the window did while the value bound.
+	skip skipAnchor
+}
+
+// skipAnchor records where recovery from a failed value resumes: after the
+// first newline at or past the value's first byte. While armed, compaction
+// keeps the discarded bytes past that newline, since they hold the lines
+// that follow the failed one. Only a Decoder with a skip predicate arms it.
+type skipAnchor struct {
+	armed    bool
+	valStart uint64 // absolute offset of the value's first byte
+	found    bool   // resume holds the bytes from resumeAt on
+	resumeAt uint64 // absolute offset just past that newline
+	resume   []byte
+}
+
+// keepDiscarded preserves what compaction of win[:cut] discards past the
+// resume point.
+func (f *feedState) keepDiscarded(cut int) {
+	a := &f.skip
+	if a.found {
+		a.resume = append(a.resume, f.win[:cut]...)
+		return
+	}
+	lo := 0
+	if a.valStart > f.base {
+		lo = int(a.valStart - f.base)
+	}
+	if lo >= cut {
+		return
+	}
+	if i := bytes.IndexByte(f.win[lo:cut], '\n'); i >= 0 {
+		j := lo + i + 1
+		a.found = true
+		a.resumeAt = f.base + uint64(j)
+		a.resume = append(a.resume[:0], f.win[j:cut]...)
+	}
+}
+
+// disarmSkip drops the anchor at the end of a Decode.
+func (f *feedState) disarmSkip() {
+	f.skip.armed = false
+	f.skip.found = false
+	f.skip.resume = f.skip.resume[:0]
 }
 
 // fill performs one read into the window and tracks finality. One read per
@@ -224,6 +271,9 @@ func (f *feedState) unconsumedOff(m *ndec.BindMachine) int {
 // compact moves the window suffix starting at cut to the window head.
 // Bytes before cut are dead: consumed by the binder or skipped past.
 func (f *feedState) compact(cut int) {
+	if cut > 0 && f.skip.armed {
+		f.keepDiscarded(cut)
+	}
 	if cut > 0 {
 		if tail := f.n - cut; tail > 0 {
 			copy(f.win, f.win[cut:f.n])
@@ -233,6 +283,22 @@ func (f *feedState) compact(cut int) {
 		}
 		f.base += uint64(cut)
 	}
+	f.consumed = 0
+}
+
+// restage puts kept bytes, starting at absolute offset at, back ahead of
+// the window content, which continues them.
+func (f *feedState) restage(kept []byte, at uint64) {
+	if need := len(kept) + f.n + ndec.BindScanPad; need > len(f.win) {
+		grown := make([]byte, max(need, 2*len(f.win)))
+		copy(grown[len(kept):], f.win[:f.n])
+		f.win = grown
+	} else {
+		copy(f.win[len(kept):], f.win[:f.n])
+	}
+	copy(f.win, kept)
+	f.n += len(kept)
+	f.base = at
 	f.consumed = 0
 }
 

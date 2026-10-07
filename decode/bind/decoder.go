@@ -177,6 +177,7 @@ func (d *Decoder) Decode(v any) error {
 		if bound {
 			sealFailedStrArena(p.alloc, m)
 		}
+		f.disarmSkip()
 		p.feed = nil
 		// Nil provenance entries while their retired backings are still
 		// retained; the release below drops them.
@@ -200,6 +201,7 @@ func (d *Decoder) Decode(v any) error {
 			d.err = err
 			return err
 		}
+		d.armSkip(f, f.base+uint64(feedSkipWS(f.win[:f.n])))
 		if err = p.feedBegin(m, ptr, f); err != nil {
 			return d.failDecode(f, m, err)
 		}
@@ -229,6 +231,7 @@ func (d *Decoder) Decode(v any) error {
 				return d.failDecode(f, m, err)
 			}
 		}
+		d.armSkip(f, f.base+uint64(feedCursorOff(m)))
 		if err = p.feedBegin(m, ptr, f); err != nil {
 			return d.failDecode(f, m, err)
 		}
@@ -271,14 +274,39 @@ func (d *Decoder) failDecode(f *feedState, m *ndec.BindMachine, err error) error
 	return err
 }
 
-// skipToNewline discards window and reader bytes through the next '\n'.
-// io.EOF means the input ended before a newline. Reader and zero-progress
-// errors are sticky. The failed value's machine state dies with the skip;
-// the next Decode remounts the window from the surviving suffix.
+// armSkip anchors error recovery for the value starting at the absolute
+// offset start, when the Decoder recovers from errors at all.
+func (d *Decoder) armSkip(f *feedState, start uint64) {
+	if d.skipErrors != nil {
+		f.skip.armed = true
+		f.skip.valStart = start
+	}
+}
+
+// skipToNewline discards window and reader bytes through the first '\n' at
+// or past the failed value's first byte, so recovery resumes on the line
+// after the one the value starts on whatever the window did meanwhile. The
+// end of input ends the line too, so a failing last line reports its error
+// and the next Decode returns io.EOF. Reader and zero-progress errors are
+// sticky. The failed value's machine state dies with the skip; the next
+// Decode remounts the window from the surviving suffix.
 func (d *Decoder) skipToNewline(f *feedState) error {
 	f.liveFor = nil
+	start := f.consumed
+	if a := &f.skip; a.armed {
+		if a.found {
+			// Compaction already passed the newline: restage the lines
+			// after it ahead of the window.
+			f.restage(a.resume, a.resumeAt)
+			return nil
+		}
+		start = 0
+		if a.valStart > f.base {
+			start = int(a.valStart - f.base)
+		}
+	}
 	for {
-		for i := f.consumed; i < f.n; i++ {
+		for i := start; i < f.n; i++ {
 			if f.win[i] == '\n' {
 				copy(f.win, f.win[i+1:f.n])
 				f.n -= i + 1
@@ -290,8 +318,9 @@ func (d *Decoder) skipToNewline(f *feedState) error {
 		f.base += uint64(f.n)
 		f.n = 0
 		f.consumed = 0
+		start = 0
 		if f.sawEOF {
-			return io.EOF
+			return nil
 		}
 		if err := f.fill(); err != nil {
 			d.err = err

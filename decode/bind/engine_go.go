@@ -45,6 +45,10 @@ func (p *Parser) goBind(src, alias []byte, base uint64, tape bool, dst unsafe.Po
 	// The release cadence matches the native driver's: one release point per
 	// bind, charged with the document bytes it decoded.
 	p.alloc.NoteParsedBytes(len(src))
+	if !tape {
+		p.pathSrc, p.pathBase = src, base
+		defer func() { p.pathSrc = nil }()
+	}
 	settled, err = gbind.Bind(p.goPlan(), (*goHost)(p), &in, dst)
 	p.alloc.Release()
 	if e, ok := err.(*gbind.Error); ok {

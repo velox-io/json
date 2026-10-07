@@ -271,6 +271,13 @@ type Parser struct {
 	// window then.
 	src []byte
 
+	// pathSrc is the active drive's source when it holds the bound value from
+	// its root, with pathBase the document offset of its first byte. Errors
+	// raised inside a deferred drain resolve their field path against it.
+	// Nil when the source is a sliding window or a tape walk's document.
+	pathSrc  []byte
+	pathBase uint64
+
 	// aliasSrc is the caller-owned original this call's zero-copy aliases
 	// reference when src is an internal copy of it. It is also the GC root
 	// for that backing through the native call, which otherwise outlives
@@ -698,6 +705,7 @@ func (p *Parser) unmarshalPadded(src []byte, rootDst unsafe.Pointer, aliasSrc []
 	}
 	srcLen := len(src)
 	p.src = src
+	p.pathSrc, p.pathBase = src, 0
 	p.aliasSrc = aliasSrc
 
 	m := (*ndec.BindMachine)(unsafe.Pointer(unsafe.SliceData(p.machine)))
@@ -768,6 +776,7 @@ func (p *Parser) unmarshalPadded(src []byte, rootDst unsafe.Pointer, aliasSrc []
 		// Clear borrowed ABI pointers before the machine is reused. KeepAlive
 		// preserves their Go owners through the final stores.
 		p.src = nil
+		p.pathSrc = nil
 		p.aliasSrc = nil
 		m.DropWindowView()
 		m.Ctx.RootDst = nil

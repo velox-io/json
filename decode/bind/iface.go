@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"unsafe"
 
 	"github.com/velox-io/json/internal/gdec"
@@ -213,11 +214,49 @@ func bindIfaceRecord(p *Parser, typeIdx uint16, target unsafe.Pointer, data []by
 		}
 		var s string
 		if err := unmarshalRawInto(p, data, reflect.TypeFor[string](), unsafe.Pointer(&s)); err != nil {
-			return err
+			return p.rebaseSubErr(err, docOff)
 		}
 		return tu.UnmarshalText([]byte(s))
 	}
-	return unmarshalRawInto(p, data, dv.Elem().Type(), unsafe.Pointer(dv.Pointer()))
+	return p.rebaseSubErr(unmarshalRawInto(p, data, dv.Elem().Type(), unsafe.Pointer(dv.Pointer())), docOff)
+}
+
+// rebaseSubErr moves an error from a sub-decode of the value at document
+// offset docOff into the document's coordinates: offsets shift by docOff,
+// and a type error's field path gains the path to the value.
+func (p *Parser) rebaseSubErr(err error, docOff int64) error {
+	var ute *UnmarshalTypeError
+	var se *SyntaxError
+	switch {
+	case errors.As(err, &ute):
+		ute.Offset += docOff
+		if prefix, ok := p.pathTo(docOff); ok && prefix != "" {
+			if ute.Field != "" {
+				ute.Field = prefix + "." + ute.Field
+			} else {
+				ute.Field = prefix
+			}
+			if p.tt.Root < uint32(len(p.tt.ReflectTypes)) {
+				ute.Struct = p.tt.ReflectTypes[p.tt.Root].Name()
+			}
+		}
+	case errors.As(err, &se):
+		se.Offset += docOff
+	}
+	return err
+}
+
+// pathTo returns the dotted JSON path of the value at document offset off,
+// when the drive's source still holds the document from its root.
+func (p *Parser) pathTo(off int64) (string, bool) {
+	if p.pathSrc == nil || off < int64(p.pathBase) {
+		return "", false
+	}
+	tokens, _, ok := walkJSONPath(p.pathSrc, int(off-int64(p.pathBase)))
+	if !ok {
+		return "", false
+	}
+	return strings.Join(tokens, "."), true
 }
 
 // unmarshalRawInto decodes one complete JSON value into ptr through a fresh
