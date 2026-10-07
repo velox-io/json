@@ -594,7 +594,13 @@ func (es *encodeState) unfoldFromYield(ctx *VjExecCtx, fb *fbInfo, isFirst bool)
 		if es.indentString != "" {
 			es.buf = append(es.buf, ' ')
 		}
-		if err := fi.Type.Encode(es, fptr); err != nil {
+		var err error
+		if fi.TagFlags&EncTagFlagQuoted != 0 {
+			err = es.encodeValueQuoted(fi.Type, fptr)
+		} else {
+			err = fi.Type.Encode(es, fptr)
+		}
+		if err != nil {
 			return err
 		}
 	}

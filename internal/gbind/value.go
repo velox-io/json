@@ -247,7 +247,7 @@ func (c *binder) bindSlow(dst unsafe.Pointer, ti, ctr uint32, site siteKind, quo
 		return nil
 	}
 	if quoted {
-		return c.bindQuoted(dst, ti, k, ctr)
+		return c.bindQuoted(dst, ti, k)
 	}
 	s := c.txt
 	var err error
@@ -345,24 +345,20 @@ func (c *binder) typeMismatch(ti uint32, site siteKind) error {
 	return c.failValueOrEOF(ndec.BindErrTypeMismatch, ti)
 }
 
-// bindQuoted binds a `,string` value at the cursor.
-func (c *binder) bindQuoted(dst unsafe.Pointer, ti uint32, k vbind.Kind, ctr uint32) error {
-	pos := c.pos()
-	if ch := c.peek(); ch != '"' {
-		// The abort classifies its token as an element abort does.
-		if !c.eof() && ch != '{' && ch != '[' {
-			if _, err := c.scalarAt(c.txt, c.p); err != nil {
-				return err
-			}
-		}
-		return c.failType(ndec.BindErrTypeMismatch, pos, ti)
+// bindQuoted binds a `,string` field value at the cursor. Anything but a
+// string holding the target scalar is a field-site mismatch: recorded, the
+// value skipped, the walk continued.
+func (c *binder) bindQuoted(dst unsafe.Pointer, ti uint32, k vbind.Kind) error {
+	if c.peek() != '"' {
+		return c.typeMismatch(ti, siteField)
 	}
+	pos := c.pos()
 	s, err := c.string(false)
 	if err != nil {
 		return err
 	}
 	if !c.writeQuotedScalar(dst, k, s) {
-		return c.failType(ndec.BindErrTypeMismatch, pos, ctr)
+		c.record(pos, ti)
 	}
 	return nil
 }

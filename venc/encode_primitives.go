@@ -121,7 +121,13 @@ func (es *encodeState) encodeQuotedString(s string) {
 	es.buf = appendEscapedString(es.buf, unsafeString(inner), escapeFlags(es.flags))
 }
 
+// encodeValueQuoted writes a `,string` field's value inside a JSON string. A
+// type that marshals itself ignores `,string`, as in encoding/json: its JSON
+// or text method still runs.
 func (es *encodeState) encodeValueQuoted(ti *EncTypeInfo, ptr unsafe.Pointer) error {
+	if ti.TypeFlags&(EncTypeFlagHasMarshalFn|EncTypeFlagHasTextMarshalFn) != 0 {
+		return ti.Encode(es, ptr)
+	}
 	switch ti.Kind {
 	case typ.KindBool:
 		if *(*bool)(ptr) {

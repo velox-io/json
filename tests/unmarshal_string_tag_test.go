@@ -2,6 +2,7 @@ package tests
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	vjson "github.com/velox-io/json"
@@ -519,5 +520,52 @@ func TestStringTag_IgnoredForComplexTypes(t *testing.T) {
 	stdOut, _ := json.Marshal(v)
 	if string(vjsonOut) != string(stdOut) {
 		t.Fatalf("mismatch:\nvjson:  %s\nstdlib: %s", vjsonOut, stdOut)
+	}
+}
+
+// A `,string` field that cannot take its value is a field-site mismatch:
+// encoding/json reports the type error and still binds every other member,
+// before and after it. Each value below is checked through both the
+// contiguous and the streaming driver.
+func TestStringTag_MismatchCompletesObject(t *testing.T) {
+	type host struct {
+		By []byte
+		M  map[string]int
+		Q  int     `json:",string"`
+		QB bool    `json:",string"`
+		QF float64 `json:",string"`
+		QS string  `json:",string"`
+		R  int
+		T  []string
+	}
+	vals := []string{`"x"`, `""`, `"1.5"`, `"99999999999999999999"`, `7`, `true`, `[1,2]`, `{"a":1}`, `"\"a\""`, `"yes"`}
+	for _, field := range []string{"Q", "QB", "QF", "QS"} {
+		for _, v := range vals {
+			in := `{"By":"aGk=","M":{"k":1},` + `"` + field + `":` + v + `,"R":1,"T":["t"]}`
+			var std host
+			stdErr := json.Unmarshal([]byte(in), &std)
+			if stdErr == nil {
+				continue
+			}
+			if _, ok := stdErr.(*json.UnmarshalTypeError); !ok {
+				continue
+			}
+			want, _ := json.Marshal(std)
+			var got host
+			err := vjson.Unmarshal([]byte(in), &got)
+			if err == nil {
+				t.Errorf("%s: accepted, want %v", in, stdErr)
+				continue
+			}
+			if js, _ := json.Marshal(got); string(js) != string(want) {
+				t.Errorf("%s:\n  std %s\n  vj  %s", in, want, js)
+			}
+			var dec host
+			if err := vjson.NewDecoder(strings.NewReader(in)).Decode(&dec); err == nil {
+				t.Errorf("%s: Decoder accepted", in)
+			} else if js, _ := json.Marshal(dec); string(js) != string(want) {
+				t.Errorf("%s: Decoder\n  std %s\n  vj  %s", in, want, js)
+			}
+		}
 	}
 }

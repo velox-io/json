@@ -808,7 +808,9 @@ object_field_value: {
       goto object_continue;
     }
 
-    /* `,string` accepts only a JSON string and reparses its content as the target scalar. */
+    /* `,string` accepts only a JSON string and reparses its content as the
+     * target scalar. Anything else is a field-site mismatch: recorded, the
+     * value skipped, the walk continued. */
     if (cur_struct_field->flags & BIND_FF_QUOTED) {
       if (ch == '"') {
         const uint8_t *qd;
@@ -831,13 +833,11 @@ object_field_value: {
         qn = (uint32_t)qn_i;
       quoted_body:
         if (bind_write_quoted_scalar(&str_p, qd, qn, child_type->kind, body, m->c.atof) < 0)
-          BIND_IMMEDIATE_TYPE_MISMATCH(m, SRC_POS(), child_type->type_idx);
+          BIND_TYPE_MISMATCH_SKIP(m, SRC_POS(), child_type);
         SRC_ADVANCE();
         goto object_continue;
       }
-      /* The abort classifies its token as an element abort does. */
-      if (!SRC_EOF() && UNLIKELY(bind_elem_token_invalid(SRC_PTR()))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-      BIND_IMMEDIATE_TYPE_MISMATCH(m, SRC_POS(), child_type->type_idx);
+      BIND_TYPE_MISMATCH_SKIP(m, SRC_POS(), child_type);
     }
   }
 
