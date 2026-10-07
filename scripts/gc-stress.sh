@@ -47,7 +47,7 @@
 #           dedicated Linux job.
 #
 # Cost: soak is whatever GC_STRESS_SOAK_MINUTES says. One pass of the three
-# suite legs is ~6min on a 10-core darwin/arm64 box, most of it ./decode/bind
+# suite legs is ~10min on a 10-core darwin/arm64 box, most of it ./decode/bind
 # under the race detector. CI runs the groups as separate parallel jobs.
 #
 # Usage:
@@ -65,7 +65,7 @@
 #                           instrumented cycles means more rounds per minute)
 #   GC_STRESS_ROUNDS        passes over the suite legs (default 1)
 #   GC_STRESS_COUNT         -test.count per suite process (default 1)
-#   GC_STRESS_TIMEOUT       per-process timeout (default 20m), hang guard only
+#   GC_STRESS_TIMEOUT       per-process timeout (default 30m), hang guard only
 #   GC_STRESS_LOGDIR        log/binary output dir (default build/gc-stress)
 #   GOMAXPROCS              passed through to every test process
 #
@@ -81,7 +81,7 @@ cd "$ROOT"
 LEGS="${GC_STRESS_LEGS:-soak cold pooled encode nondec}"
 ROUNDS="${GC_STRESS_ROUNDS:-1}"
 COUNT="${GC_STRESS_COUNT:-1}"
-TIMEOUT="${GC_STRESS_TIMEOUT:-20m}"
+TIMEOUT="${GC_STRESS_TIMEOUT:-30m}"
 LOGDIR="${GC_STRESS_LOGDIR:-$ROOT/build/gc-stress}"
 BINDIR="$LOGDIR/bin"
 

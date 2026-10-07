@@ -288,10 +288,10 @@ jobs:
   gc-stress:
     name: GC Stress (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
-    # One pass over the suite legs is ~6min on a fast local box; CI cores are
+    # One pass over the suite legs is ~10min on a fast local box; CI cores are
     # fewer and the race legs scale with them. The real hang guard is the
     # per-process -test.timeout inside the script.
-    timeout-minutes: 40
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -347,7 +347,7 @@ jobs:
     # The decode/bind suite under the hostile collector is the long pole
     # (about 16min under race on a fast box, a fraction of that without),
     # with the per-process -test.timeout inside the script as the hang guard.
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
@@ -365,7 +365,7 @@ jobs:
       run: bash scripts/gc-stress.sh
       env:
         GC_STRESS_LEGS: nondec
-        GC_STRESS_TIMEOUT: 30m
+        GC_STRESS_TIMEOUT: 40m
 
     - name: Upload GC stress logs
       if: failure()

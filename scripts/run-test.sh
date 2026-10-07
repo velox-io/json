@@ -10,16 +10,19 @@ cd "$REPO_ROOT"
 go test . -count=1
 go test -race . -count=1
 
-go test ./vbind ./decode/bind/ ./native/ndec ./native/vlib -count=1
-go test -race ./vbind ./decode/bind/ ./native/ndec ./native/vlib -count=1
+# ./decode/bind carries the interleave sweeps, which run close to the 10m
+# default on the slower CI runners (macOS AMD64 through Rosetta), so its legs
+# name their own timeout.
+go test ./vbind ./decode/bind/ ./native/ndec ./native/vlib -count=1 -timeout 30m
+go test -race ./vbind ./decode/bind/ ./native/ndec ./native/vlib -count=1 -timeout 30m
 
 # The pure-Go decoder round (vj_nondec) is platform independent and runs once
 # per Go version in its own CI job: scripts/run-test-nondec.sh, make test-nondec.
 
 # Engine differential round: a native build whose engine choice is dynamic, so
 # the diff suites run both engines over each input in one process.
-go test -tags vj_enginediff ./decode/bind/ -count=1
-go test -race -tags vj_enginediff ./decode/bind/ -count=1
+go test -tags vj_enginediff ./decode/bind/ -count=1 -timeout 30m
+go test -race -tags vj_enginediff ./decode/bind/ -count=1 -timeout 30m
 
 go test ./venc -count=1
 go test -race ./venc -count=1

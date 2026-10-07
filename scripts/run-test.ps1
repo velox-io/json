@@ -43,11 +43,13 @@ function Invoke-GoTest {
 
 Invoke-GoTest . -count=1
 
-Invoke-GoTest ./vbind ./decode/bind/ ./native/ndec ./native/vlib -count=1
+# ./decode/bind carries the interleave sweeps, which run close to the 10m
+# default on CI runners, so its legs name their own timeout.
+Invoke-GoTest ./vbind ./decode/bind/ ./native/ndec ./native/vlib -count=1 -timeout 30m
 
 # Engine differential round: a native build whose engine choice is dynamic, so
 # the diff suites run both engines over each input in one process.
-Invoke-GoTest -tags vj_enginediff ./decode/bind/ -count=1
+Invoke-GoTest -tags vj_enginediff ./decode/bind/ -count=1 -timeout 30m
 
 # The pure-Go decoder round (vj_nondec) is platform independent and runs once
 # per Go version on Linux: scripts/run-test-nondec.sh.
