@@ -2,7 +2,6 @@ package bind
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"reflect"
 	"runtime"
@@ -170,7 +169,14 @@ func (d *Decoder) Decode(v any) error {
 	m := (*ndec.BindMachine)(unsafe.Pointer(unsafe.SliceData(p.machine)))
 	p.feed = f
 
+	// bound is set while this value's bind may have written string bytes the
+	// destination references. An exit that leaves it set, an error or a panic
+	// escaping user code, seals them.
+	bound := false
 	defer func() {
+		if bound {
+			sealFailedStrArena(p.alloc, m)
+		}
 		p.feed = nil
 		// Nil provenance entries while their retired backings are still
 		// retained; the release below drops them.
@@ -228,14 +234,15 @@ func (d *Decoder) Decode(v any) error {
 		}
 	}
 
+	bound = true
 	if err := p.feedDrive(m); err != nil {
-		sealFailedStrArena(p.alloc, m)
+		p.settleAfterWalkError(m, err)
 		return d.failDecode(f, m, err)
 	}
 	if err := p.feedFinish(m, f); err != nil {
-		sealFailedStrArena(p.alloc, m)
 		return d.failDecode(f, m, err)
 	}
+	bound = false
 	// The root closed with the machine cursor at the next value's first
 	// token (or the stable edge), so the window and its scan stay mounted
 	// and the next Decode binds without rescanning.
@@ -256,8 +263,7 @@ func (d *Decoder) failDecode(f *feedState, m *ndec.BindMachine, err error) error
 		}
 		return err
 	}
-	var ute *UnmarshalTypeError
-	if errors.As(err, &ute) && m.Core.Phase == ndec.BindPhaseDocumentEnd {
+	if walkCompleted(m, err) {
 		f.consumed = f.unconsumedOff(m)
 		return err
 	}

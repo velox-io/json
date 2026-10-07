@@ -445,7 +445,13 @@ func (p *Parser) unmarshalFeed(r io.Reader, rootDst unsafe.Pointer) error {
 		return err
 	}
 
+	// Any exit before feedFinish commits, an error or a panic escaping user
+	// code, seals the string bytes the destination may already reference.
+	committed := false
 	defer func() {
+		if !committed {
+			sealFailedStrArena(p.alloc, m)
+		}
 		p.feed = nil
 		// Nil provenance entries while their retired backings are still
 		// retained; the release below drops them.
@@ -473,16 +479,15 @@ func (p *Parser) unmarshalFeed(r io.Reader, rootDst unsafe.Pointer) error {
 	}
 
 	if err := p.feedDrive(m); err != nil {
-		sealFailedStrArena(p.alloc, m)
+		p.settleAfterWalkError(m, err)
 		return err
 	}
 	if err := f.checkTrailing(m); err != nil {
-		sealFailedStrArena(p.alloc, m)
 		return err
 	}
 	if err := p.feedFinish(m, f); err != nil {
-		sealFailedStrArena(p.alloc, m)
 		return err
 	}
+	committed = true
 	return nil
 }

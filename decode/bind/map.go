@@ -207,6 +207,36 @@ func drainAllMapSlots(p *Parser, m *ndec.BindMachine) {
 	}
 }
 
+// drainMapSlotsOnAbort publishes the complete entries a walk error stranded,
+// so every map that already closed keeps its contents. It mirrors the Go
+// engine's error exits, which close a non-deferred map's region as the error
+// unwinds. Deferred-valued regions stay unpublished: their entries point at
+// intermediate slots the never-run hooks would have filled, and the Go engine
+// drops those on error too. Key conversion failures are dropped; the walk
+// error that caused the abort keeps precedence.
+func drainMapSlotsOnAbort(m *ndec.BindMachine) {
+	if m.Alloc.MapBufUsed == 0 {
+		return
+	}
+	bufBase := unsafe.Pointer(m.Alloc.MapBuf)
+	typeMetaBase := unsafe.Pointer(m.Ctx.TypeMeta)
+	typeMetaStride := unsafe.Sizeof(ndec.BindTypeMeta{})
+	for off := uint32(0); off < m.Alloc.MapBufUsed; {
+		r := mapRegionAt(bufBase, off)
+		off += uint32(ndec.BindMapRegionHeaderSize) + uint32(ndec.BindMapRegionSlots)*r.Stride
+		if r.EntryCount == 0 {
+			continue
+		}
+		meta := (*ndec.BindTypeMeta)(unsafe.Add(typeMetaBase, uintptr(r.TypeIdx)*typeMetaStride))
+		info := (*vbind.MapDrainInfo)(meta.MapMeta().DrainInfo)
+		if info.ValIsDeferred {
+			continue
+		}
+		entriesBase := unsafe.Add(unsafe.Pointer(r), ndec.BindMapRegionHeaderSize)
+		_ = drainKVSlots(r.Hmap, entriesBase, int(r.EntryCount), info, uintptr(r.Stride), uintptr(ndec.BindMapValOff))
+	}
+}
+
 // drainKVSlots writes count staged KV entries into the runtime map. An entry
 // whose key fails conversion is dropped, and the first failure is returned
 // once the rest have landed.

@@ -483,6 +483,8 @@ func (c *binder) resolveHops(host unsafe.Pointer, hostTi uint32, f *vbind.BindFi
 // length. A fixed array binds in place and skips elements past its length.
 func (c *binder) bindArray(s text, p int, dst unsafe.Pointer, ti uint32) (int, error) {
 	if s.peek(p) == ']' {
+		// Native pushes an empty array's frame too.
+		c.descents++
 		c.emptyArray(dst, ti)
 		return s.skip(p + 1), nil
 	}
@@ -521,6 +523,7 @@ func (c *binder) arrayElems(s text, p int, dst unsafe.Pointer, ti uint32) (int, 
 			c.growSlice(sc, hdr, esz)
 		}
 		count++
+		d0 := c.descents
 		var err error
 		p, err = c.bindValue(s, p, unsafe.Add(hdr.Data, uintptr(count-1)*esz), elemTi, ti, siteElem, false)
 		if err == nil {
@@ -539,8 +542,12 @@ func (c *binder) arrayElems(s text, p int, dst unsafe.Pointer, ti uint32) (int, 
 				err = c.closeErr()
 			}
 		}
-		// The elements bound so far stay charged; the rest of the tail
-		// returns to the class.
+		// An element that entered a container counts in the length, as the
+		// native push of its frame published it. The elements bound so far
+		// stay charged; the rest of the tail returns to the class.
+		if c.descents != d0 {
+			hdr.Len = count
+		}
 		c.a.CloseSlice(sc, hdr.Data, count)
 		return p, err
 	}
@@ -591,6 +598,8 @@ func (c *binder) growSlice(sc *vbind.SlotClass, hdr *gort.SliceHeader, esz uintp
 func (c *binder) bindMap(s text, p int, dst unsafe.Pointer, ti uint32) (int, error) {
 	m := c.openMap(dst, ti)
 	if s.peek(p) == '}' {
+		// Native pushes an empty map's frame too.
+		c.descents++
 		return s.skip(p + 1), nil
 	}
 	if err := c.push(); err != nil {

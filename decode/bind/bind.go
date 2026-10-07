@@ -596,6 +596,23 @@ func syncStrArena(alloc *vbind.Allocator, allocABI *ndec.BindAllocator, srcLen i
 	allocABI.StrArenaCap = uint64(cap(alloc.StrArena))
 }
 
+// walkCompleted reports whether err is a recorded type mismatch the walk
+// carried to the document end. Every value after the mismatch was bound, so
+// the staged map entries and deferred records are whole, and the destination
+// completes as best it can, like encoding/json.
+func walkCompleted(m *ndec.BindMachine, err error) bool {
+	var ute *UnmarshalTypeError
+	return m.Core.Phase == ndec.BindPhaseDocumentEnd && errors.As(err, &ute)
+}
+
+// settleAfterWalkError publishes the staged entries of a completed walk that
+// returns err. The walk error keeps precedence over drain failures.
+func (p *Parser) settleAfterWalkError(m *ndec.BindMachine, err error) {
+	if walkCompleted(m, err) {
+		_ = p.settleStaged(m)
+	}
+}
+
 // sealFailedStrArena advances past bytes written before failure. Caller-visible
 // values may already reference them, so later calls begin after that extent.
 func sealFailedStrArena(alloc *vbind.Allocator, m *ndec.BindMachine) {
@@ -739,7 +756,14 @@ func (p *Parser) unmarshalPadded(src []byte, rootDst unsafe.Pointer, aliasSrc []
 	// what a retained backing link would pin live.
 	alloc.NoteParsedBytes(srcLen)
 
+	// committed flips once the arenas advance past this parse's output. Every
+	// other exit, an error or a panic escaping a user hook, seals the string
+	// bytes already written: destination strings may reference them.
+	committed := false
 	defer func() {
+		if !committed {
+			sealFailedStrArena(alloc, m)
+		}
 		alloc.Release() // Publish native writes, then stage reusable backings.
 		// Clear borrowed ABI pointers before the machine is reused. KeepAlive
 		// preserves their Go owners through the final stores.
@@ -754,13 +778,12 @@ func (p *Parser) unmarshalPadded(src []byte, rootDst unsafe.Pointer, aliasSrc []
 	}()
 
 	if err := p.driveRoot(m); err != nil {
-		sealFailedStrArena(alloc, m)
+		p.settleAfterWalkError(m, err)
 		return err
 	}
 	// Object close may leave complete entries after the final
 	// BindYieldFlushMap, so completion drains the remainder.
 	if err := p.settleStaged(m); err != nil {
-		sealFailedStrArena(alloc, m)
 		return err
 	}
 
@@ -768,6 +791,7 @@ func (p *Parser) unmarshalPadded(src []byte, rootDst unsafe.Pointer, aliasSrc []
 	// publishes before either commit advances them.
 	publishDoc(p, valueDoc, m)
 	alloc.CommitStrArena(int(m.Core.StrUsed))
+	committed = true
 	if tape {
 		alloc.CommitTapeArena(int(m.Alloc.TapeUsed))
 		// A completed scan contributes the reusable sizing bound.
@@ -918,6 +942,11 @@ func (p *Parser) serveYield(m *ndec.BindMachine) (done bool, err error) {
 		// Reclaim the tails this parse borrowed and will never close. Purely a
 		// memory optimization.
 		sealOpenSlices(p, m)
+		// A walk error strands the staged map entries; the destination already
+		// holds the map headers, so publish what completed before the abort,
+		// as the Go engine's error exits do. Runs before the error translation
+		// because it touches no positions.
+		drainMapSlotsOnAbort(m)
 		if p.feed != nil {
 			// Immediate errors carry a window-local position; a recorded skip
 			// error was promoted to an absolute document offset at the first

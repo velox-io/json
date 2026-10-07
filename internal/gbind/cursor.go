@@ -139,6 +139,7 @@ func (c *binder) record(pos uint64, typeIdx uint32) {
 }
 
 func (c *binder) push() error {
+	c.descents++
 	if c.depth+1 > maxDepth {
 		return c.failNoPos(ndec.BindErrDepth)
 	}

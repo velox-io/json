@@ -372,6 +372,47 @@ func TestGoCoreDiffDepth(t *testing.T) {
 	}
 }
 
+// runAny decodes in once under the selected engine, as runEngine does for a
+// typed destination.
+func runAny(goCore bool, in []byte, dst any) error {
+	prev := forceGoCore
+	forceGoCore = goCore
+	defer func() { forceGoCore = prev }()
+	return Unmarshal(in, dst)
+}
+
+// A walk error strands the staged map entries, while the destination already
+// holds every map's header: both engines must leave each map that completed
+// before the abort with its entries, including the one whose later member
+// failed and maps nested inside an any element. A deferred-valued map stays
+// empty on error, as its entries point at slots the never-run hooks would
+// have filled.
+func TestGoCoreDiffMapAbort(t *testing.T) {
+	needNativeForDiff(t)
+	for _, tc := range []struct {
+		in string
+		mk func() any
+	}{
+		{`[{"a":1},{"b":2,]}`, func() any { return new([]map[string]int) }},
+		{`{"MM":[{"a":1},{"b":2,]}`, func() any { v := struct{ MM []map[string]int }{}; return &v }},
+		{`[1,{"a":1,]`, func() any { return new([]any) }},
+		{`{"a":1,"b":2,}`, func() any { return new(map[string]int) }},
+		{`{"1":1,}`, func() any { return new(map[int]int) }},
+		{`{"a":{"x":1},"b":2,}`, func() any { return new(map[string]map[string]int) }},
+		{`{"a":"x",}`, func() any { return new(map[string]json.RawMessage) }},
+	} {
+		n, g := tc.mk(), tc.mk()
+		nerr, gerr := runAny(false, []byte(tc.in), n), runAny(true, []byte(tc.in), g)
+		if describeErr(nerr) != describeErr(gerr) {
+			t.Errorf("input %q\n err native=%s\n err go    =%s", tc.in, describeErr(nerr), describeErr(gerr))
+			continue
+		}
+		if !reflect.DeepEqual(n, g) {
+			t.Errorf("input %q\n val native=%+v\n val go    =%+v", tc.in, n, g)
+		}
+	}
+}
+
 // decodeSeq drains a Decoder, one value per step, through the listed target
 // types (cycling). While the stream stays usable each outcome also records
 // where the next value starts: the input neither the reader nor Buffered

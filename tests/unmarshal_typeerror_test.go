@@ -257,3 +257,41 @@ func TestUnmarshalTypeErrorContextStreamingElem(t *testing.T) {
 		}
 	}
 }
+
+// An unknown member rejected inside a slice element ends the decode with
+// that element partly bound and counted, as encoding/json leaves it under
+// DisallowUnknownFields. The unknown member closes each document, so the
+// stdlib, which keeps going after it, has nothing left to bind.
+func TestUnmarshal_RejectUnknownKeepsOpenSliceElement(t *testing.T) {
+	type elem struct {
+		B int
+		C string
+	}
+	type doc struct {
+		S  []elem
+		P  []*elem
+		SS [][]elem
+	}
+	for _, in := range []string{
+		`{"S":[{"B":1},{"C":"y","a":1}]}`,
+		`{"P":[{"B":1},{"C":"y","a":1}]}`,
+		`{"SS":[[{"B":1}],[{"B":2},{"C":"y","a":1}]]}`,
+	} {
+		var want doc
+		dec := json.NewDecoder(strings.NewReader(in))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&want); err == nil {
+			t.Fatalf("%s: encoding/json accepted the unknown member", in)
+		}
+		var got doc
+		if err := vjson.Unmarshal([]byte(in), &got, vjson.RejectUnknownMembers(true)); err == nil {
+			t.Errorf("%s: vjson accepted the unknown member", in)
+			continue
+		}
+		wj, _ := json.Marshal(want)
+		gj, _ := json.Marshal(got)
+		if string(wj) != string(gj) {
+			t.Errorf("%s: destination divergence:\n  std:   %s\n  vjson: %s", in, wj, gj)
+		}
+	}
+}

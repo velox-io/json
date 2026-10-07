@@ -286,11 +286,13 @@ func (p *Parser) unmarshalValue(v value.Value, desc *valueabi.Descriptor, rootDs
 		return err
 	}
 	// Publish the tape produced for nested Values with the string and
-	// source views used by this walk.
+	// source views used by this walk, then advance the arena past it so the
+	// next call on this Parser cannot overwrite a published Value.
 	if valueDoc != nil {
 		valueDoc.StrArena = strArena[:m.Core.StrUsed]
 		valueDoc.Src = doc.Src
 		valueDoc.Tape = alloc.TapeArena[:m.Alloc.TapeUsed]
+		alloc.CommitTapeArena(int(m.Alloc.TapeUsed))
 	}
 	return nil
 }

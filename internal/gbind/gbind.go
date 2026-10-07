@@ -275,8 +275,12 @@ type binder struct {
 
 	opt   uint32
 	depth int
-	base  uint64
-	tape  bool
+	// descents counts the containers entered, including those a depth
+	// failure refuses: native publishes a slice's length, counting the
+	// element being bound, whenever it pushes that element's frame.
+	descents int
+	base     uint64
+	tape     bool
 
 	// strict holds the strict scan bit of opt, read per string span the
 	// walk passes.
@@ -334,6 +338,10 @@ type binder struct {
 // data, ahead of the final report point.
 func (c *binder) finish() error {
 	if c.mismatch {
+		// The walk bound every value past the mismatch, so the staged
+		// records are whole and settle into the destination; the mismatch
+		// keeps precedence over their failures.
+		c.settle()
 		return c.failType(ndec.BindErrTypeMismatch, c.mismatchPos, c.mismatchType)
 	}
 	if !c.eof() {
