@@ -464,7 +464,7 @@ func ilsGoodMatchesOracle[H any](t *testing.T, rig *ilsRig[H], drv ilsDriver) {
 	defer debug.SetGCPercent(debug.SetGCPercent(10))
 	p, _ := NewParserForType(reflect.TypeFor[H]())
 	bad := 0
-	for round := 0; round < 3; round++ {
+	for range 3 {
 		for _, g := range rig.good {
 			for _, m := range rig.modes {
 				if !m.full() || m.kind == ilsNoHandler || m.noInner {
@@ -550,7 +550,7 @@ func ilsElemJSON(i int) string {
 func ilsItemsJSON(n int) string {
 	var sb strings.Builder
 	sb.WriteByte('[')
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
@@ -740,7 +740,7 @@ func ilsRichJSON(i int) string {
 func ilsRichDoc(n int) string {
 	var sb strings.Builder
 	sb.WriteString(`{"pre":"p","items":[`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
@@ -860,7 +860,7 @@ func ilsEventJSON(u, e int) string {
 func ilsUserJSON(u, ne int, eventsFirst bool) string {
 	var ev strings.Builder
 	ev.WriteByte('[')
-	for e := 0; e < ne; e++ {
+	for e := range ne {
 		if e > 0 {
 			ev.WriteByte(',')
 		}
@@ -1099,7 +1099,7 @@ type ilsDefect struct {
 func ilsItemsWith(n, j int, repl string) string {
 	var sb strings.Builder
 	sb.WriteByte('[')
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
@@ -1346,10 +1346,10 @@ func TestIlsPooledHandlerPanicStorm(t *testing.T) {
 func TestIlsPooledConcurrentStorm(t *testing.T) {
 	const workers = 6
 	errs := make(chan string, workers)
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		go func(w int) {
 			r := rand.New(rand.NewPCG(uint64(w), 77))
-			for i := 0; i < 250; i++ {
+			for i := range 250 {
 				var in string
 				if i%2 == 0 {
 					in = ilsLeaf.good[r.IntN(len(ilsLeaf.good))]
@@ -1368,7 +1368,7 @@ func TestIlsPooledConcurrentStorm(t *testing.T) {
 			errs <- ""
 		}(w)
 	}
-	for w := 0; w < workers; w++ {
+	for range workers {
 		if e := <-errs; e != "" {
 			t.Error(e)
 		}
@@ -1674,12 +1674,12 @@ func TestIlsDecoderStreamStickyErrors(t *testing.T) {
 	good := ilsHostDoc(6)
 	bad := ilsDefectDoc(7, 5)
 	for _, bs := range []int{0, 16, 128} {
-		for round := 0; round < 20; round++ {
+		for round := range 20 {
 			input := good + "\n" + bad + "\n" + good + "\n"
 			d := NewDecoder(&chunkReader{data: []byte(input), chunk: 5 + round}, WithBufferSize(max(bs, 1)))
 			var seen []int
 			var errs []string
-			for i := 0; i < 5; i++ {
+			for range 5 {
 				h := new(ilsHost)
 				var tr ilsTrace
 				ilsInstallLeaf(h, &tr, ilsM("full", ilsFull, -1))
@@ -1733,7 +1733,7 @@ func ilsGuard(f func() string) string {
 func ilsEventsJSON(n int) string {
 	var sb strings.Builder
 	sb.WriteByte('[')
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
@@ -1757,9 +1757,9 @@ func TestIlsDrainValidatesSyntax(t *testing.T) {
 	for _, df := range defects {
 		for _, mode := range modes {
 			var accepted []int
-			for j := 0; j < 10; j++ {
+			for j := range 10 {
 				var el []string
-				for i := 0; i < 10; i++ {
+				for i := range 10 {
 					if i == j {
 						el = append(el, df)
 					} else {
@@ -1948,7 +1948,7 @@ func TestIlsDecoderRootMismatchReportedOnce(t *testing.T) {
 			}
 			d := NewDecoder(rd, WithSkipErrors(func(error) bool { return true }), WithBufferSize(bs))
 			var got []string
-			for i := 0; i < 6; i++ {
+			for range 6 {
 				var v rec
 				err := d.Decode(&v)
 				if err == io.EOF {

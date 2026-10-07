@@ -776,7 +776,7 @@ func TestIltValueSurvivesFailingParses(t *testing.T) {
 		snaps = append(snaps, string(js))
 	}
 	bigDoc := iltValHostBig()
-	for round := 0; round < 40; round++ {
+	for round := range 40 {
 		for _, in := range []string{
 			`{"pre":1,"v":{"a":[1,2,` + strings.Repeat("x", round*3),
 			`{"pre":1,"v":{"a":[1,2,3]},"mid":5}`,
@@ -818,7 +818,7 @@ func iltProbe(t *testing.T, body func()) {
 		return
 	}
 	var keep []string
-	for _, l := range strings.Split(string(out), "\n") {
+	for l := range strings.SplitSeq(string(out), "\n") {
 		if strings.HasPrefix(l, "fatal error") || strings.HasPrefix(l, "panic") || strings.HasPrefix(l, "[signal") ||
 			strings.Contains(l, "/vbind/") || strings.Contains(l, "/decode/bind/") && !strings.Contains(l, "_test.go") {
 			keep = append(keep, strings.TrimSpace(l))
@@ -1115,7 +1115,7 @@ func TestIltUVChildValues(t *testing.T) {
 	defer debug.SetGCPercent(debug.SetGCPercent(10))
 	var docs []string
 	var els []string
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		switch i % 5 {
 		case 0:
 			els = append(els, fmt.Sprintf(`{"B":%d,"C":"c%d","M":{"x":%d}}`, i, i, i))
@@ -1175,7 +1175,7 @@ func TestIltUVOfValueFieldFromUnmarshal(t *testing.T) {
 	p, _ := NewParser[host]()
 	d, _ := NewParser[iltChild]()
 	var kept []iltRetained
-	for round := 0; round < 60; round++ {
+	for round := range 60 {
 		in := fmt.Sprintf(`{"n":%d,"v":{"B":%d,"C":"c%d","M":{%s}}}`, round, round, round, iltRepeat(round%45, func(j int) string { return fmt.Sprintf(`"k%d":%d`, j, j) }))
 		if round%4 == 3 {
 			in = fmt.Sprintf(`{"n":%d,"v":{"B":"bad","M":{"a":1}}}`, round)

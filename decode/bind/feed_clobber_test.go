@@ -42,13 +42,7 @@ func (r *clobberReader) Read(p []byte) (int, error) {
 	if r.pos >= len(r.data) {
 		return 0, io.EOF
 	}
-	n := r.chunk
-	if n > len(p) {
-		n = len(p)
-	}
-	if n > len(r.data)-r.pos {
-		n = len(r.data) - r.pos
-	}
+	n := min(min(r.chunk, len(p)), len(r.data)-r.pos)
 	copy(p, r.data[r.pos:r.pos+n])
 	r.pos += n
 	if r.pos >= len(r.data) {
@@ -65,7 +59,7 @@ func (r *clobberReader) Read(p []byte) (int, error) {
 func TestFeedDeferredStackClobber(t *testing.T) {
 	doc := `{"u":{"a":[1,2,{"b":"c"}]},"i":1}`
 	for _, chunk := range []int{1, 2, 3, 7, 16, 31, 32, 33, 63, 64, 65} {
-		for rep := 0; rep < 200; rep++ {
+		for rep := range 200 {
 			p, err := NewParser[feedUnmValue]()
 			if err != nil {
 				t.Fatalf("NewParser: %v", err)

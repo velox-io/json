@@ -97,7 +97,7 @@ func TestDualSharedRoot_PhysicalLayout(t *testing.T) {
 
 	// Exactly one begin inside the published span: no second root, no hop.
 	span := int(desc.End)
-	for i := 0; i < span; i++ {
+	for i := range span {
 		if i == 0 {
 			continue
 		}

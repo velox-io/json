@@ -634,7 +634,7 @@ func TestOverflow_FloatStoresInf(t *testing.T) {
 		{"long_mantissa", strings.Repeat("7", 3000) + "e2600"},
 	}
 
-	check := func(t *testing.T, label string, got, want interface{}, gotErr, wantErr error) {
+	check := func(t *testing.T, label string, got, want any, gotErr, wantErr error) {
 		t.Helper()
 		if (gotErr != nil) != (wantErr != nil) {
 			t.Errorf("%s: err=%v, stdlib err=%v", label, gotErr, wantErr)

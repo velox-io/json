@@ -27,8 +27,8 @@ func TestProbeSwissMapSlotSizeMarksIndirectElem(t *testing.T) {
 	// Exactly at the limit: still inline, still probed.
 	type atLimit struct{ P [MapMaxElemBytes]byte }
 
-	slotSize, indirect, ok := ProbeSwissMapSlotSize(reflect.TypeOf(map[string]overLimit{}),
-		reflect.TypeOf(overLimit{}).Size())
+	slotSize, indirect, ok := ProbeSwissMapSlotSize(reflect.TypeFor[map[string]overLimit](),
+		reflect.TypeFor[overLimit]().Size())
 	if !ok {
 		t.Fatal("probe declined a map whose element Go stores behind a pointer; the slot striding is unchanged and the indirection is reported to the consumer")
 	}
@@ -39,8 +39,8 @@ func TestProbeSwissMapSlotSizeMarksIndirectElem(t *testing.T) {
 		t.Errorf("probe reported stride %d for an indirect element; it must be a nonzero multiple of 8, the size of the pointer slot", slotSize)
 	}
 
-	slotSize, indirect, ok = ProbeSwissMapSlotSize(reflect.TypeOf(map[string]atLimit{}),
-		reflect.TypeOf(atLimit{}).Size())
+	slotSize, indirect, ok = ProbeSwissMapSlotSize(reflect.TypeFor[map[string]atLimit](),
+		reflect.TypeFor[atLimit]().Size())
 	if !ok {
 		t.Fatal("probe declined an element exactly at the limit; it is still stored inline, so the fast path must remain available")
 	}
@@ -81,11 +81,11 @@ func TestMapAssignFastStrMatchesGenericAtLimit(t *testing.T) {
 		N   int64
 		Pad [MapMaxElemBytes - 8]byte
 	}
-	if MapValueIsIndirect(reflect.TypeOf(atLimit{}).Size()) {
+	if MapValueIsIndirect(reflect.TypeFor[atLimit]().Size()) {
 		t.Fatalf("atLimit is %d bytes; the test type must sit exactly at the inline limit",
-			reflect.TypeOf(atLimit{}).Size())
+			reflect.TypeFor[atLimit]().Size())
 	}
-	mapType := reflect.TypeOf(map[string]atLimit{})
+	mapType := reflect.TypeFor[map[string]atLimit]()
 	rt := TypePtr(mapType)
 
 	viaFast := make(map[string]atLimit)

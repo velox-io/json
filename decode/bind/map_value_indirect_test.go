@@ -98,7 +98,7 @@ func mapIndirectCases() []mapIndirectCase {
 			// Baseline: no deferred type anywhere, so no indirection. Present so a
 			// fix that over-applies the redirect shows up as a failure here.
 			name: "int",
-			typ:  reflect.TypeOf(map[string]int{}),
+			typ:  reflect.TypeFor[map[string]int](),
 			src:  `{"k":7}`,
 			want: "7",
 			bind: func(t *testing.T, src []byte, viaTape bool) (string, error) {
@@ -111,7 +111,7 @@ func mapIndirectCases() []mapIndirectCase {
 		},
 		{
 			name: "Value",
-			typ:  reflect.TypeOf(map[string]value.Value{}),
+			typ:  reflect.TypeFor[map[string]value.Value](),
 			src:  `{"k":{"a":7}}`,
 			want: "len=1 a=7",
 			bind: func(t *testing.T, src []byte, viaTape bool) (string, error) {
@@ -124,7 +124,7 @@ func mapIndirectCases() []mapIndirectCase {
 		},
 		{
 			name: "struct reaching Value",
-			typ:  reflect.TypeOf(map[string]mapIndirectElem{}),
+			typ:  reflect.TypeFor[map[string]mapIndirectElem](),
 			src:  `{"k":{"v":{"a":7}}}`,
 			want: "len=1 a=7",
 			bind: func(t *testing.T, src []byte, viaTape bool) (string, error) {
@@ -141,7 +141,7 @@ func mapIndirectCases() []mapIndirectCase {
 			// that says the aggregate marking works at all. Arrays of two or more
 			// are a separate defect, pinned by TestMapValueArrayElement below.
 			name: "array of Value",
-			typ:  reflect.TypeOf(map[string][1]value.Value{}),
+			typ:  reflect.TypeFor[map[string][1]value.Value](),
 			src:  `{"k":[{"a":7}]}`,
 			want: "[len=1 a=7]",
 			bind: func(t *testing.T, src []byte, viaTape bool) (string, error) {
@@ -158,7 +158,7 @@ func mapIndirectCases() []mapIndirectCase {
 			// drain dereferencing it yields a header built from unrelated bytes;
 			// the observed symptom is a length far larger than the input's.
 			name: "slice of Value",
-			typ:  reflect.TypeOf(map[string][]value.Value{}),
+			typ:  reflect.TypeFor[map[string][]value.Value](),
 			src:  `{"k":[{"a":7}]}`,
 			want: "len=1 [len=1 a=7]",
 			bind: func(t *testing.T, src []byte, viaTape bool) (string, error) {
@@ -176,7 +176,7 @@ func mapIndirectCases() []mapIndirectCase {
 		},
 		{
 			name: "slice of struct reaching Value",
-			typ:  reflect.TypeOf(map[string][]mapIndirectElem{}),
+			typ:  reflect.TypeFor[map[string][]mapIndirectElem](),
 			src:  `{"k":[{"v":{"a":7}}]}`,
 			want: "len=1 [len=1 a=7]",
 			bind: func(t *testing.T, src []byte, viaTape bool) (string, error) {
@@ -196,7 +196,7 @@ func mapIndirectCases() []mapIndirectCase {
 			// pointer to storage holding one; the observed symptom is an empty
 			// inner map.
 			name: "map of Value",
-			typ:  reflect.TypeOf(map[string]map[string]value.Value{}),
+			typ:  reflect.TypeFor[map[string]map[string]value.Value](),
 			src:  `{"k":{"inner":{"a":7}}}`,
 			want: "len=1 [len=1 a=7]",
 			bind: func(t *testing.T, src []byte, viaTape bool) (string, error) {
@@ -216,7 +216,7 @@ func mapIndirectCases() []mapIndirectCase {
 			// indirection either. Pins that the bug is about reaching a deferred
 			// type, not about nesting.
 			name: "map of int",
-			typ:  reflect.TypeOf(map[string]map[string]int{}),
+			typ:  reflect.TypeFor[map[string]map[string]int](),
 			src:  `{"k":{"inner":7}}`,
 			want: "len=1 [7]",
 			bind: func(t *testing.T, src []byte, viaTape bool) (string, error) {
@@ -236,7 +236,7 @@ func mapIndirectCases() []mapIndirectCase {
 			// scannable pointee storage. Present so a fix cannot "solve" the matrix
 			// by redirecting everything.
 			name: "pointer to Value",
-			typ:  reflect.TypeOf(map[string]*value.Value{}),
+			typ:  reflect.TypeFor[map[string]*value.Value](),
 			src:  `{"k":{"a":7}}`,
 			want: "len=1 a=7",
 			bind: func(t *testing.T, src []byte, viaTape bool) (string, error) {
@@ -253,7 +253,7 @@ func mapIndirectCases() []mapIndirectCase {
 		},
 		{
 			name:            "RawMessage",
-			typ:             reflect.TypeOf(map[string]json.RawMessage{}),
+			typ:             reflect.TypeFor[map[string]json.RawMessage](),
 			src:             `{"k":{"a":7}}`,
 			want:            `{"a":7}`,
 			tapeUnsupported: true,
@@ -267,7 +267,7 @@ func mapIndirectCases() []mapIndirectCase {
 		},
 		{
 			name:            "slice of RawMessage",
-			typ:             reflect.TypeOf(map[string][]json.RawMessage{}),
+			typ:             reflect.TypeFor[map[string][]json.RawMessage](),
 			src:             `{"k":[{"a":7}]}`,
 			want:            `len=1 [{"a":7}]`,
 			tapeUnsupported: true,

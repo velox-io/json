@@ -3,6 +3,7 @@ package bind
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"unsafe"
 
 	"github.com/velox-io/json/gort"
@@ -60,9 +61,9 @@ func (p *Parser) popStreamScope(idx int) {
 // each layer's serveStreamBatch drains its own array, and the target
 // scope's Item.Decode surfaces it via IsBreak.
 func (p *Parser) peekAnyScopeBreak() *stream.BreakSignal {
-	for i := len(p.streamScopes) - 1; i >= 0; i-- {
-		if p.streamScopes[i].breakSig != nil {
-			return p.streamScopes[i].breakSig
+	for _, v := range slices.Backward(p.streamScopes) {
+		if v.breakSig != nil {
+			return v.breakSig
 		}
 	}
 	return nil

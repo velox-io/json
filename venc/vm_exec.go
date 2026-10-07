@@ -30,11 +30,8 @@ func (es *encodeState) writeKeySpace(ctx *VjExecCtx) {
 // from VMState at exit: zero on a clean run, the held frame count on an error
 // or panic unwind.
 func clearStackFrames(ctx *VjExecCtx) {
-	depth := int(vmstateGetStackDepth(ctx.VMState))
-	if depth > VJ_MAX_STACK_DEPTH {
-		depth = VJ_MAX_STACK_DEPTH
-	}
-	for i := 0; i < depth; i++ {
+	depth := min(int(vmstateGetStackDepth(ctx.VMState)), VJ_MAX_STACK_DEPTH)
+	for i := range depth {
 		f := &ctx.Stack[i]
 		f.RetBase = nil
 		f.Payload = [20]byte{}

@@ -164,7 +164,7 @@ func BuildLargePayload() LargePayload {
 	}
 
 	p.Index = make(map[string]int, 200)
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		p.Index[fmt.Sprintf("key_%04d", i)] = i
 	}
 

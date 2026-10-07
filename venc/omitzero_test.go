@@ -108,10 +108,7 @@ func TestOmitZeroNativeBufFullMidField(t *testing.T) {
 	wantLen := len(want)
 
 	ti := EncTypeInfoOf(reflect.TypeFor[S]())
-	lo := wantLen / 2
-	if lo < 10 {
-		lo = 10
-	}
+	lo := max(wantLen/2, 10)
 	for cap := lo; cap <= wantLen+4; cap++ {
 		es := acquireEncodeState()
 		es.applyOptions(vopt.BufSize(cap))

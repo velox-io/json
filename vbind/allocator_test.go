@@ -3,6 +3,7 @@ package vbind
 import (
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"unsafe"
@@ -673,12 +674,7 @@ func TestServeSliceGrowRecursiveTreeUsesSmallerBatch(t *testing.T) {
 // retainedHas reports whether ptr is staged in retained. Staging covers every
 // backing native may carve from, so tests assert membership, not an exact count.
 func retainedHas(a *Allocator, ptr unsafe.Pointer) bool {
-	for _, p := range a.retained {
-		if p == ptr {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(a.retained, ptr)
 }
 
 // TestReleaseScopedKeepsLiveBackingsStaged pins the invariant that makes a

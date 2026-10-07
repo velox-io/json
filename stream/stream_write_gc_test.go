@@ -439,7 +439,7 @@ func TestStreamWriteIndentDepthLeak(t *testing.T) {
 	// Every element sits at a fixed nesting depth, so the deepest line must
 	// not grow with the element count.
 	deepest := 0
-	for _, line := range bytes.Split(got, []byte("\n")) {
+	for line := range bytes.SplitSeq(got, []byte("\n")) {
 		n := len(line) - len(bytes.TrimLeft(line, " "))
 		deepest = max(deepest, n/2)
 	}

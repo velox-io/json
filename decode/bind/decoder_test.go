@@ -185,7 +185,7 @@ func TestDecoderMore(t *testing.T) {
 	t.Run("reads on demand", func(t *testing.T) {
 		for _, chunk := range []int{1, 3, 4096} {
 			d := NewDecoder(&chunkReader{data: []byte(`1 2 3`), chunk: chunk})
-			for i := 0; i < 3; i++ {
+			for i := range 3 {
 				if !d.More() {
 					t.Fatalf("chunk=%d: More=false before value %d", chunk, i)
 				}
@@ -333,7 +333,7 @@ func TestDecoderSkipErrors(t *testing.T) {
 	t.Run("all bad", func(t *testing.T) {
 		data := []byte("{\n{\"a\":\n[")
 		d := NewDecoder(&chunkReader{data: data, chunk: 1}, WithSkipErrors(skipAll))
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			var v feedInner
 			if err := d.Decode(&v); err == nil {
 				t.Fatalf("line %d unexpectedly succeeded", i)
@@ -450,7 +450,7 @@ func TestDecoderEOF(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		d := NewDecoder(&chunkReader{data: nil, chunk: 1})
 		var v feedDoc
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			if err := d.Decode(&v); err != io.EOF {
 				t.Fatalf("decode %d: %v want io.EOF", i, err)
 			}
@@ -794,13 +794,13 @@ func TestDecoderManyValuesGC(t *testing.T) {
 	const n = 200
 	var sb strings.Builder
 	want := make([]feedInner, 0, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		fmt.Fprintf(&sb, "{\"a\":%d,\"b\":\"v%d\",\"c\":%d.5}\n", i, i, i)
 		want = append(want, feedInner{A: i, B: "v" + strconv.Itoa(i), C: float64(i) + 0.5})
 	}
 	for _, chunk := range []int{1, 13, 4096} {
 		d := NewDecoder(&chunkReader{data: []byte(sb.String()), chunk: chunk})
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if i%20 == 0 {
 				runtime.GC()
 			}
@@ -855,7 +855,7 @@ func TestDecoderErrNilAfterEOF(t *testing.T) {
 	if err := d.Decode(&v); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := d.Decode(&v); err != io.EOF {
 			t.Fatalf("decode %d: %v want io.EOF", i, err)
 		}

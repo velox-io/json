@@ -166,7 +166,7 @@ func TestDeepCopy_CyclicPointer(t *testing.T) {
 	// Walk forward 10 steps (5 elements, twice around). Must terminate and
 	// return to start, proving the cycle is preserved rather than flattened.
 	cur := dst
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		cur = cur.Next
 		if cur == nil {
 			t.Fatalf("nil at step %d: cycle broken", i)
@@ -178,7 +178,7 @@ func TestDeepCopy_CyclicPointer(t *testing.T) {
 
 	// Walk backward 10 steps.
 	cur = dst
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		cur = cur.Prev
 		if cur == nil {
 			t.Fatalf("nil at step %d: cycle broken", i)

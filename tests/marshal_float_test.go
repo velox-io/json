@@ -400,7 +400,7 @@ func TestNativeFloat64_Random(t *testing.T) {
 	const N = 10000
 
 	var mismatches int
-	for i := 0; i < N; i++ {
+	for i := range N {
 		bits := rng.Uint64()
 		val := math.Float64frombits(bits)
 		if math.IsNaN(val) || math.IsInf(val, 0) {
@@ -430,7 +430,7 @@ func TestNativeFloat32_Random(t *testing.T) {
 	const N = 10000
 
 	var mismatches int
-	for i := 0; i < N; i++ {
+	for i := range N {
 		bits := rng.Uint32()
 		val := math.Float32frombits(bits)
 		if float64(val) != float64(val) || math.IsInf(float64(val), 0) {
@@ -666,7 +666,7 @@ func TestNativeFloat_ValidJSON(t *testing.T) {
 		if err != nil {
 			t.Fatalf("vjson.Marshal(%v) error: %v", val, err)
 		}
-		var m map[string]interface{}
+		var m map[string]any
 		if err := json.Unmarshal(got, &m); err != nil {
 			t.Errorf("output for %v is not valid JSON: %s\n  error: %v", val, got, err)
 		}

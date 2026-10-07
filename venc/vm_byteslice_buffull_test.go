@@ -53,10 +53,7 @@ func TestByteSliceBufFull_KeyDuplication(t *testing.T) {
 
 		// Walk buffer capacities from just-too-small up to exact fit.
 		// The bug triggers when cap is enough for key but not base64.
-		lo := wantLen / 2
-		if lo < 10 {
-			lo = 10
-		}
+		lo := max(wantLen/2, 10)
 		for cap := lo; cap <= wantLen+4; cap++ {
 			es := acquireEncodeState()
 			es.applyOptions(vopt.BufSize(cap))

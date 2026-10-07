@@ -59,10 +59,7 @@ type scopeViews struct {
 // cursor slot at the last yield holds the next structural's source offset;
 // the scan sentinel entries hold srcLen.
 func remainingSource(m *ndec.BindMachine, srcLen int) int {
-	off := int(*(*uint32)(m.CursorPair()[0]))
-	if off > srcLen {
-		off = srcLen
-	}
+	off := min(int(*(*uint32)(m.CursorPair()[0])), srcLen)
 	return srcLen - off
 }
 

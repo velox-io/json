@@ -49,7 +49,7 @@ type feedStreamRichHost struct {
 func feedStreamRichJSON(n int) []byte {
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			b.WriteByte(',')
 		}
@@ -185,12 +185,12 @@ type feedStreamNestedHost struct {
 func feedStreamNestedJSON(outer, inner int) []byte {
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
-	for i := 0; i < outer; i++ {
+	for i := range outer {
 		if i > 0 {
 			b.WriteByte(',')
 		}
 		fmt.Fprintf(&b, `{"id":"o-%d","inner":[`, i)
-		for j := 0; j < inner; j++ {
+		for j := range inner {
 			if j > 0 {
 				b.WriteByte(',')
 			}
@@ -337,7 +337,7 @@ type feedStreamNestedDefHost struct {
 func TestFeedStreamNonLeafDeferred(t *testing.T) {
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		if i > 0 {
 			b.WriteByte(',')
 		}
@@ -493,7 +493,7 @@ func TestFeedStreamScopedBounded(t *testing.T) {
 	const n = 2000
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			b.WriteByte(',')
 		}
@@ -541,7 +541,7 @@ func TestFeedStreamBreakAndSkip(t *testing.T) {
 	const n = 40
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			b.WriteByte(',')
 		}

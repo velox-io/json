@@ -152,7 +152,7 @@ func TestUnmarshalPaddedRejectsCorruptTail(t *testing.T) {
 	}
 	n := len(padded)
 	tail := padded[:n+ndec.BindScanPad] // window over the sentinel region
-	for i := 0; i < ndec.BindScanPad; i++ {
+	for i := range ndec.BindScanPad {
 		saved := tail[n+i]
 		tail[n+i] = 0x21
 		var y struct {

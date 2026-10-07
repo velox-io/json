@@ -62,7 +62,7 @@ func ilDecodeSeq(data string, rd io.Reader, bufSize int) []string {
 	}
 	d := NewDecoder(rd, opts...)
 	var out []string
-	for i := 0; i < 32; i++ {
+	for range 32 {
 		var v feedInner
 		err := d.Decode(&v)
 		switch {
@@ -135,7 +135,7 @@ func TestInterleaveDecoderSkipResyncIndependentOfWindow(t *testing.T) {
 func TestInterleaveDecoderSkipNoPhantomError(t *testing.T) {
 	for _, bad := range []string{`7`, `"s"`, `[1]`, `{"a":"x"}`, `{"a":1,}`, `tru`} {
 		for _, bs := range []int{8, 16, 33, 64, 100, 128} {
-			for n := 0; n < 40; n++ {
+			for n := range 40 {
 				in := strings.Repeat("{\"a\":1,\"b\":\"xxxxxxxxxxxxxxxx\"}\n", n%7+1) + "{\"a\":2}\n" +
 					strings.Repeat(" ", n) + bad + "\n"
 				got := ilDecodeSeq(in, bytes.NewReader([]byte(in)), bs)

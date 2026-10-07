@@ -426,7 +426,7 @@ func TestParsePaddedRejectsCorruptTail(t *testing.T) {
 	}
 	n := len(padded)
 	tail := padded[:n+PaddingSize] // window over the sentinel region
-	for i := 0; i < PaddingSize; i++ {
+	for i := range PaddingSize {
 		saved := tail[n+i]
 		tail[n+i] = 0x21
 		if _, err := ParsePadded(padded); err == nil {

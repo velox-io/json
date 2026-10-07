@@ -475,7 +475,7 @@ func ilBigShapeDoc(n int) string {
 		fmt.Fprintf(&sb, "%d", i)
 	}
 	sb.WriteString(`],"SI":[`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
@@ -489,7 +489,7 @@ func ilBigShapeDoc(n int) string {
 		fmt.Fprintf(&sb, `"k%d":%d`, i, i)
 	}
 	sb.WriteString(`},"MS":{`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
@@ -503,14 +503,14 @@ func ilBigShapeDoc(n int) string {
 		fmt.Fprintf(&sb, `"str%d"`, i)
 	}
 	sb.WriteString(`],"PS":[`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
 		fmt.Fprintf(&sb, `{"B":%d}`, i)
 	}
 	sb.WriteString(`],"TS":[`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			sb.WriteByte(',')
 		}

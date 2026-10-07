@@ -222,7 +222,7 @@ func (g *stressGen) appendItem(b []byte) []byte {
 		nitems := g.rand.Intn(4)
 		g.agg.sumItems += int64(nitems)
 		b = append(b, `{"items":[`...)
-		for i := 0; i < nitems; i++ {
+		for i := range nitems {
 			if i > 0 {
 				b = append(b, ',')
 			}
@@ -255,7 +255,7 @@ func (g *stressGen) appendItem(b []byte) []byte {
 		ntags := g.rand.Intn(4)
 		g.agg.sumTags += int64(ntags)
 		b = append(b, '[')
-		for i := 0; i < ntags; i++ {
+		for i := range ntags {
 			if i > 0 {
 				b = append(b, ',')
 			}
@@ -432,7 +432,7 @@ func assertProvEmpty(t *testing.T, m *ndec.BindMachine) {
 	if c := m.StrProvCount(); c != 0 {
 		t.Fatalf("provenance count after run: %d", c)
 	}
-	for i := 0; i < ndec.BindStrProvMax; i++ {
+	for i := range ndec.BindStrProvMax {
 		if base := strProvEntryBase(m, i); base != nil {
 			t.Fatalf("provenance entry %d above count 0 kept base %p", i, base)
 		}

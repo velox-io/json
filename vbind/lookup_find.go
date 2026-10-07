@@ -309,7 +309,7 @@ func tableFind(blob unsafe.Pointer, p *byte, klen uintptr) int {
 
 func tableHash(p *byte, klen uintptr) uint64 {
 	h := uint64(0xcbf29ce484222325)
-	for i := uintptr(0); i < klen; i++ {
+	for i := range klen {
 		h ^= uint64(*(*byte)(unsafe.Add(unsafe.Pointer(p), i)))
 		h *= 0x100000001b3
 	}

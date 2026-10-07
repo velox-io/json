@@ -73,9 +73,9 @@ func ilpMutants(doc string) []string {
 	const rep = "{}[]\",:\\ 0-.etnx"
 	var out []string
 	b := []byte(doc)
-	for p := 0; p < len(b); p++ {
+	for p := range b {
 		out = append(out, string(b[:p]), string(b[:p])+string(b[p+1:]))
-		for k := 0; k < 4; k++ {
+		for k := range 4 {
 			c := rep[(p*7+k*3)%len(rep)]
 			if c != b[p] {
 				out = append(out, string(b[:p])+string(c)+string(b[p+1:]))
@@ -141,7 +141,7 @@ func ilpHistory[T any](t *testing.T, good []string) {
 	// it, with unrelated good calls interleaved between all of them.
 	first := map[string]ilpOut{}
 	var bad []string
-	for round := 0; round < 2; round++ {
+	for round := range 2 {
 		for i, m := range mutants {
 			oi := i % len(ilpOpts)
 			if oi == 6 {
@@ -207,7 +207,7 @@ func TestIlpOptionsDoNotStick(t *testing.T) {
 		"zcfalse": {}, "all": {true, true, true}, "joined": {number: true, reject: true}, "override": {},
 	}
 	rng := rand.New(rand.NewSource(1))
-	for round := 0; round < 40; round++ {
+	for round := range 40 {
 		oi := rng.Intn(len(opts))
 		o, e := opts[oi].o, want[opts[oi].name]
 		// A failing call under random options right before the checked one.
@@ -290,7 +290,7 @@ func TestIlpPaddedErrorsBetweenGoodCalls(t *testing.T) {
 		{"empty", func() []byte { return vjson.Pad(nil)[:0] }},
 		{"nil", func() []byte { return nil }},
 	}
-	for round := 0; round < 3; round++ {
+	for round := range 3 {
 		for _, b := range bad {
 			var d ilpDoc
 			err := vjson.UnmarshalPadded(b.buf(), &d)
@@ -354,7 +354,7 @@ func TestIlpInvalidTargetsBetweenGoodCalls(t *testing.T) {
 		}},
 	}
 	ok("start")
-	for round := 0; round < 3; round++ {
+	for round := range 3 {
 		for _, s := range steps {
 			err := func() (err error) {
 				defer func() {
@@ -502,25 +502,25 @@ func TestIlpRetainMap(t *testing.T) {
 func ilpBig(nInts int, strLen int, tail string) string {
 	var sb strings.Builder
 	sb.WriteString(`{"S":"`)
-	for i := 0; i < strLen; i++ {
+	for range strLen {
 		sb.WriteString(`ab\n`)
 	}
 	sb.WriteString(`","X":[`)
-	for i := 0; i < nInts; i++ {
+	for i := range nInts {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
 		fmt.Fprintf(&sb, "%d", i)
 	}
 	sb.WriteString(`],"M":{`)
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
 		fmt.Fprintf(&sb, `"key%d\n":%d`, i, i)
 	}
 	sb.WriteString(`},"SI":[`)
-	for i := 0; i < 300; i++ {
+	for i := range 300 {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
@@ -602,7 +602,7 @@ func TestIlpValueRetention(t *testing.T) {
 		step int
 	}
 	var keep []held
-	for step := 0; step < 90; step++ {
+	for step := range 90 {
 		in := docs[step%len(docs)]
 		// A failing parse and a failing walk first.
 		for _, m := range ilpMutants(in)[step%7 : step%7+12] {
@@ -721,7 +721,7 @@ func TestIlpConcurrentInterleave(t *testing.T) {
 	// Serial oracle: two passes in different orders, unstable entries dropped.
 	type key struct{ c, i, o int }
 	oracle := map[key]ilpOut{}
-	for pass := 0; pass < 2; pass++ {
+	for pass := range 2 {
 		for ci, c := range cases {
 			order := rand.New(rand.NewSource(int64(pass))).Perm(len(c.ins))
 			for _, ii := range order {
@@ -766,12 +766,12 @@ func TestIlpConcurrentInterleave(t *testing.T) {
 		}
 		mu.Unlock()
 	}
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
 			rng := rand.New(rand.NewSource(int64(w) + 100))
-			for n := 0; n < iters; n++ {
+			for n := range iters {
 				k := keys[rng.Intn(len(keys))]
 				c := cases[k.c]
 				want := oracle[k]
@@ -804,13 +804,13 @@ func TestIlpConcurrentKeptResults(t *testing.T) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var failures []string
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
 			rng := rand.New(rand.NewSource(int64(w) + 7))
 			var kept []ilpKept[ilpDoc]
-			for n := 0; n < 1500; n++ {
+			for n := range 1500 {
 				in := inputs[rng.Intn(len(inputs))]
 				v := new(ilpDoc)
 				var opts []vjson.Option
@@ -863,7 +863,7 @@ func TestIlpConcurrentDecoders(t *testing.T) {
 	run := func(seed int64) (outs []string) {
 		rng := rand.New(rand.NewSource(seed))
 		var sb bytes.Buffer
-		for i := 0; i < 400; i++ {
+		for range 400 {
 			sb.WriteString(oneLine[rng.Intn(len(oneLine))])
 			sb.WriteByte('\n')
 		}
@@ -887,11 +887,11 @@ func TestIlpConcurrentDecoders(t *testing.T) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var failures []string
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			for r := 0; r < 4; r++ {
+			for r := range 4 {
 				seed := int64(w%4*10 + r)
 				want := run(seed)
 				got := run(seed)
@@ -1026,7 +1026,7 @@ func TestIlpZeroCopyValueRejectionThenGood(t *testing.T) {
 	var want ilpVDoc
 	_ = json.Unmarshal(src, &want)
 	wantJS, _ := json.Marshal(want)
-	for round := 0; round < 5; round++ {
+	for round := range 5 {
 		zc, err := vjson.ParsePadded(vjson.Pad(append([]byte(nil), src...)), vjson.ZeroCopy(true))
 		if err != nil {
 			t.Fatalf("round %d: Parse zero-copy: %v", round, err)
@@ -1074,35 +1074,35 @@ type ilpPtrDoc struct {
 func ilpPtrDocInput(n int) string {
 	var sb strings.Builder
 	sb.WriteString(`{"MP":{`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
 		fmt.Fprintf(&sb, `"p%d\n":{"B":%d,"C":"c%d\n","D":[%d.5]}`, i, i, i, i)
 	}
 	sb.WriteString(`},"MS":{`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
 		fmt.Fprintf(&sb, `"s%d":["a%d\n","b%d"]`, i, i, i)
 	}
 	sb.WriteString(`},"MI":{`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
 		fmt.Fprintf(&sb, `"%d":{"B":%d,"C":"i%d\n"}`, i, i, i)
 	}
 	sb.WriteString(`},"MA":{`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
 		fmt.Fprintf(&sb, `"a%d":{"k":["v%d\n",%d,null]}`, i, i, i)
 	}
 	sb.WriteString(`},"PS":[`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
@@ -1145,15 +1145,15 @@ func TestIlpConcurrentGCStress(t *testing.T) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var failures []string
-	for w := 0; w < 4; w++ {
+	for w := range 4 {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
 			rng := rand.New(rand.NewSource(int64(w) + 50))
 			var keep []*ilpPtrDoc
 			var keepIdx []int
-			for n := 0; n < 250; n++ {
-				for k := 0; k < 3; k++ {
+			for range 250 {
+				for range 3 {
 					m := mutants[rng.Intn(len(mutants))]
 					var junk ilpPtrDoc
 					_ = vjson.Unmarshal([]byte(m), &junk, ilpOpts[rng.Intn(6)]...)

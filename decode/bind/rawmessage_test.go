@@ -279,7 +279,7 @@ func TestBindRawMessage_FlushDrain(t *testing.T) {
 	// fills multiple times.
 	var rawItems []byte
 	rawItems = append(rawItems, '[')
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		if i > 0 {
 			rawItems = append(rawItems, ',')
 		}

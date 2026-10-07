@@ -1,3 +1,10 @@
+# Apply go fix modernizers, except omitzero: the repo's omitempty tags are
+# deliberate encoding semantics, and omitzero changes which zero values are
+# elided (e.g. 0-length slices after preallocation), so it must not be
+# rewritten mechanically.
+fix:
+	go fix -omitzero=false ./...
+
 lint:
 	golangci-lint run --fix
 

@@ -114,17 +114,17 @@ func TestMapValueOverElemLimit_StringField(t *testing.T) {
 		// get returns the published Name for the sole key.
 		get func(any) string
 	}{
-		{"128B inline", reflect.TypeOf(map[string]mapBoundaryUnder{}), func(d any) string {
+		{"128B inline", reflect.TypeFor[map[string]mapBoundaryUnder](), func(d any) string {
 			m := *d.(*map[string]mapBoundaryUnder)
 			e := m["k"]
 			return e.Name
 		}},
-		{"136B indirect", reflect.TypeOf(map[string]mapBoundaryOver{}), func(d any) string {
+		{"136B indirect", reflect.TypeFor[map[string]mapBoundaryOver](), func(d any) string {
 			m := *d.(*map[string]mapBoundaryOver)
 			e := m["k"]
 			return e.Name
 		}},
-		{"520B indirect", reflect.TypeOf(map[string]mapBoundaryBig{}), func(d any) string {
+		{"520B indirect", reflect.TypeFor[map[string]mapBoundaryBig](), func(d any) string {
 			m := *d.(*map[string]mapBoundaryBig)
 			e := m["k"]
 			return e.Name

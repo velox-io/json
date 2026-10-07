@@ -42,7 +42,7 @@ func init() {
 // then reads a value word as a key.
 func nestedUnknown(depth int) string {
 	var sb strings.Builder
-	for i := 0; i < depth; i++ {
+	for i := range depth {
 		fmt.Fprintf(&sb, `{"l%d":`, i)
 	}
 	sb.WriteString(`"leaf"`)
@@ -80,7 +80,7 @@ func TestContainerJump_StepsExactlyPastSubtree(t *testing.T) {
 				t.Fatal(`Get("big") invalid`)
 			}
 			probe := big
-			for i := 0; i < depth; i++ {
+			for i := range depth {
 				next := probe.Get(fmt.Sprintf("l%d", i))
 				if !next.Valid() {
 					t.Fatalf("level %d missing: %s", i, big.String())

@@ -196,7 +196,6 @@ func TestInterpElementProtocol(t *testing.T) {
 		}{E: []leaf{}, N: [][]int{{}, {1}}, Z: []any{}}},
 	}
 	for _, c := range cases {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			assertJSONParity(t, c.v)
 		})

@@ -265,7 +265,7 @@ func TestAttachKindofsForStruct_MultipleFields(t *testing.T) {
 	rootIdx := tt.Root
 	rootType := &tt.Types[rootIdx]
 	firstFieldIdx := rootType.StructFirstFieldIndex(&tt.Fields[0])
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		f := &tt.Fields[firstFieldIdx+uint32(i)]
 		if !FieldHasKindof(f) {
 			t.Errorf("field %d missing TagKindof flag", i)

@@ -1,6 +1,7 @@
 package bind
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/velox-io/json/internal/valueabi"
@@ -53,10 +54,8 @@ func assertTapeHasJump(t *testing.T, v value.Value) {
 		t.Fatal("Value doc = nil")
 	}
 	snapshot := append([]uint64(nil), desc.Doc.Tape...)
-	for _, w := range snapshot {
-		if valueabi.IsSeam(w) {
-			return
-		}
+	if slices.ContainsFunc(snapshot, valueabi.IsSeam) {
+		return
 	}
 	t.Fatal("no seam word in tape; test is not exercising a seam-linked tape")
 }

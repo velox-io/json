@@ -146,10 +146,7 @@ func (w *walker) run(n int) bool {
 	pop := func(beg, end uint64) {
 		if w.tape != nil {
 			s := curTidx
-			c := curCnt & 0x7FFFFFFF
-			if c > maxSpan {
-				c = maxSpan
-			}
+			c := min(curCnt&0x7FFFFFFF, maxSpan)
 			e := uint64(w.tp)
 			w.tape[s] = beg | e | uint64(c)<<32
 			w.put(end | uint64(s))

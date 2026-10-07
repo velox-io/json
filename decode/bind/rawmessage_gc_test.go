@@ -45,7 +45,7 @@ func TestRawMessageGC_RootStructField(t *testing.T) {
 		t.Fatal(err)
 	}
 	exp := rawMsgGCExpect{want: want}
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		var x X
 		if err := p.Unmarshal(payload, &x); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
@@ -70,7 +70,7 @@ func TestRawMessageGC_PointerRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	exp := rawMsgGCExpect{want: want}
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		var x *X
 		if err := p.Unmarshal(payload, &x); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
@@ -97,7 +97,7 @@ func TestRawMessageGC_SliceElement(t *testing.T) {
 	for i, w := range wants {
 		exps[i] = rawMsgGCExpect{want: w}
 	}
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		var x X
 		if err := p.Unmarshal(payload, &x); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
@@ -122,7 +122,7 @@ func TestRawMessageGC_MapValue(t *testing.T) {
 		"a": `{"x":1}`, "b": `[1,2]`, "c": `"hi"`, "d": `42`, "e": `null`,
 	}
 	payload := []byte(`{"a":{"x":1},"b":[1,2],"c":"hi","d":42,"e":null}`)
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		var got map[string]json.RawMessage
 		if err := Unmarshal(payload, &got); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
@@ -156,7 +156,7 @@ func TestRawMessageGC_NestedStructPointer(t *testing.T) {
 		t.Fatal(err)
 	}
 	exp := rawMsgGCExpect{want: want}
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		var x Outer
 		if err := p.Unmarshal(payload, &x); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
@@ -209,7 +209,7 @@ func TestRawMessageGC_MapValueStruct(t *testing.T) {
 		<-gcDone
 	}()
 
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		var x T
 		if err := p.Unmarshal(payload, &x); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
@@ -263,7 +263,7 @@ func TestRawMessageGC_MapValueArrayOfStruct(t *testing.T) {
 		<-gcDone
 	}()
 
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		var x T
 		if err := p.Unmarshal(payload, &x); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
@@ -315,7 +315,7 @@ func TestRawMessageGC_MapValueArrayOfRawMessage(t *testing.T) {
 		<-gcDone
 	}()
 
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		var x T
 		if err := p.Unmarshal(payload, &x); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
@@ -346,7 +346,7 @@ func TestRawMessageGC_MapValueStructNull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		var x T
 		if err := p.Unmarshal(payload, &x); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
@@ -402,7 +402,7 @@ func TestRawMessageGC_MapValuePointerStruct(t *testing.T) {
 		<-gcDone
 	}()
 
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		var x T
 		if err := p.Unmarshal(payload, &x); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
@@ -453,7 +453,7 @@ func TestRawMessageGC_MapValuePointerRawMessage(t *testing.T) {
 		<-gcDone
 	}()
 
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		var x T
 		if err := p.Unmarshal(payload, &x); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
@@ -511,7 +511,7 @@ func TestRawMessageGC_MapValuePointerArrayOfStruct(t *testing.T) {
 		<-gcDone
 	}()
 
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		var x T
 		if err := p.Unmarshal(payload, &x); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
@@ -569,7 +569,7 @@ func TestRawMessageGC_MapValuePointerArrayOfStructWithArrayField(t *testing.T) {
 		<-gcDone
 	}()
 
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		var x T
 		if err := p.Unmarshal(payload, &x); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
@@ -631,7 +631,7 @@ func TestRawMessageGC_MapValuePointerArrayOfStructWithNestedStruct(t *testing.T)
 		<-gcDone
 	}()
 
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		var x T
 		if err := p.Unmarshal(payload, &x); err != nil {
 			t.Fatalf("iter %d: %v", i, err)

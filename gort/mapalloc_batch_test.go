@@ -32,7 +32,7 @@ func TestBatchMapAlloc_SizeMatch(t *testing.T) {
 
 	// Initialize N maps into the block, each at stride MapAllocUnit.
 	maps := make([]unsafe.Pointer, N)
-	for i := 0; i < N; i++ {
+	for i := range N {
 		slot := unsafe.Add(block, uintptr(i)*unitSize)
 		zeroMapUnit(slot)
 		maps[i] = MakeMap(mt, 0, slot)
@@ -43,13 +43,13 @@ func TestBatchMapAlloc_SizeMatch(t *testing.T) {
 
 	// Write distinct values into each map. If MapAllocUnit is too small,
 	// adjacent maps' fields would collide and corrupt each other.
-	for i := 0; i < N; i++ {
+	for i := range N {
 		slot := MapAssignFastStr(mt, maps[i], "k")
 		*(*int)(slot) = (i + 1) * 100
 	}
 
 	// Read back and verify no cross-contamination.
-	for i := 0; i < N; i++ {
+	for i := range N {
 		slot := MapAssignFastStr(mt, maps[i], "k")
 		want := (i + 1) * 100
 		if got := *(*int)(slot); got != want {
@@ -100,7 +100,7 @@ func TestBatchMapAlloc_BatchCount(t *testing.T) {
 		// One big allocation for N Map structs.
 		block := UnsafeNewArray(rtype, N)
 		// Initialize all N maps: each should be zero alloc.
-		for i := 0; i < N; i++ {
+		for i := range N {
 			slot := unsafe.Add(block, uintptr(i)*unitSize)
 			zeroMapUnit(slot)
 			MakeMap(mt, 0, slot)
@@ -123,15 +123,15 @@ func TestBatchMapAlloc_Functional(t *testing.T) {
 
 	block := UnsafeNewArray(rtype, N)
 	mps := make([]unsafe.Pointer, N)
-	for i := 0; i < N; i++ {
+	for i := range N {
 		slot := unsafe.Add(block, uintptr(i)*unitSize)
 		zeroMapUnit(slot)
 		mps[i] = MakeMap(mt, 0, slot)
 	}
 
 	// Insert distinct entries into each map.
-	for i := 0; i < N; i++ {
-		for j := 0; j < 5; j++ {
+	for i := range N {
+		for j := range 5 {
 			key := "key" + itoa(j)
 			val := "v" + itoa(i) + "_" + itoa(j)
 			slot := MapAssignFastStr(mt, mps[i], key)
@@ -140,15 +140,15 @@ func TestBatchMapAlloc_Functional(t *testing.T) {
 	}
 
 	// Verify lengths.
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if l := MapLen(mps[i]); l != 5 {
 			t.Fatalf("map %d: len=%d, want 5", i, l)
 		}
 	}
 
 	// Verify values.
-	for i := 0; i < N; i++ {
-		for j := 0; j < 5; j++ {
+	for i := range N {
+		for j := range 5 {
 			key := "key" + itoa(j)
 			want := "v" + itoa(i) + "_" + itoa(j)
 			slot := MapAssignFastStr(mt, mps[i], key)
@@ -161,8 +161,8 @@ func TestBatchMapAlloc_Functional(t *testing.T) {
 	// Force GC and re-verify: dirPtr (the only GC pointer in Map) must survive.
 	runtime.GC()
 	runtime.GC()
-	for i := 0; i < N; i++ {
-		for j := 0; j < 5; j++ {
+	for i := range N {
+		for j := range 5 {
 			key := "key" + itoa(j)
 			want := "v" + itoa(i) + "_" + itoa(j)
 			slot := MapAssignFastStr(mt, mps[i], key)
@@ -187,15 +187,15 @@ func TestBatchMapAlloc_RealWorldUsage(t *testing.T) {
 
 	// Consume 6 maps (like KubePods: 3 pods × 2 maps).
 	used := make([]unsafe.Pointer, 6)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		slot := unsafe.Add(mapStructBlock, uintptr(i)*unitSize)
 		zeroMapUnit(slot)
 		used[i] = MakeMap(mt, 0, slot)
 	}
 
 	// Drain entries into each map (like drainKVSlots).
-	for i := 0; i < 6; i++ {
-		for j := 0; j < 3; j++ {
+	for i := range 6 {
+		for j := range 3 {
 			key := "k" + itoa(j)
 			slot := MapAssignFastStr(mt, used[i], key)
 			*(*int)(slot) = i*10 + j
@@ -204,11 +204,11 @@ func TestBatchMapAlloc_RealWorldUsage(t *testing.T) {
 
 	// Verify after GC.
 	runtime.GC()
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		if l := MapLen(used[i]); l != 3 {
 			t.Fatalf("map %d: len=%d, want 3", i, l)
 		}
-		for j := 0; j < 3; j++ {
+		for j := range 3 {
 			key := "k" + itoa(j)
 			want := i*10 + j
 			slot := MapAssignFastStr(mt, used[i], key)
@@ -241,7 +241,7 @@ func initMapSlotsBatch(t *testing.T, mt unsafe.Pointer, n int) []unsafe.Pointer 
 	}
 	InitMapSlots(block, inner, groupBlock, ptrSize, plan, n)
 	out := make([]unsafe.Pointer, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		out[i] = *(*unsafe.Pointer)(unsafe.Add(block, uintptr(i)*ptrSize))
 	}
 	return out
@@ -260,7 +260,7 @@ func TestSmallMapPrewire_FirstAssignZeroAlloc(t *testing.T) {
 		const N = 128
 		block := UnsafeNewArray(mapAllocUnitRType, N)
 		lazy := make([]unsafe.Pointer, N)
-		for i := 0; i < N; i++ {
+		for i := range N {
 			slot := unsafe.Add(block, uintptr(i)*unsafe.Sizeof(MapAllocUnit{}))
 			zeroMapUnit(slot)
 			lazy[i] = MakeMap(mt, 0, slot)
@@ -300,8 +300,8 @@ func TestSmallMapPrewire_GC(t *testing.T) {
 	mt := TypePtr(reflect.TypeFor[map[string]string]())
 	mps := initMapSlotsBatch(t, mt, N)
 
-	for i := 0; i < N; i++ {
-		for j := 0; j < 5; j++ { // stays within the 8-slot small-map group
+	for i := range N {
+		for j := range 5 { // stays within the 8-slot small-map group
 			key := "key" + itoa(j)
 			slot := MapAssignFastStr(mt, mps[i], key)
 			*(*string)(slot) = "v" + itoa(i) + "_" + itoa(j)
@@ -310,11 +310,11 @@ func TestSmallMapPrewire_GC(t *testing.T) {
 
 	runtime.GC()
 	runtime.GC()
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if l := MapLen(mps[i]); l != 5 {
 			t.Fatalf("map %d: len=%d after GC, want 5 (group block not retained)", i, l)
 		}
-		for j := 0; j < 5; j++ {
+		for j := range 5 {
 			key := "key" + itoa(j)
 			want := "v" + itoa(i) + "_" + itoa(j)
 			slot := MapAssignFastStr(mt, mps[i], key)
@@ -366,19 +366,19 @@ func TestSmallMapPrewire_Functional(t *testing.T) {
 	mt := TypePtr(reflect.TypeFor[map[string]string]())
 	mps := initMapSlotsBatch(t, mt, N)
 
-	for i := 0; i < N; i++ {
-		for j := 0; j < 6; j++ {
+	for i := range N {
+		for j := range 6 {
 			key := "key" + itoa(j)
 			val := "v" + itoa(i) + "_" + itoa(j)
 			slot := MapAssignFastStr(mt, mps[i], key)
 			*(*string)(slot) = val
 		}
 	}
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if l := MapLen(mps[i]); l != 6 {
 			t.Fatalf("map %d: len=%d, want 6", i, l)
 		}
-		for j := 0; j < 6; j++ {
+		for j := range 6 {
 			key := "key" + itoa(j)
 			want := "v" + itoa(i) + "_" + itoa(j)
 			slot := MapAssignFastStr(mt, mps[i], key)
@@ -410,8 +410,8 @@ func TestCompositeMerge_GC(t *testing.T) {
 	mt := TypePtr(reflect.TypeFor[map[string]string]())
 	mps := initMapSlotsBatch(t, mt, N)
 
-	for i := 0; i < N; i++ {
-		for j := 0; j < 5; j++ { // stays within the 8-slot small-map group
+	for i := range N {
+		for j := range 5 { // stays within the 8-slot small-map group
 			key := "key" + itoa(j)
 			slot := MapAssignFastStr(mt, mps[i], key)
 			*(*string)(slot) = "v" + itoa(i) + "_" + itoa(j)
@@ -420,11 +420,11 @@ func TestCompositeMerge_GC(t *testing.T) {
 
 	runtime.GC()
 	runtime.GC()
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if l := MapLen(mps[i]); l != 5 {
 			t.Fatalf("map %d: len=%d after GC, want 5 (composite unit not retained)", i, l)
 		}
-		for j := 0; j < 5; j++ {
+		for j := range 5 {
 			key := "key" + itoa(j)
 			want := "v" + itoa(i) + "_" + itoa(j)
 			slot := MapAssignFastStr(mt, mps[i], key)

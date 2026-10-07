@@ -2,6 +2,7 @@ package gbind
 
 import (
 	"bytes"
+	"slices"
 	"unsafe"
 
 	"github.com/velox-io/json/decode/dom"
@@ -42,12 +43,7 @@ type polyHost struct {
 }
 
 func (h *polyHost) discBound(off uint32) bool {
-	for _, o := range h.bound {
-		if o == off {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(h.bound, off)
 }
 
 // bindPolyStruct binds a poly host object after its '{'.

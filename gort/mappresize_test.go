@@ -40,7 +40,7 @@ func TestMapPresize_AllocatesBuckets(t *testing.T) {
 	}
 
 	// Verify mapassign works and entries land correctly.
-	for i := 0; i < 256; i++ {
+	for i := range 256 {
 		key := "key_" + itoa(i)
 		slot := MapAssignFastStr(mt, mp, key)
 		*(*int)(slot) = i

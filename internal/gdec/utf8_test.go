@@ -69,7 +69,7 @@ func TestValidateBodyUTF8(t *testing.T) {
 // TestValidateBodyCtl rejects every raw byte below 0x20 alone, and accepts
 // them escaped.
 func TestValidateBodyCtl(t *testing.T) {
-	for b := 0; b < 0x20; b++ {
+	for b := range 0x20 {
 		src := []byte{'a', byte(b), 'b'}
 		if ValidateBody(src, 0, len(src)) {
 			t.Errorf("ValidateBody accepted raw byte %d", b)
@@ -100,7 +100,7 @@ func TestValidateBodySpanSplits(t *testing.T) {
 // word boundaries at every offset.
 func TestValidateBodyBoundarySplits(t *testing.T) {
 	for _, seq := range []string{"\xc2\x80", "\xe4\xb8\x96", "\xf0\x90\x80\x80"} {
-		for off := 0; off < 24; off++ {
+		for off := range 24 {
 			for _, bad := range []bool{false, true} {
 				s := append([]byte(strings.Repeat("x", off)), seq...)
 				if bad {

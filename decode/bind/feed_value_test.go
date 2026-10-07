@@ -144,7 +144,7 @@ func TestFeedValueFieldSplitParity(t *testing.T) {
 func TestFeedValueArenaGrowth(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString(`{"rows":[`)
-	for i := 0; i < 400; i++ {
+	for i := range 400 {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
@@ -190,7 +190,7 @@ type feedValueHost2 struct {
 func TestFeedValueDenseBudget(t *testing.T) {
 	var b strings.Builder
 	b.WriteByte('[')
-	for i := 0; i < 4000; i++ {
+	for i := range 4000 {
 		if i > 0 {
 			b.WriteByte(',')
 		}
@@ -243,7 +243,7 @@ func TestFeedValueNestedDocAliasing(t *testing.T) {
 	// A second, larger parse forces arena growth over the first Doc's span.
 	var sb strings.Builder
 	sb.WriteString(`{"v":{`)
-	for i := 0; i < 500; i++ {
+	for i := range 500 {
 		if i > 0 {
 			sb.WriteByte(',')
 		}

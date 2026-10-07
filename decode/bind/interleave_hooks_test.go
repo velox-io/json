@@ -430,7 +430,7 @@ func TestIlhPanicKeepsPublishedStrings(t *testing.T) {
 			_ = p.Unmarshal([]byte(tc.in), v, opts...)
 		}()
 		before := ilhSnap(v)
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			var w ilhDoc
 			_ = p.Unmarshal([]byte(`{"S":"ZZZZZZZZ\n","M":{"ZZ\n":"ZZZZZZZZ\n"},"A":7}`), &w, opts...)
 		}
@@ -511,9 +511,9 @@ func TestIlhReentrantHookSameShape(t *testing.T) {
 	}
 	for _, mode := range []ilhMode{ilhParserMode, ilhPoolMode} {
 		dirty, _ := NewParser[ilhReDoc]()
-		for round := 0; round < 3; round++ {
+		for round := range 3 {
 			for _, in := range cases {
-				for oi := 0; oi < len(ilOptSets); oi++ {
+				for oi := range ilOptSets {
 					want := func() ilOutcome {
 						fp, _ := NewParser[ilhReDoc]()
 						return ilhRun[ilhReDoc](ilhParserMode, fp, in, ilOptSets[oi], nil)
@@ -552,7 +552,7 @@ func TestIlhIfaceSubParseValueSurvivesPadBufReuse(t *testing.T) {
 	}
 	p, _ := NewParser[outer]()
 	var keep []outer
-	for round := 0; round < 4; round++ {
+	for round := range 4 {
 		o := outer{P: new(ilhValHolder)}
 		in := fmt.Sprintf(`{"P":{"V":{"key":"value-%d","arr":["a\n",%d]},"N":%d},"K":"k"}`, round, round, round)
 		if err := p.Unmarshal([]byte(in), &o); err != nil {
@@ -560,7 +560,7 @@ func TestIlhIfaceSubParseValueSurvivesPadBufReuse(t *testing.T) {
 		}
 		keep = append(keep, o)
 		// Reuse the shape's pooled pad buffers with unrelated bytes.
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			var h ilhValHolder
 			_ = Unmarshal([]byte(strings.Repeat(` `, 8)+`{"V":{"key":"XXXXXXXXXXXXXXXXXXX","arr":["Z\n",9]},"N":9}`), &h)
 			var q outer
@@ -636,14 +636,14 @@ func ilhSnapNoArena(v *ilhDoc) string {
 func ilhBigDoc(n, hookAt int, payload, tail string) string {
 	var sb strings.Builder
 	sb.WriteString(`{"S":"big\n","X":[`)
-	for i := 0; i < 400; i++ {
+	for i := range 400 {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
 		fmt.Fprintf(&sb, "%d", i)
 	}
 	sb.WriteString(`],"M":{"k1\n":"v1\n","k2\n":"v2\n"},"HS":[`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
@@ -682,7 +682,7 @@ func TestIlhRetainBigInterleaved(t *testing.T) {
 			p, _ := NewParser[ilhDoc]()
 			opts := []UnmarshalOption{vopt.ZeroCopy(zc)}
 			var kept []ilhKept
-			for round := 0; round < 3; round++ {
+			for round := range 3 {
 				for i, in := range seq {
 					v := new(ilhDoc)
 					func() {
@@ -806,7 +806,7 @@ func ilhStreamRun(mode ilhMode, p *Parser, in string, hm int, opts []UnmarshalOp
 func ilhStreamDocs() []string {
 	var big strings.Builder
 	big.WriteString(`{"Msg":"big\n","events":[`)
-	for i := 0; i < 150; i++ {
+	for i := range 150 {
 		if i > 0 {
 			big.WriteByte(',')
 		}
@@ -1060,7 +1060,7 @@ func TestIlhReaderFailureKeepsPublishedStrings(t *testing.T) {
 			_ = p.UnmarshalFeed(&ilhChunkReader{chunks: []string{first}, end: tc.end, panics: tc.panics}, v)
 		}()
 		before, _ := json.Marshal(v)
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			var w doc
 			_ = p.UnmarshalFeed(strings.NewReader(`{"S":"ZZZZZZZZ\n","M":{"ZZ\n":"ZZZZZZZZ\n"},"X":["ZZZZ\n"]}`), &w)
 			var w2 doc
@@ -1155,7 +1155,7 @@ func TestIlhErrorPrecedenceIsHistoryFree(t *testing.T) {
 	bigHooks := func(failAt int, tail string) string {
 		var sb strings.Builder
 		sb.WriteString(`{"KM":{"999":1},"HS":[`)
-		for i := 0; i < 700; i++ {
+		for i := range 700 {
 			if i > 0 {
 				sb.WriteByte(',')
 			}
@@ -1205,7 +1205,7 @@ func TestIlhErrorPrecedenceIsHistoryFree(t *testing.T) {
 	noise := append(append(append([]string(nil), ilhGood...), ilhPanics...), ilhFails...)
 	p, _ := NewParser[ilhDoc]()
 	rng := rand.New(rand.NewSource(3))
-	for round := 0; round < 400; round++ {
+	for round := range 400 {
 		c := cases[rng.Intn(len(cases))]
 		opts := ilOptSets[rng.Intn(len(ilOptSets))]
 		for k := rng.Intn(4); k > 0; k-- {

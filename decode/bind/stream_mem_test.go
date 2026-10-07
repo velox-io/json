@@ -40,7 +40,7 @@ func memElemJSON(i int) string {
 func memStreamJSON(n int) []byte {
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			b.WriteByte(',')
 		}
@@ -68,7 +68,7 @@ func TestStreamRetentionBounded(t *testing.T) {
 		pad := strings.Repeat("x", payload/n)
 		var b strings.Builder
 		b.WriteString(`{"items":[`)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if i > 0 {
 				b.WriteByte(',')
 			}
@@ -185,7 +185,7 @@ func TestStreamReleaseWithDeferredAndMapValues(t *testing.T) {
 	const n = 2000
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			b.WriteByte(',')
 		}
@@ -241,12 +241,12 @@ func TestStreamSiblingScopesRetentionBounded(t *testing.T) {
 	for _, hosts := range hostCounts {
 		var b strings.Builder
 		b.WriteString(`{"hosts":[`)
-		for hh := 0; hh < hosts; hh++ {
+		for hh := range hosts {
 			if hh > 0 {
 				b.WriteByte(',')
 			}
 			b.WriteString(`{"items":[`)
-			for i := 0; i < 8; i++ {
+			for i := range 8 {
 				if i > 0 {
 					b.WriteByte(',')
 				}
@@ -330,7 +330,7 @@ func TestStreamElementSlotIsBufferBase(t *testing.T) {
 
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		if i > 0 {
 			b.WriteByte(',')
 		}

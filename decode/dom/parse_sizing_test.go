@@ -133,7 +133,7 @@ func TestSizingArenaGrowthReuse(t *testing.T) {
 	p := NewParser()
 	src := `{"name":"` + strings.Repeat("alice", 40) + `","scores":[9.5,8.2,7.0]}`
 	var held []Value
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		v, err := p.Parse([]byte(src))
 		if err != nil {
 			t.Fatalf("parse %d: %v", i, err)

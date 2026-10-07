@@ -278,7 +278,7 @@ func TestCache_GetOrBuild_BuildError(t *testing.T) {
 
 func TestCache_GetOrBuild_Concurrent(t *testing.T) {
 	var c Cache[*int]
-	var builds int32
+	var builds atomic.Int32
 	const goroutines = 32
 	key := uintptr(0x4242)
 
@@ -292,7 +292,7 @@ func TestCache_GetOrBuild_Concurrent(t *testing.T) {
 			defer wg.Done()
 			<-start
 			v, err := c.GetOrBuild(key, func() (*int, error) {
-				atomic.AddInt32(&builds, 1)
+				builds.Add(1)
 				x := 123
 				return &x, nil
 			})

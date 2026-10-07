@@ -32,7 +32,7 @@ type scopeValueHost struct {
 func scopeValueJSON(n int, pad int) []byte {
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			b.WriteByte(',')
 		}
@@ -254,7 +254,7 @@ func TestScopeViewValuePinPerElement(t *testing.T) {
 	needNativeBinder(t)
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		if i > 0 {
 			b.WriteByte(',')
 		}
@@ -334,7 +334,7 @@ func TestScopeViewNestedValueDocs(t *testing.T) {
 	needNativeBinder(t)
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		if i > 0 {
 			b.WriteByte(',')
 		}
@@ -343,7 +343,7 @@ func TestScopeViewNestedValueDocs(t *testing.T) {
 		} else {
 			b.WriteString(`{"in":[`)
 		}
-		for j := 0; j < 9; j++ {
+		for j := range 9 {
 			if j > 0 {
 				b.WriteByte(',')
 			}
@@ -448,7 +448,7 @@ func TestScopeViewNestedStreamsBoundAndValid(t *testing.T) {
 			b.WriteByte(',')
 		}
 		fmt.Fprintf(&b, `{"id":"o-%d","inner":[`, i)
-		for j := 0; j < inner; j++ {
+		for j := range inner {
 			if j > 0 {
 				b.WriteByte(',')
 			}
@@ -515,7 +515,7 @@ func TestScopeViewNestedStreamsBoundAndValid(t *testing.T) {
 	}
 	off := 0
 	for i, c := range innerCounts {
-		for j := 0; j < c; j++ {
+		for j := range c {
 			want := fmt.Sprintf("%d-%d-%s", i, j, strings.Repeat("y", 20))
 			if got := innerVs[off+j]; got != want {
 				t.Fatalf("innerVs[%d] = %q, want %q", off+j, got, want)
@@ -600,7 +600,7 @@ func TestScopeViewDiscAcrossInnerStream(t *testing.T) {
 
 func scopePolyInnerList(n int) string {
 	var b strings.Builder
-	for j := 0; j < n; j++ {
+	for j := range n {
 		if j > 0 {
 			b.WriteByte(',')
 		}
@@ -634,7 +634,7 @@ func TestScopeViewTextUnmarshalerAcrossRotations(t *testing.T) {
 	const n = 20000
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			b.WriteByte(',')
 		}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -909,12 +910,7 @@ func foldEqual(a, b string) bool {
 }
 
 func exactKeyMatch(k string, tags []string) bool {
-	for _, t := range tags {
-		if k == t {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(tags, k)
 }
 
 // hasCaseFoldKey reports whether data contains a top-level JSON object key

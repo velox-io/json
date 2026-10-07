@@ -277,7 +277,7 @@ func verifySwissMapLargeLayout() bool {
 		for g := uintptr(0); g < uintptr(numGroups); g++ {
 			group := unsafe.Add(groupsData, g*layout.GroupSize)
 			ctrls := *(*uint64)(group) // ctrl word at group head
-			for si := uintptr(0); si < 8; si++ {
+			for si := range uintptr(8) {
 				if byte(ctrls>>(si*8))&0x80 != 0 { // empty or deleted
 					continue
 				}

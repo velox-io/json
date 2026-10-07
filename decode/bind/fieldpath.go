@@ -278,7 +278,7 @@ func resolveMismatchPath(tt *vbind.TypeTree, tokens []string) (uint32, bool, boo
 			first := tt.Types[idx].StructFirstFieldIndex(fields)
 			count := tt.Types[idx].Struct().FieldCount
 			var found *vbind.BindField
-			for j := uint32(0); j < count; j++ {
+			for j := range count {
 				if tt.FieldNames[first+j] == tokens[i] {
 					found = &tt.Fields[first+j]
 					break

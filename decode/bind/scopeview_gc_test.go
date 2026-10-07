@@ -53,7 +53,7 @@ func TestStreamScopeRotationGC(t *testing.T) {
 
 	const rounds = 40
 	var total int64
-	for r := 0; r < rounds; r++ {
+	for r := range rounds {
 		src := newStressStreamReader(2 << 20)
 		var h stressHost
 		var count int64
@@ -118,7 +118,7 @@ func TestStreamScopeRotationHoldGC(t *testing.T) {
 	}
 
 	var held []value.Value
-	for r := 0; r < 20; r++ {
+	for r := range 20 {
 		src := newStressStreamReader(2 << 20)
 		var h stressHost
 		var count int64

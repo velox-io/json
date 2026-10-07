@@ -24,13 +24,7 @@ func (r *chunkReader) Read(p []byte) (int, error) {
 	if r.pos >= len(r.data) {
 		return 0, io.EOF
 	}
-	n := r.chunk
-	if n > len(p) {
-		n = len(p)
-	}
-	if n > len(r.data)-r.pos {
-		n = len(r.data) - r.pos
-	}
+	n := min(min(r.chunk, len(p)), len(r.data)-r.pos)
 	copy(p, r.data[r.pos:r.pos+n])
 	r.pos += n
 	if r.pos >= len(r.data) {
@@ -466,7 +460,7 @@ type feedIntStreamHost struct {
 func TestFeedTrailingCommaAtResetBoundary(t *testing.T) {
 	var mb strings.Builder
 	mb.WriteString(`{"m":{`)
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		fmt.Fprintf(&mb, `"k%d":%d,`, i, i)
 	}
 	mb.WriteString(`}}`)
@@ -758,7 +752,7 @@ func TestFeedDeferredMapFlushCrossing(t *testing.T) {
 	}
 	var sb strings.Builder
 	sb.WriteString(`{"m":{`)
-	for i := 0; i < 24; i++ {
+	for i := range 24 {
 		if i > 0 {
 			sb.WriteByte(',')
 		}

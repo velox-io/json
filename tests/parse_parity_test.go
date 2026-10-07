@@ -35,13 +35,7 @@ func (r *chunkReader) Read(p []byte) (int, error) {
 	if r.pos >= len(r.data) {
 		return 0, io.EOF
 	}
-	n := r.size
-	if n > len(p) {
-		n = len(p)
-	}
-	if n > len(r.data)-r.pos {
-		n = len(r.data) - r.pos
-	}
+	n := min(min(r.size, len(p)), len(r.data)-r.pos)
 	copy(p[:n], r.data[r.pos:r.pos+n])
 	r.pos += n
 	return n, nil
@@ -773,7 +767,7 @@ func TestDecoder_ErrorRecovery(t *testing.T) {
 
 	run := func(newDec func(io.Reader) interface{ Decode(any) error }) (successes, failures int, vals []int) {
 		dec := newDec(strings.NewReader(data))
-		for i := 0; i < 16; i++ {
+		for range 16 {
 			var p valDoc
 			err := dec.Decode(&p)
 			if err == io.EOF {
@@ -805,7 +799,7 @@ func TestDecoder_ErrorRecovery(t *testing.T) {
 func TestDecoder_TruncatedDocumentErrors(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("{")
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		fmt.Fprintf(&sb, `"k%d":"value%d",`, i, i)
 	}
 	sb.WriteString(`"last":"end"}`)

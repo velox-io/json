@@ -166,10 +166,7 @@ func (f *feedState) mountWindow(p *Parser, m *ndec.BindMachine) error {
 	// arena base and str_used after every yield. Growth preserves content so
 	// tape string offsets written before the growth stay resolvable in the new
 	// backing.
-	need := int(m.Core.StrUsed) + f.n + 64
-	if need < feedArenaFloor {
-		need = feedArenaFloor
-	}
+	need := max(int(m.Core.StrUsed)+f.n+64, feedArenaFloor)
 	if displaced := p.alloc.GrowStrArenaPreserve(int(m.Core.StrUsed), need); displaced != nil {
 		if err := recordStrProv(m, displaced, int(m.Core.StrUsed)); err != nil {
 			return err
@@ -351,7 +348,7 @@ func (f *feedState) checkTrailing(m *ndec.BindMachine) error {
 	off := 0
 	for !f.sawEOF {
 		n, err := f.r.Read(buf[:])
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if c := buf[i]; c != ' ' && c != '\t' && c != '\n' && c != '\r' {
 				return jerr.NewSyntaxError("bind: trailing data after value", int(f.base)+f.n+off+i)
 			}
@@ -450,10 +447,7 @@ func (p *Parser) feedBegin(m *ndec.BindMachine, rootDst unsafe.Pointer, f *feedS
 
 	if cont {
 		remaining := f.n - f.unconsumedOff(m)
-		need := remaining + 64
-		if need < feedArenaFloor {
-			need = feedArenaFloor
-		}
+		need := max(remaining+64, feedArenaFloor)
 		p.alloc.GrowStrArenaPreserve(0, need)
 		allocABI.StrArena = (*byte)(unsafe.SliceData(p.alloc.StrArena))
 		allocABI.StrArenaCap = uint64(cap(p.alloc.StrArena))

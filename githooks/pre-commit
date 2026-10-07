@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
-# Keeps lint findings out of commits. No --fix: an auto-fixed file would stay
-# unstaged and the commit would carry the unfixed content.
+# Runs `make fix` (go fix modernizers) before committing and re-stages the
+# files it rewrote, so the commit carries the fixed content. Lint stays a pure
+# gate (lint-ci, no --fix): a finding that survives fix needs a human, not an
+# automatic edit left unstaged in the worktree.
 #
 # Install with `make hooks` (sets core.hooksPath to this directory).
 
@@ -11,6 +13,26 @@ cd "$(git rev-parse --show-toplevel)"
 if ! command -v golangci-lint >/dev/null 2>&1; then
   echo "pre-commit: refusing, golangci-lint is not installed" >&2
   exit 1
+fi
+
+# Worktree snapshot via `git stash create`: it writes commit objects without
+# touching the index or the worktree, and prints nothing when the tree is
+# clean. Only the delta between the two snapshots is re-staged, so unrelated
+# unstaged edits are left alone. A file that already had unstaged edits and
+# was also rewritten by fix is staged whole, edits included.
+snap=$(git stash create)
+before=${snap:-HEAD}
+
+make fix
+
+snap=$(git stash create)
+after=${snap:-HEAD}
+
+fixed=$(git diff --name-only "$before" "$after")
+if [ -n "$fixed" ]; then
+  printf '%s\n' "$fixed" | while IFS= read -r f; do git add -- "$f"; done
+  echo "pre-commit: re-staged files rewritten by make fix:"
+  printf '%s\n' "$fixed" | sed 's/^/  /'
 fi
 
 make lint-ci

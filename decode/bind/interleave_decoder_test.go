@@ -222,7 +222,7 @@ func TestInterleaveDecoderNDJSON(t *testing.T) {
 func ilDiffRes(lines []ilLine, want, got []ilDecRes) string {
 	var sb strings.Builder
 	n := max(len(want), len(got))
-	for i := 0; i < n; i++ {
+	for i := range n {
 		var w, g ilDecRes
 		wm, gm := "<none>", "<none>"
 		if i < len(want) {

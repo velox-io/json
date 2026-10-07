@@ -36,7 +36,7 @@ type feedOptAnyHost struct {
 func feedOptAnyJSON(n int) []byte {
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			b.WriteByte(',')
 		}
@@ -387,7 +387,7 @@ func TestFeedOptions_StrictScanRejectsStreamContent(t *testing.T) {
 func TestFeedOptions_StrictScanSplitMultibyteValid(t *testing.T) {
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
-	for i := 0; i < 33; i++ {
+	for i := range 33 {
 		if i > 0 {
 			b.WriteByte(',')
 		}
@@ -435,7 +435,7 @@ func TestFeedOptions_StrictScanSplitMultibyteValid(t *testing.T) {
 func TestFeedOptions_EscapeSplitAcrossEdges(t *testing.T) {
 	var b strings.Builder
 	b.WriteString(`{"items":[`)
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		if i > 0 {
 			b.WriteByte(',')
 		}

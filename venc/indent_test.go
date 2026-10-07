@@ -44,7 +44,7 @@ func runIndentDepthReset(t *testing.T, setup func(*encodeState)) {
 	}
 
 	inner := indentResetSimple{A: 1, B: 2}
-	ti := EncTypeInfoOf(reflect.TypeOf(indentResetSimple{}))
+	ti := EncTypeInfoOf(reflect.TypeFor[indentResetSimple]())
 	if err := es.encodeTop(ti, unsafe.Pointer(&inner)); err != nil {
 		t.Fatalf("encode: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestIndentYieldRunExitsAtEntryDepth(t *testing.T) {
 
 	es.applyOptions(vopt.Indent("", "  "))
 	outer := indentResetYielder{Name: "x", Val: customMarshalerVal{}}
-	ti := EncTypeInfoOf(reflect.TypeOf(indentResetYielder{}))
+	ti := EncTypeInfoOf(reflect.TypeFor[indentResetYielder]())
 	if err := es.encodeTop(ti, unsafe.Pointer(&outer)); err != nil {
 		t.Fatalf("encode: %v", err)
 	}

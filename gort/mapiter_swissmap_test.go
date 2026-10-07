@@ -13,7 +13,7 @@ import (
 
 func BenchmarkMapsIterDirect(b *testing.B) {
 	m := make(map[string]string, 100)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		k := "key_" + string(rune('A'+i/26)) + string(rune('a'+i%26))
 		m[k] = "val_" + k
 	}
@@ -35,7 +35,7 @@ func BenchmarkMapsIterDirect(b *testing.B) {
 
 func BenchmarkMapsIterLegacyShim(b *testing.B) {
 	m := make(map[string]string, 100)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		k := "key_" + string(rune('A'+i/26)) + string(rune('a'+i%26))
 		m[k] = "val_" + k
 	}

@@ -64,7 +64,7 @@ func TestUnmarshalValueRepeatedStringReferenceAppendBound(t *testing.T) {
 	copy(arena, "q\"\"x\"\"")
 	tape := make([]uint64, 2+2*entries)
 	tape[0] = tagObjBeg | uint64(len(tape)-1) | entries<<32
-	for i := 0; i < entries; i++ {
+	for i := range entries {
 		tape[1+2*i] = packString(0, 1)
 		tape[2+2*i] = packString(2, 3)
 	}
