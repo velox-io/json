@@ -182,13 +182,13 @@ The case table is a struct type: each field is one case, and its type is what ge
 ```go
 func init() {
     vjson.DefineVariantCases[EventEnvelope, struct {
-        _ User    `case:"user"`    // "user"    → User
-        _ Product `case:"product"` // "product" → Product
+        user User                 // "user"   → User
+        _ Product `case:"e-book"` // "e-book" → Product
     }]()
 }
 ```
 
-The case value is the descriptor field's name, so `User User` declares the case `"User"`. Use a blank field with a `case:"..."` tag when the discriminator value is not a Go identifier, as above. A blank field without a tag is the default case, used when no case matches; without one, an unmatched value is an error.
+The case value is the descriptor field's name, so `user User` declares the case `"user"`. Use a blank field with a `case:"..."` tag when the discriminator value is not a Go identifier, as above. A blank field without a tag is the default case, used when no case matches; without one, an unmatched value is an error.
 
 The call site stays an ordinary `Unmarshal` into the host. Afterwards `env.Data` holds the selected case as its concrete Go type:
 
