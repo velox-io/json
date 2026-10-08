@@ -40,9 +40,23 @@ test:
 test-nondec:
 	@./scripts/run-test-nondec.sh
 
+# Whole-repo coverage over all three engine builds: the default build, the
+# pure-Go decoder round (vj_nondec), and the pure-Go encoder round
+# (vj_noencvm), merged into one report.
 test-coverage:
-	go test -race -coverprofile=coverage.out .
+	rm -rf coverdata coverdata-merged
+	mkdir -p coverdata coverdata-merged
+	go test -count=1 -cover ./... -timeout 30m -args -test.gocoverdir=$(CURDIR)/coverdata
+	go test -count=1 -cover -tags vj_nondec ./... -timeout 40m -args -test.gocoverdir=$(CURDIR)/coverdata
+	go test -count=1 -cover -tags vj_noencvm ./venc ./stream ./tests -args -test.gocoverdir=$(CURDIR)/coverdata
+	go tool covdata merge -i=coverdata -o=coverdata-merged
+	go tool covdata textfmt -i=coverdata-merged -o=coverage.out
 	go tool cover -html=coverage.out -o coverage.html
+	rm -rf coverdata coverdata-merged
+
+clean-coverage:
+	rm -f coverage.out coverage.html
+	rm -rf coverdata coverdata-merged
 
 # Single-process shuffled run of the public-API suites (tests, tests/compat,
 # stream). scripts/cmd/alltests (a nested module whose go.mod replaces
