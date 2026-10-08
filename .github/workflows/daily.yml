@@ -1,0 +1,62 @@
+name: Daily
+
+# Daily drift hunting: re-run the deterministic CI matrix and a short fuzz
+# session on "develop" to surface corner cases from toolchain drift.
+#
+# Pause semantics: if the latest completed run of either workflow on "develop"
+# is red at the current HEAD, today's dispatch is skipped. A push that moves
+# "develop" past the failure resumes the schedule automatically.
+
+on:
+  schedule:
+  # 20:17 UTC daily (04:17 CST, results ready by morning)
+  - cron: '17 20 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    name: Guard and dispatch
+    runs-on: ubuntu-latest
+    env:
+      REPO: ${{ github.repository }}
+      REF: develop
+    steps:
+    - name: Check latest completed runs on develop
+      id: check
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        HEAD=$(gh api "repos/$REPO/commits/$REF" --jq '.sha')
+        RED_AT_HEAD=0
+        for WF in ci.yml fuzz.yml; do
+          LATEST=$(gh api "repos/$REPO/actions/workflows/$WF/runs?branch=$REF&status=completed&per_page=1" \
+            --jq '.workflow_runs[0] | select(. != null) | "\(.conclusion) \(.head_sha)"')
+          if [ -z "$LATEST" ]; then
+            echo "$WF: no completed runs on $REF, treating as green"
+            continue
+          fi
+          CONCLUSION=${LATEST%% *}
+          SHA=${LATEST##* }
+          echo "$WF: latest completed run is $CONCLUSION at ${SHA:0:8} (HEAD ${HEAD:0:8})"
+          if [ "$CONCLUSION" != "success" ] && [ "$SHA" = "$HEAD" ]; then
+            RED_AT_HEAD=1
+          fi
+        done
+        if [ "$RED_AT_HEAD" = "1" ]; then
+          echo "Known red at $REF HEAD, skipping today's runs"
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Dispatch CI and Fuzz
+      if: steps.check.outputs.skip != 'true'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh workflow run ci.yml --repo "$REPO" --ref "$REF"
+        gh workflow run fuzz.yml --repo "$REPO" --ref "$REF" -f fuzz-time=15m

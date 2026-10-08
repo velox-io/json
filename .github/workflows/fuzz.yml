@@ -1,9 +1,7 @@
 name: Fuzz
 
 on:
-  schedule:
-  # Run every Sunday at 03:00 UTC
-  - cron: '0 3 * * 0'
+  # Daily dispatch is owned by daily.yml (fuzz-time=15m on develop)
   workflow_dispatch:
     inputs:
       fuzz-time:
