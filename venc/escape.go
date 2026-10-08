@@ -1,6 +1,7 @@
 package venc
 
 import (
+	"encoding/binary"
 	"unicode/utf8"
 	"unsafe"
 )
@@ -72,7 +73,9 @@ func appendEscapedString(buf []byte, s string, flags escapeFlags) []byte {
 	start := 0
 
 	for i+8 <= n {
-		w := *(*uint64)(unsafe.Add(unsafe.Pointer(base), i))
+		// Decoded little-endian so the byte at i sits in the word's low
+		// bytes, which firstMarkedByteIndex and the masks below assume.
+		w := binary.LittleEndian.Uint64((*[8]byte)(unsafe.Add(unsafe.Pointer(base), i))[:])
 
 		mq := hasZeroByte(w ^ (lo64 * 0x22)) // "
 		mb := hasZeroByte(w ^ (lo64 * 0x5C)) // \

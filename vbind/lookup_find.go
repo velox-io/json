@@ -1,6 +1,9 @@
 package vbind
 
-import "unsafe"
+import (
+	"encoding/binary"
+	"unsafe"
+)
 
 // LookupFind reads a vlib.Build blob and returns its key index in [0, n), or -1
 // on a miss. Struct blobs live in the process cache; each variant blob is rooted
@@ -45,7 +48,7 @@ const wKeyCap = 64
 // windowFind consults: its probe may leave the key, while the other tiers
 // read [0, klen) alone.
 func findAt(blob unsafe.Pointer, p *byte, klen, end uintptr) int {
-	switch *(*uint32)(blob) {
+	switch readU32(blob, 0) {
 	case tierWindow:
 		return windowFind(blob, p, klen, end)
 	case tierGperf:
@@ -69,16 +72,23 @@ const (
 // gperfLastCh must match NDEC_LOOKUP_GPERF_LAST_CH in the native blob format.
 const gperfLastCh = 0xFE
 
+// The blob is a little-endian byte format shared with the native binder.
+// Scalar fields of two or more bytes go through the readU* helpers rather
+// than a native deref, so a lookup holds on any CPU.
 func readU8(p unsafe.Pointer, off uintptr) uint8 {
 	return *(*uint8)(unsafe.Add(p, off))
 }
 
-func readU32(p unsafe.Pointer, off uintptr) uint32 {
-	return *(*uint32)(unsafe.Add(p, off))
+func readU16(p unsafe.Pointer, off uintptr) uint16 {
+	return binary.LittleEndian.Uint16((*[2]byte)(unsafe.Add(p, off))[:])
 }
 
-func readPtr(p unsafe.Pointer, off uintptr) uintptr {
-	return *(*uintptr)(unsafe.Add(p, off))
+func readU32(p unsafe.Pointer, off uintptr) uint32 {
+	return binary.LittleEndian.Uint32((*[4]byte)(unsafe.Add(p, off))[:])
+}
+
+func readU64(p unsafe.Pointer, off uintptr) uintptr {
+	return uintptr(binary.LittleEndian.Uint64((*[8]byte)(unsafe.Add(p, off))[:]))
 }
 
 func keyEquals(blob unsafe.Pointer, off, klen uintptr, p *byte) bool {
@@ -105,9 +115,9 @@ const (
 func windowFind(blob unsafe.Pointer, p *byte, klen, end uintptr) int {
 	boff := readU8(blob, wOffByteOffset)
 	shift := readU8(blob, wOffShift)
-	n := readPtr(blob, wOffN)
-	stride := readPtr(blob, wOffStride)
-	kboff := readPtr(blob, wOffKeyBytesOff)
+	n := readU64(blob, wOffN)
+	stride := readU64(blob, wOffStride)
+	kboff := readU64(blob, wOffKeyBytesOff)
 
 	// WINDOW blobs store only keys of at most wKeyCap-1 bytes.
 	if klen >= wKeyCap {
@@ -164,13 +174,13 @@ const (
 
 func gperfFind(blob unsafe.Pointer, p *byte, klen uintptr) int {
 	np := readU8(blob, 8)
-	n := readPtr(blob, gOffN)
-	tableSize := readPtr(blob, gOffTableSize)
-	stride := readPtr(blob, gOffStride)
-	assoOff := readPtr(blob, gOffAssoOff)
-	slotsOff := readPtr(blob, gOffSlotsOff)
-	klenOff := readPtr(blob, gOffKeyLenOff)
-	kboff := readPtr(blob, gOffKeyBytesOff)
+	n := readU64(blob, gOffN)
+	tableSize := readU64(blob, gOffTableSize)
+	stride := readU64(blob, gOffStride)
+	assoOff := readU64(blob, gOffAssoOff)
+	slotsOff := readU64(blob, gOffSlotsOff)
+	klenOff := readU64(blob, gOffKeyLenOff)
+	kboff := readU64(blob, gOffKeyBytesOff)
 
 	var h = klen
 	positions := unsafe.Add(blob, gOffPositions)
@@ -225,9 +235,9 @@ const (
 
 func handFind(blob unsafe.Pointer, p *byte, klen uintptr) int {
 	variant := readU32(blob, hOffVariant)
-	n := readPtr(blob, hOffN)
-	mask := readPtr(blob, hOffMask) // uint64 but stored as uintptr
-	kboff := readPtr(blob, hOffKeyBytesOff)
+	n := readU64(blob, hOffN)
+	mask := readU64(blob, hOffMask)
+	kboff := readU64(blob, hOffKeyBytesOff)
 
 	var c0, c1 byte
 	if klen > 0 {
@@ -258,7 +268,7 @@ func handFind(blob unsafe.Pointer, p *byte, klen uintptr) int {
 		return -1
 	}
 
-	off := kboff + uintptr(ki)*readPtr(blob, 40)
+	off := kboff + uintptr(ki)*readU64(blob, 40)
 	if keyEquals(blob, off, klen, p) {
 		return int(ki)
 	}
@@ -286,19 +296,19 @@ const (
 )
 
 func tableFind(blob unsafe.Pointer, p *byte, klen uintptr) int {
-	mask := readPtr(blob, tOffMask)
+	mask := readU64(blob, tOffMask)
 
 	h := tableHash(p, klen)
 	pos := uintptr(h & uint64(mask))
 	for {
 		slotBase := tOffSlots + pos*8
-		valueP1 := *(*uint16)(unsafe.Add(blob, slotBase+6))
+		valueP1 := readU16(blob, slotBase+6)
 		if valueP1 == 0 {
 			return -1
 		}
-		keyLen := *(*uint16)(unsafe.Add(blob, slotBase+4))
+		keyLen := readU16(blob, slotBase+4)
 		if uintptr(keyLen) == klen {
-			keyOff := *(*uint32)(unsafe.Add(blob, slotBase))
+			keyOff := readU32(blob, slotBase)
 			if keyEquals(blob, uintptr(keyOff), klen, p) {
 				return int(valueP1) - 1
 			}
