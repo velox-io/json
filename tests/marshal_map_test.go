@@ -862,3 +862,73 @@ func TestNativeMap_SliceOfMap_BufFull(t *testing.T) {
 		}
 	}
 }
+
+// fillSmallValueMap builds a map[string]T with keys key_00, key_01, ...
+func fillSmallValueMap[T any](n int, fill func(int) T) map[string]T {
+	m := make(map[string]T, n)
+	for i := range n {
+		m[fmt.Sprintf("key_%02d", i)] = fill(i)
+	}
+	return m
+}
+
+type wrapSmallValueMap[T any] struct {
+	M map[string]T `json:"m"`
+}
+
+// checkSmallValueMap marshals the map both bare and struct-wrapped and compares
+// each output against encoding/json at the document level, since the native
+// walk emits entries in slot order while std sorts keys.
+func checkSmallValueMap[T any](t *testing.T, name string, n int, fill func(int) T) {
+	t.Helper()
+	m := fillSmallValueMap(n, fill)
+
+	got, err := vjson.Marshal(m)
+	if err != nil {
+		t.Fatalf("%s count=%d: vjson.Marshal(map) error: %v", name, n, err)
+	}
+	want, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("%s count=%d: json.Marshal(map) error: %v", name, n, err)
+	}
+	if !mapsEqual(got, want) {
+		t.Errorf("%s count=%d bare map:\n  got:  %s\n  want: %s", name, n, got, want)
+	}
+
+	w := wrapSmallValueMap[T]{M: m}
+	gotW, err := vjson.Marshal(w)
+	if err != nil {
+		t.Fatalf("%s count=%d: vjson.Marshal(wrap) error: %v", name, n, err)
+	}
+	wantW, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("%s count=%d: json.Marshal(wrap) error: %v", name, n, err)
+	}
+	if !mapsEqual(gotW, wantW) {
+		t.Errorf("%s count=%d wrapped map:\n  got:  %s\n  want: %s", name, n, gotW, wantW)
+	}
+}
+
+// TestMarshalSmallValueMapsGroupBoundary marshals map[string]T for value types
+// narrower than a pointer across the Swiss Map group boundary. A group holds 8
+// slots, so entry 9 spills into a second group; count 64 additionally forces
+// directory traversal. Under the split group layout (GOEXPERIMENT=mapsplitgroup,
+// the Go 1.28 default) keys and elements live in separate regions of the group.
+// bool/uint8/int32 exercise MAP_STR_ITER; int/int64/string exercise the
+// specialized map opcodes.
+func TestMarshalSmallValueMapsGroupBoundary(t *testing.T) {
+	counts := make([]int, 0, 17)
+	for n := 1; n <= 16; n++ {
+		counts = append(counts, n)
+	}
+	counts = append(counts, 64)
+
+	for _, n := range counts {
+		checkSmallValueMap(t, "bool", n, func(i int) bool { return i%2 == 0 })
+		checkSmallValueMap(t, "uint8", n, func(i int) uint8 { return uint8(i*7 + 1) })
+		checkSmallValueMap(t, "int32", n, func(i int) int32 { return int32(-i * 13) })
+		checkSmallValueMap(t, "int", n, func(i int) int { return i * 13 })
+		checkSmallValueMap(t, "int64", n, func(i int) int64 { return int64(i)*-31 - 5 })
+		checkSmallValueMap(t, "string", n, func(i int) string { return fmt.Sprintf("v%02d", i) })
+	}
+}
