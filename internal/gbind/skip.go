@@ -7,8 +7,8 @@ import (
 
 // skipValue skips the value at the cursor through the generic skip, so the
 // lenient opt governs it at every site that skips a value: an unbound struct
-// member, a mismatched field, a fixed array's surplus element, and a stopped
-// stream's remainder.
+// member, a mismatched field, a fixed array's surplus element, a stopped
+// stream's remainder, and a deferred raw span.
 func (c *binder) skipValue() error {
 	p, err := c.skipAt(c.txt, c.p)
 	c.p = p
@@ -33,14 +33,6 @@ func (c *binder) skipAt(s text, p int) (int, error) {
 	c.p = p
 	err := c.skipToken()
 	return c.p, err
-}
-
-// skipNested moves past the container opening at the cursor without
-// validating it.
-func (c *binder) skipNested() error {
-	p, err := c.nestedAt(c.txt, c.p+1, false)
-	c.p = p
-	return err
 }
 
 // rootSkip consumes the root value starting at start after a recorded

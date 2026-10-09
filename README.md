@@ -49,7 +49,7 @@ Velox focuses on **binding-style** conversion between JSON and typed Go values (
 | `UseNumber(bool)` | decode | `false` | Decode numbers bound to `any` as `json.Number` |
 | `RejectUnknownMembers(bool)` | decode | `false` | Error on unknown fields |
 | `ZeroCopy(bool)` | decode | `true`| Whether strings alias the caller's buffer |
-| `SkipLenient(bool)` | decode | `false` | Skip unbound values by counting brackets only, without validating them |
+| `SkipLenient(bool)` | decode | `false` | Skip unbound values, and delimit the raw spans hooks receive, by counting brackets only, without validating them |
 
 
 Options compose with `Join`. For output close to the standard library:

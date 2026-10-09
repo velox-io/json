@@ -51,15 +51,17 @@ func ZeroCopy(v bool) Options { return vopt.ZeroCopy(v) }
 
 // SkipLenient selects the skip a decode runs over values it does not bind:
 // surplus fixed-array elements, values a stopped stream drains, unknown struct
-// members, and values a mismatched field or root discards. Lenient counts
-// brackets and trusts the rest, so a skipped scalar is not validated and comma
-// order inside a skipped container is not checked. It is a trust-your-input
-// switch: malformed bytes inside a skipped region go unreported, and where a
-// value is missing, as in `[1,]` with a surplus element, the skip consumes
-// the byte in its place, even the enclosing container's closing bracket, so
-// the decode goes on against the wrong nesting and its result or error is
-// unspecified. Default false, where those regions are validated and a
-// malformed one is a syntax error.
+// members, and values a mismatched field or root discards. The same skip
+// delimits the raw span a json.Unmarshaler, a RawMessage, or a non-empty
+// interface receives. Lenient counts brackets and trusts the rest, so a
+// skipped scalar is not validated and comma order inside a skipped container
+// is not checked. It is a trust-your-input switch: malformed bytes inside a
+// skipped region go unreported or reach a hook, and where a value is missing,
+// as in `[1,]` with a surplus element, the skip consumes the byte in its
+// place, even the enclosing container's closing bracket, so the decode goes
+// on against the wrong nesting and its result or error is unspecified.
+// Default false, where those regions are validated and a malformed one is a
+// syntax error.
 func SkipLenient(v bool) Options { return vopt.SkipLenient(v) }
 
 // PaddingSize is the minimum number of 0x20 padding bytes a buffer must

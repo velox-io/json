@@ -78,11 +78,9 @@ func (c *binder) deferValue(dst unsafe.Pointer, ti, ctr uint32) error {
 			d.docOff = int64(c.base) + int64(start+1)
 		}
 	} else {
-		if ch == '{' || ch == '[' {
-			if err := c.skipNested(); err != nil {
-				return err
-			}
-		} else if err := c.skipToken(); err != nil {
+		// The span reaches its hook as a complete value: the skip validates
+		// it unless the lenient opt releases it.
+		if err := c.skipValue(); err != nil {
 			return err
 		}
 		span := c.src

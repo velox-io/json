@@ -231,6 +231,22 @@ NDEC_FN_DECL void ndec_bind_parse_stream(void *_m_) {
 #define BIND_INPUT_EOF_CHECK(m) ((void)0)
 #endif
 
+/* Appends an in-flight deferred raw value's stable bytes in this window to
+ * the raw scratch ahead of an input yield. The first relocation copies from
+ * the value's origin and opens its scratch span; later ones copy from the
+ * window's offset zero, where the value's remainder starts. */
+#define BIND_RAW_RELOCATE(m)                                                                                      \
+  do {                                                                                                            \
+    uint32_t raw_from_ = 0;                                                                                       \
+    if ((m)->raw_scratch_start == BIND_RAW_NONE) {                                                                \
+      raw_from_              = (m)->raw_origin;                                                                   \
+      (m)->raw_scratch_start = (m)->raw_used;                                                                     \
+    }                                                                                                             \
+    uint32_t raw_len_ = (m)->window_stable_end - raw_from_;                                                       \
+    __builtin_memcpy((m)->raw_arena + (m)->raw_used, src + raw_from_, raw_len_);                                  \
+    (m)->raw_used += raw_len_;                                                                                    \
+  } while (0)
+
 /* Debug verification of the input-phase discipline. input_resume_phase starts
  * poisoned; every read region arms it at entry, so poison surviving to an
  * input yield means a path reached the window sentinel without arming, and
@@ -454,10 +470,13 @@ NOINLINE static void ndec_bind_parse_inner(NdecBindMachine *m) {
     goto map_first;
 #endif
   case BIND_PHASE_DEFERRED_RAW_RESUME:
-    /* deferred_raw_scan restores the block-local bracket depth from
-     * m->raw_depth. The scan may stop at a window edge again, so the phase is
-     * re-armed before the loop reads the sentinel. */
+    /* A deferred raw span resumes the walk that yielded, selected by the
+     * same lenient opt: valid_skip restores its state from m->skip_depth,
+     * deferred_raw_scan its bracket depth from m->raw_depth. Either may stop
+     * at a window edge again, so the phase is re-armed before the walk reads
+     * the sentinel. */
     NDEC_SET_INPUT_PHASE(BIND_PHASE_DEFERRED_RAW_RESUME);
+    if (!(m->b.ctx.opt_flags & BIND_OPT_SKIP_LENIENT)) goto valid_skip;
     goto deferred_raw_scan;
   case BIND_PHASE_VD_OBJ_OPEN:
   case BIND_PHASE_VD_ARR_OPEN:
@@ -1787,8 +1806,11 @@ map_continue_resume: {
 }
 
 /* Validating skip state, packed into m->skip_depth: the nesting below
- * VSKIP_STATE_SHIFT, the expectation above it, and the root flag on top. A
- * packed state is never 0 or 1, the fresh-entry conventions. */
+ * VSKIP_STATE_SHIFT, the expectation above it, and the continuation on top.
+ * A packed state is never 0 or 1, the fresh-entry conventions. The
+ * continuation names where a finished walk goes: the parent's member or
+ * element walk, document_end for a root skip, or deferred_raw_close for a
+ * deferred raw span, which the walk validates rather than discards. */
 #ifndef VSKIP_PACK
 #define VSKIP_VALUE          1u /* a value: after ':' or an array ',' */
 #define VSKIP_VALUE_OR_CLOSE 2u /* an array's first element or its ']' */
@@ -1796,11 +1818,14 @@ map_continue_resume: {
 #define VSKIP_KEY_OR_CLOSE   4u /* an object's first key or its '}' */
 #define VSKIP_COLON          5u
 #define VSKIP_AFTER          6u /* ',' or the container's close */
+#define VSKIP_CONT_PARENT    0u
+#define VSKIP_CONT_ROOT      1u
+#define VSKIP_CONT_DEFERRED  2u
 #define VSKIP_STATE_SHIFT    16
-#define VSKIP_ROOT_SHIFT     19
+#define VSKIP_CONT_SHIFT     19
 #define VSKIP_DEPTH_MASK     0xFFFFu
-#define VSKIP_PACK(sd, st, root)                                                                                  \
-  ((uint32_t)(sd) | ((uint32_t)(st) << VSKIP_STATE_SHIFT) | ((uint32_t)(root) << VSKIP_ROOT_SHIFT))
+#define VSKIP_PACK(sd, st, cont)                                                                                  \
+  ((uint32_t)(sd) | ((uint32_t)(st) << VSKIP_STATE_SHIFT) | ((uint32_t)(cont) << VSKIP_CONT_SHIFT))
 #endif
 
 /* Root mismatch skip: consume the complete root value, then surface the
@@ -1822,9 +1847,9 @@ root_skip_value: {
     } else if (root_skip_depth == 1) {
       uint8_t open                       = src[SRC_PREV_POS()];
       ((uint8_t *)&frames[depth + 1])[0] = (open == '[');
-      m->skip_depth = VSKIP_PACK(1, open == '[' ? VSKIP_VALUE_OR_CLOSE : VSKIP_KEY_OR_CLOSE, 1);
+      m->skip_depth = VSKIP_PACK(1, open == '[' ? VSKIP_VALUE_OR_CLOSE : VSKIP_KEY_OR_CLOSE, VSKIP_CONT_ROOT);
     } else {
-      m->skip_depth = VSKIP_PACK(0, VSKIP_VALUE, 1);
+      m->skip_depth = VSKIP_PACK(0, VSKIP_VALUE, VSKIP_CONT_ROOT);
     }
     goto valid_skip;
   }
@@ -1922,23 +1947,25 @@ unsafe_skip_value: {
 }
 
 safe_skip_value: {
-  if (!(NDEC_STREAM_MODE && m->skip_depth != 0)) m->skip_depth = VSKIP_PACK(0, VSKIP_VALUE, 0);
+  if (!(NDEC_STREAM_MODE && m->skip_depth != 0)) m->skip_depth = VSKIP_PACK(0, VSKIP_VALUE, VSKIP_CONT_PARENT);
   goto valid_skip;
 }
 
 /* The validating skip checks the whole value against the grammar, keys,
  * colons, commas and bracket kinds included, as encoding/json does before it
  * discards a value. Each label is one expectation, so the state exists only
- * at an input yield, packed into m->skip_depth with the root flag that
- * selects where a finished skip continues. Each skipped container counts
- * toward BIND_MAX_DEPTH and keeps its kind in the frame slots above the live
- * bind depth, as the Value walk does. */
+ * at an input yield, packed into m->skip_depth with the continuation that
+ * selects where a finished walk goes. Each walked container counts toward
+ * BIND_MAX_DEPTH and keeps its kind in the frame slots above the live bind
+ * depth, as the Value walk does. A deferred raw span's walk relocates the
+ * value's stable bytes to the raw scratch at each input yield, as the
+ * lenient raw scan does. */
 valid_skip: {
   uint32_t vs_word = m->skip_depth;
   m->skip_depth    = 0;
   uint32_t vs_sd   = vs_word & VSKIP_DEPTH_MASK;
   uint32_t vs_st   = (vs_word >> VSKIP_STATE_SHIFT) & 7u;
-  uint32_t vs_root = vs_word >> VSKIP_ROOT_SHIFT;
+  uint32_t vs_cont = vs_word >> VSKIP_CONT_SHIFT;
   uint8_t *vs_kind = (uint8_t *)&frames[depth + 1];
   uint32_t vs_pos;
   uint8_t vs_c;
@@ -1986,8 +2013,9 @@ vs_value:
   }
 vs_after:
   if (vs_sd == 0) {
-    if (vs_root) goto document_end;
-    goto json_parent_continue;
+    if (vs_cont == VSKIP_CONT_PARENT) goto json_parent_continue;
+    if (vs_cont == VSKIP_CONT_ROOT) goto document_end;
+    goto deferred_raw_close;
   }
   VS_NEED(VSKIP_AFTER);
   vs_c = SRC_ADVANCE_CHAR();
@@ -2021,8 +2049,13 @@ vs_close:
   goto vs_after;
 vs_eof:
   if (NDEC_STREAM_MODE && !m->window_final) {
-    BIND_INPUT_PHASE_EXPECT2(BIND_PHASE_SKIP_RESUME, BIND_PHASE_ROOT_SKIP_RESUME);
-    m->skip_depth = VSKIP_PACK(vs_sd, vs_st, vs_root);
+    if (vs_cont == VSKIP_CONT_DEFERRED) {
+      BIND_INPUT_PHASE_EXPECT(BIND_PHASE_DEFERRED_RAW_RESUME);
+      BIND_RAW_RELOCATE(m);
+    } else {
+      BIND_INPUT_PHASE_EXPECT2(BIND_PHASE_SKIP_RESUME, BIND_PHASE_ROOT_SKIP_RESUME);
+    }
+    m->skip_depth = VSKIP_PACK(vs_sd, vs_st, vs_cont);
     BIND_INPUT_EOF_YIELD(m);
   }
   if (vs_st == VSKIP_COLON) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
@@ -2152,7 +2185,9 @@ any_value: {
  * a TextUnmarshaler record and a base64 []byte record carry the string body,
  * borrowed from the source under the zero-copy opt or interned from
  * str_arena. JSON null bypasses TextUnmarshaler but remains part of the raw
- * span for the other deferred kinds. */
+ * span for the other deferred kinds. A raw span reaches its hook as a
+ * complete value: the validating walk checks it against the grammar unless
+ * the lenient skip opt is set, where the raw scan counts brackets. */
 deferred_value: {
   uint8_t *deferred_slot      = m->c.stash.deferred_yield.slot;
   const BindType *deferred_ct = m->c.stash.deferred_yield.type;
@@ -2165,72 +2200,65 @@ deferred_value: {
     goto json_value_done;
   }
 
+  if (deferred_ct->kind != BIND_KIND_TEXT_UNMARSHALER && deferred_ct->kind != BIND_KIND_SLICE) {
+    /* The span runs from the current structural offset to the first
+     * structural offset after the value. deferred_raw_close owns the record
+     * write: an input yield must not leave a half-written record behind the
+     * unadvanced drain cursor. The scanner publishes only whole atoms, so a
+     * primitive never crosses a window edge; only a container walk can stop
+     * for more input. */
+    NDEC_SET_INPUT_PHASE(BIND_PHASE_DEFERRED_RAW_RESUME);
+    m->raw_origin = SRC_POS();
+    if (!(m->b.ctx.opt_flags & BIND_OPT_SKIP_LENIENT)) {
+      m->skip_depth = VSKIP_PACK(0, VSKIP_VALUE, VSKIP_CONT_DEFERRED);
+      goto valid_skip;
+    }
+    if (ch == '{' || ch == '[') goto deferred_raw_scan;
+    SRC_ADVANCE();
+    goto deferred_raw_close;
+  }
+
+  /* TextUnmarshaler and base64 []byte read decoded string bytes. Under the
+   * zero-copy opt an escape-free body borrows the source span; escaped and
+   * oversized bodies intern into str_arena behind the strarena label. The
+   * mismatch carries the container as its destination, preempting any
+   * recorded field error, whose leaf must not surface here. */
+  if (ch != '"') BIND_IMMEDIATE_TYPE_MISMATCH(m, SRC_POS(), cur_type.type_idx);
   UnmarshalRecord *rec = (UnmarshalRecord *)(m->b.alloc.deferred_drain + m->b.alloc.deferred_drain_used);
   rec->target          = deferred_slot;
   rec->type_idx        = deferred_ct->type_idx;
   rec->kind            = deferred_ct->kind;
-
-  if (deferred_ct->kind != BIND_KIND_TEXT_UNMARSHALER && deferred_ct->kind != BIND_KIND_SLICE) {
-    /* Record the raw JSON span from the current structural offset to the first
-     * structural offset after the value. The scanner publishes only whole
-     * atoms, so a primitive never crosses a window edge; only the container
-     * scan can stop for more input. */
-    if (ch == '{' || ch == '[') {
-      /* deferred_raw_scan owns the record write: an input yield must not
-       * leave a half-written record behind the unadvanced drain cursor. */
-      NDEC_SET_INPUT_PHASE(BIND_PHASE_DEFERRED_RAW_RESUME);
-      goto deferred_raw_scan;
-    }
-    uint32_t start_off = SRC_POS();
-    SRC_ADVANCE();
-    uint32_t end_off = SRC_POS();
-    if (NDEC_STREAM_MODE && end_off > m->window_stable_end) end_off = m->window_stable_end;
-    rec->backing = BIND_RECORD_BACKING_SOURCE;
-    rec->arg0    = start_off;
-    rec->arg1    = end_off;
+  uint32_t zlen, zbp;
+  int32_t zst =
+      (m->b.ctx.opt_flags & BIND_OPT_ZERO_COPY_STR) ? ndec_str_parse_zc_scan(SRC_PTR() + 1, &zlen, &zbp, 0) : 0;
+  if (zst == 1) {
+    uint32_t body_off = (uint32_t)(SRC_PTR() + 1 - src);
+    rec->backing      = BIND_RECORD_BACKING_SOURCE;
+    rec->arg0         = body_off;
+    rec->arg1         = body_off + zlen;
   } else {
-    /* TextUnmarshaler and base64 []byte read decoded string bytes. Under the
-     * zero-copy opt an escape-free body borrows the source span; escaped and
-     * oversized bodies intern into str_arena behind the strarena label.
-     * The mismatch carries the container as its destination, preempting any
-     * recorded field error, whose leaf must not surface here. */
-    if (ch != '"') BIND_IMMEDIATE_TYPE_MISMATCH(m, SRC_POS(), cur_type.type_idx);
-    uint32_t zlen, zbp;
-    int32_t zst =
-        (m->b.ctx.opt_flags & BIND_OPT_ZERO_COPY_STR) ? ndec_str_parse_zc_scan(SRC_PTR() + 1, &zlen, &zbp, 0) : 0;
-    if (zst == 1) {
-      uint32_t body_off = (uint32_t)(SRC_PTR() + 1 - src);
-      rec->backing      = BIND_RECORD_BACKING_SOURCE;
-      rec->arg0         = body_off;
-      rec->arg1         = body_off + zlen;
-    } else {
-      const uint8_t *str_data;
-      uint32_t str_len;
-      if (bind_intern_str(&str_p, SRC_PTR(), &str_data, &str_len) < 0)
-        BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-      rec->backing = BIND_RECORD_BACKING_STRARENA;
-      rec->arg0    = (uint32_t)(str_data - m->b.alloc.str_arena);
-      rec->arg1    = str_len;
-    }
-    SRC_ADVANCE();
+    const uint8_t *str_data;
+    uint32_t str_len;
+    if (bind_intern_str(&str_p, SRC_PTR(), &str_data, &str_len) < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
+    rec->backing = BIND_RECORD_BACKING_STRARENA;
+    rec->arg0    = (uint32_t)(str_data - m->b.alloc.str_arena);
+    rec->arg1    = str_len;
   }
-
+  SRC_ADVANCE();
   m->b.alloc.deferred_drain_used += sizeof(UnmarshalRecord);
   goto json_value_done;
 }
 
-/* The raw container scan for deferred values. deferred_value enters at the
- * opening bracket; the BIND_PHASE_DEFERRED_RAW_RESUME gate re-enters after an
- * input yield with the bracket depth restored from m->raw_depth. The scan
- * steps one structural per iteration, so brackets inside strings leave the
- * count untouched. A non-final window edge appends the value's stable bytes
- * to the raw scratch and yields; the next window's offset zero continues the
- * value because the relocated tail is exactly its unconsumed remainder. */
+/* The lenient raw container scan for deferred values. deferred_value enters
+ * at the opening bracket; the BIND_PHASE_DEFERRED_RAW_RESUME gate re-enters
+ * after an input yield with the bracket depth restored from m->raw_depth.
+ * The scan steps one structural per iteration, so brackets inside strings
+ * leave the count untouched. A non-final window edge appends the value's
+ * stable bytes to the raw scratch and yields; the next window's offset zero
+ * continues the value because the relocated tail is exactly its unconsumed
+ * remainder. */
 deferred_raw_scan: {
-  /* The cursor sits on the opening bracket at entry, so the span origin is
-   * the current structural offset. A resumed scan reads raw_scratch_start. */
-  uint32_t um_start_off = SRC_POS();
-  uint32_t um_depth     = 1;
+  uint32_t um_depth = 1;
   if (NDEC_STREAM_MODE && m->raw_scratch_start != BIND_RAW_NONE) {
     um_depth = m->raw_depth;
     goto deferred_raw_loop;
@@ -2241,11 +2269,7 @@ deferred_raw_scan: {
     if (UNLIKELY(SRC_EOF())) {
       if (NDEC_STREAM_MODE && !m->window_final) {
         BIND_INPUT_PHASE_EXPECT(BIND_PHASE_DEFERRED_RAW_RESUME);
-        uint32_t from = (m->raw_scratch_start == BIND_RAW_NONE) ? um_start_off : 0;
-        if (m->raw_scratch_start == BIND_RAW_NONE) m->raw_scratch_start = m->raw_used;
-        uint32_t len = m->window_stable_end - from;
-        __builtin_memcpy(m->raw_arena + m->raw_used, src + from, len);
-        m->raw_used += len;
+        BIND_RAW_RELOCATE(m);
         m->raw_depth = um_depth;
         BIND_INPUT_EOF_YIELD(m);
       }
@@ -2256,6 +2280,13 @@ deferred_raw_scan: {
     else if (c == '}' || c == ']')
       um_depth--;
   }
+  goto deferred_raw_close;
+}
+
+/* Publishes the record of the raw span ending at the cursor: the source span
+ * from raw_origin, or the scratch span when the value crossed a window edge,
+ * completed with the final window's part. */
+deferred_raw_close: {
   uint32_t end_off = SRC_POS();
   if (NDEC_STREAM_MODE && end_off > m->window_stable_end) end_off = m->window_stable_end;
   UnmarshalRecord *rec = (UnmarshalRecord *)(m->b.alloc.deferred_drain + m->b.alloc.deferred_drain_used);
@@ -2271,7 +2302,7 @@ deferred_raw_scan: {
     m->raw_scratch_start = BIND_RAW_NONE;
   } else {
     rec->backing = BIND_RECORD_BACKING_SOURCE;
-    rec->arg0    = um_start_off;
+    rec->arg0    = m->raw_origin;
     rec->arg1    = end_off;
   }
   m->b.alloc.deferred_drain_used += sizeof(UnmarshalRecord);

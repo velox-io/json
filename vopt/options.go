@@ -105,10 +105,10 @@ func RejectUnknownMembers(v bool) Options { return boolOpt(FlagRejectUnknownMemb
 // entries unable to alias reject with ErrZeroCopyUnsupported.
 func ZeroCopy(v bool) Options { return boolOpt(FlagZeroCopy, v) }
 
-// SkipLenient selects how a decode passes over the values it does not bind.
-// Lenient counts brackets and trusts the rest, so a malformed token or comma
-// inside a skipped region goes unreported. See vjson.SkipLenient for the sites
-// it governs.
+// SkipLenient selects how a decode passes over the values it does not bind
+// and the raw spans it hands to hooks. Lenient counts brackets and trusts the
+// rest, so a malformed token or comma inside such a region goes unreported.
+// See vjson.SkipLenient for the sites it governs.
 func SkipLenient(v bool) Options { return boolOpt(FlagSkipLenient, v) }
 
 // Indent sets the per-line prefix and the per-depth indentation step.

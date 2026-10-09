@@ -226,13 +226,15 @@ typedef struct NdecBindMachine {
    * it is clear; window_stable_end bounds every span the binder records
    * from this window, while the sentinel offset itself is src_len, which
    * can swallow the scanner's withheld tail. Native owns the skip and raw
-   * cursors: skip_depth preserves an in-flight value skip across an input
-   * yield.
+   * cursors: skip_depth preserves an in-flight validating walk across an
+   * input yield, a deferred raw value's included.
    *
    * Raw scratch materializes deferred raw values that cross a window edge.
+   * raw_origin is the in-flight value's window-local start offset.
    * raw_scratch_start is the value's scratch origin, or BIND_RAW_NONE while
-   * the value never crossed a window, so its record uses the source span.
-   * raw_depth preserves the raw scan's bracket nesting. A value resumed after
+   * the value never crossed a window, so its record uses the source span
+   * from raw_origin. raw_depth preserves the lenient raw scan's bracket
+   * nesting. A value resumed after
    * an edge appends from the next window's offset zero: the relocated tail is
    * exactly the value's unconsumed remainder. The Go driver owns raw_arena
    * and raw_cap and guarantees cap >= raw_used + window_len at every install:
@@ -245,7 +247,7 @@ typedef struct NdecBindMachine {
   uint32_t window_stable_end; /* off 8536 */
   uint32_t raw_depth;         /* off 8540 */
   uint32_t raw_scratch_start; /* off 8544 */
-  uint32_t _pad3;             /* off 8548, aligns raw_arena to 8 */
+  uint32_t raw_origin;        /* off 8548 */
   uint8_t *raw_arena;         /* off 8552 */
   uint32_t raw_cap;           /* off 8560 */
   uint32_t raw_used;          /* off 8564 */
