@@ -24,6 +24,8 @@ compile_flags.txt
 # Test/Benchmark artifacts
 *.png
 *.test
+/coverdata
+/coverdata-merged
 coverage.out
 coverage.html
 coverage_*.html
