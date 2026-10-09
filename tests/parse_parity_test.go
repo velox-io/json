@@ -51,6 +51,9 @@ func dbgAny(v any) string {
 	return fmt.Sprintf("%+v", rv.Interface())
 }
 
+// newOf returns a constructor of fresh *T destinations.
+func newOf[T any]() func() any { return func() any { return new(T) } }
+
 // assertSameDecode pins that vjson and encoding/json agree on error presence
 // and, on success, on the decoded value.
 func assertSameDecode(t *testing.T, name string, data []byte, mk func() any) {

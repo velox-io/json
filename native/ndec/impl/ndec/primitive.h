@@ -1251,22 +1251,25 @@ INLINE int tape_bind_write_number(uint8_t kind, uint8_t tag, uint64_t word, uint
     iv = (int64_t)v;
     dv = (tag == (TAPE_UINT64 >> 56)) ? (double)uv : (double)iv;
   }
-  if (is_double) {
-    switch (kind) {
-    case BIND_KIND_INT8:
-    case BIND_KIND_INT16:
-    case BIND_KIND_INT32:
-    case BIND_KIND_INT64:
-    case BIND_KIND_INT:
-    case BIND_KIND_UINT8:
-    case BIND_KIND_UINT16:
-    case BIND_KIND_UINT32:
-    case BIND_KIND_UINT64:
-    case BIND_KIND_UINT:
-      return -1;
-    default:
-      break;
-    }
+  switch (kind) {
+  case BIND_KIND_INT8:
+  case BIND_KIND_INT16:
+  case BIND_KIND_INT32:
+  case BIND_KIND_INT64:
+  case BIND_KIND_INT:
+    /* TAPE_UINT64 carries the values past INT64_MAX, whose iv view wraps
+     * negative and would pass every signed range check. */
+    if (is_double || (tag == (TAPE_UINT64 >> 56) && iv < 0)) return -1;
+    break;
+  case BIND_KIND_UINT8:
+  case BIND_KIND_UINT16:
+  case BIND_KIND_UINT32:
+  case BIND_KIND_UINT64:
+  case BIND_KIND_UINT:
+    if (is_double) return -1;
+    break;
+  default:
+    break;
   }
   switch (kind) {
   case BIND_KIND_INT8: {
@@ -1409,11 +1412,11 @@ INLINE int tape_bind_write_num_raw(uint8_t kind, const uint8_t *text, uint32_t l
 #define TAPE_BIND_NUMBER_ARM(m, kind_, dst_, cont_label, ON_MISMATCH)                                             \
   do {                                                                                                            \
     if ((tag) == (TAPE_INT64 >> 56) || (tag) == (TAPE_UINT64 >> 56) || (tag) == (TAPE_DOUBLE >> 56)) {            \
-      uint64_t _word = *TAP_CURSOR;                                                                               \
-      uint64_t _v    = TAP_READ_NUMBER();                                                                         \
-      if (UNLIKELY(tape_bind_write_number((kind_), (tag), _word, _v, (dst_), (m)->b.alloc.str_arena,              \
-                                          (m)->c.atof) < 0))                                                      \
+      /* Advance only after a successful write, as for TAPE_NUM_RAW below. */                                     \
+      if (UNLIKELY(tape_bind_write_number((kind_), (tag), *TAP_CURSOR, TAP_CURSOR[1], (dst_),                     \
+                                          (m)->b.alloc.str_arena, (m)->c.atof) < 0))                              \
         ON_MISMATCH;                                                                                              \
+      (void)TAP_READ_NUMBER();                                                                                    \
       goto cont_label;                                                                                            \
     }                                                                                                             \
     if ((tag) == (TAPE_NUM_RAW >> 56)) {                                                                          \

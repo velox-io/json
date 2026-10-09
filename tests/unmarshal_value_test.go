@@ -98,3 +98,55 @@ func TestUnmarshalValue_ElementMismatchNamesElementType(t *testing.T) {
 		})
 	}
 }
+
+type valueNumHost struct {
+	I   int64   `json:"i"`
+	N   int     `json:"n"`
+	I8  int8    `json:"i8"`
+	U   uint64  `json:"u"`
+	F32 float32 `json:"f32"`
+	S   string  `json:"s"`
+}
+
+// A number its target cannot hold is an *UnmarshalTypeError from
+// UnmarshalValue as from Unmarshal, wherever the number sits: an unsigned
+// value past the int64 range never wraps into a signed target, and the walk
+// after a mismatched field stays on the document's structure.
+func TestUnmarshalValue_NumberMismatch(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		doc  string
+		mk   func() any
+	}{
+		{"int64 past max", `{"i":9223372036854775808}`, newOf[valueNumHost]()},
+		{"int past max", `{"n":18446744073709551615}`, newOf[valueNumHost]()},
+		{"int8 from uint64 max", `{"i8":18446744073709551615}`, newOf[valueNumHost]()},
+		{"int8 overflow", `{"i8":128}`, newOf[valueNumHost]()},
+		{"negative unsigned", `{"u":-1}`, newOf[valueNumHost]()},
+		{"fraction for int", `{"i":1.5}`, newOf[valueNumHost]()},
+		{"float32 overflow", `{"f32":1e50}`, newOf[valueNumHost]()},
+		{"mismatch before fields", `{"i8":1.5,"s":"x","i":2,"u":3}`, newOf[valueNumHost]()},
+		{"element past int64", `[1,9223372036854775808]`, newOf[[]int64]()},
+		{"element from uint64 max", `[18446744073709551615]`, newOf[[]int8]()},
+		{"map value past int64", `{"k":9223372036854775808}`, newOf[map[string]int64]()},
+		{"root past int64", `9223372036854775808`, newOf[int64]()},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			v, err := vjson.Parse([]byte(c.doc))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			got := c.mk()
+			var te, want *json.UnmarshalTypeError
+			if err := vjson.UnmarshalValue(v, got); !errors.As(err, &te) {
+				t.Fatalf("UnmarshalValue error = %v (%T), bound %s, want *UnmarshalTypeError", err, err, dbgAny(got))
+			}
+			if err := json.Unmarshal([]byte(c.doc), c.mk()); !errors.As(err, &want) {
+				t.Fatalf("encoding/json error = %v, want *UnmarshalTypeError", err)
+			}
+			if te.Type != want.Type {
+				t.Errorf("UnmarshalValue names %v, encoding/json names %v", te.Type, want.Type)
+			}
+		})
+	}
+}
