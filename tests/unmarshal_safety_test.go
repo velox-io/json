@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	vjson "github.com/velox-io/json"
 )
@@ -957,4 +959,46 @@ func TestPointer_PreExistingReuse_StdlibCompat(t *testing.T) {
 			t.Errorf("value mismatch: vjson=%q, stdlib=%q", *vjsonS.V, *stdS.V)
 		}
 	})
+}
+
+// A pointer type that leads back to itself through pointers alone has no
+// non-pointer layer for a pointer walk to stop at, so the shape build refuses
+// it. encoding/json is no baseline: a non-null input overflows its stack.
+type selfPtr *selfPtr
+
+// The cycle may also start below the type a field declares.
+type selfPtrA *selfPtrB
+type selfPtrB *selfPtrA
+
+func TestPointer_SelfReferentialTypeRefused(t *testing.T) {
+	var root selfPtr
+	var field struct {
+		X selfPtr `json:"x"`
+	}
+	var below struct {
+		X *selfPtrA `json:"x"`
+	}
+	for _, tc := range []struct {
+		name string
+		in   string
+		dst  any
+	}{
+		{"root null", `null`, &root},
+		{"root value", `1`, &root},
+		{"field", `{"x":1}`, &field},
+		{"cycle below field type", `{"x":1}`, &below},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			done := make(chan error, 1)
+			go func() { done <- vjson.Unmarshal([]byte(tc.in), tc.dst) }()
+			select {
+			case err := <-done:
+				if err == nil || !strings.Contains(err.Error(), "leads back to itself") {
+					t.Errorf("error = %v; want the shape build to refuse the pointer cycle", err)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("decode did not return; a pointer walk never reached a non-pointer layer")
+			}
+		})
+	}
 }

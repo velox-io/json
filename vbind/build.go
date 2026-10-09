@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"unsafe"
 
 	"github.com/velox-io/json/gort"
@@ -153,6 +154,26 @@ type mapSite struct {
 	mapRType     unsafe.Pointer
 }
 
+// pointerCycle returns the first type that ut's chain of pointer layers
+// revisits, as `type P *P` revisits P, or nil when the chain reaches a
+// non-pointer kind. The chain holds each distinct type once, so the walk ends
+// even when the cycle starts below ut.
+func pointerCycle(ut *typ.UniType) reflect.Type {
+	var chain []reflect.Type
+	for ut.Kind == typ.KindPointer {
+		if slices.Contains(chain, ut.Type) {
+			return ut.Type
+		}
+		chain = append(chain, ut.Type)
+		pi, _ := ut.Ext.(*typ.PointerTypeInfo)
+		if pi == nil || pi.ElemType == nil {
+			return nil
+		}
+		ut = pi.ElemType
+	}
+	return nil
+}
+
 // collect must store cross table references as indexes because every target
 // slice can still reallocate. resolveChildPointers converts them only after
 // collection and all attach passes have frozen the backing arrays.
@@ -235,6 +256,11 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 		pi, _ := ut.Ext.(*typ.PointerTypeInfo)
 		if pi == nil || pi.ElemType == nil {
 			return 0, fmt.Errorf("vbind: pointer ext missing")
+		}
+		// Every pointer walk, the native root unwrap included, resolves layers
+		// until a non-pointer kind and relies on reaching one.
+		if cyc := pointerCycle(ut); cyc != nil {
+			return 0, fmt.Errorf("vbind: pointer type %s leads back to itself through pointers alone, so it has no pointee a JSON value other than null could fill", cyc)
 		}
 		childIdx, err := b.collect(pi.ElemType)
 		if err != nil {
