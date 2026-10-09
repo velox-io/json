@@ -366,6 +366,28 @@ INLINE int bind_write_quoted_scalar(uint8_t **str_pp, const uint8_t *data, uint3
     *(intptr_t *)((dst) + 16) = 0;                                                                                \
   } while (0)
 
+/* A fixed array holds exactly the elements its JSON array supplied, as in
+ * encoding/json: closing it zeroes the elements from index count on. A count
+ * at or past the array length leaves the array whole. */
+#define BIND_ZERO_ARRAY_TAIL(dst, m, ct, count)                                                                   \
+  do {                                                                                                            \
+    uint64_t _zoff  = (uint64_t)(count) * (ct)->u.array.child_size;                                               \
+    uint64_t _zsize = (m)->b.ctx.type_meta[(ct)->type_idx].size;                                                  \
+    if (_zoff < _zsize) __builtin_memset((dst) + _zoff, 0, (size_t)(_zsize - _zoff));                             \
+  } while (0)
+
+/* Publishes an array-shaped destination whose JSON array closed with no
+ * element: a slice takes the shared empty backing, a fixed array zeroes every
+ * element. */
+#define BIND_WRITE_EMPTY_ARRAY(dst, m, ct)                                                                        \
+  do {                                                                                                            \
+    if (BIND_IS_SLICE_LIKE((ct)->kind)) {                                                                         \
+      BIND_WRITE_EMPTY_SLICE((dst), (m), (ct)->type_idx);                                                         \
+    } else if ((ct)->kind == BIND_KIND_ARRAY) {                                                                   \
+      BIND_ZERO_ARRAY_TAIL((dst), (m), (ct), 0);                                                                  \
+    }                                                                                                             \
+  } while (0)
+
 /* Whether p lies in the SlotClass's current bump block. Only a backing there
  * borrowed the block's tail, so only it may return the unused part at close.
  * The full-width unsigned difference wraps for addresses below the block, so
@@ -852,7 +874,7 @@ INLINE int bind_skip_string_ok(const uint8_t *body) {
 
 #define BIND_EMPTY_ARRAY_CLOSE(m, ct, pop_target, pop_fn)                                                         \
   do {                                                                                                            \
-    if (BIND_IS_SLICE_LIKE((ct)->kind)) BIND_WRITE_EMPTY_SLICE(cur_dst, (m), (ct)->type_idx);                     \
+    BIND_WRITE_EMPTY_ARRAY(cur_dst, (m), (ct));                                                                   \
     pop_fn(frames, &depth, &cur_dst, &cur_type, &cur_count, &cur_aux);                                            \
     goto pop_target;                                                                                              \
   } while (0)

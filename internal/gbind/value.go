@@ -546,11 +546,23 @@ func (c *binder) bindArray(s text, p int, dst unsafe.Pointer, ti uint32) (int, e
 }
 
 // emptyArray binds `[]`: a slice takes the shared empty backing, a fixed
-// array keeps its contents.
+// array zeroes every element.
 func (c *binder) emptyArray(dst unsafe.Pointer, ti uint32) {
 	if c.typ(ti).Kind == vbind.KindSlice {
 		sm := c.tt.TypeMeta[ti].SliceMeta()
 		*(*gort.SliceHeader)(dst) = gort.SliceHeader{Data: *(*unsafe.Pointer)(unsafe.Pointer(&sm.EmptySliceData))}
+		return
+	}
+	c.zeroArrayTail(dst, ti, 0)
+}
+
+// zeroArrayTail zeroes a fixed array's elements from index count on: the
+// array holds exactly the elements its JSON array supplied, as in
+// encoding/json.
+func (c *binder) zeroArrayTail(dst unsafe.Pointer, ti uint32, count int) {
+	off := uintptr(count) * uintptr(c.typ(ti).Array().ChildSize)
+	if size := c.size(ti); off < size {
+		gort.MemclrHasPointers(unsafe.Add(dst, off), size-off)
 	}
 }
 
@@ -625,6 +637,7 @@ func (c *binder) fixedElems(s text, p int, dst unsafe.Pointer, ti uint32) (int, 
 		case ',':
 			p = s.skip(p + 1)
 		case ']':
+			c.zeroArrayTail(dst, ti, count)
 			c.pop()
 			return s.skip(p + 1), nil
 		default:

@@ -578,7 +578,7 @@ document_start: {
       if (cur_type.kind == BIND_KIND_STREAM) {
         BIND_YIELD(m, BIND_YIELD_SLICE_GROW, (uint32_t)cur_type.type_idx, 0, BIND_PHASE_ARRAY_CLOSE);
       }
-      if (BIND_IS_SLICE_LIKE(cur_type.kind)) BIND_WRITE_EMPTY_SLICE(cur_dst, m, cur_type.type_idx);
+      BIND_WRITE_EMPTY_ARRAY(cur_dst, m, &cur_type);
       goto document_end;
     }
     if (bind_push_array_or_slice(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
@@ -1245,14 +1245,14 @@ phase2_done: {
 /* Streaming resume after the window ended between '[' and the first element.
  * A leading ']' completes the open site's empty close: a stream activates its
  * handler with an empty batch, a slice publishes the empty header, and a
- * fixed array keeps its contents. */
+ * fixed array zeroes its elements. */
 array_first:
   if (SRC_PEEK() == ']') {
     SRC_ADVANCE();
     if (cur_type.kind == BIND_KIND_STREAM) {
       BIND_YIELD(m, BIND_YIELD_SLICE_GROW, (uint32_t)cur_type.type_idx, 0, BIND_PHASE_ARRAY_CLOSE);
     }
-    if (BIND_IS_SLICE_LIKE(cur_type.kind)) BIND_WRITE_EMPTY_SLICE(cur_dst, m, cur_type.type_idx);
+    BIND_WRITE_EMPTY_ARRAY(cur_dst, m, &cur_type);
     bind_pop(frames, &depth, &cur_dst, &cur_type, &cur_count, &cur_aux);
     goto json_value_done;
   }
@@ -1441,6 +1441,8 @@ array_continue: {
         __builtin_memcpy(&data, cur_dst, sizeof(data));
         bind_slot_close(sc, data, (const uint8_t *)cur_aux, cur_count);
       }
+    } else if (cur_type.kind == BIND_KIND_ARRAY) {
+      BIND_ZERO_ARRAY_TAIL(cur_dst, m, &cur_type, cur_count);
     }
     /* An empty root stream resumes here without a pushed frame, so depth zero
      * must complete directly instead of popping. */
@@ -2766,7 +2768,7 @@ t_document_start: {
     }
     if (TAP_TAG() == (TAPE_END_ARRAY >> 56)) {
       TAP_ADVANCE();
-      if (cur_type.kind == BIND_KIND_SLICE) BIND_WRITE_EMPTY_SLICE(cur_dst, m, cur_type.type_idx);
+      BIND_WRITE_EMPTY_ARRAY(cur_dst, m, &cur_type);
       goto t_document_end;
     }
     /* The root array still needs a frame because its close uses the shared pop path. */
@@ -3045,7 +3047,7 @@ t_field_value_cold_gate:
     TAP_ADVANCE();
     if (TAP_TAG() == (TAPE_END_ARRAY >> 56)) {
       TAP_ADVANCE();
-      if (cur_type.kind == BIND_KIND_SLICE) BIND_WRITE_EMPTY_SLICE(cur_dst, m, cur_type.type_idx);
+      BIND_WRITE_EMPTY_ARRAY(cur_dst, m, &cur_type);
       bind_pop(frames, &depth, &cur_dst, &cur_type, &cur_count, &cur_aux);
       goto t_scope_end;
     }
@@ -3317,7 +3319,7 @@ t_array_value: {
     TAP_ADVANCE();
     if (TAP_TAG() == (TAPE_END_ARRAY >> 56)) {
       TAP_ADVANCE();
-      if (cur_type.kind == BIND_KIND_SLICE) BIND_WRITE_EMPTY_SLICE(cur_dst, m, cur_type.type_idx);
+      BIND_WRITE_EMPTY_ARRAY(cur_dst, m, &cur_type);
       bind_pop(frames, &depth, &cur_dst, &cur_type, &cur_count, &cur_aux);
       goto t_scope_end;
     }
@@ -3348,6 +3350,8 @@ t_array_continue: {
         __builtin_memcpy(&data, cur_dst, sizeof(data));
         bind_slot_close(sc, data, (const uint8_t *)cur_aux, cur_count);
       }
+    } else if (cur_type.kind == BIND_KIND_ARRAY) {
+      BIND_ZERO_ARRAY_TAIL(cur_dst, m, &cur_type, cur_count);
     }
     /* Generic pop: parent may be STRUCT (slice field of a struct, pushed via
      * bind_push in t_object_field_value) or SLICE/ARRAY (nested array, pushed
@@ -3587,7 +3591,7 @@ t_map_value: {
     TAP_ADVANCE();
     if (TAP_TAG() == (TAPE_END_ARRAY >> 56)) {
       TAP_ADVANCE();
-      if (cur_type.kind == BIND_KIND_SLICE) BIND_WRITE_EMPTY_SLICE(cur_dst, m, cur_type.type_idx);
+      BIND_WRITE_EMPTY_ARRAY(cur_dst, m, &cur_type);
       bind_pop(frames, &depth, &cur_dst, &cur_type, &cur_count, &cur_aux);
       goto t_scope_end;
     }
