@@ -26,11 +26,10 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 
 		// elemNL marks the first element of a just-opened container in indent
 		// mode: the element's leading newline+indent is written by whichever
-		// op renders it. Keyed writes own their newline (interpWriteKey), so
-		// only keyless opens and the interface op consult this flag. A keyless
-		// pointer deref passes it through: the pointee's open writes the
-		// newline. A stream driver seeds it through es.childElemNL when it
-		// hands the interpreter an element whose separators it already wrote.
+		// op renders it, through interpWriteKey. A keyless pointer deref
+		// passes it through to the pointee. A stream driver seeds it through
+		// es.childElemNL when it hands the interpreter an element whose
+		// separators it already wrote.
 		elemNL = es.childElemNL
 	)
 	es.childElemNL = false
@@ -55,20 +54,7 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 		switch op {
 
 		case opObjOpen:
-			if hdr.KeyLen > 0 {
-				es.interpWriteKey(hdr, first, indent)
-				elemNL = false
-			} else if !first {
-				es.buf = append(es.buf, ',')
-				if indent {
-					es.appendNewlineIndent()
-				}
-			} else if elemNL {
-				// First container element: open on its own line like the
-				// primitives do via interpWriteKey.
-				es.appendNewlineIndent()
-				elemNL = false
-			}
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			es.buf = append(es.buf, '{')
 			if indent {
 				es.indentDepth++
@@ -88,7 +74,7 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			pc += 8
 
 		case opBool:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			if *(*bool)(unsafe.Add(base, uintptr(hdr.FieldOff))) {
 				es.buf = append(es.buf, litTrue...)
@@ -98,67 +84,67 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			pc += 8
 
 		case opInt:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			es.appendInt64(int64(*(*int)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opInt8:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			es.appendInt64(int64(*(*int8)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opInt16:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			es.appendInt64(int64(*(*int16)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opInt32:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			es.appendInt64(int64(*(*int32)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opInt64:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			es.appendInt64(*(*int64)(unsafe.Add(base, uintptr(hdr.FieldOff))))
 			pc += 8
 
 		case opUint:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			es.appendUint64(uint64(*(*uint)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opUint8:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			es.appendUint64(uint64(*(*uint8)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opUint16:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			es.appendUint64(uint64(*(*uint16)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opUint32:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			es.appendUint64(uint64(*(*uint32)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opUint64:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			es.appendUint64(*(*uint64)(unsafe.Add(base, uintptr(hdr.FieldOff))))
 			pc += 8
 
 		case opFloat32:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			f := float64(*(*float32)(unsafe.Add(base, uintptr(hdr.FieldOff))))
 			if math.IsNaN(f) || math.IsInf(f, 0) {
@@ -168,7 +154,7 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			pc += 8
 
 		case opFloat64:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			f := *(*float64)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			if math.IsNaN(f) || math.IsInf(f, 0) {
@@ -178,45 +164,45 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			pc += 8
 
 		case opString:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			s := *(*string)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			es.encodeString(s)
 			pc += 8
 
 		case opKString:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			s := *(*string)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			es.encodeString(s)
 			pc += 8
 
 		case opKInt:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			es.appendInt64(int64(*(*int)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opKInt64:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			es.appendInt64(*(*int64)(unsafe.Add(base, uintptr(hdr.FieldOff))))
 			pc += 8
 
 		case opKQInt:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			es.appendQuotedInt64(int64(*(*int)(unsafe.Add(base, uintptr(hdr.FieldOff)))))
 			pc += 8
 
 		case opKQInt64:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			es.appendQuotedInt64(*(*int64)(unsafe.Add(base, uintptr(hdr.FieldOff))))
 			pc += 8
 
 		case opRawMessage:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			sh := (*gort.SliceHeader)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			if sh.Data == nil || sh.Len == 0 {
@@ -228,7 +214,7 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			pc += 8
 
 		case opNumber:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			s := *(*string)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			if s == "" {
@@ -239,7 +225,7 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			pc += 8
 
 		case opByteSlice:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			sh := (*gort.SliceHeader)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			if sh.Data == nil {
@@ -256,7 +242,7 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			pc += 8
 
 		case opTime:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			fb, ok := bp.Fallbacks[int(pc)]
 			if !ok {
@@ -269,7 +255,7 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			pc += 8
 
 		case opValue:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			v := (*value.Value)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 			if err := es.appendTapeValue(v); err != nil {
@@ -395,13 +381,13 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			fieldPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
 			p := *(*unsafe.Pointer)(fieldPtr)
 			if p == nil {
-				es.interpWriteKey(hdr, first, indent)
+				es.interpWriteKey(hdr, first, &elemNL, indent)
 				first = false
 				es.buf = append(es.buf, litNull...)
 				pc += ext.OperandA // jump past PtrEnd
 			} else {
 				if hdr.KeyLen > 0 {
-					es.interpWriteKey(hdr, first, indent)
+					es.interpWriteKey(hdr, first, &elemNL, indent)
 					// After writing key, set first=true so the value starts without comma
 					first = true
 				}
@@ -432,19 +418,8 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			bodyLen := ext.OperandB
 			sh := (*gort.SliceHeader)(unsafe.Add(base, uintptr(hdr.FieldOff)))
 
-			if hdr.KeyLen > 0 {
-				es.interpWriteKey(hdr, first, indent)
-				elemNL = false
-				first = false
-			} else if !first {
-				es.buf = append(es.buf, ',')
-				if indent {
-					es.appendNewlineIndent()
-				}
-			} else if elemNL {
-				es.appendNewlineIndent()
-				elemNL = false
-			}
+			es.interpWriteKey(hdr, first, &elemNL, indent)
+			first = false
 
 			if sh.Data == nil {
 				es.buf = append(es.buf, litNull...)
@@ -523,19 +498,8 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			arrayLen := int32(packed >> 16)
 			bodyLen := ext.OperandB
 
-			if hdr.KeyLen > 0 {
-				es.interpWriteKey(hdr, first, indent)
-				elemNL = false
-				first = false
-			} else if !first {
-				es.buf = append(es.buf, ',')
-				if indent {
-					es.appendNewlineIndent()
-				}
-			} else if elemNL {
-				es.appendNewlineIndent()
-				elemNL = false
-			}
+			es.interpWriteKey(hdr, first, &elemNL, indent)
+			first = false
 
 			es.buf = append(es.buf, '[')
 			if indent {
@@ -571,18 +535,7 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 		case opSeqFloat64, opSeqInt, opSeqInt64, opSeqString:
 			// The seq op renders the whole array; the element-position comma
 			// and leading newline belong here, not inside interpSeq.
-			if hdr.KeyLen > 0 {
-				es.interpWriteKey(hdr, first, indent)
-				elemNL = false
-			} else if !first {
-				es.buf = append(es.buf, ',')
-				if indent {
-					es.appendNewlineIndent()
-				}
-			} else if elemNL {
-				es.appendNewlineIndent()
-				elemNL = false
-			}
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			if err := es.interpSeq(hdr, ops, pc, base, op); err != nil {
 				return err
 			}
@@ -594,7 +547,7 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			if !ok {
 				return fmt.Errorf("venc: interp: opMap at PC=%d with no fallback info", pc)
 			}
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			mapPtr := unsafe.Add(base, fb.Offset)
 			if err := fb.TI.Encode(es, mapPtr); err != nil {
@@ -603,7 +556,7 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			pc += 8
 
 		case opMapStrStr, opMapStrInt, opMapStrInt64:
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			mapPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
 			if fb, ok := bp.Fallbacks[int(pc)]; ok {
@@ -634,7 +587,7 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			if !ok {
 				return fmt.Errorf("venc: interp: opMapStrIter at PC=%d with no fallback", pc)
 			}
-			es.interpWriteKey(hdr, first, indent)
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			first = false
 			mapPtr := unsafe.Add(base, fb.Offset)
 			if err := fb.TI.Encode(es, mapPtr); err != nil {
@@ -647,18 +600,7 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 
 		case opInterface:
 			fieldPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
-			if hdr.KeyLen > 0 {
-				es.interpWriteKey(hdr, first, indent)
-				elemNL = false
-			} else if !first {
-				es.buf = append(es.buf, ',')
-				if indent {
-					es.appendNewlineIndent()
-				}
-			} else if elemNL {
-				es.appendNewlineIndent()
-				elemNL = false
-			}
+			es.interpWriteKey(hdr, first, &elemNL, indent)
 			if err := es.encodeAnyIface(fieldPtr); err != nil {
 				return err
 			}
@@ -756,13 +698,20 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 	return nil
 }
 
-func (es *encodeState) interpWriteKey(hdr *VjOpHdr, first bool, indent bool) {
+// interpWriteKey writes what precedes a value: the comma after a sibling,
+// the line break that starts it in indent mode, and a member's key. A member
+// starts a new line. An element starts one after a comma or as the first
+// element of a just-opened container (elemNL, which the write consumes);
+// any other keyless value continues the line, as the pointee written after
+// its pointer's key does.
+func (es *encodeState) interpWriteKey(hdr *VjOpHdr, first bool, elemNL *bool, indent bool) {
 	if !first {
 		es.buf = append(es.buf, ',')
 	}
-	if indent {
+	if indent && (hdr.KeyLen > 0 || !first || *elemNL) {
 		es.appendNewlineIndent()
 	}
+	*elemNL = false
 	if hdr.KeyLen > 0 {
 		es.buf = append(es.buf, keyPoolBytes(hdr.KeyOff, hdr.KeyLen)...)
 		if indent {
