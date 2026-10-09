@@ -269,8 +269,14 @@ func (es *encodeState) handleIfaceCacheMiss(ctx *VjExecCtx, bp *Blueprint) error
 
 	// An unfold miss compiles the body-only Blueprint of the concrete struct
 	// and attaches it to the cache entry; the miss re-executes OP_UNFOLD,
-	// which then dispatches through the SWITCH_OPS frame.
+	// which then dispatches through the SWITCH_OPS frame. That frame reads
+	// the fields at the data word, so a case it cannot address there gets no
+	// body: each of its misses runs the unfold in Go and resumes past the op.
 	if hdr := opHdrAt(activeBlueprint(ctx, bp).Ops, ctx.PC); hdr.OpType == opUnfold {
+		if !unfoldInPlace(rtype) {
+			ifacePtr := unsafe.Add(ctx.CurBase, uintptr(hdr.FieldOff))
+			return es.unfoldInGo(ctx, ifacePtr, hdr.Flags&opFlagIfaceField != 0, vmstateGetFirst(ctx.VMState))
+		}
 		bodyBP, err := es.unfoldBodyBlueprint(rtype)
 		if err != nil {
 			return err
@@ -300,10 +306,14 @@ func (es *encodeState) handleIfaceCacheMiss(ctx *VjExecCtx, bp *Blueprint) error
 			fullBP = ti.getBlueprint()
 		case typ.KindMap:
 			fullBP = ti.getBlueprint()
-			// Map interface payloads are direct, so the VM needs the INDIRECT flag.
-			flags = ifaceFlagIndirect
 		default:
 		}
+	}
+	// A type the interface stores in its data word (a map, a single-pointer
+	// struct or array) is encoded from the word itself, not from what it
+	// points to.
+	if fullBP != nil && typ.IsDirectIface(rtype) {
+		flags = ifaceFlagIndirect
 	}
 
 	insertIfaceCache(typePtr, fullBP, tag, flags)
@@ -523,9 +533,8 @@ func (es *encodeState) spreadFromYield(ctx *VjExecCtx, bp *Blueprint, fb *fbInfo
 	return nil
 }
 
-// unfoldFromYield emits an inline variant case's fields in Go: the cold
-// mirror of the body-only Blueprint. Field order, omitempty, keys, and the
-// comma state follow emitStructBody's compiled form.
+// unfoldFromYield runs an unfold field the blueprint could not address
+// (pointer hops, oversized offset) in Go.
 func (es *encodeState) unfoldFromYield(ctx *VjExecCtx, fb *fbInfo, isFirst bool) error {
 	fieldBase := ctx.CurBase
 	if len(fb.PtrPath) > 0 {
@@ -536,27 +545,58 @@ func (es *encodeState) unfoldFromYield(ctx *VjExecCtx, fb *fbInfo, isFirst bool)
 		}
 		fieldBase = hopBase
 	}
-	fieldPtr := unsafe.Add(fieldBase, fb.Offset)
+	return es.unfoldInGo(ctx, unsafe.Add(fieldBase, fb.Offset), fb.TI.Kind == typ.KindIface, isFirst)
+}
 
-	typePtr := *(*unsafe.Pointer)(fieldPtr)
+// unfoldCase resolves the case an inline variant field holds: its concrete
+// type and the address its fields are read from. A pointer case reads its
+// pointee, a boxed value its box, and a value the interface stores in its
+// data word reads the word itself. A nil interface or a nil pointer case
+// holds no case.
+func unfoldCase(ifacePtr unsafe.Pointer, ifaceField bool) (reflect.Type, unsafe.Pointer, bool) {
+	typePtr := *(*unsafe.Pointer)(ifacePtr)
 	if typePtr == nil {
+		return nil, nil, false
+	}
+	if ifaceField {
+		// A non-empty interface stores an itab; the concrete type is its
+		// second word.
+		typePtr = *(*unsafe.Pointer)(unsafe.Add(typePtr, 8))
+	}
+	rtype := typeFromRTypePtr(typePtr)
+	word := unsafe.Add(ifacePtr, 8)
+	switch {
+	case rtype.Kind() == reflect.Pointer:
+		p := *(*unsafe.Pointer)(word)
+		return rtype, p, p != nil
+	case typ.IsDirectIface(rtype):
+		return rtype, word, true
+	}
+	return rtype, *(*unsafe.Pointer)(word), true
+}
+
+// unfoldInPlace reports whether the native unfold, which reads a case's
+// fields at the data word, addresses the case: a pointer case or a boxed
+// value.
+func unfoldInPlace(rtype reflect.Type) bool {
+	return rtype.Kind() == reflect.Pointer || !typ.IsDirectIface(rtype)
+}
+
+// unfoldInGo emits the fields of the case the inline variant field at
+// ifacePtr holds: the cold mirror of the body-only Blueprint. Field order,
+// omitempty, keys, and the comma state follow emitStructBody's compiled
+// form. It resumes the VM past the unfold op.
+func (es *encodeState) unfoldInGo(ctx *VjExecCtx, ifacePtr unsafe.Pointer, ifaceField bool, isFirst bool) error {
+	rtype, dataPtr, ok := unfoldCase(ifacePtr, ifaceField)
+	if !ok {
 		ctx.PC += 8
 		return nil
 	}
-	if fb.TI.Kind == typ.KindIface {
-		typePtr = *(*unsafe.Pointer)(unsafe.Add(typePtr, 8))
-	}
-
-	bodyBP, err := es.unfoldBodyBlueprint(typeFromRTypePtr(typePtr))
-	if err != nil {
-		return err
-	}
-	ti, err := unfoldStructTI(typeFromRTypePtr(typePtr))
+	ti, err := unfoldStructTI(rtype)
 	if err != nil {
 		return err
 	}
 	si := ti.ResolveStruct()
-	dataPtr := *(*unsafe.Pointer)(unsafe.Add(fieldPtr, 8))
 
 	first := isFirst
 	for i := range si.Fields {
@@ -602,8 +642,6 @@ func (es *encodeState) unfoldFromYield(ctx *VjExecCtx, fb *fbInfo, isFirst bool)
 		}
 	}
 
-	// bodyBP was compiled for the cache so later encodes stay native.
-	_ = bodyBP
 	ctx.PC += 8
 	if !first {
 		ctx.VMState &^= vjStFirstBit

@@ -1,6 +1,8 @@
 package tests
 
 import (
+	"bytes"
+	"encoding/json"
 	"testing"
 
 	vjson "github.com/velox-io/json"
@@ -33,6 +35,18 @@ type polyInlineHost struct {
 	Data any    `json:",embed" vjson:"variant=type"`
 }
 
+// polyRef holds a single pointer, so an interface stores it in its data
+// word rather than behind a pointer.
+type polyRef struct {
+	P *int `json:"p"`
+}
+
+type polyRefHost struct {
+	Type string `json:"type"`
+	Data any    `json:",embed" vjson:"variant=type"`
+	N    int    `json:"n"`
+}
+
 type polyKindofEnvelope struct {
 	Data any `json:"data" vjson:"kindof"`
 }
@@ -45,6 +59,10 @@ func init() {
 	vbind.DefineVariantCases[polyInlineHost, struct {
 		_ polyUser    `case:"user"`
 		_ polyProduct `case:"product"`
+	}]()
+	vbind.DefineVariantCases[polyRefHost, struct {
+		_ polyUser `case:"user"`
+		_ polyRef  `case:"ref"`
 	}]()
 	vbind.DefineKindofCases[polyKindofEnvelope, struct {
 		bool   bool
@@ -90,6 +108,44 @@ func TestPolyEncodeRoundTrip(t *testing.T) {
 		if string(got) != in {
 			t.Errorf("inline round trip: got %s, want %s", got, in)
 		}
+	}
+}
+
+// An inline case unfolds the same whether the interface holds it boxed,
+// behind a pointer, or in its data word.
+func TestPolyEncodeInlineCaseStorage(t *testing.T) {
+	x := 7
+	for _, c := range []struct {
+		name string
+		typ  string
+		data any
+		want string
+	}{
+		{"boxed", "user", polyUser{ID: 1, Name: "a"}, `{"type":"user","id":1,"name":"a","n":2}`},
+		{"pointer", "user", &polyUser{ID: 1, Name: "a"}, `{"type":"user","id":1,"name":"a","n":2}`},
+		{"data word", "ref", polyRef{P: &x}, `{"type":"ref","p":7,"n":2}`},
+		{"data word nil field", "ref", polyRef{}, `{"type":"ref","p":null,"n":2}`},
+		{"pointer to data-word type", "ref", &polyRef{P: &x}, `{"type":"ref","p":7,"n":2}`},
+	} {
+		h := polyRefHost{Type: c.typ, Data: c.data, N: 2}
+		check := func(leg string, got []byte, err error, want string) {
+			t.Helper()
+			if err != nil {
+				t.Errorf("%s/%s: %v", c.name, leg, err)
+			} else if string(got) != want {
+				t.Errorf("%s/%s: got %s, want %s", c.name, leg, got, want)
+			}
+		}
+		got, err := vjson.Marshal(h)
+		check("Marshal", got, err, c.want)
+		got, err = vjson.Marshal([]polyRefHost{h, h})
+		check("slice", got, err, "["+c.want+","+c.want+"]")
+		var ind bytes.Buffer
+		if ierr := json.Indent(&ind, []byte(c.want), "", "  "); ierr != nil {
+			t.Fatal(ierr)
+		}
+		got, err = vjson.MarshalIndent(h, "", "  ")
+		check("MarshalIndent", got, err, ind.String())
 	}
 }
 

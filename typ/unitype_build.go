@@ -229,18 +229,18 @@ func detectInterfaceHooks(t reflect.Type) *InterfaceHooks {
 	return &hooks
 }
 
-// isDirectIface reports whether an interface holding a t stores the value
+// IsDirectIface reports whether an interface holding a t stores the value
 // itself in its data word rather than a pointer to it. It mirrors the
 // compiler's rule: pointer-shaped kinds, and single-element arrays or
 // single-field structs of a pointer-shaped type.
-func isDirectIface(t reflect.Type) bool {
+func IsDirectIface(t reflect.Type) bool {
 	switch t.Kind() {
 	case reflect.Pointer, reflect.Map, reflect.Chan, reflect.Func, reflect.UnsafePointer:
 		return true
 	case reflect.Array:
-		return t.Len() == 1 && isDirectIface(t.Elem())
+		return t.Len() == 1 && IsDirectIface(t.Elem())
 	case reflect.Struct:
-		return t.NumField() == 1 && isDirectIface(t.Field(0).Type)
+		return t.NumField() == 1 && IsDirectIface(t.Field(0).Type)
 	}
 	return false
 }
@@ -249,7 +249,7 @@ func isDirectIface(t reflect.Type) bool {
 // call on the t-typed value at ptr: the value's own word when t is stored
 // directly in an interface, its address otherwise.
 func valueReceiverData(t reflect.Type) func(unsafe.Pointer) unsafe.Pointer {
-	if isDirectIface(t) {
+	if IsDirectIface(t) {
 		return func(ptr unsafe.Pointer) unsafe.Pointer { return *(*unsafe.Pointer)(ptr) }
 	}
 	return func(ptr unsafe.Pointer) unsafe.Pointer { return ptr }

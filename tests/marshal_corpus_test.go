@@ -227,6 +227,30 @@ func TestMarshalCorpus_Composites(t *testing.T) {
 	}
 }
 
+// mcRef and mcRefs hold a single pointer, so an interface stores them in its
+// data word rather than behind a pointer.
+type mcRef struct{ P *int }
+
+type mcRefs [1]*int
+
+type mcAnyHost struct{ I any }
+
+// An interface payload encodes the same whether the interface stores it
+// behind a pointer or in its data word.
+func TestMarshalCorpus_InterfacePayloads(t *testing.T) {
+	n := 7
+	for _, c := range []marshalCase{
+		mc("single-pointer struct in field", mcAnyHost{I: mcRef{P: &n}}),
+		mc("single-pointer array in field", mcAnyHost{I: mcRefs{&n}}),
+		mc("nil single-pointer struct in field", mcAnyHost{I: mcRef{}}),
+		mc("single-pointer struct in slice", []any{mcRef{P: &n}, mcRefs{&n}, mcRef{}}),
+		mc("single-pointer struct in map", map[string]any{"k": mcRef{P: &n}}),
+		mc("map in field", mcAnyHost{I: map[string]int{"a": 1}}),
+	} {
+		c.run(t)
+	}
+}
+
 // A map value whose type has a marshal method encodes through it, whatever
 // its kind.
 func TestMarshalCorpus_HookedMapValues(t *testing.T) {

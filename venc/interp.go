@@ -343,18 +343,12 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			}
 
 		case opUnfold:
-			ifacePtr := unsafe.Add(base, uintptr(hdr.FieldOff))
-			typePtr := *(*unsafe.Pointer)(ifacePtr)
-			if typePtr == nil {
+			rtype, caseBase, ok := unfoldCase(unsafe.Add(base, uintptr(hdr.FieldOff)), hdr.Flags&opFlagIfaceField != 0)
+			if !ok {
 				pc += 8
 				continue
 			}
-			if hdr.Flags&opFlagIfaceField != 0 {
-				// Non-empty interface: word 0 is an itab; the concrete type
-				// is its second word.
-				typePtr = *(*unsafe.Pointer)(unsafe.Add(typePtr, 8))
-			}
-			ti, err := unfoldStructTI(typeFromRTypePtr(typePtr))
+			ti, err := unfoldStructTI(rtype)
 			if err != nil {
 				return err
 			}
@@ -372,7 +366,7 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 
 			ops = bodyBP.Ops
 			pc = 0
-			base = *(*unsafe.Pointer)(unsafe.Add(ifacePtr, 8))
+			base = caseBase
 			// first stays as-is: the body's first field continues the host's
 			// comma state, and an empty body leaves it untouched.
 
