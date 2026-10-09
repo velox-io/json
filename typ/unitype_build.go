@@ -385,7 +385,9 @@ func buildMapTypeInfo(t reflect.Type, building map[reflect.Type]*UniType) *MapTy
 		IsStringKey: isStringKey,
 		ValHasPtr:   TypeContainsPointer(t.Elem()),
 	}
-	if isStringKey {
+	// The variants write their values as the plain kind, so a value type
+	// with a hook stays generic: its method must run for every entry.
+	if isStringKey && valUT.Hooks == nil {
 		switch valUT.Kind {
 		case KindString:
 			mi.MapKind = MapVariantStrStr

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"math"
 	"reflect"
+	"strconv"
 	"testing"
 
 	vjson "github.com/velox-io/json"
@@ -142,6 +143,28 @@ type mcMethodsQuoted struct {
 	T mcText      `json:"t,string"` //nolint:staticcheck // methods ignore the option
 }
 
+// mcStatus, mcName and mcCount are int, string and int64 kinds that encode
+// through value-receiver methods.
+type mcStatus int
+
+func (s mcStatus) MarshalJSON() ([]byte, error) {
+	return []byte(`"s` + strconv.Itoa(int(s)) + `"`), nil
+}
+
+type mcName string
+
+func (n mcName) MarshalText() ([]byte, error) { return []byte("n:" + string(n)), nil }
+
+type mcCount int64
+
+func (c mcCount) MarshalJSON() ([]byte, error) { return []byte(`"c` + strconv.Itoa(int(c)) + `"`), nil }
+
+type mcHookedMaps struct {
+	S map[string]mcStatus
+	N map[string]mcName
+	C map[string]mcCount
+}
+
 type mcBytes struct {
 	Nil   []byte
 	Empty []byte
@@ -199,6 +222,23 @@ func TestMarshalCorpus_Composites(t *testing.T) {
 		mcForm("text keys", map[mcText]int{{S: "b"}: 1, {S: "a"}: 2}, formUnordered),
 		mc("text key", map[mcText]int{{S: "<&>"}: 1}),
 		mc("nested pointers", &struct{ P **int }{P: func() **int { p := &n; return &p }()}),
+	} {
+		c.run(t)
+	}
+}
+
+// A map value whose type has a marshal method encodes through it, whatever
+// its kind.
+func TestMarshalCorpus_HookedMapValues(t *testing.T) {
+	for _, c := range []marshalCase{
+		mc("hooked map values", mcHookedMaps{
+			S: map[string]mcStatus{"a": 1},
+			N: map[string]mcName{"b": "x"},
+			C: map[string]mcCount{"c": 2},
+		}),
+		mc("status map", map[string]mcStatus{"a": 1}),
+		mc("name map", map[string]mcName{"b": "x"}),
+		mc("count map", map[string]mcCount{"c": 2}),
 	} {
 		c.run(t)
 	}
