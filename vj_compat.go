@@ -18,15 +18,16 @@ type Unmarshaler = json.Unmarshaler
 //
 // v's type must be representable by the vjson type system (no chan, func, or
 // unsafe.Pointer). Scalars are returned by value; slices, maps, and pointers
-// are freshly allocated. Strings are copied to new backing storage.
-// Cyclic graphs are not supported; the type graph must be acyclic.
+// are freshly allocated. Strings are copied to new backing storage. A cyclic
+// graph copies into the same cycle over the new allocations.
 func DeepCopy[T any](v T) (T, error) {
 	return vcopy.DeepCopy(v)
 }
 
 // CopyInto deep-copies src into *dst using the vjson type system. It is the
 // allocation-light variant of DeepCopy: the result is written in place,
-// avoiding the final reflect.Value boxing.
+// avoiding the final reflect.Value boxing. The existing contents of *dst are
+// replaced, not merged.
 func CopyInto[T any](src T, dst *T) error {
 	return vcopy.CopyInto(src, dst)
 }
