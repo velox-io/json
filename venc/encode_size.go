@@ -294,7 +294,13 @@ func buildSizeMap(ti *EncTypeInfo, depth int) func(ptr unsafe.Pointer) int {
 	}
 
 	// Per-entry estimate: "key": value, = keyHint + 1(:) + valHint
-	keyHint := computeHintBytes(mi.KeyType, depth+1)
+	// A pointer key is named by its base value, so the estimate follows the
+	// dereference chain.
+	keyET := mi.KeyType
+	if mi.KeyBase != nil {
+		keyET = mi.KeyBase
+	}
+	keyHint := computeHintBytes(keyET, depth+1)
 	valHint := computeHintBytes(mi.ValType, depth+1)
 	entryHint := keyHint + 1 + valHint
 

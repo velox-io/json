@@ -253,7 +253,9 @@ func (es *encodeState) encodeMapStringString(ptr unsafe.Pointer) error {
 	return nil
 }
 
-func (es *encodeState) encodeMapKey(keyPtr unsafe.Pointer, keyTI *EncTypeInfo, keyType reflect.Type) error {
+// encodeMapKey names the keyTI value at keyPtr as an object member. declared
+// is the map's key type, which an unsupported key reports.
+func (es *encodeState) encodeMapKey(keyPtr unsafe.Pointer, keyTI *EncTypeInfo, declared reflect.Type) error {
 	if keyTI.TypeFlags&EncTypeFlagHasTextMarshalFn != 0 {
 		text, err := keyTI.Hooks.TextMarshalFn(keyPtr)
 		if err != nil {
@@ -262,15 +264,43 @@ func (es *encodeState) encodeMapKey(keyPtr unsafe.Pointer, keyTI *EncTypeInfo, k
 		es.encodeString(string(text))
 		return nil
 	}
-	switch keyType.Kind() {
+	switch keyTI.Type.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		es.appendQuotedInt64(readIntN(keyPtr, keyType.Size()))
+		es.appendQuotedInt64(readIntN(keyPtr, keyTI.Size))
 		return nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		es.appendQuotedUint64(readUintN(keyPtr, keyType.Size()))
+		es.appendQuotedUint64(readUintN(keyPtr, keyTI.Size))
+		return nil
+	case reflect.String:
+		// A direct string-kind key never gets here: the IsStringKey branch
+		// names it. This is the base of a dereferenced pointer key, whose
+		// storage is the string itself.
+		es.encodeString(*(*string)(keyPtr))
 		return nil
 	}
-	return &UnsupportedTypeError{Type: keyType}
+	return &UnsupportedTypeError{Type: declared}
+}
+
+// encodeDerefMapKey names the non-string key at keyPtr. A pointer key is named
+// by the value at the end of its chain; each hop reads the pointer stored one
+// level up, and a nil pointer on the way has no name, except a nil key whose
+// type has its own MarshalText.
+func (es *encodeState) encodeDerefMapKey(mi *EncMapInfo, keyPtr unsafe.Pointer) error {
+	if mi.KeyHops == 0 {
+		return es.encodeMapKey(keyPtr, mi.KeyType, mi.KeyType.Type)
+	}
+	for range mi.KeyHops {
+		keyPtr = *(*unsafe.Pointer)(keyPtr)
+		if keyPtr == nil {
+			// Such a key reaches its base in one hop: the nil is the key.
+			if mi.KeyNilNamed {
+				es.encodeString("")
+				return nil
+			}
+			return &UnsupportedValueError{Str: fmt.Sprintf("nil pointer in map key of type %s", mi.KeyType.Type)}
+		}
+	}
+	return es.encodeMapKey(keyPtr, mi.KeyBase, mi.KeyType.Type)
 }
 
 func readIntN(ptr unsafe.Pointer, size uintptr) int64 {
@@ -348,7 +378,7 @@ func (es *encodeState) encodeMapGeneric(mi *EncMapInfo, ptr unsafe.Pointer) erro
 		}
 		if mi.IsStringKey {
 			es.encodeString(*(*string)(keyPtr))
-		} else if err := es.encodeMapKey(keyPtr, mi.KeyType, mi.KeyType.Type); err != nil {
+		} else if err := es.encodeDerefMapKey(mi, keyPtr); err != nil {
 			return err
 		}
 		if es.indentString != "" {

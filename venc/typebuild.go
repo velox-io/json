@@ -1,6 +1,7 @@
 package venc
 
 import (
+	"encoding"
 	"reflect"
 	"unsafe"
 
@@ -8,6 +9,8 @@ import (
 	"github.com/velox-io/json/rtcache"
 	"github.com/velox-io/json/typ"
 )
+
+var textMarshalerType = reflect.TypeFor[encoding.TextMarshaler]()
 
 var (
 	encTypeCache rtcache.Cache[*EncTypeInfo] // rtype to EncTypeInfo, shared with recursive builds
@@ -219,11 +222,40 @@ func buildMapInfo(t reflect.Type, info *typ.MapTypeInfo, building map[uintptr]*E
 		MapRType:    gort.TypePtr(t),
 		IsStringKey: info.IsStringKey,
 	}
+	if !info.IsStringKey {
+		resolveKeyDeref(mi, t.Key(), building)
+	}
 	if slotSize, indirect, ok := probeSwissMapSlotSize(t, info.ValType.Size); ok {
 		mi.SlotSize = slotSize
 		mi.Indirect = indirect
 	}
 	return mi
+}
+
+// resolveKeyDeref records how a non-string pointer key of type key is named:
+// by the value at the end of its pointer chain. KeyHops counts the
+// dereferences and KeyBase describes that value. A pointer whose own method
+// set has MarshalText reaches it in one hop, and the method is the base's. The
+// chain is walked on the reflect types, which are complete even while the
+// container holding the map is still being built, so the result does not
+// depend on which type a build starts from. A chain that cycles never ends and
+// leaves the key direct, where its pointer kind names no entry.
+func resolveKeyDeref(mi *EncMapInfo, key reflect.Type, building map[uintptr]*EncTypeInfo) {
+	mi.KeyNilNamed = key.Kind() == reflect.Pointer && key.Implements(textMarshalerType)
+	hops := 0
+	seen := make(map[reflect.Type]bool)
+	for key.Kind() == reflect.Pointer {
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		key = key.Elem()
+		hops++
+	}
+	if hops > 0 {
+		mi.KeyHops = hops
+		mi.KeyBase = buildEncRec(key, building)
+	}
 }
 
 func buildPointerInfo(info *typ.PointerTypeInfo, building map[uintptr]*EncTypeInfo) *EncPointerInfo {

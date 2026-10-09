@@ -161,4 +161,16 @@ type EncMapInfo struct {
 	IsStringKey bool
 	SlotSize    uintptr // Swiss Map slot size; 0 if unknown
 	Indirect    bool    // element stored behind a pointer; slots hold a *V
+
+	// KeyHops is the number of pointer dereferences from a key slot to the
+	// value the key is named by; 0 for a non-pointer key. KeyType keeps
+	// describing the slot layout, which holds a pointer at every hop.
+	KeyHops int
+
+	// KeyBase is the key type after KeyHops dereferences; nil when KeyHops is 0.
+	KeyBase *EncTypeInfo
+
+	// KeyNilNamed records that the key type is a pointer with MarshalText in
+	// its own method set, which names a nil key "" as encoding/json does.
+	KeyNilNamed bool
 }
