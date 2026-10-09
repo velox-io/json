@@ -577,40 +577,25 @@ func TestVariantAnyDefaultPassthrough(t *testing.T) {
 }
 
 // TestVariantAnyCaseErrorParity verifies a mismatch inside an any-target case
-// descent reports the case type rather than a cascading syntax error. The
-// tape path's value name stays "json" (tape offsets carry no source byte), so
-// only the error kind and type are compared. The immediate dispatch (disc
-// before value) keeps the JSON path's leaf identity, while the tape walk
-// reports the case type in either order.
+// descent reports the leaf type that rejected the value rather than a
+// cascading syntax error, on the immediate dispatch (disc before value) and
+// on the tape walk (disc after value, or any UnmarshalValue) alike. The tape
+// path's value name stays "json" (tape offsets carry no source byte), so only
+// the error kind and type are compared.
 func TestVariantAnyCaseErrorParity(t *testing.T) {
-	var u variantAnyCaseHost
-	uerr := Unmarshal([]byte(`{"data":[1],"kind":"list"}`), &u)
-	var typErr *UnmarshalTypeError
-	if !errors.As(uerr, &typErr) || typErr.Type == nil || typErr.Type.String() != "[]string" {
-		t.Fatalf("Unmarshal err = %v, want *UnmarshalTypeError with type []string", uerr)
-	}
-	val, err := dom.Parse([]byte(`{"data":[1],"kind":"list"}`))
-	if err != nil {
-		t.Fatalf("dom.Parse: %v", err)
-	}
-	var uv variantAnyCaseHost
-	verr := UnmarshalValue(val, &uv)
-	if !errors.As(verr, &typErr) || typErr.Type == nil || typErr.Type.String() != "[]string" {
-		t.Fatalf("UnmarshalValue err = %v, want *UnmarshalTypeError with type []string", verr)
-	}
-
-	var u2 variantAnyCaseHost
-	uerr2 := Unmarshal([]byte(`{"kind":"list","data":[1]}`), &u2)
-	if !errors.As(uerr2, &typErr) || typErr.Type == nil || typErr.Type.String() != "string" {
-		t.Fatalf("immediate dispatch err = %v, want *UnmarshalTypeError with type string", uerr2)
-	}
-	val2, err := dom.Parse([]byte(`{"kind":"list","data":[1]}`))
-	if err != nil {
-		t.Fatalf("dom.Parse: %v", err)
-	}
-	var uv2 variantAnyCaseHost
-	verr2 := UnmarshalValue(val2, &uv2)
-	if !errors.As(verr2, &typErr) || typErr.Type == nil || typErr.Type.String() != "[]string" {
-		t.Fatalf("immediate dispatch UnmarshalValue err = %v, want *UnmarshalTypeError with type []string", verr2)
+	for _, src := range []string{`{"data":[1],"kind":"list"}`, `{"kind":"list","data":[1]}`} {
+		var u variantAnyCaseHost
+		var typErr *UnmarshalTypeError
+		if err := Unmarshal([]byte(src), &u); !errors.As(err, &typErr) || typErr.Type == nil || typErr.Type.String() != "string" {
+			t.Errorf("Unmarshal(%s) err = %v, want *UnmarshalTypeError with type string", src, err)
+		}
+		val, err := dom.Parse([]byte(src))
+		if err != nil {
+			t.Fatalf("dom.Parse: %v", err)
+		}
+		var uv variantAnyCaseHost
+		if err := UnmarshalValue(val, &uv); !errors.As(err, &typErr) || typErr.Type == nil || typErr.Type.String() != "string" {
+			t.Errorf("UnmarshalValue(%s) err = %v, want *UnmarshalTypeError with type string", src, err)
+		}
 	}
 }

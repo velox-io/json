@@ -1114,6 +1114,16 @@ INLINE uint32_t bind_mismatch_end_delta(const NdecBindMachine *m, uint64_t pos) 
 
 #define TAPE_BIND_YIELD_ERR_NO_POS(m, kind, detail) TAPE_BIND_YIELD_ERR((m), (kind), (detail))
 
+/* An array or map element the tape walk cannot bind aborts the walk. The
+ * error names the element type that rejected the value, as the JSON walk's
+ * element dispatch does, rather than the container current at the yield. */
+#define TAPE_BIND_ELEM_TYPE_MISMATCH(m, ct)                                                                       \
+  do {                                                                                                            \
+    (m)->c.first_error_type_idx  = (uint32_t)(ct)->type_idx;                                                      \
+    (m)->c.first_error_end_delta = 0;                                                                             \
+    TAPE_BIND_YIELD_ERR((m), BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - (m)->b.alloc.value_tape));           \
+  } while (0)
+
 #define TAPE_BIND_YIELD_FLUSH_MAP(m, count, closing, map_hdr, resume_phase)                                       \
   do {                                                                                                            \
     __TAPE_BIND_SAVE_LOCALS(m);                                                                                   \

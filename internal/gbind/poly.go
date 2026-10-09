@@ -156,11 +156,7 @@ func (c *binder) polyField(h *polyHost, f *vbind.BindField, key string, kpos int
 	if c.typ(pc.ti).Kind != vbind.KindAny && c.coldCase(pc) {
 		return c.deferEntry(h, key, kpos)
 	}
-	err := c.bindCase(target, h, pc)
-	if err != nil && c.tape {
-		c.rewriteCaseMismatch(pc)
-	}
-	return err
+	return c.bindCase(target, h, pc)
 }
 
 // polyCase is a selected case. ok is false when selection failed.
@@ -419,24 +415,7 @@ func (c *binder) phase2Poly(h *polyHost, f *vbind.BindField) error {
 	}
 	err := c.bindCase(unsafe.Add(h.dst, f.Offset), h, pc)
 	c.pop()
-	if err != nil {
-		c.rewriteCaseMismatch(pc)
-	}
 	return err
-}
-
-// rewriteCaseMismatch lifts a type-mismatch abort out of a case descent to
-// the case type. Tape-backed descents, the deferred phase2 bind and every
-// tape-mode walk, report the descent root as the native tape binder does,
-// because the tape carries no source identity for the leaf. The JSON path's
-// immediate dispatch keeps the leaf identity a plain field reports. Syntax,
-// truncation, and depth failures pass through untouched, and the innermost
-// descent's lift wins, matching the native yield point.
-func (c *binder) rewriteCaseMismatch(pc polyCase) {
-	if c.info.Kind == ndec.BindErrTypeMismatch && !c.caseLift {
-		c.info.TypeIdx = int(pc.ti)
-		c.caseLift = true
-	}
 }
 
 // bindInlineCase binds the inline case from its view of the entries: a

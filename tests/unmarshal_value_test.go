@@ -2,6 +2,7 @@ package tests
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -53,4 +54,47 @@ func TestUnmarshalValue_MergesIntoStructs(t *testing.T) {
 	assertSameValueDecode(t, "merge",
 		`{"In":{"A":9},"P":{"A":9},"Arr":[{"A":9},{}],"M":{"k":{"A":9}}}`, mk)
 	assertSameValueDecode(t, "empty objects", `{"In":{},"P":{},"Arr":[{},{}]}`, mk)
+}
+
+// A mismatched array element or map value aborts UnmarshalValue with an
+// *UnmarshalTypeError naming the type that rejected the value, the same
+// type Unmarshal names for the same document.
+func TestUnmarshalValue_ElementMismatchNamesElementType(t *testing.T) {
+	type field struct {
+		B []int `json:"b"`
+	}
+	for _, c := range []struct {
+		name string
+		doc  string
+		mk   func() any
+	}{
+		{"slice string", `[1,"x"]`, func() any { return new([]int) }},
+		{"slice bool", `[true]`, func() any { return new([]string) }},
+		{"slice object", `[{}]`, func() any { return new([]int) }},
+		{"slice array", `[[1]]`, func() any { return new([]bool) }},
+		{"slice of slices", `[[1,"x"]]`, func() any { return new([][]int) }},
+		{"slice of maps", `[{"k":"x"}]`, func() any { return new([]map[string]int) }},
+		{"fixed array", `[1,"x"]`, func() any { return new([2]int) }},
+		{"map value", `{"k":"x"}`, func() any { return new(map[string]int) }},
+		{"map object", `{"k":{}}`, func() any { return new(map[string][]int) }},
+		{"map of slices", `{"k":[1,"x"]}`, func() any { return new(map[string][]int) }},
+		{"field slice", `{"b":[1,"x"]}`, func() any { return new(field) }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			v, err := vjson.Parse([]byte(c.doc))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			var got, want *json.UnmarshalTypeError
+			if err := vjson.UnmarshalValue(v, c.mk()); !errors.As(err, &got) {
+				t.Fatalf("UnmarshalValue error = %v, want *UnmarshalTypeError", err)
+			}
+			if err := vjson.Unmarshal([]byte(c.doc), c.mk()); !errors.As(err, &want) {
+				t.Fatalf("Unmarshal error = %v, want *UnmarshalTypeError", err)
+			}
+			if got.Type != want.Type {
+				t.Errorf("UnmarshalValue names %v, Unmarshal names %v", got.Type, want.Type)
+			}
+		})
+	}
 }

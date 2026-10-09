@@ -312,9 +312,6 @@ type binder struct {
 	rootType     uint32
 
 	info Error
-	// caseLift marks a mismatch abort already lifted to its innermost case
-	// type, so an enclosing case descent does not lift it further.
-	caseLift bool
 
 	deferred []deferred
 	docs     []stagedDoc

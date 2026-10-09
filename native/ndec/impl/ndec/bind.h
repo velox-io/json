@@ -3244,7 +3244,7 @@ t_array_value: {
       TAP_ADVANCE();
       goto t_array_continue;
     }
-    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_ELEM_TYPE_MISMATCH(m, child_type);
   }
 
   switch (child_type->kind) {
@@ -3259,7 +3259,7 @@ t_array_value: {
       TAP_ADVANCE();
       goto t_array_continue;
     }
-    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_ELEM_TYPE_MISMATCH(m, child_type);
   case BIND_KIND_INT:
   case BIND_KIND_INT8:
   case BIND_KIND_INT16:
@@ -3272,14 +3272,11 @@ t_array_value: {
   case BIND_KIND_UINT64:
   case BIND_KIND_FLOAT32:
   case BIND_KIND_FLOAT64: {
-    TAPE_BIND_NUMBER_ARM(
-        m, child_type->kind, body, t_array_continue,
-        TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape)));
+    TAPE_BIND_NUMBER_ARM(m, child_type->kind, body, t_array_continue, TAPE_BIND_ELEM_TYPE_MISMATCH(m, child_type));
   }
   case BIND_KIND_STRUCT: {
     /* An element merges into its slot like a struct field. */
-    if (tag != (TAPE_START_OBJECT >> 56))
-      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    if (tag != (TAPE_START_OBJECT >> 56)) TAPE_BIND_ELEM_TYPE_MISMATCH(m, child_type);
     TAP_ADVANCE();
     int empty = (TAP_TAG() == (TAPE_END_OBJECT >> 56));
     if (empty) {
@@ -3295,8 +3292,7 @@ t_array_value: {
     goto t_object_field;
   }
   case BIND_KIND_MAP: {
-    if (tag != (TAPE_START_OBJECT >> 56))
-      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    if (tag != (TAPE_START_OBJECT >> 56)) TAPE_BIND_ELEM_TYPE_MISMATCH(m, child_type);
     if (bind_push_array_or_slice(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       TAPE_BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
     cur_dst  = body;
@@ -3308,8 +3304,7 @@ t_array_value: {
   case BIND_KIND_ARRAY: {
     /* The parent is an array or slice, so its specialized frame preserves the
      * outer slot cursor while the nested element descends. */
-    if (tag != (TAPE_START_ARRAY >> 56))
-      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    if (tag != (TAPE_START_ARRAY >> 56)) TAPE_BIND_ELEM_TYPE_MISMATCH(m, child_type);
     if (bind_push_array_or_slice(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       TAPE_BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
     cur_dst   = body;
@@ -3325,7 +3320,7 @@ t_array_value: {
     goto t_array_begin;
   }
   case BIND_KIND_PTR:
-    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_ELEM_TYPE_MISMATCH(m, child_type);
   default:
     goto t_unsupported;
   }
@@ -3513,7 +3508,7 @@ t_map_value: {
       TAP_ADVANCE();
       goto t_map_continue;
     }
-    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_ELEM_TYPE_MISMATCH(m, child_type);
   }
 
   switch (child_type->kind) {
@@ -3528,7 +3523,7 @@ t_map_value: {
       TAP_ADVANCE();
       goto t_map_continue;
     }
-    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_ELEM_TYPE_MISMATCH(m, child_type);
   case BIND_KIND_INT:
   case BIND_KIND_INT8:
   case BIND_KIND_INT16:
@@ -3541,13 +3536,10 @@ t_map_value: {
   case BIND_KIND_UINT64:
   case BIND_KIND_FLOAT32:
   case BIND_KIND_FLOAT64: {
-    TAPE_BIND_NUMBER_ARM(
-        m, child_type->kind, body, t_map_continue,
-        TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape)));
+    TAPE_BIND_NUMBER_ARM(m, child_type->kind, body, t_map_continue, TAPE_BIND_ELEM_TYPE_MISMATCH(m, child_type));
   }
   case BIND_KIND_STRUCT: {
-    if (tag != (TAPE_START_OBJECT >> 56))
-      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    if (tag != (TAPE_START_OBJECT >> 56)) TAPE_BIND_ELEM_TYPE_MISMATCH(m, child_type);
     uint32_t zero_size = m->b.ctx.type_meta[child_type->type_idx].size;
     __builtin_memset(body, 0, zero_size);
     TAP_ADVANCE();
@@ -3567,8 +3559,7 @@ t_map_value: {
   case BIND_KIND_MAP: {
     /* Preserve the parent map frame before the nested map replaces cur_dst,
      * cur_type, and cur_aux. */
-    if (tag != (TAPE_START_OBJECT >> 56))
-      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    if (tag != (TAPE_START_OBJECT >> 56)) TAPE_BIND_ELEM_TYPE_MISMATCH(m, child_type);
     if (bind_push_map(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       TAPE_BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
     cur_dst  = body;
@@ -3580,8 +3571,7 @@ t_map_value: {
   case BIND_KIND_ARRAY: {
     /* Preserve the parent map frame while the nested array or slice owns the
      * current destination and type. */
-    if (tag != (TAPE_START_ARRAY >> 56))
-      TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    if (tag != (TAPE_START_ARRAY >> 56)) TAPE_BIND_ELEM_TYPE_MISMATCH(m, child_type);
     if (bind_push_map(frames, &depth, cur_dst, cur_type, cur_count, cur_aux))
       TAPE_BIND_YIELD_ERR_NO_POS(m, BIND_ERR_DEPTH, 0);
     cur_dst   = body;
@@ -3597,7 +3587,7 @@ t_map_value: {
     goto t_array_begin;
   }
   case BIND_KIND_PTR:
-    TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
+    TAPE_BIND_ELEM_TYPE_MISMATCH(m, child_type);
   default:
     goto t_unsupported;
   }
