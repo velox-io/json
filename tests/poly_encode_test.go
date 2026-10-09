@@ -170,6 +170,51 @@ func TestPolyEncodeInlineCaseStorage(t *testing.T) {
 	}
 }
 
+// An inline case unfolds the struct at the end of a pointer chain, and a nil
+// anywhere along the chain holds no case: nothing is written and the host's
+// fields stay put, the same as a nil interface.
+func TestPolyEncodeInlineCasePointerChain(t *testing.T) {
+	u := &polyUser{ID: 1, Name: "a"}
+	var nu *polyUser
+	const full = `{"type":"user","id":1,"name":"a","n":2}`
+	const none = `{"type":"user","n":2}`
+	// A non-nil *polyUser ahead of the case in the same call caches its
+	// type's body, so a typed nil of that type unfolds from a cache hit.
+	prime := polyRefHost{Type: "user", Data: u, N: 2}
+	for _, c := range []struct {
+		name string
+		data any
+		want string
+	}{
+		{"nil interface", nil, none},
+		{"typed nil pointer", (*polyUser)(nil), none},
+		{"typed nil non-struct pointer", (*int)(nil), none},
+		{"pointer chain", &u, full},
+		{"pointer chain inner nil", &nu, none},
+		{"typed nil pointer chain", (**polyUser)(nil), none},
+	} {
+		h := polyRefHost{Type: "user", Data: c.data, N: 2}
+		check := func(leg string, got []byte, err error, want string) {
+			t.Helper()
+			if err != nil {
+				t.Errorf("%s/%s: %v", c.name, leg, err)
+			} else if string(got) != want {
+				t.Errorf("%s/%s: got %s, want %s", c.name, leg, got, want)
+			}
+		}
+		got, err := vjson.Marshal(h)
+		check("Marshal", got, err, c.want)
+		got, err = vjson.Marshal([]polyRefHost{prime, h, h})
+		check("after cached", got, err, "["+full+","+c.want+","+c.want+"]")
+		var ind bytes.Buffer
+		if ierr := json.Indent(&ind, []byte(c.want), "", "  "); ierr != nil {
+			t.Fatal(ierr)
+		}
+		got, err = vjson.MarshalIndent(h, "", "  ")
+		check("MarshalIndent", got, err, ind.String())
+	}
+}
+
 // An inline case whose fields encode in Go unfolds like any other, and the
 // host's fields after it continue.
 func TestPolyEncodeInlineCaseGoFields(t *testing.T) {

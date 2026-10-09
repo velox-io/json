@@ -272,9 +272,12 @@ func (es *encodeState) handleIfaceCacheMiss(ctx *VjExecCtx, bp *Blueprint) error
 	// which then dispatches through the SWITCH_OPS frame. That frame reads
 	// the fields at the data word, so a case it cannot address there gets no
 	// body: each of its misses runs the unfold in Go and resumes past the op.
+	// A nil data word runs in Go too: a typed nil pointer holds no case
+	// whatever its pointee, so its type must not be compiled (a non-struct
+	// pointee would fail where the Go engine skips).
 	if hdr := opHdrAt(activeBlueprint(ctx, bp).Ops, ctx.PC); hdr.OpType == opUnfold {
-		if !unfoldInPlace(rtype) {
-			ifacePtr := unsafe.Add(ctx.CurBase, uintptr(hdr.FieldOff))
+		ifacePtr := unsafe.Add(ctx.CurBase, uintptr(hdr.FieldOff))
+		if !unfoldInPlace(rtype) || *(*unsafe.Pointer)(unsafe.Add(ifacePtr, 8)) == nil {
 			return es.unfoldInGo(ctx, ifacePtr, hdr.Flags&opFlagIfaceField != 0, vmstateGetFirst(ctx.VMState))
 		}
 		bodyBP, err := es.unfoldBodyBlueprint(rtype)
@@ -558,10 +561,11 @@ func (es *encodeState) unfoldFromYield(ctx *VjExecCtx, fb *fbInfo, isFirst bool)
 }
 
 // unfoldCase resolves the case an inline variant field holds: its concrete
-// type and the address its fields are read from. A pointer case reads its
-// pointee, a boxed value its box, and a value the interface stores in its
-// data word reads the word itself. A value case whose methods may write it
-// reads a copy instead. A nil interface or a nil pointer case holds no case.
+// type and the address its fields are read from. A pointer case reads the
+// end of its pointer chain, a boxed value its box, and a value the interface
+// stores in its data word reads the word itself. A value case whose methods
+// may write it reads a copy instead. A nil interface, or a nil anywhere
+// along a pointer chain, holds no case.
 func unfoldCase(ifacePtr unsafe.Pointer, ifaceField bool) (reflect.Type, unsafe.Pointer, bool) {
 	typePtr := *(*unsafe.Pointer)(ifacePtr)
 	if typePtr == nil {
@@ -576,6 +580,9 @@ func unfoldCase(ifacePtr unsafe.Pointer, ifaceField bool) (reflect.Type, unsafe.
 	word := unsafe.Add(ifacePtr, 8)
 	if rtype.Kind() == reflect.Pointer {
 		p := *(*unsafe.Pointer)(word)
+		for t := rtype.Elem(); p != nil && t.Kind() == reflect.Pointer; t = t.Elem() {
+			p = *(*unsafe.Pointer)(p)
+		}
 		return rtype, p, p != nil
 	}
 	val := word
@@ -589,11 +596,12 @@ func unfoldCase(ifacePtr unsafe.Pointer, ifaceField bool) (reflect.Type, unsafe.
 }
 
 // unfoldInPlace reports whether the native unfold, which reads a case's
-// fields at the data word, may run there: a pointer case, or a boxed value
-// none of whose methods may write it.
+// fields at the data word, may run there: a single pointer case, or a boxed
+// value none of whose methods may write it. A pointer chain reaches its
+// struct through more than one deref, which the native unfold does not do.
 func unfoldInPlace(rtype reflect.Type) bool {
 	if rtype.Kind() == reflect.Pointer {
-		return true
+		return rtype.Elem().Kind() != reflect.Pointer
 	}
 	return !typ.IsDirectIface(rtype) && EncTypeInfoOf(rtype).TypeFlags&EncTypeFlagNeedsAddr == 0
 }
