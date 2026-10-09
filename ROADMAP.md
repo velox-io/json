@@ -10,10 +10,7 @@ This file lists current high-impact improvement areas for contributors.
    Explore API shape, implementation strategy, and performance trade-offs for adding
    an optional sorted-keys mode without regressing the default fast path.
 
-2. **Support JSON v2 `format` tag**
-
-
-3. **First-class custom encoding and decoding**
+2. **First-class custom encoding and decoding**
 
    A JSON library must let users define their own encode/decode logic, and velox lacks an elegant mechanism for it.
    The only extension point today is `MarshalJSON() ([]byte, error)` / `UnmarshalJSON([]byte) error`, whose bytes-in/bytes-out shape isolates custom types from the library:
