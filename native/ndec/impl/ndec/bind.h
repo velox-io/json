@@ -3024,10 +3024,10 @@ t_field_value_cold_gate:
                          TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape), ct));
   }
   case BIND_KIND_STRUCT: {
+    /* The object merges into the struct as the JSON walk does: fields it
+     * omits keep their value, and fresh backings arrive zeroed. */
     if (tag != (TAPE_START_OBJECT >> 56))
       TAPE_BIND_TYPE_MISMATCH_SKIP(m, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape), ct);
-    uint32_t zero_size = m->b.ctx.type_meta[ct->type_idx].size;
-    __builtin_memset(body, 0, zero_size);
     TAPE_BIND_DESCEND_STRUCT(body, ct, t_object_continue, bind_push_struct);
   }
   case BIND_KIND_MAP: {
@@ -3277,10 +3277,9 @@ t_array_value: {
         TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape)));
   }
   case BIND_KIND_STRUCT: {
+    /* An element merges into its slot like a struct field. */
     if (tag != (TAPE_START_OBJECT >> 56))
       TAPE_BIND_YIELD_ERR(m, BIND_ERR_TYPE_MISMATCH, (uint32_t)(TAP_CURSOR - m->b.alloc.value_tape));
-    uint32_t zero_size = m->b.ctx.type_meta[child_type->type_idx].size;
-    __builtin_memset(body, 0, zero_size);
     TAP_ADVANCE();
     int empty = (TAP_TAG() == (TAPE_END_OBJECT >> 56));
     if (empty) {
