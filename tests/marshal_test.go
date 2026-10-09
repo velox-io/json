@@ -496,6 +496,68 @@ func TestMarshal_ByteSlice_NilVsEmpty_StdlibCompat(t *testing.T) {
 	}
 }
 
+type marshalByte uint8
+
+// A byte array is an array, not a byte slice: it encodes as a JSON array of
+// numbers in every position, as encoding/json encodes it and as Unmarshal
+// reads it back. Only []byte takes base64.
+func TestMarshal_ByteArray(t *testing.T) {
+	type field struct {
+		B [4]byte `json:"b"`
+	}
+	type tagged struct {
+		E [2]byte `json:"e,omitempty"`
+		Z [2]byte `json:"z,omitzero"`
+		S [2]byte `json:"s,string"` //nolint:staticcheck // deliberate: ,string does not apply to arrays
+	}
+	type named struct {
+		N [2]marshalByte `json:"n"`
+	}
+	type anyField struct {
+		A any `json:"a"`
+	}
+	for _, c := range []struct {
+		name string
+		v    any
+	}{
+		{"field", field{B: [4]byte{1}}},
+		{"zero field", field{}},
+		{"tagged zero", tagged{}},
+		{"tagged set", tagged{E: [2]byte{1, 2}, Z: [2]byte{3}, S: [2]byte{4}}},
+		{"named element", named{N: [2]marshalByte{1, 2}}},
+		{"pointer field", &struct{ P *[2]byte }{P: &[2]byte{1, 2}}},
+		{"empty array", struct{ B [0]byte }{}},
+		{"nested", [2][2]byte{{1, 2}, {3, 4}}},
+		{"root", [3]byte{1, 2, 255}},
+		{"slice element", [][2]byte{{1, 2}}},
+		{"map value", map[string][2]byte{"k": {1, 2}}},
+		{"any field", anyField{A: [2]byte{1, 2}}},
+		{"any root", any([2]byte{1, 2})},
+		{"any pointer", any(&[2]byte{1, 2})},
+		{"any slice", []any{[2]byte{1, 2}}},
+		{"any map", map[string]any{"k": [2]byte{1, 2}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			stdRaw, vjRaw := encodeWithBoth(t, c.v)
+			assertJSONEqual(t, c.name, stdRaw, vjRaw)
+		})
+	}
+
+	// The encoding reads back into the same array.
+	in := field{B: [4]byte{1, 2, 3, 4}}
+	out, err := vjson.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var back field
+	if err := vjson.Unmarshal(out, &back); err != nil {
+		t.Fatalf("Unmarshal(%s): %v", out, err)
+	}
+	if back != in {
+		t.Errorf("round trip = %+v, want %+v", back, in)
+	}
+}
+
 func TestMarshal_NonByteSlice_Nil(t *testing.T) {
 	// All nil slices → null (matches stdlib)
 	type S struct {

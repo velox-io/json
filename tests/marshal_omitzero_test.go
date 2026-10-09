@@ -309,16 +309,8 @@ func TestMarshal_OmitZero_Array(t *testing.T) {
 	stdRaw, vjRaw = encodeWithBoth(t, outer{A: [2]int{0, 1}})
 	assertJSONEqual(t, "non-zero array", stdRaw, vjRaw)
 
-	// Non-zero byte arrays encode as base64 (a standing vjson difference from
-	// stdlib's number array); only the omission decision is under test here.
-	// The other arrays stay zero, so only c survives.
-	got, err := vjson.Marshal(outer{C: [4]byte{1}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := `{"c":"AQAAAA=="}`; string(got) != want {
-		t.Errorf("non-zero byte array: got %s, want %s", got, want)
-	}
+	stdRaw, vjRaw = encodeWithBoth(t, outer{C: [4]byte{1}})
+	assertJSONEqual(t, "non-zero byte array", stdRaw, vjRaw)
 }
 
 func TestMarshal_OmitZero_ArrayOfTime(t *testing.T) {

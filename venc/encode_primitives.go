@@ -206,17 +206,6 @@ func (es *encodeState) encodeByteSlice(sh *SliceHeader) error {
 	return nil
 }
 
-func (es *encodeState) encodeByteArray(ai *EncArrayInfo, ptr unsafe.Pointer) error {
-	data := unsafe.Slice((*byte)(ptr), ai.ArrayLen)
-	es.buf = append(es.buf, '"')
-	encodedLen := base64.StdEncoding.EncodedLen(len(data))
-	start := len(es.buf)
-	es.buf = append(es.buf, make([]byte, encodedLen)...)
-	base64.StdEncoding.Encode(es.buf[start:], data)
-	es.buf = append(es.buf, '"')
-	return nil
-}
-
 func (es *encodeState) encodeMapStringString(ptr unsafe.Pointer) error {
 	mp := *(*map[string]string)(ptr)
 	if mp == nil {

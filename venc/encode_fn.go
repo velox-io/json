@@ -128,15 +128,8 @@ func bindEncodeFn(ti *EncTypeInfo) {
 		}
 
 	case typ.KindArray:
-		ai := ti.ResolveArray()
-		if ai.ElemType.Kind == typ.KindUint8 && ai.ElemSize == 1 {
-			ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
-				return es.encodeByteArray(ai, ptr)
-			}
-		} else {
-			ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
-				return es.exec(ti.getBlueprint(), ptr)
-			}
+		ti.Encode = func(es *encodeState, ptr unsafe.Pointer) error {
+			return es.exec(ti.getBlueprint(), ptr)
 		}
 
 	case typ.KindMap:

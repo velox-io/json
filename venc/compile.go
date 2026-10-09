@@ -422,13 +422,6 @@ func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 			emitSliceChecked(b, fi.Type, fc, omitCheckTag(fi, needsOmitempty, needsOmitZero))
 
 		case typ.KindArray:
-			ai := fi.Type.ResolveArray()
-			// [N]byte still goes through the Go base64 path; its omitzero
-			// check rides the fallback site rather than a second yield.
-			if ai.ElemType.Kind == typ.KindUint8 && ai.ElemSize == 1 {
-				emitFieldFallback(b, fc, fieldFBInfo(fi, fc, fbReasonByteArray))
-				continue
-			}
 			if needsOmitZero {
 				emitOmitZeroGo(b, fieldOff, fi, fc, func() {
 					emitArray(b, fi.Type, fc)

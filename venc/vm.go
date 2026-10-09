@@ -128,7 +128,6 @@ const (
 	fbReasonMarshaler                  // implements json.Marshaler
 	fbReasonTextMarshaler              // implements encoding.TextMarshaler
 	fbReasonQuoted                     // field has `,string` struct tag
-	fbReasonByteArray                  // [N]byte, base64 encoding
 	fbReasonIface                      // non-empty interface
 	fbReasonOverflow                   // field offset or key exceeds native encoding limits
 	fbReasonViaPtr                     // promoted across an embedded pointer; needs a hop walk

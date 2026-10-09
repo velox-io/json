@@ -1,6 +1,8 @@
 package tests
 
 import (
+	"bytes"
+	"encoding/json"
 	"reflect"
 	"strconv"
 	"strings"
@@ -329,16 +331,12 @@ func TestMapValueOverElemLimit_Encode(t *testing.T) {
 			if err != nil {
 				t.Fatalf("vjson.Marshal: %v", err)
 			}
-			// encoding/json renders a [N]byte array as a list where this encoder
-			// uses base64, and that difference is unrelated to the boundary (it
-			// shows for a plain struct too). Compare only the field the boundary
-			// can damage: an element read from the wrong slot loses it entirely.
-			if !strings.Contains(string(got), `"name":"hello"`) {
-				out := string(got)
-				if len(out) > 80 {
-					out = out[:80] + "..."
-				}
-				t.Errorf("vjson.Marshal did not render the value's own field; got %s", out)
+			want, err := json.Marshal(v)
+			if err != nil {
+				t.Fatalf("encoding/json: %v", err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Errorf("vjson.Marshal = %.80s..., encoding/json = %.80s...", got, want)
 			}
 		})
 	}

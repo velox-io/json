@@ -36,7 +36,6 @@ var fbReasonLabels = [...]string{
 	fbReasonMarshaler:     "marshaler",
 	fbReasonTextMarshaler: "text_marshaler",
 	fbReasonQuoted:        "quoted",
-	fbReasonByteArray:     "byte_array",
 	fbReasonIface:         "iface",
 	fbReasonOverflow:      "overflow",
 	fbReasonViaPtr:        "via_ptr",
