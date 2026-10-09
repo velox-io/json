@@ -554,7 +554,8 @@ typedef struct VjIfaceCacheEntry {
 } VjIfaceCacheEntry;
 
 /* VjIfaceCacheEntry.flags bits */
-#define VJ_IFACE_FLAG_INDIRECT 0x01 /* base = &eface.data (not *eface.data) */
+#define VJ_IFACE_FLAG_INDIRECT      0x01 /* ops base = &eface.data (not *eface.data) */
+#define VJ_IFACE_FLAG_BODY_INDIRECT 0x02 /* body_ops base = &eface.data (not *eface.data) */
 
 _Static_assert(sizeof(VjIfaceCacheEntry) == 32, "VjIfaceCacheEntry must be 32 bytes");
 _Static_assert(offsetof(VjIfaceCacheEntry, type_ptr) == 0, "VjIfaceCacheEntry.type_ptr offset");

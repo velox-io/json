@@ -155,8 +155,13 @@ const (
 	vjStYieldShift     = 40
 )
 
-// Must match native VJ_IFACE_FLAG_INDIRECT.
-const ifaceFlagIndirect uint8 = 0x01
+// VjIfaceCacheEntry.Flags bits, mirroring native VJ_IFACE_FLAG_*: whether
+// OpsPtr (ifaceFlagIndirect) or BodyOpsPtr (ifaceFlagBodyIndirect) reads
+// its base at the data word itself rather than where the word points.
+const (
+	ifaceFlagIndirect     uint8 = 0x01
+	ifaceFlagBodyIndirect uint8 = 0x02
+)
 
 func vmstateGetExit(st uint64) int32 {
 	return int32((st >> vjStExitShift) & 0xFF)
@@ -563,11 +568,12 @@ func insertIfaceCache(typePtr unsafe.Pointer, bp *Blueprint, tag uint8, flags ui
 	globalIfaceCache.current.Store(cur.withEntry(entry))
 }
 
-// insertIfaceCacheBody attaches a body-only Blueprint to the entry already
+// insertIfaceCacheBody attaches a body-only Blueprint, with bodyFlags (zero
+// or ifaceFlagBodyIndirect) saying where its base is, to the entry already
 // published for typePtr; the entry's OP_INTERFACE verdict stays as it is.
 // The snapshot is copy-on-write: in-flight VMs keep reading the table they
 // were handed.
-func insertIfaceCacheBody(typePtr unsafe.Pointer, bodyBP *Blueprint) {
+func insertIfaceCacheBody(typePtr unsafe.Pointer, bodyBP *Blueprint, bodyFlags uint8) {
 	globalIfaceCache.mu.Lock()
 	defer globalIfaceCache.mu.Unlock()
 
@@ -585,6 +591,7 @@ func insertIfaceCacheBody(typePtr unsafe.Pointer, bodyBP *Blueprint) {
 	slots := make([]VjIfaceCacheEntry, len(cur.slots))
 	copy(slots, cur.slots)
 	slots[idx].BodyOpsPtr = bodyPtr
+	slots[idx].Flags |= bodyFlags
 	globalIfaceCache.current.Store(&ifaceCacheSnapshot{slots: slots, shift: cur.shift, count: cur.count})
 }
 

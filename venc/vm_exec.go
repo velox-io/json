@@ -270,22 +270,29 @@ func (es *encodeState) handleIfaceCacheMiss(ctx *VjExecCtx, bp *Blueprint) error
 	// An unfold miss compiles the body-only Blueprint of the concrete struct
 	// and attaches it to the cache entry; the miss re-executes OP_UNFOLD,
 	// which then dispatches through the SWITCH_OPS frame. That frame reads
-	// the fields at the data word, so a case it cannot address there gets no
-	// body: each of its misses runs the unfold in Go and resumes past the op.
-	// A nil data word runs in Go too: a typed nil pointer holds no case
-	// whatever its pointee, so its type must not be compiled (a non-struct
-	// pointee would fail where the Go engine skips).
+	// the fields in place, so a case it cannot address there gets no body:
+	// each of its misses runs the unfold in Go and resumes past the op. A
+	// typed nil pointer runs in Go too: it holds no case whatever its
+	// pointee, so its type must not be compiled (a non-struct pointee would
+	// fail where the Go engine skips).
 	if hdr := opHdrAt(activeBlueprint(ctx, bp).Ops, ctx.PC); hdr.OpType == opUnfold {
 		ifacePtr := unsafe.Add(ctx.CurBase, uintptr(hdr.FieldOff))
-		if !unfoldInPlace(rtype) || *(*unsafe.Pointer)(unsafe.Add(ifacePtr, 8)) == nil {
+		word := *(*unsafe.Pointer)(unsafe.Add(ifacePtr, 8))
+		if !unfoldInPlace(rtype) || rtype.Kind() == reflect.Pointer && word == nil {
 			return es.unfoldInGo(ctx, ifacePtr, hdr.Flags&opFlagIfaceField != 0, vmstateGetFirst(ctx.VMState))
 		}
 		bodyBP, err := es.unfoldBodyBlueprint(rtype)
 		if err != nil {
 			return err
 		}
+		// A struct the interface stores in its data word starts at the word;
+		// a boxed struct or a pointer case starts where the word points.
+		var bodyFlags uint8
+		if rtype.Kind() != reflect.Pointer && typ.IsDirectIface(rtype) {
+			bodyFlags = ifaceFlagBodyIndirect
+		}
 		es.ensureIfaceEntry(typePtr, rtype)
-		insertIfaceCacheBody(typePtr, bodyBP)
+		insertIfaceCacheBody(typePtr, bodyBP, bodyFlags)
 		es.traceRecordBlueprint(bodyBP)
 		return nil
 	}
@@ -628,14 +635,15 @@ func unfoldCase(ifacePtr unsafe.Pointer, ifaceField bool) (reflect.Type, unsafe.
 }
 
 // unfoldInPlace reports whether the native unfold, which reads a case's
-// fields at the data word, may run there: a single pointer case, or a boxed
-// value none of whose methods may write it. A pointer chain reaches its
-// struct through more than one deref, which the native unfold does not do.
+// fields where the interface holds them, may run there: a single pointer
+// case, or a value none of whose methods may write it, boxed or in the data
+// word. A pointer chain reaches its struct through more than one deref,
+// which the native unfold does not do.
 func unfoldInPlace(rtype reflect.Type) bool {
 	if rtype.Kind() == reflect.Pointer {
 		return rtype.Elem().Kind() != reflect.Pointer
 	}
-	return !typ.IsDirectIface(rtype) && EncTypeInfoOf(rtype).TypeFlags&EncTypeFlagNeedsAddr == 0
+	return EncTypeInfoOf(rtype).TypeFlags&EncTypeFlagNeedsAddr == 0
 }
 
 // unfoldInGo emits the fields of the case the inline variant field at

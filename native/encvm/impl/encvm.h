@@ -985,17 +985,22 @@ vj_op_unfold: {
     VM_SAVE_AND_RETURN(VJ_EXIT_YIELD);
   }
 
-  const uint8_t *data = *(const uint8_t **)(iface_ptr + 8);
-  if (UNLIKELY(data == NULL)) {
-    /* A typed nil pointer case: the type word names a case but the data
-     * word is nil, which selects no case at all, the same verdict as the
-     * nil interface above (Go's unfoldCase returns ok=false). Only single
-     * pointer cases and boxed structs reach a body (the Go miss handler
-     * gates insertion with unfoldInPlace), and a boxed struct's data word
-     * is never nil. A case stored in the data word itself may legitimately
-     * be nil there, but it has no body and leaves through the miss above,
-     * so this check must follow the lookup. Nothing is emitted. */
-    VM_NEXT_SHORT();
+  /* The body reads its fields at the case struct. A struct the interface
+   * stores in its data word (a single pointer-shaped field) starts at the
+   * word, whose nil is just that field's value. Otherwise the data word
+   * points at the struct: a boxed struct's box, never nil, or a single
+   * pointer case's pointee. */
+  const uint8_t *body_base;
+  if (e->flags & VJ_IFACE_FLAG_BODY_INDIRECT) {
+    body_base = iface_ptr + 8;
+  } else {
+    body_base = *(const uint8_t **)(iface_ptr + 8);
+    if (UNLIKELY(body_base == NULL)) {
+      /* A typed nil pointer case selects no case at all, the same verdict
+       * as the nil interface above (Go's unfoldCase returns ok=false).
+       * Nothing is emitted. */
+      VM_NEXT_SHORT();
+    }
   }
 
   if (UNLIKELY(VJ_ST_GET_STACK_DEPTH(vmstate) >= VJ_MAX_STACK_DEPTH)) {
@@ -1010,11 +1015,9 @@ vj_op_unfold: {
     frame->state        = VJ_FRAME_STATE_PRESERVE_FIRST;
     VM_SAVE_TRACE_DEPTH(frame);
     VJ_ST_INC_STACK_DEPTH(vmstate);
-    /* The data word is a pointer for both boxed structs and pointer cases,
-     * so one deref addresses the body's field zero. */
     ops  = e->body_ops;
     op   = (const VjOpHdr *)ops;
-    base = data;
+    base = body_base;
     VM_DISPATCH();
   }
 }

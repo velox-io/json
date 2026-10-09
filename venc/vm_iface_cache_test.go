@@ -226,3 +226,40 @@ func TestNonEmptyInterfaceNativeVerdict(t *testing.T) {
 		}
 	}
 }
+
+// ifaceVerdictRef holds a single pointer, so an interface stores it in its
+// data word.
+type ifaceVerdictRef struct {
+	P *int `json:"p"`
+}
+
+// A case the interface stores in its data word unfolds natively from the
+// word itself, whose nil is the field's value rather than a missing case:
+// even a first sight with a nil word compiles the body.
+func TestUnfoldDataWordCaseNative(t *testing.T) {
+	if !encvm.Available {
+		t.Skip("native encvm unavailable")
+	}
+	got, err := Marshal(ifaceVerdictUnfoldHost{Kind: "ref", Obj: ifaceVerdictRef{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"kind":"ref","p":null}`; string(got) != want {
+		t.Errorf("nil word: got %s, want %s", got, want)
+	}
+	e := loadIfaceCacheSnapshot().lookup(rtypePtr(reflect.TypeFor[ifaceVerdictRef]()))
+	if e == nil || e.BodyOpsPtr == nil || e.Flags&ifaceFlagBodyIndirect == 0 {
+		t.Errorf("data-word case entry = %+v, want a body read at the word", e)
+	}
+	x := 7
+	got, err = Marshal([]ifaceVerdictUnfoldHost{
+		{Kind: "ref", Obj: ifaceVerdictRef{P: &x}},
+		{Kind: "ref", Obj: ifaceVerdictRef{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `[{"kind":"ref","p":7},{"kind":"ref","p":null}]`; string(got) != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
