@@ -2,26 +2,34 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"net/netip"
+	"reflect"
 
-	vjson "github.com/velox-io/json"
+	json "github.com/velox-io/json"
 )
 
 func main() {
-
-	type User struct {
-		Name  string   `json:"name"`
-		Roles []string `json:"roles"`
+	// Round-trip marshal and unmarshal a hostname map where the netip.Addr type
+	// implements both encoding.TextMarshaler and encoding.TextUnmarshaler.
+	want := map[netip.Addr]string{
+		netip.MustParseAddr("192.168.0.100"): "carbonite",
+		netip.MustParseAddr("192.168.0.101"): "obsidian",
+		netip.MustParseAddr("192.168.0.102"): "diamond",
 	}
-
-	var u User
-	err := vjson.Unmarshal([]byte(`{"name":"alice","roles":["admin"]}`), &u)
+	b, err := json.Marshal(&want)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
+	}
+	fmt.Printf("marshal result: %s\n", string(b))
+	var got map[netip.Addr]string
+	err = json.Unmarshal(b, &got)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	out, err := vjson.Marshal(u) // {"name":"alice","roles":["admin"]}
-	if err != nil {
-		panic(err)
+	// Sanity check.
+	if !reflect.DeepEqual(got, want) {
+		log.Fatalf("roundtrip mismatch: got %v, want %v", got, want)
 	}
-	fmt.Println(string(out))
 }
