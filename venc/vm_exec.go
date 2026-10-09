@@ -294,6 +294,15 @@ func (es *encodeState) handleIfaceCacheMiss(ctx *VjExecCtx, bp *Blueprint) error
 	var flags uint8
 
 	switch {
+	case ti.TypeFlags&EncTypeFlagNeedsAddr != 0:
+		// A pointer-receiver method would run on the interface's payload,
+		// which the caller may share or the runtime may keep read-only. The
+		// empty entry makes OP_INTERFACE yield, and the Go path hands the
+		// method a copy.
+	case ti.TypeFlags&(EncTypeFlagHasMarshalFn|EncTypeFlagHasTextMarshalFn) != 0:
+		// A hooked type of any kind runs its root blueprint, which hands the
+		// value to the method; a primitive tag would encode the bare kind.
+		fullBP = ti.getBlueprint()
 	case ti.Kind <= typ.KindString:
 		tag = uint8(kindToOpcode(ti.Kind))
 	default:
@@ -551,8 +560,8 @@ func (es *encodeState) unfoldFromYield(ctx *VjExecCtx, fb *fbInfo, isFirst bool)
 // unfoldCase resolves the case an inline variant field holds: its concrete
 // type and the address its fields are read from. A pointer case reads its
 // pointee, a boxed value its box, and a value the interface stores in its
-// data word reads the word itself. A nil interface or a nil pointer case
-// holds no case.
+// data word reads the word itself. A value case whose methods may write it
+// reads a copy instead. A nil interface or a nil pointer case holds no case.
 func unfoldCase(ifacePtr unsafe.Pointer, ifaceField bool) (reflect.Type, unsafe.Pointer, bool) {
 	typePtr := *(*unsafe.Pointer)(ifacePtr)
 	if typePtr == nil {
@@ -565,21 +574,28 @@ func unfoldCase(ifacePtr unsafe.Pointer, ifaceField bool) (reflect.Type, unsafe.
 	}
 	rtype := typeFromRTypePtr(typePtr)
 	word := unsafe.Add(ifacePtr, 8)
-	switch {
-	case rtype.Kind() == reflect.Pointer:
+	if rtype.Kind() == reflect.Pointer {
 		p := *(*unsafe.Pointer)(word)
 		return rtype, p, p != nil
-	case typ.IsDirectIface(rtype):
-		return rtype, word, true
 	}
-	return rtype, *(*unsafe.Pointer)(word), true
+	val := word
+	if !typ.IsDirectIface(rtype) {
+		val = *(*unsafe.Pointer)(word)
+	}
+	if ti := EncTypeInfoOf(rtype); ti.TypeFlags&EncTypeFlagNeedsAddr != 0 {
+		val = addressableCopy(ti, val)
+	}
+	return rtype, val, true
 }
 
 // unfoldInPlace reports whether the native unfold, which reads a case's
-// fields at the data word, addresses the case: a pointer case or a boxed
-// value.
+// fields at the data word, may run there: a pointer case, or a boxed value
+// none of whose methods may write it.
 func unfoldInPlace(rtype reflect.Type) bool {
-	return rtype.Kind() == reflect.Pointer || !typ.IsDirectIface(rtype)
+	if rtype.Kind() == reflect.Pointer {
+		return true
+	}
+	return !typ.IsDirectIface(rtype) && EncTypeInfoOf(rtype).TypeFlags&EncTypeFlagNeedsAddr == 0
 }
 
 // unfoldInGo emits the fields of the case the inline variant field at

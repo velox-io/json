@@ -1138,9 +1138,11 @@ func canSwissMapInC(variant typ.MapVariant) bool {
 
 // canSwissMapIterInC reports whether MAP_STR_ITER can walk this map. That opcode
 // addresses each value by stride, so it needs a stride the layout probe
-// confirmed; a SlotSize of zero reports that none exists.
+// confirmed; a SlotSize of zero reports that none exists. It encodes each
+// value in its map slot, so a value type whose methods may write it stays
+// on the Go map loop, which hands them a copy.
 func canSwissMapIterInC(mi *EncMapInfo) bool {
-	return mi.IsStringKey && mi.SlotSize != 0
+	return mi.IsStringKey && mi.SlotSize != 0 && mi.ValType.TypeFlags&EncTypeFlagNeedsAddr == 0
 }
 
 func swissMapOpcode(variant typ.MapVariant) uint16 {

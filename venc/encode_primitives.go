@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"unsafe"
 
+	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/jerr"
 	"github.com/velox-io/json/typ"
 	"github.com/velox-io/json/value"
@@ -317,6 +318,17 @@ func (es *encodeState) encodeMapGeneric(mi *EncMapInfo, ptr unsafe.Pointer) erro
 		es.indentDepth++
 	}
 
+	// A map entry is not addressable, so a method that may write its
+	// receiver runs on a copy. One slot per map serves every entry, as
+	// encoding/json reuses one value per map.
+	var keySlot, valSlot unsafe.Pointer
+	if !mi.IsStringKey && mi.KeyType.Hooks != nil && mi.KeyType.Hooks.TextMarshalAddr {
+		keySlot = gort.MallocGC(mi.KeyType.Size, mi.KeyType.Ptr, true)
+	}
+	if mi.ValType.TypeFlags&EncTypeFlagNeedsAddr != 0 {
+		valSlot = gort.MallocGC(mi.ValType.Size, mi.ValType.Ptr, true)
+	}
+
 	var it mapsIter
 	mapsIterInit(mi.MapRType, mp, &it)
 	for mapsIterKey(&it) != nil {
@@ -330,6 +342,10 @@ func (es *encodeState) encodeMapGeneric(mi *EncMapInfo, ptr unsafe.Pointer) erro
 		}
 
 		keyPtr := mapsIterKey(&it)
+		if keySlot != nil {
+			gort.TypedMemmove(mi.KeyType.Ptr, keySlot, keyPtr)
+			keyPtr = keySlot
+		}
 		if mi.IsStringKey {
 			es.encodeString(*(*string)(keyPtr))
 		} else if err := es.encodeMapKey(keyPtr, mi.KeyType, mi.KeyType.Type); err != nil {
@@ -342,6 +358,10 @@ func (es *encodeState) encodeMapGeneric(mi *EncMapInfo, ptr unsafe.Pointer) erro
 		}
 
 		elemPtr := mapsIterElem(&it)
+		if valSlot != nil {
+			gort.TypedMemmove(mi.ValType.Ptr, valSlot, elemPtr)
+			elemPtr = valSlot
+		}
 		if err := mi.ValType.Encode(es, elemPtr); err != nil {
 			return err
 		}
@@ -569,6 +589,15 @@ func (es *encodeState) encodeAnyMap(mp map[string]any) error {
 
 	es.buf = append(es.buf, '}')
 	return nil
+}
+
+// addressableCopy returns a heap copy of the ti-typed value at src, so a
+// method that may write its receiver runs on storage the encoder owns. The
+// copy is never reused: the method may keep the pointer.
+func addressableCopy(ti *EncTypeInfo, src unsafe.Pointer) unsafe.Pointer {
+	dst := gort.MallocGC(ti.Size, ti.Ptr, true)
+	gort.TypedMemmove(ti.Ptr, dst, src)
+	return dst
 }
 
 func (es *encodeState) encodeAnyReflect(v any) error {

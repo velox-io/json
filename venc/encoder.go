@@ -84,6 +84,11 @@ func (enc *Encoder) Encode(v any) error {
 			// Otherwise the data word points to the value.
 			ptr = data
 		}
+		// Either way the value is the caller's interface payload, which is
+		// not addressable: a method that may write it runs on a copy.
+		if ti.TypeFlags&EncTypeFlagNeedsAddr != 0 {
+			ptr = addressableCopy(ti, ptr)
+		}
 	}
 
 	err := enc.encodePtr(ti, ptr)

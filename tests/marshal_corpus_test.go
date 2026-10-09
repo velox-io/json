@@ -253,6 +253,31 @@ func TestMarshalCorpus_InterfacePayloads(t *testing.T) {
 	}
 }
 
+// mcRefHook is stored in an interface's data word and encodes through a
+// value-receiver method.
+type mcRefHook struct{ P *int }
+
+func (r mcRefHook) MarshalJSON() ([]byte, error) { return []byte(strconv.Itoa(*r.P)), nil }
+
+type mcAnySliceHost struct{ S []any }
+
+// An interface payload whose type has a marshal method encodes through it,
+// whatever its kind and however the interface stores it.
+func TestMarshalCorpus_HookedInterfacePayloads(t *testing.T) {
+	n := 7
+	for _, c := range []marshalCase{
+		mc("hooked int in field", mcAnyHost{I: mcStatus(1)}),
+		mc("hooked string in field", mcAnyHost{I: mcName("x")}),
+		mc("hooked int64 in field", mcAnyHost{I: mcCount(2)}),
+		mc("hooked struct in field", mcAnyHost{I: mcMarshaler{N: 1}}),
+		mc("hooked data-word struct in field", mcAnyHost{I: mcRefHook{P: &n}}),
+		mc("hooked values in slice field", mcAnySliceHost{S: []any{mcStatus(3), mcName("y"), mcCount(4), mcRefHook{P: &n}}}),
+		mc("hooked values in slice", []any{mcStatus(5), mcName("z")}),
+	} {
+		c.run(t)
+	}
+}
+
 // A map value whose type has a marshal method encodes through it, whatever
 // its kind.
 func TestMarshalCorpus_HookedMapValues(t *testing.T) {

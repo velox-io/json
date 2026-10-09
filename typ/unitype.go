@@ -59,6 +59,12 @@ const (
 	TypeFlagHasTextMarshalFn                        // encoding.TextMarshaler
 	TypeFlagRawMessage                              // json.RawMessage
 	TypeFlagNumber                                  // json.Number
+
+	// TypeFlagNeedsAddr marks a type whose encoding may run a
+	// pointer-receiver method on the value's own bytes. The encoder hands
+	// such a method a copy wherever the value is not addressable: an
+	// interface payload, a map key or value.
+	TypeFlagNeedsAddr
 )
 
 // TagFlag stores field tag options.
@@ -104,6 +110,12 @@ type InterfaceHooks struct {
 	// encoding.TextMarshaler / encoding.TextUnmarshaler.
 	TextMarshalFn   func(ptr unsafe.Pointer) ([]byte, error)
 	TextUnmarshalFn func(ptr unsafe.Pointer, data []byte) error
+
+	// MarshalAddr and TextMarshalAddr record that MarshalFn and
+	// TextMarshalFn bind a pointer-receiver method: the call runs on the
+	// bytes at ptr, which the method may write.
+	MarshalAddr     bool
+	TextMarshalAddr bool
 }
 
 // PtrHop is one embedded-pointer crossing on a promoted field's path.
@@ -197,6 +209,10 @@ type StructField struct {
 	// emission native; the reflect walk may run natively where a kind-level
 	// check exists.
 	OmitZeroMethod bool
+
+	// OmitZeroAddr records that the IsZero method has a pointer receiver:
+	// the check runs on the field's own bytes.
+	OmitZeroAddr bool
 }
 
 // SliceTypeInfo describes a slice.

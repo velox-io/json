@@ -196,6 +196,7 @@ func detectInterfaceHooks(t reflect.Type) *InterfaceHooks {
 		present = true
 	} else if ptrType.Implements(marshalerType) {
 		hooks.MarshalFn = bindMarshalerPtr(t)
+		hooks.MarshalAddr = true
 		present = true
 	}
 
@@ -212,6 +213,7 @@ func detectInterfaceHooks(t reflect.Type) *InterfaceHooks {
 		present = true
 	} else if ptrType.Implements(textMarshalerType) {
 		hooks.TextMarshalFn = bindTextMarshalerPtr(t)
+		hooks.TextMarshalAddr = true
 		present = true
 	}
 
@@ -708,7 +710,7 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 				tagFlags |= TagFlagEmbed
 			}
 
-			ozFn, ozMethod := makeOmitZeroFn(rf.Type, fieldUT)
+			ozFn, ozMethod, ozAddr := makeOmitZeroFn(rf.Type, fieldUT)
 			sf := StructField{
 				FieldType:      fieldUT,
 				TagFlags:       tagFlags,
@@ -723,6 +725,7 @@ func collectStructFields(t reflect.Type, baseOffset uintptr, building map[reflec
 				IsZeroFn:       makeIsZero(rf.Type),
 				OmitZeroFn:     ozFn,
 				OmitZeroMethod: ozMethod,
+				OmitZeroAddr:   ozAddr,
 			}
 			// Value is a struct (tape-backed) but, like encoding/json's
 			// treatment of struct types, omitempty must NOT elide it: a zero
@@ -961,13 +964,14 @@ var isZeroerType = reflect.TypeFor[isZeroer]()
 // A field whose type, or pointer-to-type, statically implements isZeroer
 // defers to that method, nil-guarded for the pointer and interface kinds,
 // exactly as encoding/json does; method reports that binding so the encoder
-// can route the check through Go while keeping the emission native. Every
-// other type gets the pure-reflect walk. value.Value and stream.Stream
-// fields do not participate in omitzero.
-func makeOmitZeroFn(t reflect.Type, ut *UniType) (fn func(unsafe.Pointer) bool, method bool) {
+// can route the check through Go while keeping the emission native, and addr
+// that the method has a pointer receiver. Every other type gets the
+// pure-reflect walk. value.Value and stream.Stream fields do not participate
+// in omitzero.
+func makeOmitZeroFn(t reflect.Type, ut *UniType) (fn func(unsafe.Pointer) bool, method, addr bool) {
 	switch ut.Kind {
 	case KindValue, KindStream:
-		return nil, false
+		return nil, false, false
 	}
 
 	switch {
@@ -980,7 +984,7 @@ func makeOmitZeroFn(t reflect.Type, ut *UniType) (fn func(unsafe.Pointer) bool, 
 			return rv.IsNil() ||
 				(rv.Elem().Kind() == reflect.Pointer && rv.Elem().IsNil()) ||
 				rv.Interface().(isZeroer).IsZero()
-		}, true
+		}, true, false
 	case t.Kind() == reflect.Pointer && t.Implements(isZeroerType):
 		itab := fieldReceiverItab(t)
 		return func(ptr unsafe.Pointer) bool {
@@ -989,21 +993,21 @@ func makeOmitZeroFn(t reflect.Type, ut *UniType) (fn func(unsafe.Pointer) bool, 
 				return true
 			}
 			return isZeroerCall(itab, p)
-		}, true
+		}, true, false
 	case t.Implements(isZeroerType):
 		itab := fieldReceiverItab(t)
 		recv := valueReceiverData(t)
 		return func(ptr unsafe.Pointer) bool {
 			return isZeroerCall(itab, recv(ptr))
-		}, true
+		}, true, false
 	case reflect.PointerTo(t).Implements(isZeroerType):
 		// Pointer-receiver method: the receiver is the field's address.
 		itab := fieldAddrReceiverItab(t)
 		return func(ptr unsafe.Pointer) bool {
 			return isZeroerCall(itab, ptr)
-		}, true
+		}, true, true
 	}
-	return makeReflectZeroFn(t), false
+	return makeReflectZeroFn(t), false, false
 }
 
 // fieldReceiverItab extracts the itab for calling an isZeroer whose receiver

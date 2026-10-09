@@ -43,7 +43,12 @@ func buildEncTypeInfo(t reflect.Type) *EncTypeInfo {
 	// every constructed subtree at the end so future roots share it.
 	building := make(map[uintptr]*EncTypeInfo)
 	eti := buildEncRec(t, building)
-	// All types are now fully constructed (Ext wired). Bind encode functions.
+	// All types are now fully constructed (Ext wired). Mark the types that
+	// need an addressable value, then bind encode functions.
+	marked := make(map[*EncTypeInfo]bool, len(building))
+	for _, beti := range building {
+		markNeedsAddr(beti, building, marked)
+	}
 	for _, beti := range building {
 		bindEncodeFn(beti)
 	}
@@ -51,6 +56,53 @@ func buildEncTypeInfo(t reflect.Type) *EncTypeInfo {
 		encTypeCache.Publish(rtp, beti)
 	}
 	return eti
+}
+
+// markNeedsAddr sets EncTypeFlagNeedsAddr on et when encoding it may run a
+// pointer-receiver method on its own bytes, and reports the flag. A type
+// with a hook decides by the hook it binds, which takes the whole value over.
+// Otherwise a struct needs it when an inline field does or a field's omitzero
+// method has a pointer receiver, and an array when its element does. A
+// pointer or slice element is addressable, and a map or interface is a site
+// of its own, so neither propagates. A type an earlier build published keeps
+// its flag; marked memoizes this build's types.
+func markNeedsAddr(et *EncTypeInfo, building map[uintptr]*EncTypeInfo, marked map[*EncTypeInfo]bool) bool {
+	if v, ok := marked[et]; ok {
+		return v
+	}
+	if building[uintptr(et.Ptr)] != et {
+		return et.TypeFlags&EncTypeFlagNeedsAddr != 0
+	}
+	// Inline storage cannot contain itself, so the walk below never revisits
+	// et; the entry only bounds a malformed graph.
+	marked[et] = false
+	need := false
+	switch {
+	case et.Kind == typ.KindValue:
+		// Encoded by the tape walk, which never calls its MarshalJSON.
+	case et.TypeFlags&EncTypeFlagHasMarshalFn != 0:
+		need = et.Hooks.MarshalAddr
+	case et.TypeFlags&EncTypeFlagHasTextMarshalFn != 0:
+		need = et.Hooks.TextMarshalAddr
+	case et.Kind == typ.KindStruct:
+		for i := range et.ResolveStruct().Fields {
+			fi := &et.ResolveStruct().Fields[i]
+			if len(fi.PtrPath) > 0 {
+				continue // lives in a pointee
+			}
+			if fi.TagFlags&EncTagFlagOmitZero != 0 && fi.OmitZeroAddr || markNeedsAddr(fi.Type, building, marked) {
+				need = true
+				break
+			}
+		}
+	case et.Kind == typ.KindArray:
+		need = markNeedsAddr(et.ResolveArray().ElemType, building, marked)
+	}
+	marked[et] = need
+	if need {
+		et.TypeFlags |= EncTypeFlagNeedsAddr
+	}
+	return need
 }
 
 func buildEncRec(t reflect.Type, building map[uintptr]*EncTypeInfo) *EncTypeInfo {
@@ -132,6 +184,7 @@ func buildStructInfo(info *typ.StructTypeInfo, building map[uintptr]*EncTypeInfo
 			IsZeroFn:       sf.IsZeroFn,
 			OmitZeroFn:     sf.OmitZeroFn,
 			OmitZeroMethod: sf.OmitZeroMethod,
+			OmitZeroAddr:   sf.OmitZeroAddr,
 			TagFlags:       sf.TagFlags,
 		})
 	}

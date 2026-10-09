@@ -29,6 +29,13 @@ func FloatExpAuto(v bool) Options { return vopt.FloatExpAuto(v) }
 func BufSize(n int) Options { return vopt.BufSize(n) }
 
 // Marshal returns the compact JSON encoding of v.
+//
+// MarshalJSON, MarshalText and IsZero (for omitzero) defined on a pointer
+// receiver are called for every value of the type. A value addressable from
+// v, such as a pointee, a slice element or a field of either, is passed in
+// place. Interface payloads, map keys and map values are not addressable:
+// the method receives a copy and its writes through the receiver are
+// discarded. The same holds for every encoding entry point.
 func Marshal[T any](v T, opts ...MarshalOption) ([]byte, error) {
 	return venc.Marshal(v, opts...)
 }

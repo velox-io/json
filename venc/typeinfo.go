@@ -11,6 +11,7 @@ import (
 const (
 	EncTypeFlagHasMarshalFn     = typ.TypeFlagHasMarshalFn
 	EncTypeFlagHasTextMarshalFn = typ.TypeFlagHasTextMarshalFn
+	EncTypeFlagNeedsAddr        = typ.TypeFlagNeedsAddr
 	EncTagFlagQuoted            = typ.TagFlagQuoted
 	EncTagFlagOmitEmpty         = typ.TagFlagOmitEmpty
 	EncTagFlagOmitZero          = typ.TagFlagOmitZero
@@ -113,6 +114,9 @@ type EncFieldInfo struct {
 	// OmitZeroMethod records that OmitZeroFn came from an IsZero method
 	// binding, which only Go can run.
 	OmitZeroMethod bool
+
+	// OmitZeroAddr records that the IsZero method has a pointer receiver.
+	OmitZeroAddr bool
 }
 
 type EncStructInfo struct {
