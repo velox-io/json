@@ -240,6 +240,8 @@ type mcAnyHost struct{ I any }
 func TestMarshalCorpus_InterfacePayloads(t *testing.T) {
 	n := 7
 	for _, c := range []marshalCase{
+		mc("single-pointer struct", mcRef{P: &n}),
+		mc("single-pointer array", mcRefs{&n}),
 		mc("single-pointer struct in field", mcAnyHost{I: mcRef{P: &n}}),
 		mc("single-pointer array in field", mcAnyHost{I: mcRefs{&n}}),
 		mc("nil single-pointer struct in field", mcAnyHost{I: mcRef{}}),

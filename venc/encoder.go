@@ -8,6 +8,7 @@ import (
 
 	"github.com/velox-io/json/gort"
 	"github.com/velox-io/json/native/encvm"
+	"github.com/velox-io/json/typ"
 	"github.com/velox-io/json/vopt"
 )
 
@@ -74,25 +75,13 @@ func (enc *Encoder) Encode(v any) error {
 		ti = encElemTypeInfoOf(rtp, rt)
 	} else {
 		ti = EncTypeInfoOf(rt)
-		switch rt.Kind() {
-		case reflect.Map, reflect.Chan, reflect.Func:
-			// Direct-interface types: data IS the value (a pointer-width
-			// descriptor). Encoder expects a pointer TO the value, so take &eface[1].
+		if typ.IsDirectIface(rt) {
+			// The interface stores the value in its data word (a map, chan,
+			// func, or single-pointer struct or array), so the value's
+			// address is the word's.
 			ptr = unsafe.Pointer(&eface[1])
-		case reflect.Struct:
-			if rt.Size() <= unsafe.Sizeof(uintptr(0)) {
-				// One-pointer-word structs are also stored directly in the
-				// interface data word, so data is the value's single pointer,
-				// not a pointer to the value. Box through reflect, which owns
-				// the interface layout rules.
-				box := reflect.New(rt)
-				box.Elem().Set(reflect.ValueOf(v))
-				ptr = box.UnsafePointer()
-				break
-			}
-			ptr = data
-		default:
-			// Indirect types: data is already a pointer to the value.
+		} else {
+			// Otherwise the data word points to the value.
 			ptr = data
 		}
 	}
