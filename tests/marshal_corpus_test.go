@@ -253,6 +253,34 @@ func TestMarshalCorpus_InterfacePayloads(t *testing.T) {
 	}
 }
 
+type mcPair struct {
+	A int
+	B string
+}
+
+// An interface payload that is a pointer encodes its pointee, null when nil,
+// however deep the chain and whichever receiver the pointee's method has.
+func TestMarshalCorpus_PointerInterfacePayloads(t *testing.T) {
+	n := 7
+	pair := &mcPair{A: 1, B: "x"}
+	var nilPair *mcPair
+	for _, c := range []marshalCase{
+		mc("pointer to struct", mcAnyHost{I: pair}),
+		mc("nil pointer", mcAnyHost{I: nilPair}),
+		mc("pointer to int", mcAnyHost{I: &n}),
+		mc("pointer chain", mcAnyHost{I: &pair}),
+		mc("pointer chain inner nil", mcAnyHost{I: &nilPair}),
+		mc("pointer to data-word struct", mcAnyHost{I: &mcRef{P: &n}}),
+		mc("pointer to value-receiver hook", mcAnyHost{I: &mcMarshaler{N: 1}}),
+		mcForm("pointer-receiver hook", mcAnyHost{I: &ptrOnlyMarshaler{Name: "p"}}, formVerbatim),
+		mc("pointers in slice field", mcAnySliceHost{S: []any{pair, nilPair, &mcPair{A: 2}, &n}}),
+		mc("pointers in slice", []any{pair, nilPair, &n}),
+		mc("pointer in map", map[string]any{"k": pair}),
+	} {
+		c.run(t)
+	}
+}
+
 // mcRefHook is stored in an interface's data word and encodes through a
 // value-receiver method.
 type mcRefHook struct{ P *int }

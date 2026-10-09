@@ -284,14 +284,29 @@ func (es *encodeState) handleIfaceCacheMiss(ctx *VjExecCtx, bp *Blueprint) error
 		if err != nil {
 			return err
 		}
+		es.ensureIfaceEntry(typePtr, rtype)
 		insertIfaceCacheBody(typePtr, bodyBP)
 		es.traceRecordBlueprint(bodyBP)
 		return nil
 	}
 
+	es.ensureIfaceEntry(typePtr, rtype)
+	return nil
+}
+
+// ensureIfaceEntry publishes the cache entry for rtype with the verdict
+// OP_INTERFACE runs on: a primitive tag, a Blueprint to switch into, or
+// neither, which sends every such payload to Go. Every entry carries its
+// verdict from the moment it exists, so an entry an unfold miss creates
+// serves OP_INTERFACE too; the unfold body attaches to it afterwards.
+func (es *encodeState) ensureIfaceEntry(typePtr unsafe.Pointer, rtype reflect.Type) {
+	if loadIfaceCacheSnapshot().lookup(typePtr) != nil {
+		return
+	}
 	ti := EncTypeInfoOf(rtype)
 
-	// Primitive tags are opcode values; tag=0 means the cache entry relies on OpsPtr or a future yield.
+	// Primitive tags are opcode values; tag=0 means the entry switches into
+	// OpsPtr, or yields to Go when that is nil too.
 	var tag uint8
 	var fullBP *Blueprint
 	var flags uint8
@@ -318,12 +333,16 @@ func (es *encodeState) handleIfaceCacheMiss(ctx *VjExecCtx, bp *Blueprint) error
 			fullBP = ti.getBlueprint()
 		case typ.KindMap:
 			fullBP = ti.getBlueprint()
+		case typ.KindPointer:
+			// The root Blueprint derefs the pointer the data word holds and
+			// writes null for a typed nil.
+			fullBP = ti.getBlueprint()
 		default:
 		}
 	}
-	// A type the interface stores in its data word (a map, a single-pointer
-	// struct or array) is encoded from the word itself, not from what it
-	// points to.
+	// A type the interface stores in its data word (a pointer, a map, a
+	// single-pointer struct or array) is encoded from the word itself, not
+	// from what it points to.
 	if fullBP != nil && typ.IsDirectIface(rtype) {
 		flags = ifaceFlagIndirect
 	}
@@ -332,7 +351,6 @@ func (es *encodeState) handleIfaceCacheMiss(ctx *VjExecCtx, bp *Blueprint) error
 	if fullBP != nil {
 		es.traceRecordBlueprint(fullBP)
 	}
-	return nil
 }
 
 func (es *encodeState) encodeAnyIface(ifacePtr unsafe.Pointer) error {

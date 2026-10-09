@@ -2,8 +2,11 @@ package venc
 
 import (
 	"math/bits"
+	"reflect"
 	"testing"
 	"unsafe"
+
+	"github.com/velox-io/json/native/encvm"
 )
 
 // fakeTypePtrs returns n distinct 8-aligned pointers that mimic rtype
@@ -128,5 +131,57 @@ func TestIfaceCacheTableBodyAttachKeepsSlots(t *testing.T) {
 	}
 	if next.lookup(target).BodyOpsPtr != bodyOps {
 		t.Fatal("lookup does not see attached body ops")
+	}
+}
+
+type ifaceVerdictPtr struct {
+	A int `json:"a"`
+}
+
+type ifaceVerdictCase struct {
+	B int `json:"b"`
+}
+
+type ifaceVerdictAnyHost struct {
+	V any `json:"v"`
+}
+
+type ifaceVerdictUnfoldHost struct {
+	Kind string `json:"kind"`
+	Obj  any    `json:",embed" vjson:"variant=kind"`
+}
+
+// An entry's OP_INTERFACE verdict decides whether a payload stays native:
+// no tag and no Blueprint sends every payload of the type to Go. A pointer
+// payload switches into its root Blueprint, and an entry an unfold created
+// carries the verdict as well as the body, so the type stays native when it
+// later fills an ordinary interface field.
+func TestIfaceEntryNativeVerdict(t *testing.T) {
+	if !encvm.Available {
+		t.Skip("native encvm unavailable")
+	}
+	entry := func(t reflect.Type) *VjIfaceCacheEntry {
+		return loadIfaceCacheSnapshot().lookup(rtypePtr(t))
+	}
+
+	if _, err := Marshal(ifaceVerdictAnyHost{V: &ifaceVerdictPtr{A: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if e := entry(reflect.TypeFor[*ifaceVerdictPtr]()); e == nil || e.OpsPtr == nil {
+		t.Errorf("pointer payload entry = %+v, want a Blueprint", e)
+	}
+
+	if _, err := Marshal(ifaceVerdictUnfoldHost{Kind: "k", Obj: ifaceVerdictCase{B: 2}}); err != nil {
+		t.Fatal(err)
+	}
+	if e := entry(reflect.TypeFor[ifaceVerdictCase]()); e == nil || e.OpsPtr == nil || e.BodyOpsPtr == nil {
+		t.Errorf("unfolded case entry = %+v, want both a Blueprint and a body", e)
+	}
+	got, err := Marshal(ifaceVerdictAnyHost{V: ifaceVerdictCase{B: 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `{"v":{"b":2}}` {
+		t.Errorf("unfolded case in an interface field: got %s", got)
 	}
 }

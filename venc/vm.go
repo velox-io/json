@@ -564,9 +564,10 @@ func insertIfaceCache(typePtr unsafe.Pointer, bp *Blueprint, tag uint8, flags ui
 	globalIfaceCache.current.Store(cur.withEntry(entry))
 }
 
-// insertIfaceCacheBody attaches a body-only Blueprint to an existing entry
-// (or inserts a new one carrying only the body). The snapshot is
-// copy-on-write: in-flight VMs keep reading the table they were handed.
+// insertIfaceCacheBody attaches a body-only Blueprint to the entry already
+// published for typePtr; the entry's OP_INTERFACE verdict stays as it is.
+// The snapshot is copy-on-write: in-flight VMs keep reading the table they
+// were handed.
 func insertIfaceCacheBody(typePtr unsafe.Pointer, bodyBP *Blueprint) {
 	globalIfaceCache.mu.Lock()
 	defer globalIfaceCache.mu.Unlock()
@@ -574,20 +575,18 @@ func insertIfaceCacheBody(typePtr unsafe.Pointer, bodyBP *Blueprint) {
 	bodyPtr := unsafe.Pointer(&bodyBP.Ops[0])
 
 	cur := globalIfaceCache.current.Load()
-	if idx := cur.find(typePtr); idx >= 0 {
-		if cur.slots[idx].BodyOpsPtr == bodyPtr {
-			return
-		}
-		registerBlueprintOps(bodyBP)
-		slots := make([]VjIfaceCacheEntry, len(cur.slots))
-		copy(slots, cur.slots)
-		slots[idx].BodyOpsPtr = bodyPtr
-		globalIfaceCache.current.Store(&ifaceCacheSnapshot{slots: slots, shift: cur.shift, count: cur.count})
+	idx := cur.find(typePtr)
+	if idx < 0 {
+		panic("venc: unfold body attached before its interface cache entry") // internal bug: callers publish the entry first
+	}
+	if cur.slots[idx].BodyOpsPtr == bodyPtr {
 		return
 	}
-
 	registerBlueprintOps(bodyBP)
-	globalIfaceCache.current.Store(cur.withEntry(VjIfaceCacheEntry{TypePtr: typePtr, BodyOpsPtr: bodyPtr}))
+	slots := make([]VjIfaceCacheEntry, len(cur.slots))
+	copy(slots, cur.slots)
+	slots[idx].BodyOpsPtr = bodyPtr
+	globalIfaceCache.current.Store(&ifaceCacheSnapshot{slots: slots, shift: cur.shift, count: cur.count})
 }
 
 // bodyBlueprintCache holds body-only Blueprints keyed by rtype pointer, so
