@@ -478,10 +478,12 @@ const (
 	//
 	// The field's hop run starts at StructMetaPayload.PtrHops[HopStart] and ends
 	// at the hop whose Last bit is set. HopStart rides in the high 16 bits, which
-	// it can share with the poly table index only because a
-	// via-ptr field is never a polymorphic target: attachVariantsForStruct and
-	// attachKindofsForStruct refuse that combination. The refusal is what keeps
-	// this bit space unambiguous, so it is not an assumption but an invariant.
+	// it can share with the poly table index only because a via-ptr field never
+	// carries one: attachVariantsForStruct refuses a promoted variant target or
+	// discriminator, attachKindofsForStruct a promoted kindof target, and the
+	// struct build a promoted reserve-unknown. The refusal is what keeps this bit
+	// space unambiguous, and it also keeps every merged-tape routing flag off
+	// via-ptr fields, so it is not an assumption but an invariant.
 	TagViaPtr FieldTagFlag = 1 << 12
 )
 
@@ -508,8 +510,8 @@ func FieldPolyIdx(f *BindField) uint16 {
 }
 
 // FieldHopStart is valid only for TagViaPtr fields. It shares the high-16 index
-// space with the poly table, which is sound because a promoted field is never a
-// polymorphic target.
+// space with the poly table, which is sound because a promoted field never
+// carries a poly index.
 func FieldHopStart(f *BindField) uint16 {
 	return uint16(f.Flags >> fieldFlagPolyIdxShift)
 }

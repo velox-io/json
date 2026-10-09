@@ -404,6 +404,14 @@ func (b *builder) attachVariantsForStruct(hostUT *typ.UniType, hostIdx uint32, s
 		if vdiscFieldType := si.Fields[vdiscFieldIdx].FieldType.Type; vdiscFieldType.Kind() != reflect.String {
 			return fmt.Errorf("vbind: struct %s discriminator field %q must be a string, got %s", hostUT.Type, discName, vdiscFieldType)
 		}
+		// The discriminator is read and written at DiscFieldOff from the host
+		// base, and its field record's high 16 bits carry the poly index in place
+		// of a hop start, so it must live in the host for the same reason the
+		// target must.
+		if vdisc := &si.Fields[vdiscFieldIdx]; len(vdisc.PtrPath) > 0 {
+			return fmt.Errorf("vbind: struct %s variant field %q names discriminator %q, which is promoted across an embedded pointer; polymorphic dispatch needs the discriminator in the host itself, so embed %s by value or give the pointer an explicit JSON name",
+				hostUT.Type, sf.JSONName, discName, vdisc.PtrPath[0].PointeeType.Type)
+		}
 		if err := b.buildOneVariantTable(hostUT, hostIdx, si, fieldsBase, vdiscFieldIdx, i, isInline, sf.DeclaringType, sf.GoName); err != nil {
 			return err
 		}

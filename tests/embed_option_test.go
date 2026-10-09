@@ -7,6 +7,7 @@ import (
 
 	vjson "github.com/velox-io/json"
 	"github.com/velox-io/json/value"
+	"github.com/velox-io/json/vbind"
 )
 
 // `json:",embed"` promotes a named field's content into its host. Go embedding
@@ -304,6 +305,33 @@ type embReserveHostPtr struct {
 	Y int `json:"y"`
 }
 
+// The discriminator has the same need from the other side: dispatch reads and
+// writes it at an offset from the host base while its bytes live in the
+// pointee. The variant field itself stays in the host.
+type embDiscBase struct {
+	Type string `json:"type"`
+}
+type embDiscCase struct {
+	Name string `json:"name"`
+}
+type embDiscInlineHost struct {
+	*embDiscBase
+	Data any `json:",embed" vjson:"variant=type"`
+}
+type embDiscSiblingHost struct {
+	*embDiscBase
+	Data any `json:"data" vjson:"variant=type"`
+}
+
+func init() {
+	vbind.DefineVariantCases[embDiscInlineHost, struct {
+		_ embDiscCase `case:"t"`
+	}]()
+	vbind.DefineVariantCases[embDiscSiblingHost, struct {
+		_ embDiscCase `case:"t"`
+	}]()
+}
+
 func TestEmbedOption_PolyAcrossPointerRefused(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -313,6 +341,8 @@ func TestEmbedOption_PolyAcrossPointerRefused(t *testing.T) {
 		{"variant", new(embPolyHost), "promoted across an embedded pointer"},
 		{"kindof", new(embKindofHost), "promoted across an embedded pointer"},
 		{"reserve-unknown", new(embReserveHostPtr), "promoted across an embedded pointer"},
+		{"inline discriminator", new(embDiscInlineHost), "promoted across an embedded pointer"},
+		{"sibling discriminator", new(embDiscSiblingHost), "promoted across an embedded pointer"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := vjson.Unmarshal([]byte(`{"type":"t","y":1}`), tc.dst)

@@ -713,6 +713,12 @@ object_field_value: {
   const BindType *child_type = (const BindType *)cur_struct_field->type;
   uint8_t ch                 = SRC_PEEK();
   if (UNLIKELY(cur_struct_field->flags | (ch == 'n'))) {
+    /* The merged-tape route emits key, which is local to object_field_key: a
+     * resume enters below its initialization, so no yield may come first. The
+     * route needs no body, so it precedes the hop resolution's BLOCK_FULL. */
+    if (cur_struct_field->flags & (BIND_FF_RESERVE_UNKNOWN | BIND_FF_INLINE_VARIANT | BIND_FF_INLINE_VDISC))
+      goto object_field_tape;
+
     /* Resolve promoted pointer hops before null handling. The field offset is
      * relative to the reached pointee even when the field value is null. */
     if (cur_struct_field->flags & BIND_FF_VIA_PTR) {
@@ -721,9 +727,6 @@ object_field_value: {
       BIND_RESOLVE_FIELD_HOPS(m, field_base, cur_struct_field, hops, BIND_PHASE_OBJECT_FIELD_VALUE);
       body = field_base + cur_struct_field->offset;
     }
-
-    if (cur_struct_field->flags & (BIND_FF_RESERVE_UNKNOWN | BIND_FF_INLINE_VARIANT | BIND_FF_INLINE_VDISC))
-      goto object_field_tape;
 
     /* This pointer loop stashes cur_struct_field in the field-resume shape. */
     if (ch != 'n') {
