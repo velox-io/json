@@ -193,6 +193,7 @@ func Bind(pl *Plan, h Host, in *Input, dst unsafe.Pointer) (settled bool, err er
 	c.txt = mkText(in.Src)
 	if c.regionPlan != pl {
 		c.regions, c.memo, c.regionPlan = make([][]unsafe.Pointer, pl.nmaps), make([]byte, pl.memoLen), pl
+		c.keys = vbind.KeyScratch{}
 	}
 	c.scratch = &st.scratch
 	c.a = in.Alloc
@@ -258,7 +259,8 @@ func (c *binder) release() {
 	clear(d)
 	clear(s)
 	clear(p)
-	*c = binder{deferred: d[:0], docs: s[:0], pending: p[:0], regions: c.regions, memo: c.memo, regionPlan: c.regionPlan}
+	*c = binder{deferred: d[:0], docs: s[:0], pending: p[:0], regions: c.regions, memo: c.memo, regionPlan: c.regionPlan,
+		keys: c.keys}
 }
 
 // errScan is the scan verdict's failure, which names no position.
@@ -301,7 +303,7 @@ type binder struct {
 
 	// The generic map assign takes its key by address; these hold it so
 	// it need not escape per entry.
-	intKey [8]byte
+	keys   vbind.KeyScratch
 	strKey string
 
 	// The first recorded type mismatch surfaces at document end against
@@ -324,8 +326,8 @@ type binder struct {
 	// the native Parser's memo holds. Entries survive binds: a stale byte
 	// only mispredicts.
 	memo []byte
-	// regionPlan is the Plan regions and memo were built for; a Bind
-	// through another Plan rebuilds both.
+	// regionPlan is the Plan regions, memo, and keys were built for; a
+	// Bind through another Plan rebuilds them.
 	regionPlan *Plan
 	hookErr    error // first hook failure
 	keyErr     error // first map-key conversion failure

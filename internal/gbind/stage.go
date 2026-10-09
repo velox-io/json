@@ -23,7 +23,8 @@ import (
 // Hook and map-key failures never abort the walk. Drains record the first
 // of each, walk errors take precedence, and the report points (document
 // end, stream handoff) surface a hook failure before a key failure, so the
-// verdict never depends on when the drains ran.
+// verdict never depends on when the drains ran. A key's UnmarshalText runs
+// in the map publication, so its failure is a key failure.
 
 // maxStaged bounds the staged hooks, and with them the rebase scan of each
 // slice growth.

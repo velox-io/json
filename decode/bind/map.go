@@ -30,9 +30,9 @@ type mapRegionMove struct {
 }
 
 // mapDrainScratch backs drainAllMapSlots. One instance per Parser is safe:
-// FLUSH handling is synchronous and runs no user callbacks (deferred records
-// drain first, stream recursion enters through BindYieldInput), so drains
-// never nest.
+// FLUSH handling is synchronous (deferred records drain first, stream
+// recursion enters through BindYieldInput), and the key hooks a drain runs see
+// only key bytes, never this Parser, so drains never nest.
 type mapDrainScratch struct {
 	offsets     []uint32 // region offsets, ascending
 	liveOffs    []uint32 // live region offsets, ascending
@@ -108,7 +108,8 @@ func drainAllMapSlots(p *Parser, m *ndec.BindMachine) {
 		if mapRegion.EntryCount > 0 {
 			entriesBase := unsafe.Add(unsafe.Pointer(mapRegion), ndec.BindMapRegionHeaderSize)
 			mapHdr := mapRegion.Hmap
-			if err := drainKVSlots(mapHdr, entriesBase, int(mapRegion.EntryCount), info, stride, uintptr(ndec.BindMapValOff)); err != nil {
+			if err := drainKVSlots(mapHdr, entriesBase, int(mapRegion.EntryCount), info, stride, uintptr(ndec.BindMapValOff),
+				&p.mapKeys); err != nil {
 				p.failed.noteKey(err)
 			}
 		}
@@ -214,7 +215,7 @@ func drainAllMapSlots(p *Parser, m *ndec.BindMachine) {
 // intermediate slots the never-run hooks would have filled, and the Go engine
 // drops those on error too. Key conversion failures are dropped; the walk
 // error that caused the abort keeps precedence.
-func drainMapSlotsOnAbort(m *ndec.BindMachine) {
+func drainMapSlotsOnAbort(p *Parser, m *ndec.BindMachine) {
 	if m.Alloc.MapBufUsed == 0 {
 		return
 	}
@@ -233,14 +234,16 @@ func drainMapSlotsOnAbort(m *ndec.BindMachine) {
 			continue
 		}
 		entriesBase := unsafe.Add(unsafe.Pointer(r), ndec.BindMapRegionHeaderSize)
-		_ = drainKVSlots(r.Hmap, entriesBase, int(r.EntryCount), info, uintptr(r.Stride), uintptr(ndec.BindMapValOff))
+		_ = drainKVSlots(r.Hmap, entriesBase, int(r.EntryCount), info, uintptr(r.Stride), uintptr(ndec.BindMapValOff),
+			&p.mapKeys)
 	}
 }
 
-// drainKVSlots writes count staged KV entries into the runtime map. An entry
-// whose key fails conversion is dropped, and the first failure is returned
-// once the rest have landed.
-func drainKVSlots(mapHdr, entriesBase unsafe.Pointer, count int, info *vbind.MapDrainInfo, stride, valueOff uintptr) error {
+// drainKVSlots writes count staged KV entries into the runtime map, keys
+// converting through ks. An entry whose key fails conversion is dropped, and
+// the first failure is returned once the rest have landed.
+func drainKVSlots(mapHdr, entriesBase unsafe.Pointer, count int, info *vbind.MapDrainInfo, stride, valueOff uintptr,
+	ks *vbind.KeyScratch) error {
 	keyKind := info.KeyKind
 	valSize := uintptr(info.ValSize)
 	mapRType := info.MapRType
@@ -287,12 +290,11 @@ func drainKVSlots(mapHdr, entriesBase unsafe.Pointer, count int, info *vbind.Map
 		return nil
 	}
 
-	var keyBuf [8]byte
 	var first error
 	for i := range count {
 		slot := unsafe.Add(entriesBase, uintptr(i)*stride)
-		key := *(*string)(slot)
-		if err := info.EncodeIntKey(&keyBuf, key); err != nil {
+		elemInMap, err := info.AssignKey(mapHdr, *(*string)(slot), ks)
+		if err != nil {
 			if first == nil {
 				first = err
 			}
@@ -305,7 +307,6 @@ func drainKVSlots(mapHdr, entriesBase unsafe.Pointer, count int, info *vbind.Map
 		} else {
 			valSrc = valSlot
 		}
-		elemInMap := gort.MapAssign(mapRType, mapHdr, unsafe.Pointer(&keyBuf[0]))
 		copyMapValue(elemInMap, valSrc, valSize)
 	}
 	return first

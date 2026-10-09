@@ -256,8 +256,13 @@ type Parser struct {
 	counted bool
 
 	// mapDrain backs drainAllMapSlots. One instance suffices because FLUSH
-	// handling is synchronous and runs no user callbacks, so drains never nest.
+	// handling is synchronous and the only user code it runs, key hooks, sees
+	// no handle on this Parser, so drains never nest.
 	mapDrain mapDrainScratch
+
+	// mapKeys is the key storage every map drain of this Parser converts
+	// non-string keys into.
+	mapKeys vbind.KeyScratch
 
 	// failed collects the current root drive's hook and map-key failures;
 	// driveRoot resets it.
@@ -964,7 +969,7 @@ func (p *Parser) serveYield(m *ndec.BindMachine) (done bool, err error) {
 		// holds the map headers, so publish what completed before the abort,
 		// as the Go engine's error exits do. Runs before the error translation
 		// because it touches no positions.
-		drainMapSlotsOnAbort(m)
+		drainMapSlotsOnAbort(p, m)
 		if p.feed != nil {
 			// Immediate errors carry a window-local position; a recorded skip
 			// error was promoted to an absolute document offset at the first

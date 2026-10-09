@@ -246,14 +246,22 @@ type MapMetaPayload struct {
 // an element larger than gort.MapMaxElemBytes behind a pointer, so the drain must
 // assign it with the generic mapassign. It occupies padding the struct already
 // had, so the ABI record is unchanged.
+//
+// KeyKind is the conversion class of the key (see mapKeyKind). The fields from
+// KeySize on serve key conversion only; native stages keys as strings and
+// never reads them, so they extend the record past the C view.
 type MapDrainInfo struct {
 	MapRType      unsafe.Pointer // off 0   map *_type (mapassign / mapassign_faststr)
 	KVStride      uint32         // off 8   SAX slot width (bind reads stride from map_region_header)
-	KeyKind       Kind           // off 12  selects string vs int conversion in drain
+	KeyKind       Kind           // off 12  key conversion class
 	ValSize       uint32         // off 16  sizeof(val) for copyMapValue
 	ValIsDeferred bool           // off 20  map value is staged in a scannable SlotClass
 	ValIndirect   bool           // off 21  Go stores this element behind a pointer; drain must not use faststr
 	ValSlotClass  int32          // off 24  SlotClass idx for deferred val intermediate; -1 = N/A
+
+	KeySize  uint32                                   // off 28  sizeof(key)
+	KeyRType unsafe.Pointer                           // off 32  key *_type
+	KeyText  func(ptr unsafe.Pointer, b []byte) error // off 40  UnmarshalText of a KindTextUnmarshaler key
 }
 
 // BindAnyMeta is a read only Go/C ABI record reached through a noscan child

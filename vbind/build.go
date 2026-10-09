@@ -148,10 +148,10 @@ type mapSite struct {
 	idx          uint32
 	kvStride     uint32
 	valIdx       uint32
-	keyIdx       uint32
 	stride       uint32 // entry_slot stride (16 + sizeof(V) padded to 8)
 	valSlotClass int32  // SlotClass for deferred val intermediate; -1 = N/A
 	mapRType     unsafe.Pointer
+	key          *typ.UniType
 }
 
 // pointerCycle returns the first type that ut's chain of pointer layers
@@ -560,10 +560,10 @@ func (b *builder) collect(ut *typ.UniType) (uint32, error) {
 			idx:          idx,
 			kvStride:     kvStride,
 			valIdx:       valIdx,
-			keyIdx:       keyIdx,
 			stride:       stride,
 			valSlotClass: valSlotClass,
 			mapRType:     ut.Ptr,
+			key:          mi.KeyType,
 		})
 	case typ.KindAny:
 		// The seen entry must already exist before collecting []any and map[string]any,
@@ -1153,16 +1153,21 @@ func (b *builder) attachMapDrainInfos() {
 	b.mapDrainInfo = make([]MapDrainInfo, len(b.mapSites))
 	for i, s := range b.mapSites {
 		valMeta := &b.typeMeta[s.valIdx]
-		keyType := &b.types[s.keyIdx]
-		b.mapDrainInfo[i] = MapDrainInfo{
+		info := MapDrainInfo{
 			MapRType:      s.mapRType,
 			KVStride:      s.kvStride,
-			KeyKind:       keyType.Kind,
+			KeyKind:       mapKeyKind(s.key),
 			ValSize:       valMeta.Size,
 			ValIsDeferred: b.mapValueNeedsIndirection(s.valIdx),
 			ValIndirect:   gort.MapValueIsIndirect(uintptr(valMeta.Size)),
 			ValSlotClass:  s.valSlotClass,
+			KeySize:       uint32(s.key.Size),
+			KeyRType:      s.key.Ptr,
 		}
+		if info.KeyKind == KindTextUnmarshaler {
+			info.KeyText = s.key.Hooks.TextUnmarshalFn
+		}
+		b.mapDrainInfo[i] = info
 		b.typeMeta[s.idx].MapMeta().DrainInfo = unsafe.Pointer(&b.mapDrainInfo[i])
 	}
 }

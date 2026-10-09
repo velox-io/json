@@ -32,6 +32,14 @@ func (h *hkText) UnmarshalText(b []byte) error {
 	return nil
 }
 
+// hkKey is a TextUnmarshaler map key.
+type hkKey struct{ K string }
+
+func (h *hkKey) UnmarshalText(b []byte) error {
+	h.K = "key:" + string(b)
+	return nil
+}
+
 type hkHost struct {
 	U  hkSpan            `json:"u"`
 	P  *hkSpan           `json:"p"`
@@ -42,6 +50,7 @@ type hkHost struct {
 	TS []hkText          `json:"ts"`
 	R  json.RawMessage   `json:"r"`
 	B  []byte            `json:"b"`
+	K  map[hkKey]int     `json:"k"`
 	N  int               `json:"n"`
 }
 
@@ -78,6 +87,7 @@ func TestUnmarshalHooks(t *testing.T) {
 		{"text bool", `{"tp":true,"n":3}`, newOf[hkHost](), false},
 		{"text object", `{"t":{"a":1},"n":3}`, newOf[hkHost](), false},
 		{"text element mismatch", `{"ts":["a",2,"c"],"n":3}`, newOf[hkHost](), false},
+		{"text map keys", `{"k":{"a":1,"b\u00e9":2}}`, newOf[hkHost](), false},
 		{"raw message and bytes", `{"r":{"k":[1, 2]},"b":"YWJj"}`, newOf[hkHost](), false},
 		{"raw message scalars", `{"r":"s","b":""}`, newOf[hkHost](), false},
 		{"raw message null", `{"r":null,"b":null}`, newOf[hkHost](), false},

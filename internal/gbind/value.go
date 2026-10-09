@@ -832,19 +832,17 @@ func (c *binder) deferredEntries(s text, p int, m unsafe.Pointer, ti uint32, mp 
 	}
 }
 
-// mapSlot assigns key, converting an integer key as the native drain does,
-// and returns its value slot. A key that fails conversion gets no entry,
-// and the first failure is recorded.
+// mapSlot assigns key, converting a non-string key as the native drain
+// does, and returns its value slot. A key that fails conversion gets no
+// entry, and the first failure is recorded.
 func (c *binder) mapSlot(info *vbind.MapDrainInfo, m unsafe.Pointer, key string) unsafe.Pointer {
 	switch {
 	case info.KeyKind != vbind.KindString:
-		if err := info.EncodeIntKey(&c.intKey, key); err != nil {
-			if c.keyErr == nil {
-				c.keyErr = err
-			}
-			return nil
+		slot, err := info.AssignKey(m, key, &c.keys)
+		if err != nil && c.keyErr == nil {
+			c.keyErr = err
 		}
-		return gort.MapAssign(info.MapRType, m, unsafe.Pointer(&c.intKey[0]))
+		return slot
 	case info.ValIndirect:
 		c.strKey = key
 		slot := gort.MapAssign(info.MapRType, m, unsafe.Pointer(&c.strKey))

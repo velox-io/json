@@ -21,7 +21,8 @@ import (
 // windowing demands, so they only record failures; walk errors take
 // precedence, and the report points (drive end, stream batch handoff)
 // surface what was recorded. A hook failure outranks a key failure, which
-// keeps the verdict independent of the order the drains ran in.
+// keeps the verdict independent of the order the drains ran in. A key's
+// UnmarshalText runs in the map drain, so its failure is a key failure.
 type deferredErrs struct{ hook, key error }
 
 func (e *deferredErrs) noteHook(err error) {

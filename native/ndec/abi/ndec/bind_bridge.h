@@ -272,9 +272,11 @@ _Static_assert(offsetof(BindMapRegionHeader, parent_slot) == 24, "BindMapRegionH
 #define BIND_MAP_REGION_SLOTS       32 /* vbind.RegionSlotsPerMap */
 
 /*
- * Layout matches vbind.MapDrainInfo. Go owns and roots map_rtype. Deferred map
- * values are staged in the indicated scannable SlotClass; independently,
- * val_indirect selects generic map assignment for runtime-indirect values.
+ * Layout matches the leading fields of vbind.MapDrainInfo; the Go record
+ * extends past it with key conversion state C never reads. Go owns and roots
+ * map_rtype. Deferred map values are staged in the indicated scannable
+ * SlotClass; independently, val_indirect selects generic map assignment for
+ * runtime-indirect values.
  */
 typedef struct BindMapDrainInfo {
   const void *map_rtype;   /* off 0, Go runtime map type */

@@ -32,4 +32,5 @@ func main() {
 	if !reflect.DeepEqual(got, want) {
 		log.Fatalf("roundtrip mismatch: got %v, want %v", got, want)
 	}
+	fmt.Printf("%+v", want)
 }
