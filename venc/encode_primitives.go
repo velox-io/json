@@ -617,10 +617,15 @@ func (es *encodeState) encodeAnyReflect(v any) error {
 
 	ti := EncTypeInfoOf(rv.Type())
 
-	// Reached through a pointer: encode in place. Otherwise the value is not
-	// addressable and must be copied into an addressable slot.
+	// Reached through a pointer: encode in place.
 	if rv.CanAddr() {
 		return ti.Encode(es, rv.Addr().UnsafePointer())
+	}
+	// Otherwise the value is v's payload. A boxed value no method can write
+	// is read in its box. A value in the data word has no address of its
+	// own, and one a method may write must not be shared: both are copied.
+	if !typ.IsDirectIface(rv.Type()) && ti.TypeFlags&EncTypeFlagNeedsAddr == 0 {
+		return ti.Encode(es, (*[2]unsafe.Pointer)(unsafe.Pointer(&v))[1])
 	}
 	tmp := reflect.New(rv.Type())
 	tmp.Elem().Set(rv)
