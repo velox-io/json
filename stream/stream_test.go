@@ -1,7 +1,13 @@
 package stream_test
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
 	"testing"
+	"testing/iotest"
 
 	vjson "github.com/velox-io/json"
 	"github.com/velox-io/json/stream"
@@ -544,4 +550,89 @@ func TestStreamThreeLayerBreak(t *testing.T) {
 	if len(middlesSeen) != len(wantMiddles) {
 		t.Fatalf("middlesSeen = %v, want %v", middlesSeen, wantMiddles)
 	}
+}
+
+// A stream reports what its elements' decodes report: a mismatched or
+// malformed element fails the document with the error encoding/json gives
+// the same element in a slice, and an error the handler returns reaches the
+// caller unchanged. Both hold through Unmarshal and a Decoder fed one byte at
+// a time.
+func TestStreamElementErrors(t *testing.T) {
+	errStop := errors.New("handler stop")
+	decodeAll := func(s stream.Scope[event]) error {
+		for it := range s.Iter() {
+			if err := it.Decode(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	stopAtSecond := func(s stream.Scope[event]) error {
+		n := 0
+		for it := range s.Iter() {
+			if err := it.Decode(); err != nil {
+				return err
+			}
+			if n++; n == 2 {
+				return errStop
+			}
+		}
+		return nil
+	}
+	type sliceHost struct {
+		Events []event `json:"events"`
+		Name   string  `json:"name"`
+	}
+	for _, tc := range []struct {
+		name    string
+		in      string
+		handler func(stream.Scope[event]) error
+		want    error // nil: the error class encoding/json reports for the slice twin
+	}{
+		{"element mismatch", `{"events":[{"id":"a"},{"id":1}],"name":"x"}`, decodeAll, nil},
+		{"element not an object", `{"events":[{"id":"a"},7],"name":"x"}`, decodeAll, nil},
+		{"malformed element", `{"events":[{"id":"a",}],"name":"x"}`, decodeAll, nil},
+		{"truncated element", `{"events":[{"id":"a"`, decodeAll, nil},
+		{"field after the stream", `{"events":[{"id":"a"}],"name":5}`, decodeAll, nil},
+		{"handler error", `{"events":[{"id":"a"},{"id":"b"},{"id":"c"}],"name":"x"}`, stopAtSecond, errStop},
+	} {
+		var stdErr error
+		if tc.want == nil {
+			stdErr = json.Unmarshal([]byte(tc.in), new(sliceHost))
+			if stdErr == nil {
+				t.Fatalf("%s: encoding/json accepted %s", tc.name, tc.in)
+			}
+		}
+		check := func(leg string, err error) {
+			t.Helper()
+			switch {
+			case tc.want != nil:
+				if !errors.Is(err, tc.want) {
+					t.Errorf("%s/%s: error %v, want the handler's error", tc.name, leg, err)
+				}
+			case errClass(err) != errClass(stdErr):
+				t.Errorf("%s/%s: error %s (%v), encoding/json %s (%v)", tc.name, leg, errClass(err), err, errClass(stdErr), stdErr)
+			}
+		}
+		var h host
+		h.Events.OnRead(tc.handler)
+		check("Unmarshal", vjson.Unmarshal([]byte(tc.in), &h))
+		var d host
+		d.Events.OnRead(tc.handler)
+		check("Decoder", vjson.NewDecoder(iotest.OneByteReader(strings.NewReader(tc.in))).Decode(&d))
+	}
+}
+
+func errClass(err error) string {
+	var se *json.SyntaxError
+	var te *json.UnmarshalTypeError
+	switch {
+	case err == nil:
+		return "ok"
+	case errors.As(err, &te):
+		return "type"
+	case errors.As(err, &se), errors.Is(err, io.ErrUnexpectedEOF):
+		return "syntax"
+	}
+	return fmt.Sprintf("other(%T)", err)
 }
