@@ -3,6 +3,7 @@ package stream_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -200,4 +201,79 @@ type countWriter struct {
 func (c *countWriter) Write(p []byte) (int, error) {
 	c.flushes++
 	return c.w.Write(p)
+}
+
+// A stream held by an interface encodes as its array wherever the interface
+// sits, and a producer's error fails the encode unchanged.
+func TestOnWriteThroughAnyAndErrors(t *testing.T) {
+	events := func() *stream.Stream[wEvent] {
+		s := &stream.Stream[wEvent]{}
+		s.OnWrite(func(sink stream.Sink[wEvent]) error {
+			for i := range 2 {
+				if err := sink.Encode(&wEvent{ID: "e", N: i}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		return s
+	}
+	const arr = `[{"id":"e","n":0},{"id":"e","n":1}]`
+	type anyHost struct {
+		A any    `json:"a"`
+		M string `json:"m"`
+	}
+	for _, tc := range []struct {
+		name string
+		val  func() any
+		want string
+	}{
+		{"root any", func() any { return events() }, arr},
+		{"struct any field", func() any { return &anyHost{A: events(), M: "x"} }, `{"a":` + arr + `,"m":"x"}`},
+		{"slice element", func() any { return []any{1, events(), nil} }, `[1,` + arr + `,null]`},
+		{"map value", func() any { return map[string]any{"s": events()} }, `{"s":` + arr + `}`},
+	} {
+		got, err := vjson.Marshal(tc.val())
+		if err != nil {
+			t.Fatalf("%s: Marshal: %v", tc.name, err)
+		}
+		if string(got) != tc.want {
+			t.Errorf("%s: Marshal = %s, want %s", tc.name, got, tc.want)
+		}
+		var want bytes.Buffer
+		if ierr := json.Indent(&want, []byte(tc.want), "> ", "\t"); ierr != nil {
+			t.Fatal(ierr)
+		}
+		got, err = vjson.MarshalIndent(tc.val(), "> ", "\t")
+		if err != nil {
+			t.Fatalf("%s: MarshalIndent: %v", tc.name, err)
+		}
+		if string(got) != want.String() {
+			t.Errorf("%s: MarshalIndent =\n%s\nwant\n%s", tc.name, got, want.String())
+		}
+	}
+
+	sentinel := errors.New("producer failed")
+	fail := func(s *stream.Stream[wEvent]) *stream.Stream[wEvent] {
+		s.OnWrite(func(sink stream.Sink[wEvent]) error {
+			if err := sink.Encode(&wEvent{ID: "e"}); err != nil {
+				return err
+			}
+			return sentinel
+		})
+		return s
+	}
+	for name, val := range map[string]func() any{
+		"field":        func() any { r := &wResponse{}; fail(&r.Events); return r },
+		"root":         func() any { return fail(&stream.Stream[wEvent]{}) },
+		"slice of any": func() any { return []any{fail(&stream.Stream[wEvent]{})} },
+	} {
+		if _, err := vjson.Marshal(val()); !errors.Is(err, sentinel) {
+			t.Errorf("%s: Marshal error = %v, want the producer's error", name, err)
+		}
+		var buf bytes.Buffer
+		if err := vjson.NewEncoder(&buf).Encode(val()); !errors.Is(err, sentinel) {
+			t.Errorf("%s: Encoder error = %v, want the producer's error", name, err)
+		}
+	}
 }
