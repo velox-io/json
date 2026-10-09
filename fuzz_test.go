@@ -6,12 +6,33 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/velox-io/json/internal/gdec"
 )
+
+// stdAtofWrong reports whether this toolchain's encoding/json mis-evaluates
+// the bare JSON number token num. Two known defect classes, both on huge
+// mantissas past the uint64 fast path: go1.26 and earlier accept a negative
+// exponent scaled into overflow, and go1.27 returns a wrong finite value at
+// specific digit lengths. The parity oracle stands down for such inputs.
+func stdAtofWrong(num []byte) bool {
+	tr, ok := ratNumber(num)
+	if !ok {
+		return false
+	}
+	var std float64
+	err := json.Unmarshal(num, &std)
+	if math.IsInf(tr.f64, 0) {
+		return err == nil
+	}
+	return err == nil && std != tr.f64
+}
 
 // longNumberSeeds reach the >19-digit truncation and multiprecision refine
 // paths, which byte-level mutation rarely grows into from short seeds.
@@ -28,6 +49,13 @@ func longNumberSeeds() []string {
 		strings.Repeat("9", 400) + "e-400",
 		"0." + strings.Repeat("0", 320) + strings.Repeat("4", 900),
 		"-" + strings.Repeat("3", 1000) + "e-700",
+		// Overflowing mantissa + negative exponent: both engines reject
+		// with ErrRange, while go1.26 and earlier wrongly accept.
+		"-" + strings.Repeat("3", 1011) + "e-700",
+		"2" + strings.Repeat("0", 1008) + "e-700",
+		// A second 1 deep inside an 827-digit mantissa: vjson returns the
+		// correctly rounded 1e126 while go1.27's atof returns 1e99.
+		"1" + strings.Repeat("0", 589) + "1" + strings.Repeat("0", 236) + "e-700",
 	}
 }
 
@@ -112,6 +140,11 @@ func FuzzUnmarshalAny(f *testing.F) {
 
 		// CRITICAL: vjson must not reject valid JSON that encoding/json accepts.
 		if vjErr != nil && stdErr == nil {
+			// Stand down when the correctly rounded value overflows: the
+			// acceptance is a stdlib atof defect on huge mantissas.
+			if tr, ok := ratNumber(data); ok && !tr.inRange("float64") {
+				return
+			}
 			t.Errorf("vjson rejected but encoding/json accepted\ninput: %q\nvjson error: %v\nencoding/json result: %v",
 				data, vjErr, stdResult)
 		}
@@ -139,6 +172,13 @@ func FuzzUnmarshalAny(f *testing.F) {
 				// each with U+FFFD.
 				if !utf8.Valid(data) {
 					return
+				}
+				// A bare number where vjson holds the correctly rounded
+				// value is a stdlib atof defect, not a vjson bug.
+				if vf, isNum := vjResult.(float64); isNum {
+					if tr, ok := ratNumber(data); ok && vf == tr.f64 {
+						return
+					}
 				}
 				t.Errorf("result mismatch\ninput:  %q\nvjson:  %#v\nstdlib: %#v",
 					data, vjResult, stdResult)
@@ -368,18 +408,23 @@ func FuzzUnmarshalNumber(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		checkNumberParity[float32](t, "float32", data)
-		checkNumberParity[float64](t, "float64", data)
-		checkNumberParity[[]float32](t, "[]float32", wrapBytes("[", data, "]"))
-		checkNumberParity[[]float64](t, "[]float64", wrapBytes("[", data, "]"))
+		// All five forms below decode the same number text, so one
+		// arbitration covers them: when the toolchain's atof mis-evaluates
+		// it, parity stands down instead of reporting a vjson defect.
+		stdBad := stdAtofWrong(data)
+		checkNumberParity[float32](t, "float32", data, data, stdBad)
+		checkNumberParity[float64](t, "float64", data, data, stdBad)
+		w := wrapBytes("[", data, "]")
+		checkNumberParity[[]float32](t, "[]float32", w, data, stdBad)
+		checkNumberParity[[]float64](t, "[]float64", w, data, stdBad)
 		doc := wrapBytes(`{"f32":`, data, "")
 		doc = append(append(doc, `,"f64":`...), data...)
-		checkNumberParity[fields](t, "struct", append(doc, '}'))
+		checkNumberParity[fields](t, "struct", append(doc, '}'), data, stdBad)
 		// Hex floats and digit separators are the documented ",string"
 		// divergence: strconv takes them, the native atof does not.
 		if !bytes.ContainsAny(data, "xX_") {
 			q := wrapBytes(`{"q32":"`, data, `","q64":"`)
-			checkNumberParity[quoted](t, "quoted", append(append(q, data...), `"}`...))
+			checkNumberParity[quoted](t, "quoted", append(append(q, data...), `"}`...), data, stdBad)
 		}
 	})
 }
@@ -391,20 +436,93 @@ func wrapBytes(pre string, data []byte, post string) []byte {
 
 // checkNumberParity fails when vjson rejects what encoding/json accepts or
 // when both accept with different values. Leniency stays unchecked, as in
-// FuzzUnmarshalAny.
-func checkNumberParity[T any](t *testing.T, kind string, data []byte) {
+// FuzzUnmarshalAny. num is the bare number text inside data; its correctly
+// rounded truth arbitrates the two failure branches, and stdBad, from
+// stdAtofWrong on the same text, disarms the mixed-precision forms whose
+// mismatch cannot be attributed per field.
+func checkNumberParity[T any](t *testing.T, kind string, data, num []byte, stdBad bool) {
 	t.Helper()
 	var vj, std T
 	vjErr := Unmarshal(data, &vj)
 	stdErr := json.Unmarshal(data, &std)
 	if vjErr != nil && stdErr == nil {
+		// A truth past the form's range turns the acceptance itself into
+		// the stdlib atof defect; vjson's rejection is correct.
+		if tr, ok := ratNumber(num); ok && !tr.inRange(kind) {
+			return
+		}
 		t.Errorf("%s: vjson rejected but encoding/json accepted\ninput: %q\nvjson error: %v\nstdlib: %v",
 			kind, data, vjErr, std)
 		return
 	}
 	// Shortest round-trip formatting is injective on floats and equates NaN.
 	if vjErr == nil && stdErr == nil && fmt.Sprint(vj) != fmt.Sprint(std) {
+		if tr, ok := ratNumber(num); ok && heldBy(tr, vj, kind, stdBad) {
+			return
+		}
 		t.Errorf("%s: value mismatch\ninput:  %q\nvjson:  %v\nstdlib: %v", kind, data, vj, std)
+	}
+}
+
+// numTruth is the correctly rounded value of a JSON number token at both
+// float precisions, from big.Rat.
+type numTruth struct {
+	f64 float64
+	f32 float32
+}
+
+// ratNumber parses num as a JSON number token and returns its truth. ok is
+// false for any other input, including strconv-only spellings, so those
+// stay outside arbitration.
+func ratNumber(num []byte) (numTruth, bool) {
+	if end, valid := gdec.ValidNumber(num, 0); !valid || end != len(num) {
+		return numTruth{}, false
+	}
+	r, ok := new(big.Rat).SetString(string(num))
+	if !ok {
+		return numTruth{}, false
+	}
+	var tr numTruth
+	tr.f64, _ = r.Float64()
+	tr.f32, _ = r.Float32()
+	return tr, true
+}
+
+// inRange reports whether the truth fits the precision of kind. The mixed
+// kinds accept when either precision overflows: encoding/json must reject
+// that field, so its acceptance is a defect.
+func (tr numTruth) inRange(kind string) bool {
+	switch kind {
+	case "float32", "[]float32":
+		return !math.IsInf(float64(tr.f32), 0)
+	default:
+		return !math.IsInf(tr.f64, 0)
+	}
+}
+
+// heldBy reports whether v holds the correctly rounded value for kind, so a
+// stdlib divergence on the same text is the oracle's defect. The mixed
+// kinds cannot attribute a mismatch per field; they stand down only when
+// stdBad already proved the toolchain's atof wrong.
+func heldBy[T any](tr numTruth, v T, kind string, stdBad bool) bool {
+	if !tr.inRange(kind) {
+		return stdBad
+	}
+	switch kind {
+	case "float64":
+		x, _ := any(v).(float64)
+		return x == tr.f64
+	case "[]float64":
+		x, _ := any(v).([]float64)
+		return len(x) == 1 && x[0] == tr.f64
+	case "float32":
+		x, _ := any(v).(float32)
+		return x == tr.f32
+	case "[]float32":
+		x, _ := any(v).([]float32)
+		return len(x) == 1 && x[0] == tr.f32
+	default:
+		return stdBad
 	}
 }
 

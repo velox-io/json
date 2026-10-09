@@ -20,7 +20,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
-        go-version: ['1.24', '1.26', 'stable']
+        # The parity oracle needs a stdlib whose strconv.ParseFloat rejects
+        # huge-mantissa negative-exponent overflow; that landed in go1.27.
+        # Older toolchains stay covered by ci.yml's test matrix.
+        go-version: ['1.27', 'stable']
         target:
         - FuzzMarshalString
         - FuzzMarshalStruct
