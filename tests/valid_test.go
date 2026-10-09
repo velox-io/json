@@ -26,6 +26,8 @@ var validCases = []string{
 	`1E10`,
 	`1.5e+10`,
 	`1.5e-10`,
+	`1E+3`,
+	`-1.5e-3`,
 	`3.141592653589793`,
 	`""`,
 	`"hello"`,
@@ -69,19 +71,23 @@ var invalidCases = []string{
 	"\n\t\r",
 	`tru`,
 	`truex`,
+	`nullx`,
+	`nil`,
 	`fals`,
 	`nul`,
 	`NULL`,
 	`True`,
 	`False`,
-	`01`,   // leading zero
-	`1.`,   // trailing dot
-	`1.e5`, // empty fraction
-	`+1`,   // explicit plus
-	`--1`,  // double minus
-	`1e`,   // empty exponent
-	`1e+`,  // empty exponent sign
-	`.5`,   // missing leading digit
+	`01`,    // leading zero
+	`1.`,    // trailing dot
+	`1.e5`,  // empty fraction
+	`+1`,    // explicit plus
+	`--1`,   // double minus
+	`1e`,    // empty exponent
+	`1e+`,   // empty exponent sign
+	`.5`,    // missing leading digit
+	`1.2.3`, // second fraction
+	`1x`,    // number run into a letter
 	`Infinity`,
 	`NaN`,
 	`'single'`,                // wrong quote
