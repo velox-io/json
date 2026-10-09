@@ -185,3 +185,44 @@ func TestIfaceEntryNativeVerdict(t *testing.T) {
 		t.Errorf("unfolded case in an interface field: got %s", got)
 	}
 }
+
+type ifaceVerdictShape interface{ Name() string }
+
+type ifaceVerdictSquare struct {
+	S int `json:"s"`
+}
+
+func (ifaceVerdictSquare) Name() string { return "square" }
+
+type ifaceVerdictCircle struct {
+	R int `json:"r"`
+}
+
+func (ifaceVerdictCircle) Name() string { return "circle" }
+
+type ifaceVerdictShapeHost struct {
+	S ifaceVerdictShape   `json:"s"`
+	L []ifaceVerdictShape `json:"l"`
+}
+
+// A non-empty interface field or element dispatches through OP_INTERFACE,
+// which resolves the concrete type from the itab and publishes its entry:
+// the payload stays native like an any's.
+func TestNonEmptyInterfaceNativeVerdict(t *testing.T) {
+	if !encvm.Available {
+		t.Skip("native encvm unavailable")
+	}
+	h := ifaceVerdictShapeHost{S: ifaceVerdictSquare{S: 1}, L: []ifaceVerdictShape{ifaceVerdictCircle{R: 2}}}
+	got, err := Marshal(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `{"s":{"s":1},"l":[{"r":2}]}` {
+		t.Errorf("got %s", got)
+	}
+	for _, rt := range []reflect.Type{reflect.TypeFor[ifaceVerdictSquare](), reflect.TypeFor[ifaceVerdictCircle]()} {
+		if e := loadIfaceCacheSnapshot().lookup(rtypePtr(rt)); e == nil || e.OpsPtr == nil {
+			t.Errorf("%v entry = %+v, want a Blueprint", rt, e)
+		}
+	}
+}

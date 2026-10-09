@@ -353,8 +353,22 @@ func (es *encodeState) ensureIfaceEntry(typePtr unsafe.Pointer, rtype reflect.Ty
 	}
 }
 
-func (es *encodeState) encodeAnyIface(ifacePtr unsafe.Pointer) error {
-	return es.encodeAny(*(*any)(ifacePtr))
+// encodeAnyIface encodes the interface at ifacePtr by its dynamic value. A
+// non-empty interface (ifaceField) holds an itab in word 0, whose second
+// word is the concrete type; with the data word that forms the same any.
+func (es *encodeState) encodeAnyIface(ifacePtr unsafe.Pointer, ifaceField bool) error {
+	if !ifaceField {
+		return es.encodeAny(*(*any)(ifacePtr))
+	}
+	words := (*[2]unsafe.Pointer)(ifacePtr)
+	if words[0] == nil {
+		return es.encodeAny(nil)
+	}
+	var v any
+	ev := (*[2]unsafe.Pointer)(unsafe.Pointer(&v))
+	ev[0] = *(*unsafe.Pointer)(unsafe.Add(words[0], 8))
+	ev[1] = words[1]
+	return es.encodeAny(v)
 }
 
 // unfoldBodyBlueprint resolves the body-only Blueprint for the concrete type

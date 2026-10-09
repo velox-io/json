@@ -237,6 +237,81 @@ func TestPolyEncodeInlineCaseGoFields(t *testing.T) {
 	}
 }
 
+// polyEvent is the domain interface a variant field may declare instead of
+// any; every case implements it.
+type polyEvent interface{ EventName() string }
+
+type polyLogin struct {
+	User string `json:"user"`
+}
+
+func (polyLogin) EventName() string { return "login" }
+
+type polyPurchase struct {
+	SKU string `json:"sku"`
+	Qty int    `json:"qty"`
+}
+
+func (polyPurchase) EventName() string { return "purchase" }
+
+type polyEventEnvelope struct {
+	Type string    `json:"type"`
+	Data polyEvent `json:"data" vjson:"variant=type"`
+}
+
+type polyEventInline struct {
+	Type string    `json:"type"`
+	Data polyEvent `json:",embed" vjson:"variant=type"`
+	N    int       `json:"n"`
+}
+
+func init() {
+	vbind.DefineVariantCases[polyEventEnvelope, struct {
+		login    polyLogin
+		purchase polyPurchase
+	}]()
+	vbind.DefineVariantCases[polyEventInline, struct {
+		login    polyLogin
+		purchase polyPurchase
+	}]()
+}
+
+// A variant field declared as a domain interface round trips like one
+// declared as any, sibling or inline, alone or as slice elements.
+func TestPolyEncodeInterfaceFieldRoundTrip(t *testing.T) {
+	roundTrip := func(t *testing.T, in string, v any) {
+		t.Helper()
+		if err := vjson.Unmarshal([]byte(in), v); err != nil {
+			t.Fatalf("Unmarshal(%s): %v", in, err)
+		}
+		got, err := vjson.Marshal(v)
+		if err != nil || string(got) != in {
+			t.Errorf("Marshal = %s, %v; want %s", got, err, in)
+		}
+		var ind bytes.Buffer
+		if ierr := json.Indent(&ind, []byte(in), "", "  "); ierr != nil {
+			t.Fatal(ierr)
+		}
+		got, err = vjson.MarshalIndent(v, "", "  ")
+		if err != nil || string(got) != ind.String() {
+			t.Errorf("MarshalIndent = %s, %v; want %s", got, err, ind.String())
+		}
+	}
+	for _, in := range []string{
+		`{"type":"login","data":{"user":"ann"}}`,
+		`{"type":"purchase","data":{"sku":"s1","qty":2}}`,
+	} {
+		roundTrip(t, in, new(polyEventEnvelope))
+	}
+	roundTrip(t, `[{"type":"login","data":{"user":"a"}},{"type":"purchase","data":{"sku":"b","qty":1}}]`, new([]polyEventEnvelope))
+	for _, in := range []string{
+		`{"type":"login","user":"ann","n":1}`,
+		`{"type":"purchase","sku":"s1","qty":2,"n":1}`,
+	} {
+		roundTrip(t, in, new(polyEventInline))
+	}
+}
+
 // kindof fields encode naturally through concrete-type dispatch; no
 // machinery on the encode side, and the round trip is byte identical.
 func TestPolyEncodeKindofRoundTrip(t *testing.T) {

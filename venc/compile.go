@@ -446,13 +446,24 @@ func emitStructBody(b *irBuilder, si *EncStructInfo, baseOff uintptr) {
 			if needsOmitempty || needsOmitZero {
 				emitSkipIfZero(b, fieldOff, 16+8, typ.KindAny)
 			}
-			emitInterface(b, fc)
+			emitInterface(b, fc, 0)
 
 		case typ.KindIface:
-			if needsOmitempty {
+			// An IsZero method in the interface's method set runs on the
+			// dynamic value in Go; without one, nil is the only zero.
+			if ozMethod {
+				emitOmitZeroGo(b, fieldOff, fi, fc, func() {
+					if needsOmitempty {
+						emitSkipIfZero(b, fieldOff, 16+8, typ.KindIface)
+					}
+					emitInterface(b, fc, opFlagIfaceField)
+				})
+				continue
+			}
+			if needsOmitempty || needsOmitZero {
 				emitSkipIfZero(b, fieldOff, 16+8, typ.KindIface)
 			}
-			emitFieldFallback(b, fc, fieldFBInfo(fi, fc, fbReasonIface))
+			emitInterface(b, fc, opFlagIfaceField)
 
 		default:
 			// json.RawMessage lands here as a single-op fallback. Its
@@ -717,9 +728,12 @@ func emitMapSwissIter(b *irBuilder, ti *EncTypeInfo, fc fieldContext) {
 	})
 }
 
-func emitInterface(b *irBuilder, fc fieldContext) {
+// emitInterface emits an OP_INTERFACE; flags carries opFlagIfaceField for a
+// non-empty interface.
+func emitInterface(b *irBuilder, fc fieldContext, flags uint8) {
 	b.emit(IRInst{
 		Op:       opInterface,
+		Flags:    flags,
 		KeyLen:   fc.KeyLen,
 		KeyOff:   fc.KeyOff,
 		FieldOff: uint16(fc.FieldOff),
@@ -969,10 +983,10 @@ func emitTypeBody(b *irBuilder, elemTI *EncTypeInfo) {
 		}
 
 	case typ.KindAny:
-		b.emit(IRInst{
-			Op:       opInterface,
-			FieldOff: 0,
-		})
+		emitInterface(b, fieldContext{}, 0)
+
+	case typ.KindIface:
+		emitInterface(b, fieldContext{}, opFlagIfaceField)
 
 	case typ.KindPointer:
 		afterLabel := b.allocLabel()

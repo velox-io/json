@@ -128,7 +128,6 @@ const (
 	fbReasonMarshaler                  // implements json.Marshaler
 	fbReasonTextMarshaler              // implements encoding.TextMarshaler
 	fbReasonQuoted                     // field has `,string` struct tag
-	fbReasonIface                      // non-empty interface
 	fbReasonOverflow                   // field offset or key exceeds native encoding limits
 	fbReasonViaPtr                     // promoted across an embedded pointer; needs a hop walk
 	fbReasonValue                      // value.Value deeper than the walk's native bounds
@@ -140,8 +139,8 @@ const (
 
 // VjOpHdr.flags bits, mirroring native VJ_OP_FLAG_*.
 const (
-	// opFlagIfaceField: the unfold field's word 0 is an itab rather than an
-	// rtype.
+	// opFlagIfaceField: the OP_UNFOLD or OP_INTERFACE interface is non-empty,
+	// so its word 0 is an itab rather than an rtype.
 	opFlagIfaceField uint8 = 0x01
 	// opFlagIndirectElem: the MAP_STR_ITER map stores its element behind a
 	// pointer, so each slot holds a *V the VM dereferences once.

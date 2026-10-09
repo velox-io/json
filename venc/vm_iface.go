@@ -11,6 +11,7 @@ func (es *encodeState) handleInterfaceYield(ctx *VjExecCtx, activeBP *Blueprint)
 	hdr := opHdrAt(activeBP.Ops, ctx.PC)
 	isFirst := vmstateGetFirst(ctx.VMState)
 	ifacePtr := unsafe.Add(ctx.CurBase, uintptr(hdr.FieldOff))
+	ifaceField := hdr.Flags&opFlagIfaceField != 0
 
 	if !isFirst {
 		es.buf = append(es.buf, ',')
@@ -21,11 +22,11 @@ func (es *encodeState) handleInterfaceYield(ctx *VjExecCtx, activeBP *Blueprint)
 		es.writeKeySpace(ctx)
 	}
 
-	if err := es.encodeAnyIface(ifacePtr); err != nil {
+	if err := es.encodeAnyIface(ifacePtr, ifaceField); err != nil {
 		return err
 	}
 
-	// Only slice loops can hand off the remaining interface{} elements in one batch.
+	// Only slice loops can hand off the remaining interface elements in one batch.
 	stackDepth := vmstateGetStackDepth(ctx.VMState)
 	if stackDepth > 0 && ctx.PC >= 16 {
 		frame := &ctx.Stack[stackDepth-1]
@@ -39,7 +40,7 @@ func (es *encodeState) handleInterfaceYield(ctx *VjExecCtx, activeBP *Blueprint)
 				es.buf = append(es.buf, ',')
 				es.writeIndent(ctx)
 				elemPtr := unsafe.Add(frame.iterData(), uintptr(idx)*elemSize)
-				if err := es.encodeAnyIface(elemPtr); err != nil {
+				if err := es.encodeAnyIface(elemPtr, ifaceField); err != nil {
 					return err
 				}
 			}

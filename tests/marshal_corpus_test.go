@@ -281,6 +281,79 @@ func TestMarshalCorpus_PointerInterfacePayloads(t *testing.T) {
 	}
 }
 
+// mcShape is a non-empty interface; its implementations cover a boxed
+// struct, a pointer receiver, a primitive kind, a data-word struct, and a
+// marshal method.
+type mcShape interface{ Area() int }
+
+type mcSquare struct{ S int }
+
+func (s mcSquare) Area() int { return s.S * s.S }
+
+type mcCircle struct{ R int }
+
+func (c *mcCircle) Area() int { return 3 * c.R * c.R }
+
+type mcLength int
+
+func (l mcLength) Area() int { return 0 }
+
+type mcRefShape struct{ P *int }
+
+func (mcRefShape) Area() int { return 0 }
+
+type mcHookShape struct{ N int }
+
+func (mcHookShape) Area() int                    { return 0 }
+func (mcHookShape) MarshalJSON() ([]byte, error) { return []byte(`"hook"`), nil }
+
+// mcBlank is a non-empty interface whose method set includes IsZero, so
+// omitzero asks the dynamic value.
+type mcBlank interface{ IsZero() bool }
+
+type mcBlankVal struct{ N int }
+
+func (b mcBlankVal) IsZero() bool { return b.N == 0 }
+
+type mcShapeHost struct {
+	S mcShape
+	T mcShape `json:"t,omitempty"`
+	U mcShape `json:"u,omitzero"`
+	Z mcBlank `json:"z,omitzero"`
+	P *mcShape
+}
+
+type mcShapes struct {
+	L []mcShape
+	M map[string]mcShape
+}
+
+// A non-empty interface encodes its dynamic value exactly as any does.
+func TestMarshalCorpus_NonEmptyInterfacePayloads(t *testing.T) {
+	n := 7
+	var nilCircle *mcCircle
+	var shape mcShape = mcSquare{S: 2}
+	for _, c := range []marshalCase{
+		mc("nil", mcShapeHost{}),
+		mc("boxed struct", mcShapeHost{S: mcSquare{S: 2}, T: mcSquare{S: 3}, U: mcSquare{}}),
+		mc("pointer", mcShapeHost{S: &mcCircle{R: 1}}),
+		mc("typed nil pointer", mcShapeHost{S: nilCircle, T: nilCircle, U: nilCircle}),
+		mc("primitive kind", mcShapeHost{S: mcLength(5)}),
+		mc("data-word struct", mcShapeHost{S: mcRefShape{P: &n}, T: mcRefShape{}}),
+		mc("marshal method", mcShapeHost{S: mcHookShape{N: 1}}),
+		mc("omitzero method zero", mcShapeHost{Z: mcBlankVal{}}),
+		mc("omitzero method non-zero", mcShapeHost{Z: mcBlankVal{N: 1}}),
+		mc("pointer to interface", mcShapeHost{P: &shape}),
+		mc("elements", mcShapes{
+			L: []mcShape{mcSquare{S: 1}, nil, &mcCircle{R: 2}, mcLength(3), mcRefShape{P: &n}, mcHookShape{}},
+			M: map[string]mcShape{"k": mcSquare{S: 4}},
+		}),
+		mc("slice", []mcShape{mcSquare{S: 1}, nilCircle, mcLength(2)}),
+	} {
+		c.run(t)
+	}
+}
+
 // mcRefHook is stored in an interface's data word and encodes through a
 // value-receiver method.
 type mcRefHook struct{ P *int }

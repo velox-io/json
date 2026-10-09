@@ -597,7 +597,7 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 		case opInterface:
 			fieldPtr := unsafe.Add(base, uintptr(hdr.FieldOff))
 			es.interpWriteKey(hdr, first, &elemNL, indent)
-			if err := es.encodeAnyIface(fieldPtr); err != nil {
+			if err := es.encodeAnyIface(fieldPtr, hdr.Flags&opFlagIfaceField != 0); err != nil {
 				return err
 			}
 			first = false

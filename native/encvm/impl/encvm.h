@@ -1507,6 +1507,12 @@ vj_op_interface: {
     VM_NEXT_SHORT();
   }
 
+  /* A non-empty interface stores an itab in word 0; the concrete type is
+   * the itab's second word. The data word has the same layout either way. */
+  if (op->flags & VJ_OP_FLAG_IFACE_FIELD) {
+    type_ptr = *(const void **)((const uint8_t *)type_ptr + 8);
+  }
+
   /* Non-nil: resolve through the cache (inline hash lookup), pre-check
    * every failure condition, and only then write the key: no speculative
    * key write, no undo state.  The bulky primitive encode switch lives in

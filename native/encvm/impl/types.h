@@ -132,10 +132,8 @@ enum OpType {
 /* ================================================================
  *  ZeroCheckTag: omit-check tags for OP_SKIP_IF_ZERO's operand_b
  *
- *  Values 1..21 mirror Go ElemTypeKind (1-based); Go casts directly.
- *  22 and 23 are C-only tags (ZCT_BYTE_SLICE is dead on the emit side;
- *  ZCT_FALLBACK deliberately collides with KindIface so a non-empty
- *  interface field never skips natively, the Go fallback checks it).
+ *  Values 1..21 and 23 mirror Go ElemTypeKind (1-based); Go casts directly.
+ *  22 is a C-only tag (ZCT_BYTE_SLICE is dead on the emit side).
  *  24..27 stay clear of the ElemTypeKind values that flow as raw kinds.
  *  28..30 are the omitzero nil-only variants: an empty-but-non-nil slice,
  *  map, or RawMessage is a zero reflect value but not an empty one, so
@@ -165,7 +163,7 @@ enum ZeroCheckTag {
   ZCT_RAW_MESSAGE = 20,
   ZCT_NUMBER      = 21,
   ZCT_BYTE_SLICE  = 22,
-  ZCT_FALLBACK    = 23,
+  ZCT_IFACE       = 23,
 
   /* omitzero, nil-only variants */
   ZCT_OZ_SLICE = 28, /* slice is zero only when data == NULL */
@@ -244,7 +242,8 @@ static inline int vj_is_zero(const uint8_t *ptr, uint16_t zct) {
   case ZCT_POINTER:
     return *(const void *const *)ptr == NULL;
   case ZCT_INTERFACE:
-    /* nil interface = zero value (eface.type_ptr == NULL). */
+  case ZCT_IFACE:
+    /* nil interface = zero value (word 0, the rtype or itab, is NULL). */
     return *(const void *const *)ptr == NULL;
   case ZCT_SLICE:
   case ZCT_BYTE_SLICE: {
@@ -274,10 +273,6 @@ static inline int vj_is_zero(const uint8_t *ptr, uint16_t zct) {
      * omitempty has no struct case, and omitzero routes through Go. */
     return 0;
   }
-  case ZCT_FALLBACK:
-    /* Go-only fallback: the memory layout is unknown to C.
-     * Never skip; the Go fallback handler checks omitempty. */
-    return 0;
   default:
     return 0; /* unknown tag: never skip */
   }
@@ -419,7 +414,7 @@ typedef struct VjOpHdr {
 } VjOpHdr;
 
 /* VjOpHdr.flags bits */
-#define VJ_OP_FLAG_IFACE_FIELD   0x01 /* OP_UNFOLD: field is a non-empty interface */
+#define VJ_OP_FLAG_IFACE_FIELD   0x01 /* OP_UNFOLD/OP_INTERFACE: the interface is non-empty */
 #define VJ_OP_FLAG_INDIRECT_ELEM 0x02 /* OP_MAP_STR_ITER/_END: map slot holds a *V */
 
 _Static_assert(sizeof(VjOpHdr) == 8, "VjOpHdr must be 8 bytes");
