@@ -107,34 +107,6 @@ INLINE int ndec_valid_number(const uint8_t *p) {
   return 0;
 }
 
-/* Reports whether the n bytes at p are exactly one JSON number, the check
- * encoding/json applies to a quoted json.Number. Bounded by n rather than a
- * delimiter, so it reads decoded string bodies. */
-INLINE int ndec_number_text_ok(const uint8_t *p, size_t n) {
-  const uint8_t *e = p + n;
-  if (p < e && *p == '-') p++;
-  const uint8_t *d = p;
-  while (p < e && *p >= '0' && *p <= '9')
-    p++;
-  size_t k = (size_t)(p - d);
-  if (k == 0 || (d[0] == '0' && k > 1)) return 0;
-  if (p < e && *p == '.') {
-    const uint8_t *f = ++p;
-    while (p < e && *p >= '0' && *p <= '9')
-      p++;
-    if (p == f) return 0;
-  }
-  if (p < e && (*p == 'e' || *p == 'E')) {
-    p++;
-    if (p < e && (*p == '+' || *p == '-')) p++;
-    const uint8_t *x = p;
-    while (p < e && *p >= '0' && *p <= '9')
-      p++;
-    if (p == x) return 0;
-  }
-  return p == e;
-}
-
 /* Validate one scalar whose first byte is neither a quote nor a container
  * open. The scanner marks every non-structural, non-whitespace byte after a
  * structural as a scalar start, so rejects land here as unknown first

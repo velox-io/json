@@ -120,6 +120,61 @@ func TestFmtErrors(t *testing.T) {
 	}
 }
 
+// fmtTokenCases are documents whose structure is well formed but whose
+// number or string tokens break the grammar, which the reformatter must
+// reject token by token as encoding/json does.
+func fmtTokenCases() []string {
+	docs := []string{
+		`01`, `-`, `1.`, `.5`, `1e`, `1e+`, `-01`, `1.2.3`, `[01]`, `{"a":-}`, `[1.e5]`,
+		`"\q"`, `"\u00"`, `"\uZZZZ"`, `"\u12"`, `"\"`, `["\x"]`, `{"\q":1}`, `{"a\u0":1}`,
+		"\"a\x01b\"", "[\"\x1f\"]", "{\"k\x00\":1}", "\"\t\"",
+	}
+	// A raw control byte or a bad escape at every offset of strings that
+	// span word and scanner chunk boundaries.
+	for _, n := range []int{7, 8, 9, 63, 64, 65, 130} {
+		for _, at := range []int{0, n / 2, n - 1} {
+			body := []byte(strings.Repeat("x", n))
+			body[at] = 0x01
+			docs = append(docs, `{"k":"`+string(body)+`"}`, `["`+string(body)+`"]`)
+			body[at] = 'x'
+			esc := string(body[:at]) + `\q` + string(body[at:])
+			docs = append(docs, `{"k":"`+esc+`"}`, `{"`+esc+`":1}`)
+		}
+	}
+	return docs
+}
+
+// Compact and Indent reject exactly what encoding/json rejects, as a
+// *SyntaxError, and agree with Valid.
+func TestFmtTokenGrammar(t *testing.T) {
+	valid := []string{
+		`0`, `-0`, `1.5e-3`, `1E+9`, `"\u00e9\ud83d\ude00\/\b\f\n\r\t\"\\"`, "\"\xff\"",
+		`{"a\nb":"c\u0041"}`, `[` + strings.Repeat(`"\\"`+",", 20) + `0]`,
+	}
+	for _, doc := range append(valid, fmtTokenCases()...) {
+		want := stdjson.Valid([]byte(doc))
+		if got := vjson.Valid([]byte(doc)); got != want {
+			t.Errorf("Valid(%q) = %v, encoding/json %v", doc, got, want)
+		}
+		for name, run := range map[string]func(*bytes.Buffer) error{
+			"Compact": func(b *bytes.Buffer) error { return vjson.Compact(b, []byte(doc)) },
+			"Indent":  func(b *bytes.Buffer) error { return vjson.Indent(b, []byte(doc), "", "  ") },
+		} {
+			var buf bytes.Buffer
+			err := run(&buf)
+			if (err == nil) != want {
+				t.Errorf("%s(%q) error = %v, encoding/json valid = %v", name, doc, err, want)
+				continue
+			}
+			if err != nil {
+				if _, ok := err.(*vjson.SyntaxError); !ok {
+					t.Errorf("%s(%q): got %T, want *SyntaxError", name, doc, err)
+				}
+			}
+		}
+	}
+}
+
 func TestFmtCorpusRoundTrip(t *testing.T) {
 	gz, err := os.ReadFile(filepath.Join("benchmark", "corpus", "testdata", "canada_geometry.json.gz"))
 	if err != nil {

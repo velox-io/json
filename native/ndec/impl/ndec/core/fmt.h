@@ -1,9 +1,12 @@
 /*
  * JSON reformatter: SAX-driven emitters that re-emit a document as
  * compact text or with prefix/indent, writing into a caller buffer.
- * Syntax-only: no UTF-8 validation, and numbers and escaped strings
- * pass through as raw bytes, so reformatting never changes a
- * document's tokens.
+ * Numbers and strings pass through as raw bytes, so reformatting never
+ * changes a document's tokens. The SAX scanner only spans those tokens,
+ * so the emitters check number grammar and string escapes, and the run
+ * checks the scanner's raw control byte flag: the reformatter rejects
+ * what encoding/json's Compact and Indent reject. Malformed UTF-8 is not
+ * an error, as it is not to encoding/json.
  *
  * Include this header before any other ndec core header: the UTF-8
  * checker must compile to its no-op form.
@@ -20,9 +23,14 @@
 
 #define NDEC_NO_UTF8_CHECK
 #include "ndec/core/sapi.h"
+#include "ndec/core/str.h"
 
 /* Output buffer full: out->len holds the exact needed size. */
 #define NDEC_FMT_FULL 1
+
+/* Emitter verdict for a number or string token outside the JSON grammar,
+ * a host error to the SAX scanner. ndec_fmt_run reports it as syntax. */
+#define FMT_ERR_TOKEN (-2)
 
 typedef struct {
   uint8_t *buf; /* NULL with cap 0 selects count-only mode */
@@ -113,8 +121,74 @@ static int32_t fmt_end_object(void *ud) {
   return NDEC_PROCEED;
 }
 
+/* Validates the escape whose backslash sits at p[i], bounded by the body
+ * length n. Returns the index just past the escape, or 0 when malformed. */
+INLINE uint32_t fmt_escape_end(const uint8_t *p, uint32_t i, uint32_t n) {
+  if (++i == n) return 0;
+  if (p[i] == 'u') {
+    uint32_t r;
+    if (n - i <= 4 || !ndec_str_hex4(p + i + 1, &r)) return 0;
+    return i + 5;
+  }
+  uint8_t mapped;
+  return ndec_str_simple_escape(p[i], &mapped) ? i + 1 : 0;
+}
+
+/* Reports whether a string body's escapes are well formed. Raw control
+ * bytes are the scanner's to catch (NdecScanState.control_error), so only a
+ * body the scanner saw a backslash in is walked. Each word yields the exact
+ * mask of its backslashes; one inside the previous escape (the second of
+ * an escaped backslash) is skipped, and every other starts an escape. */
+static int fmt_string_ok(NdecStrInfo str) {
+  if (LIKELY(!str.has_escape)) return 1;
+  const uint8_t *p   = str.raw.ptr;
+  uint32_t n         = str.raw.len;
+  uint32_t end       = 0; /* one past the last validated escape */
+  uint32_t w0        = 0;
+  const uint64_t low = 0x7f7f7f7f7f7f7f7full;
+  for (; w0 + 8 <= n; w0 += 8) {
+    uint64_t w;
+    __builtin_memcpy(&w, p + w0, 8);
+    uint64_t x  = w ^ 0x5c5c5c5c5c5c5c5cull;
+    uint64_t bs = ~(((x & low) + low) | x | low);
+    for (; bs != 0; bs &= bs - 1) {
+      uint32_t at = w0 + (uint32_t)(__builtin_ctzll(bs) >> 3);
+      if (at < end) continue;
+      if ((end = fmt_escape_end(p, at, n)) == 0) return 0;
+    }
+  }
+  for (uint32_t at = end > w0 ? end : w0; at < n;) {
+    if (p[at] != '\\') {
+      at++;
+      continue;
+    }
+    if ((at = fmt_escape_end(p, at, n)) == 0) return 0;
+  }
+  return 1;
+}
+
+/* The offset of the first raw control byte inside a string, for the error
+ * report once the scanner flagged one. */
+static uint32_t fmt_control_pos(const uint8_t *src, size_t n) {
+  int in_string = 0;
+  for (size_t i = 0; i < n; i++) {
+    uint8_t c = src[i];
+    if (!in_string) {
+      in_string = c == '"';
+    } else if (c == '\\') {
+      i++;
+    } else if (c == '"') {
+      in_string = 0;
+    } else if (c < 0x20) {
+      return (uint32_t)i;
+    }
+  }
+  return (uint32_t)n;
+}
+
 static int32_t fmt_object_field(void *ud, NdecStrInfo key) {
   FmtCtx *f = (FmtCtx *)ud;
+  if (UNLIKELY(!fmt_string_ok(key))) return FMT_ERR_TOKEN;
   if (f->need_sep) fmt_putc(f, ',');
   if (!f->compact) fmt_newline_indent(f);
   f->need_sep                = 0;
@@ -157,6 +231,7 @@ static int32_t fmt_end_array(void *ud) {
 
 static int32_t fmt_scalar_string(void *ud, NdecStrInfo str) {
   FmtCtx *f = (FmtCtx *)ud;
+  if (UNLIKELY(!fmt_string_ok(str))) return FMT_ERR_TOKEN;
   fmt_sep(f);
   fmt_putc(f, '"');
   fmt_write(f, str.raw.ptr, str.raw.len);
@@ -177,9 +252,10 @@ static const uint8_t fmt_ws_table[256] = {
 
 static int32_t fmt_scalar_number(void *ud, NdecRawStr raw) {
   FmtCtx *f = (FmtCtx *)ud;
-  fmt_sep(f);
   while (raw.len > 0 && fmt_ws_table[raw.ptr[raw.len - 1]])
     raw.len--;
+  if (UNLIKELY(!ndec_number_text_ok(raw.ptr, raw.len))) return FMT_ERR_TOKEN;
+  fmt_sep(f);
   fmt_write(f, raw.ptr, raw.len);
   f->need_sep = 1;
   return NDEC_PROCEED;
@@ -249,7 +325,12 @@ static int ndec_fmt_run(NdecFmtState *st, const uint8_t *src, size_t src_len, in
       return NDEC_ERR_EOF;
     }
     *err_pos = ctx->error_pos;
+    if ((int32_t)ctx->exit_code == FMT_ERR_TOKEN) return NDEC_ERR_SYNTAX;
     return (int)ctx->exit_code;
+  }
+  if (UNLIKELY(ctx->scan_state.control_error)) {
+    *err_pos = fmt_control_pos(src, src_len);
+    return NDEC_ERR_SYNTAX;
   }
 
   /* json.Indent keeps whitespace after the top-level value verbatim. */

@@ -592,4 +592,32 @@ INLINE int32_t ndec_str_parse_zc_continue(const uint8_t *src, uint8_t *dst, uint
 #endif
 }
 
+/* Reports whether the n bytes at p are exactly one JSON number, the check
+ * encoding/json applies to a quoted json.Number. Bounded by n rather than a
+ * delimiter, so it reads decoded string bodies and raw token spans alike. */
+INLINE int ndec_number_text_ok(const uint8_t *p, size_t n) {
+  const uint8_t *e = p + n;
+  if (p < e && *p == '-') p++;
+  const uint8_t *d = p;
+  while (p < e && *p >= '0' && *p <= '9')
+    p++;
+  size_t k = (size_t)(p - d);
+  if (k == 0 || (d[0] == '0' && k > 1)) return 0;
+  if (p < e && *p == '.') {
+    const uint8_t *f = ++p;
+    while (p < e && *p >= '0' && *p <= '9')
+      p++;
+    if (p == f) return 0;
+  }
+  if (p < e && (*p == 'e' || *p == 'E')) {
+    p++;
+    if (p < e && (*p == '+' || *p == '-')) p++;
+    const uint8_t *x = p;
+    while (p < e && *p >= '0' && *p <= '9')
+      p++;
+    if (p == x) return 0;
+  }
+  return p == e;
+}
+
 #endif /* NDEC_CORE_STR_H */
