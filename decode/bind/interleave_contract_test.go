@@ -2,7 +2,6 @@ package bind
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -256,11 +255,6 @@ func TestInterleaveSyntaxErrorNamesPosition(t *testing.T) {
 			}{{"Unmarshal", cerr}, {"Decoder", derr}} {
 				var vse *SyntaxError
 				if !errors.As(e.err, &vse) {
-					continue
-				}
-				// The streaming driver stages a base64 body off the source, so
-				// its decode failure has no document offset to name.
-				if e.name == "Decoder" && errors.As(e.err, new(base64.CorruptInputError)) {
 					continue
 				}
 				// Offset 0 is a position when the defect is the token there or

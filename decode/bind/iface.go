@@ -5,13 +5,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"reflect"
 	"strings"
 	"unsafe"
 
 	"github.com/velox-io/json/internal/gdec"
-	"github.com/velox-io/json/jerr"
 	"github.com/velox-io/json/native/ndec"
 	"github.com/velox-io/json/vbind"
 )
@@ -137,13 +135,12 @@ func applyDeferred(p *Parser, kind vbind.Kind, typeIdx uint16, target unsafe.Poi
 	case vbind.KindSlice:
 		// A []byte target staged from a JSON string: decode base64 from the
 		// string bytes, like encoding/json. An empty string yields a non-nil
-		// empty slice. The error names the string's document offset when
-		// the span has one.
+		// empty slice. A body that is no base64 is a string the slice cannot
+		// hold:  a type error wrapping the base64.CorruptInputError
 		dbuf := make([]byte, base64.StdEncoding.DecodedLen(len(data)))
 		n, err := base64.StdEncoding.Decode(dbuf, data)
 		if err != nil {
-			return jerr.NewSyntaxErrorWrap(
-				fmt.Sprintf("vjson: invalid base64 in []byte field: %v", err), int(docOff), err)
+			return &UnmarshalTypeError{Value: "string", Type: p.tt.ReflectTypes[typeIdx], Offset: docOff, Err: err}
 		}
 		*(*[]byte)(target) = dbuf[:n]
 		return nil

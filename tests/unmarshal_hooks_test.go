@@ -6,6 +6,7 @@ package tests
 // Unmarshal and the chunked Decoder; the tape walk does not run hooks.
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -176,6 +177,56 @@ type hkFailHost struct {
 	U hkFail     `json:"u"`
 	T hkTextFail `json:"t"`
 	B int        `json:"b"`
+}
+
+// A []byte given a string that is no base64 fails as a type error wrapping
+// the base64.CorruptInputError, as go1.27 reports it; earlier versions return
+// the bare CorruptInputError, which errors.As still reaches. The rest of the
+// value decodes, and a Decoder goes on to the next value, as with every
+// version of encoding/json.
+func TestUnmarshalHooks_InvalidBase64(t *testing.T) {
+	bytesType := reflect.TypeFor[[]byte]()
+	check := func(t *testing.T, leg string, err error) {
+		t.Helper()
+		var ute *json.UnmarshalTypeError
+		if !errors.As(err, &ute) || ute.Type != bytesType || ute.Value != "string" {
+			t.Errorf("%s: error %v, want an UnmarshalTypeError of a string into []uint8", leg, err)
+		}
+		var cie base64.CorruptInputError
+		if !errors.As(err, &cie) {
+			t.Errorf("%s: error %v does not wrap a base64.CorruptInputError", leg, err)
+		}
+	}
+	for _, in := range []string{
+		`{"b":"!!!","n":3}`,
+		`{"n":3,"b":"YQ"}`,
+		`{"b":"Y Q==","r":[1],"n":3}`,
+	} {
+		t.Run(in, func(t *testing.T) {
+			var want hkHost
+			if err := json.Unmarshal([]byte(in), &want); err == nil {
+				t.Fatalf("encoding/json accepted %s", in)
+			}
+			var got hkHost
+			check(t, "Unmarshal", vjson.Unmarshal([]byte(in), &got))
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("Unmarshal decoded %s, encoding/json %s", dbgAny(got), dbgAny(want))
+			}
+			for _, chunk := range []int{1, 7, len(in) + 1} {
+				leg := fmt.Sprintf("Decoder(chunk=%d)", chunk)
+				d := vjson.NewDecoder(&chunkReader{data: []byte(in + ` {"n":7}`), size: chunk})
+				got = hkHost{}
+				check(t, leg, d.Decode(&got))
+				if !reflect.DeepEqual(got, want) {
+					t.Errorf("%s decoded %s, encoding/json %s", leg, dbgAny(got), dbgAny(want))
+				}
+				var next hkHost
+				if err := d.Decode(&next); err != nil || next.N != 7 {
+					t.Errorf("%s: next value: %+v, %v; want n=7", leg, next, err)
+				}
+			}
+		})
+	}
 }
 
 // A hook's error reaches the caller as the hook returned it, on every entry
