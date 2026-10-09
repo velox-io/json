@@ -1834,23 +1834,8 @@ root_skip_value: {
       root_skip_depth = 1;
       SRC_ADVANCE();
     } else {
-      /* The scanner publishes whole atoms, so validation mirrors safe_skip_value
-       * and one structural advance consumes the token. The container loop below
-       * counts brackets only, so SKIP_LENIENT relaxes the scalar root alone. */
-      if (!(m->b.ctx.opt_flags & BIND_OPT_SKIP_LENIENT)) {
-        if (ch == '"') {
-          if (UNLIKELY(ndec_str_parse(SRC_PTR() + 1, str_p, NULL, 0) < 0))
-            BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-        } else if (ch == 't' || ch == 'f' || ch == 'n') {
-          if (UNLIKELY(bind_validate_atom(SRC_PTR(), ch) < 0)) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-        } else {
-          const uint8_t *_end;
-          double _dv;
-          if (UNLIKELY(ndec_parse_double_padded(SRC_PTR(), &_dv, m->c.atof, &_end)))
-            BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-          if (UNLIKELY(is_non_delim(*_end))) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
-        }
-      }
+      /* The scanner publishes whole atoms, so one structural advance
+       * consumes a scalar root. */
       SRC_ADVANCE();
       goto document_end;
     }
