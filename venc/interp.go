@@ -326,10 +326,11 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			base = frame.RetBase
 			frame.RetBase = nil
 			pc = *(*int32)(unsafe.Pointer(&frame.Payload[0]))
-			// An unfold return resumes a different ops stream (the body-only
-			// Blueprint), restored from the frame payload.
-			if opsPtr := *(*unsafe.Pointer)(unsafe.Pointer(&frame.Payload[8])); opsPtr != nil {
-				ops = unsafe.Slice((*byte)(opsPtr), int(*(*int32)(unsafe.Pointer(&frame.Payload[16]))))
+			// An unfold return resumes the Blueprint that ran the unfold,
+			// restored from the frame payload: its ops and its fallbacks.
+			if parent := *(*unsafe.Pointer)(unsafe.Pointer(&frame.Payload[8])); parent != nil {
+				bp = (*Blueprint)(parent)
+				ops = bp.Ops
 				opsLen = int32(len(ops))
 			}
 			preserveFirst := *(*int32)(unsafe.Pointer(&frame.Payload[4])) != 0
@@ -360,11 +361,12 @@ func (es *encodeState) interp(ctx *VjExecCtx, bp *Blueprint, base unsafe.Pointer
 			frame.RetBase = base
 			*(*int32)(unsafe.Pointer(&frame.Payload[0])) = pc + 8
 			*(*int32)(unsafe.Pointer(&frame.Payload[4])) = 1 // preserve first on ret
-			*(*unsafe.Pointer)(unsafe.Pointer(&frame.Payload[8])) = unsafe.Pointer(&ops[0])
-			*(*int32)(unsafe.Pointer(&frame.Payload[16])) = int32(len(ops))
+			*(*unsafe.Pointer)(unsafe.Pointer(&frame.Payload[8])) = unsafe.Pointer(bp)
 			depth++
 
-			ops = bodyBP.Ops
+			bp = bodyBP
+			ops = bp.Ops
+			opsLen = int32(len(ops))
 			pc = 0
 			base = caseBase
 			// first stays as-is: the body's first field continues the host's

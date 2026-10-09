@@ -47,6 +47,24 @@ type polyRefHost struct {
 	N    int    `json:"n"`
 }
 
+// polyRich's fields leave the native ops for Go: a marshal method, a map
+// with integer keys, and an interface.
+type polyRich struct {
+	Status polyStatus     `json:"status"`
+	Counts map[int]string `json:"counts"`
+	Extra  any            `json:"extra"`
+}
+
+type polyStatus int
+
+func (s polyStatus) MarshalJSON() ([]byte, error) { return []byte(`"on"`), nil }
+
+type polyRichHost struct {
+	Type string `json:"type"`
+	Data any    `json:",embed" vjson:"variant=type"`
+	N    int    `json:"n"`
+}
+
 type polyKindofEnvelope struct {
 	Data any `json:"data" vjson:"kindof"`
 }
@@ -63,6 +81,9 @@ func init() {
 	vbind.DefineVariantCases[polyRefHost, struct {
 		_ polyUser `case:"user"`
 		_ polyRef  `case:"ref"`
+	}]()
+	vbind.DefineVariantCases[polyRichHost, struct {
+		_ polyRich `case:"rich"`
 	}]()
 	vbind.DefineKindofCases[polyKindofEnvelope, struct {
 		bool   bool
@@ -146,6 +167,28 @@ func TestPolyEncodeInlineCaseStorage(t *testing.T) {
 		}
 		got, err = vjson.MarshalIndent(h, "", "  ")
 		check("MarshalIndent", got, err, ind.String())
+	}
+}
+
+// An inline case whose fields encode in Go unfolds like any other, and the
+// host's fields after it continue.
+func TestPolyEncodeInlineCaseGoFields(t *testing.T) {
+	const want = `{"type":"rich","status":"on","counts":{"1":"a"},"extra":[true],"n":2}`
+	var ind bytes.Buffer
+	if err := json.Indent(&ind, []byte(want), "", "  "); err != nil {
+		t.Fatal(err)
+	}
+	for _, data := range []any{
+		polyRich{Status: 1, Counts: map[int]string{1: "a"}, Extra: []any{true}},
+		&polyRich{Status: 1, Counts: map[int]string{1: "a"}, Extra: []any{true}},
+	} {
+		h := polyRichHost{Type: "rich", Data: data, N: 2}
+		if got, err := vjson.Marshal(h); err != nil || string(got) != want {
+			t.Errorf("%T: Marshal = %s, %v; want %s", data, got, err, want)
+		}
+		if got, err := vjson.MarshalIndent(h, "", "  "); err != nil || string(got) != ind.String() {
+			t.Errorf("%T: MarshalIndent = %s, %v; want %s", data, got, err, ind.String())
+		}
 	}
 }
 
