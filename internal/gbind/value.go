@@ -396,10 +396,10 @@ func (c *binder) atom() error {
 }
 
 // nullZero mirrors BIND_NULL_ZERO: null clears reference-like storage and
-// Number, and leaves scalars and structs untouched.
+// leaves scalars, Number, and structs untouched.
 func (c *binder) nullZero(dst unsafe.Pointer, ti uint32) {
 	switch c.typ(ti).Kind {
-	case vbind.KindPointer, vbind.KindSlice, vbind.KindStream, vbind.KindMap, vbind.KindAny, vbind.KindNumber:
+	case vbind.KindPointer, vbind.KindSlice, vbind.KindStream, vbind.KindMap, vbind.KindAny:
 		gort.MemclrHasPointers(dst, c.size(ti))
 	}
 }

@@ -350,7 +350,6 @@ INLINE int bind_write_quoted_scalar(uint8_t **str_pp, const uint8_t *data, uint3
     case BIND_KIND_STREAM:                                                                                        \
     case BIND_KIND_MAP:                                                                                           \
     case BIND_KIND_ANY:                                                                                           \
-    case BIND_KIND_NUMBER:                                                                                        \
       __builtin_memset((dst), 0, (m)->b.ctx.type_meta[(ct)->type_idx].size);                                      \
       break;                                                                                                      \
     default:                                                                                                      \

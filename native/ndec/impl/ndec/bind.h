@@ -536,8 +536,8 @@ document_start: {
       }
       goto deferred_value;
     }
-    /* Null clears reference-like roots and Number storage. Scalars and structs
-     * retain their value, and an outer pointer still names its original slot. */
+    /* Null clears reference-like roots. Scalars, Number, and structs retain
+     * their value, and an outer pointer still names its original slot. */
     if (ch == 'n') {
       if (bind_validate_atom(SRC_PTR(), 'n') < 0) BIND_YIELD_ERR(m, BIND_ERR_SYNTAX, SRC_POS());
       SRC_ADVANCE();

@@ -83,18 +83,43 @@ func TestNumber_StructField_Quoted(t *testing.T) {
 	}
 }
 
-func TestNumber_StructField_Null(t *testing.T) {
-	type Msg struct {
-		N json.Number `json:"n"`
+// TestNumber_NullKeepsValue pins that null leaves a json.Number as it was,
+// the way encoding/json treats every string kind, while a *json.Number
+// becomes nil and a map value starts from the zero Number.
+func TestNumber_NullKeepsValue(t *testing.T) {
+	type msg struct {
+		N  json.Number    `json:"n"`
+		P  *json.Number   `json:"p"`
+		A  [2]json.Number `json:"a"`
+		S  []json.Number  `json:"s"`
+		M  map[string]json.Number
+		In struct{ N json.Number }
 	}
-	input := []byte(`{"n":null}`)
-	var msg Msg
-	if err := vjson.Unmarshal(input, &msg); err != nil {
-		t.Fatal(err)
+	prefilled := func() any {
+		one := json.Number("1")
+		return &msg{
+			N: "1", P: &one, A: [2]json.Number{"1", "1"},
+			S: []json.Number{"1", "1"}, M: map[string]json.Number{"a": "1"},
+			In: struct{ N json.Number }{N: "1"},
+		}
 	}
-	if string(msg.N) != "" {
-		t.Fatalf("N = %q, want empty string", msg.N)
+	cases := []struct{ name, in string }{
+		{"field", `{"n":null}`},
+		{"pointer field", `{"p":null}`},
+		{"array element", `{"a":[null,2]}`},
+		{"slice element", `{"s":[null,2]}`},
+		{"map value", `{"M":{"a":null,"b":null}}`},
+		{"nested field", `{"In":{"N":null}}`},
 	}
+	for _, tc := range cases {
+		assertSameDecode(t, tc.name, []byte(tc.in), prefilled)
+		for chunk := 1; chunk <= len(tc.in); chunk++ {
+			assertSameStream(t, tc.name, []byte(tc.in), chunk, prefilled)
+		}
+	}
+	root := func() any { n := json.Number("1"); return &n }
+	assertSameDecode(t, "root", []byte(`null`), root)
+	assertSameStream(t, "root", []byte(`null`), 1, root)
 }
 
 func TestNumber_StructField_Mixed(t *testing.T) {

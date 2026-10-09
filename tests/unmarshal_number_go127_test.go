@@ -58,3 +58,18 @@ func TestNumber_LongMantissa(t *testing.T) {
 		})
 	}
 }
+
+// A ,string json.Number field given a quoted "null" body: go1.27 rejects the
+// body as no number, where earlier versions take it as null and keep the
+// field.
+func TestNumber_QuotedNullBody(t *testing.T) {
+	type msg struct {
+		Q json.Number `json:"q,string"`
+	}
+	in := `{"q":"null"}`
+	prefilled := func() any { return &msg{Q: "1"} }
+	assertSameDecode(t, "quoted field", []byte(in), prefilled)
+	for chunk := 1; chunk <= len(in); chunk++ {
+		assertSameStream(t, "quoted field", []byte(in), chunk, prefilled)
+	}
+}
