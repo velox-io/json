@@ -16,8 +16,10 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 
 	vjson "github.com/velox-io/json"
 	"github.com/velox-io/json/native/encvm"
@@ -67,6 +69,74 @@ var floatDocs = []string{
 	`{"f":0.3000000000000000444089209850062616169452667236328125,"g":2.2250738585072014e-308}`,
 }
 
+// floatRefBits holds the bit patterns encoding/json decodes for floatDocs,
+// fixed once at init so a mismatch report can name the diverging side.
+var floatRefBits = func() [][2]uint64 {
+	refs := make([][2]uint64, len(floatDocs))
+	for i, doc := range floatDocs {
+		var d floatDoc
+		if err := stdjson.Unmarshal([]byte(doc), &d); err != nil {
+			panic(err)
+		}
+		refs[i] = floatDocBits(&d)
+	}
+	return refs
+}()
+
+// floatResult carries the decoded documents with the slice base Run
+// observed, so Verify can check the operand pointer it compares through.
+type floatResult struct {
+	docs []floatDoc
+	base uintptr
+}
+
+// floatDocBits snapshots d through integer loads, keeping the bits clear
+// of the vector registers the float comparison uses.
+//
+//go:noinline
+func floatDocBits(d *floatDoc) [2]uint64 {
+	return [2]uint64{
+		atomic.LoadUint64((*uint64)(unsafe.Pointer(&d.F))),
+		atomic.LoadUint64((*uint64)(unsafe.Pointer(&d.G))),
+	}
+}
+
+// floatDocNE is the float comparison Verify judges by. Out of line, it
+// loads both operands from memory on its own.
+//
+//go:noinline
+func floatDocNE(a, b *floatDoc) bool { return *a != *b }
+
+// floatMismatch reports one disagreement between the bit snapshots gs, ws
+// and the float comparison ne, all taken before the report. It re-reads
+// both operands and classifies the failure:
+//   - pointer: an operand address differs from the one recorded at
+//     allocation, so a stack slot holding it was overwritten;
+//   - float compare: the snapshots agree bit for bit while ne holds, so
+//     the comparison itself misbehaved;
+//   - transient: the snapshots differ and the re-read agrees, so memory
+//     changed underneath Verify;
+//   - contents: the operands still differ; ref names the wrong side.
+func floatMismatch(i int, base, wantAddr uintptr, gp, wp *floatDoc, ne bool, gs, ws [2]uint64) error {
+	gotAddr := uintptr(unsafe.Pointer(gp))
+	wantBase := base + uintptr(i)*unsafe.Sizeof(floatDoc{})
+	gr, wr := floatDocBits(gp), floatDocBits(wp)
+	var kind string
+	switch {
+	case gotAddr != wantBase || uintptr(unsafe.Pointer(wp)) != wantAddr:
+		kind = "pointer"
+	case gs == ws:
+		kind = "float compare"
+	case gr == wr:
+		kind = "transient"
+	default:
+		kind = "contents"
+	}
+	return fmt.Errorf("doc %d: %s mismatch: ne=%v snap got=%016x want=%016x reread got=%016x want=%016x ref=%016x got@%#x expect@%#x want@%#x expect@%#x (reread got %+v want %+v)",
+		i, kind, ne, gs, ws, gr, wr, floatRefBits[i],
+		gotAddr, wantBase, uintptr(unsafe.Pointer(wp)), wantAddr, *gp, *wp)
+}
+
 func floatPrecisionCase() Case {
 	return Case{
 		Name: "float-precision-bind",
@@ -77,17 +147,20 @@ func floatPrecisionCase() Case {
 					return err
 				}
 			}
-			return out
+			return floatResult{docs: out, base: uintptr(unsafe.Pointer(&out[0]))}
 		},
 		Verify: func(res any) error {
-			got := res.([]floatDoc)
+			r := res.(floatResult)
 			for i, doc := range floatDocs {
 				var want floatDoc
+				wantAddr := uintptr(unsafe.Pointer(&want))
 				if err := stdjson.Unmarshal([]byte(doc), &want); err != nil {
 					return fmt.Errorf("std decode doc %d: %w", i, err)
 				}
-				if got[i] != want {
-					return fmt.Errorf("doc %d: got %+v want %+v", i, got[i], want)
+				gp := &r.docs[i]
+				gs, ws := floatDocBits(gp), floatDocBits(&want)
+				if ne := floatDocNE(gp, &want); ne || gs != ws {
+					return floatMismatch(i, r.base, wantAddr, gp, &want, ne, gs, ws)
 				}
 			}
 			return nil
