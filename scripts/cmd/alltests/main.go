@@ -33,9 +33,10 @@
 // the source declaration instead.
 //
 // Data directories referenced by relative path from a unit directory are
-// exposed in the output tree via symlinks: testdata/ and benchmark/ inside
-// the output directory, and a tool-module testdata/JSONTestSuite link for
-// the ../JSONTestSuite reference used by tests/compat.
+// exposed in the output tree via symlinks: testdata/ inside the output
+// directory, and tool-module testdata/ links (JSONTestSuite, benchmark) for
+// the ../JSONTestSuite and ../benchmark references used by tests/compat and
+// tests.
 //
 // Output lives under <tool module>/testdata/alltests, inside this module.
 // The module's go.mod requires github.com/velox-io/json with a replace to
@@ -187,10 +188,11 @@ func main() {
 
 	// Expose data directories referenced by relative path from the unit dirs.
 	fatalIf(symlink(root, "tests/testdata", filepath.Join(out, "testdata")))
-	fatalIf(symlink(root, "benchmark", filepath.Join(out, "benchmark")))
-	// tests/compat reaches the suite through ../JSONTestSuite, which from the
-	// output directory resolves to the repo-root testdata/ directory.
+	// tests/compat and tests reach their data through ../JSONTestSuite and
+	// ../benchmark, which from the output directory resolve into this
+	// module's testdata/.
 	fatalIf(symlink(root, "tests/JSONTestSuite", filepath.Join(toolDir, "testdata", "JSONTestSuite")))
+	fatalIf(symlink(root, "benchmark", filepath.Join(toolDir, "testdata", "benchmark")))
 
 	for i, u := range units {
 		fmt.Printf("unit %-12s %2d files  (renames: %s)\n", u.dir, len(files[i]), renameSummary(renames[i]))

@@ -32,6 +32,7 @@ static inline void ndec_sax_ctx_init(NdecSaxContext *ctx, const NdecReactor *rea
   ctx->scan_state.prev_escape           = 0;
   ctx->scan_state.prev_structural_or_ws = 1;
   ctx->scan_state.last_backslash        = 0;
+  ctx->scan_state.control_error         = 0;
 
   utf8_checker_init(&ctx->utf8);
 }

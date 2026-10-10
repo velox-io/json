@@ -120,6 +120,24 @@ func TestFmtErrors(t *testing.T) {
 	}
 }
 
+// A document with a raw control byte is rejected but must not poison the
+// pooled native formatter state for the next call: the SAX context
+// reinitializes every scan-state field between calls.
+func TestFmtControlResidue(t *testing.T) {
+	var bad bytes.Buffer
+	if err := vjson.Compact(&bad, []byte("[\"\x1f\"]")); err == nil {
+		t.Fatal("Compact with a raw control byte: want error")
+	}
+	var ok bytes.Buffer
+	if err := vjson.Compact(&ok, []byte(`{"a":1,"b":[1,2,3]}`)); err != nil {
+		t.Fatalf("Compact on clean input after a rejected document: %v", err)
+	}
+	var ind bytes.Buffer
+	if err := vjson.Indent(&ind, []byte(`{"a":1}`), "", "  "); err != nil {
+		t.Fatalf("Indent on clean input after a rejected document: %v", err)
+	}
+}
+
 // fmtTokenCases are documents whose structure is well formed but whose
 // number or string tokens break the grammar, which the reformatter must
 // reject token by token as encoding/json does.
@@ -176,9 +194,9 @@ func TestFmtTokenGrammar(t *testing.T) {
 }
 
 func TestFmtCorpusRoundTrip(t *testing.T) {
-	gz, err := os.ReadFile(filepath.Join("benchmark", "corpus", "testdata", "canada_geometry.json.gz"))
+	gz, err := os.ReadFile(filepath.Join("..", "benchmark", "corpus", "testdata", "canada_geometry.json.gz"))
 	if err != nil {
-		t.Skipf("corpus unavailable: %v", err)
+		t.Fatal(err)
 	}
 	zr, err := gzip.NewReader(bytes.NewReader(gz))
 	if err != nil {
