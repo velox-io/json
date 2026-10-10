@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -394,6 +395,7 @@ func FuzzUnmarshalNumber(f *testing.F) {
 		`1.7976931348623157e+308`, `1.8e308`, `5e-324`, `2.4703282292062328e-324`,
 		`9100000000000000.999`, `100.0000000000800`,
 		`1,2.5,-3e2`, `01`, `1.`, `.5`, `1e`, `+1`, `-`, `NaN`, `-Inf`, `infinity`,
+		`0\u00780\u00700`, // \u escaped hex float spelling
 	}
 	seeds = append(seeds, longNumberSeeds()...)
 	for _, s := range seeds {
@@ -424,7 +426,14 @@ func FuzzUnmarshalNumber(f *testing.F) {
 		checkNumberParity[fields](t, "struct", append(doc, '}'), data, stdBad)
 		// Hex floats and digit separators are the documented ",string"
 		// divergence: strconv takes them, the native atof does not.
-		if !bytes.ContainsAny(data, "xX_") {
+		// The spelling can hide behind \u escapes, so decide on the
+		// unescaped body. A body Unquote rejects cannot parse as a
+		// float either, leaving the raw bytes a sound fallback.
+		body := string(data)
+		if unq, err := strconv.Unquote("\"" + body + "\""); err == nil {
+			body = unq
+		}
+		if !strings.ContainsAny(body, "xX_") {
 			q := wrapBytes(`{"q32":"`, data, `","q64":"`)
 			checkNumberParity[quoted](t, "quoted", append(append(q, data...), `"}`...), data, stdBad)
 		}
