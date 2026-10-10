@@ -1,0 +1,113 @@
+name: Stackstress Repro
+
+# Replays tests/stackstress on the macOS AMD64 via Rosetta configuration of
+# ci.yml (macos-latest, GOARCH=amd64, Go stable) in a loop of fresh processes
+# until the budget runs out. Every failing process log is kept as an artifact.
+# Pushing a repro/stackstress* branch starts a run; workflow_dispatch tunes
+# the knobs once this file is on the default branch.
+
+on:
+  push:
+    branches: ['repro/stackstress*']
+  workflow_dispatch:
+    inputs:
+      run:
+        description: 'test.run regex'
+        default: '^TestStackStress_ConcurrentSweepGC$'
+      secs:
+        description: 'VJSTACKSTRESS_SECS per process'
+        default: '5'
+      budget:
+        description: 'Loop budget per shard, minutes'
+        default: '45'
+      race:
+        description: 'Build with -race'
+        type: boolean
+        default: false
+      godebug:
+        description: 'GODEBUG for the test process'
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stackstress-repro-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repro:
+    name: Repro (macOS AMD64 via Rosetta, shard ${{ matrix.shard }})
+    runs-on: macos-latest
+    timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+    env:
+      GOARCH: amd64
+      RUN: ${{ inputs.run || '^TestStackStress_ConcurrentSweepGC$' }}
+      SECS: ${{ inputs.secs || '5' }}
+      BUDGET: ${{ inputs.budget || '45' }}
+      RACE: ${{ inputs.race && '-race' || '' }}
+      TEST_GODEBUG: ${{ inputs.godebug || '' }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Setup Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: stable
+
+    - name: Environment
+      run: |
+        go version
+        sw_vers
+        sysctl -n machdep.cpu.brand_string hw.ncpu
+
+    - name: Build test binary
+      run: |
+        go test -c $RACE -tags vjstackstress -o "$RUNNER_TEMP/ss.test" ./tests/stackstress/
+        file "$RUNNER_TEMP/ss.test"
+
+    - name: Loop
+      shell: bash
+      run: |
+        set -uo pipefail
+        hits_dir="$RUNNER_TEMP/hits"
+        mkdir -p "$hits_dir"
+        deadline=$(( $(date +%s) + BUDGET * 60 ))
+        runs=0
+        hits=0
+        while [ "$(date +%s)" -lt "$deadline" ]; do
+          runs=$((runs + 1))
+          log="$RUNNER_TEMP/run.log"
+          GODEBUG="$TEST_GODEBUG" VJSTACKSTRESS_SECS="$SECS" \
+            "$RUNNER_TEMP/ss.test" -test.run "$RUN" -test.count=1 >"$log" 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            hits=$((hits + 1))
+            cp "$log" "$hits_dir/shard${{ matrix.shard }}-run$runs.log"
+            echo "::error::run $runs exited $rc"
+            grep -E -- '--- FAIL|mismatch|panic|fatal error|SIG' "$log" | head -20
+          fi
+        done
+        echo "runs=$runs hits=$hits"
+        {
+          echo "### shard ${{ matrix.shard }}: runs=$runs hits=$hits"
+          if [ "$hits" -gt 0 ]; then
+            echo '```'
+            cat "$hits_dir"/*.log | grep -E -- 'mismatch|panic|fatal error' | head -20
+            echo '```'
+          fi
+        } >>"$GITHUB_STEP_SUMMARY"
+        [ "$hits" -eq 0 ]
+
+    - name: Upload failing logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: stackstress-hits-shard${{ matrix.shard }}
+        path: ${{ runner.temp }}/hits/
+        if-no-files-found: ignore
