@@ -2,7 +2,10 @@ name: Stackstress Repro
 
 # Replays tests/stackstress on the macOS AMD64 via Rosetta configuration of
 # ci.yml (macos-latest, GOARCH=amd64, Go stable) in a loop of fresh processes
-# until the budget runs out. Every failing process log is kept as an artifact.
+# until the budget runs out. By default each process runs the whole package
+# in file order, as make test does, so ConcurrentSweepGC starts after the
+# single-case sweeps have warmed the process. Every failing process log is
+# kept as an artifact.
 # Pushing a repro/stackstress* branch starts a run; workflow_dispatch tunes
 # the knobs once this file is on the default branch.
 
@@ -13,7 +16,7 @@ on:
     inputs:
       run:
         description: 'test.run regex'
-        default: '^TestStackStress_ConcurrentSweepGC$'
+        default: '.'
       secs:
         description: 'VJSTACKSTRESS_SECS per process'
         default: '5'
@@ -46,7 +49,7 @@ jobs:
         shard: [1, 2, 3, 4, 5]
     env:
       GOARCH: amd64
-      RUN: ${{ inputs.run || '^TestStackStress_ConcurrentSweepGC$' }}
+      RUN: ${{ inputs.run || '.' }}
       SECS: ${{ inputs.secs || '5' }}
       BUDGET: ${{ inputs.budget || '45' }}
       RACE: ${{ inputs.race && '-race' || '' }}
