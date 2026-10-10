@@ -76,8 +76,10 @@ jobs:
 
     - name: Loop
       shell: bash
+      # The runner invokes bash with -e; a failing test process must reach
+      # the bookkeeping below instead of ending the step.
       run: |
-        set -uo pipefail
+        set +e -uo pipefail
         hits_dir="$RUNNER_TEMP/hits"
         mkdir -p "$hits_dir"
         deadline=$(( $(date +%s) + BUDGET * 60 ))
