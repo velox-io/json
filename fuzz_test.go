@@ -56,6 +56,8 @@ func longNumberSeeds() []string {
 		// A second 1 deep inside an 827-digit mantissa: vjson returns the
 		// correctly rounded 1e126 while go1.27's atof returns 1e99.
 		"1" + strings.Repeat("0", 589) + "1" + strings.Repeat("0", 236) + "e-700",
+		// Leading whitespace: the wrapped document must stay arbitrated.
+		" " + "1" + strings.Repeat("0", 687) + "1" + strings.Repeat("0", 138) + "e-700",
 	}
 }
 
@@ -473,8 +475,10 @@ type numTruth struct {
 
 // ratNumber parses num as a JSON number token and returns its truth. ok is
 // false for any other input, including strconv-only spellings, so those
-// stay outside arbitration.
+// stay outside arbitration. Surrounding JSON whitespace is trimmed so a
+// wrapped number document stays arbitrated.
 func ratNumber(num []byte) (numTruth, bool) {
+	num = bytes.Trim(num, " \t\n\r")
 	if end, valid := gdec.ValidNumber(num, 0); !valid || end != len(num) {
 		return numTruth{}, false
 	}
