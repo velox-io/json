@@ -6,6 +6,12 @@ name: Stackstress Repro
 # in file order, as make test does, so ConcurrentSweepGC starts after the
 # single-case sweeps have warmed the process. Every failing process log is
 # kept as an artifact.
+#
+# Two arms share each run: preempt runs the default runtime, nopreempt sets
+# GODEBUG=asyncpreemptoff=1 so no preemption signal lands inside Go code.
+# The matrix expands shard-major, interleaving the arms across scheduling
+# waves.
+#
 # Pushing a repro/stackstress* branch starts a run; workflow_dispatch tunes
 # the knobs once this file is on the default branch.
 
@@ -27,9 +33,6 @@ on:
         description: 'Build with -race'
         type: boolean
         default: false
-      godebug:
-        description: 'GODEBUG for the test process'
-        default: ''
 
 permissions:
   contents: read
@@ -40,20 +43,24 @@ concurrency:
 
 jobs:
   repro:
-    name: Repro (macOS AMD64 via Rosetta, shard ${{ matrix.shard }})
+    name: Repro (Rosetta, ${{ matrix.arm }}, shard ${{ matrix.shard }})
     runs-on: macos-latest
     timeout-minutes: 70
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        arm: [preempt, nopreempt]
+        include:
+        - arm: nopreempt
+          godebug: asyncpreemptoff=1
     env:
       GOARCH: amd64
       RUN: ${{ inputs.run || '.' }}
       SECS: ${{ inputs.secs || '5' }}
       BUDGET: ${{ inputs.budget || '45' }}
       RACE: ${{ inputs.race && '-race' || '' }}
-      TEST_GODEBUG: ${{ inputs.godebug || '' }}
+      TEST_GODEBUG: ${{ matrix.godebug }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
@@ -93,14 +100,14 @@ jobs:
           rc=$?
           if [ "$rc" -ne 0 ]; then
             hits=$((hits + 1))
-            cp "$log" "$hits_dir/shard${{ matrix.shard }}-run$runs.log"
+            cp "$log" "$hits_dir/${{ matrix.arm }}-shard${{ matrix.shard }}-run$runs.log"
             echo "::error::run $runs exited $rc"
             grep -E -- '--- FAIL|mismatch|panic|fatal error|SIG' "$log" | head -20
           fi
         done
         echo "runs=$runs hits=$hits"
         {
-          echo "### shard ${{ matrix.shard }}: runs=$runs hits=$hits"
+          echo "### ${{ matrix.arm }} shard ${{ matrix.shard }}: runs=$runs hits=$hits"
           if [ "$hits" -gt 0 ]; then
             echo '```'
             cat "$hits_dir"/*.log | grep -E -- 'mismatch|panic|fatal error' | head -20
@@ -113,6 +120,6 @@ jobs:
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: stackstress-hits-shard${{ matrix.shard }}
+        name: stackstress-hits-${{ matrix.arm }}-shard${{ matrix.shard }}
         path: ${{ runner.temp }}/hits/
         if-no-files-found: ignore
