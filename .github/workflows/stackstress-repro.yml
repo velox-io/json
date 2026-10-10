@@ -1,16 +1,16 @@
 name: Stackstress Repro
 
-# Replays tests/stackstress on the macOS AMD64 via Rosetta configuration of
-# ci.yml (macos-latest, GOARCH=amd64, Go stable) in a loop of fresh processes
-# until the budget runs out. By default each process runs the whole package
-# in file order, as make test does, so ConcurrentSweepGC starts after the
-# single-case sweeps have warmed the process. Every failing process log is
-# kept as an artifact.
+# Replays tests/stackstress on macos-latest with Go stable in a loop of fresh
+# processes until the budget runs out. By default each process runs the
+# whole package in file order, as make test does, so ConcurrentSweepGC
+# starts after the single-case sweeps have warmed the process. Every failing
+# process log is kept as an artifact.
 #
-# Two arms share each run: preempt runs the default runtime, nopreempt sets
-# GODEBUG=asyncpreemptoff=1 so no preemption signal lands inside Go code.
-# The matrix expands shard-major, interleaving the arms across scheduling
-# waves.
+# The goarch axis picks the execution mode on the arm64 image: amd64 runs
+# under Rosetta 2 as the ci.yml macOS AMD64 job does, arm64 runs natively.
+# The godebug axis sets GODEBUG for the test process, for example
+# asyncpreemptoff=1 to keep preemption signals out of Go code. The matrix
+# expands shard-major, interleaving the arms across scheduling waves.
 #
 # Pushing a repro/stackstress* branch starts a run; workflow_dispatch tunes
 # the knobs once this file is on the default branch.
@@ -43,19 +43,18 @@ concurrency:
 
 jobs:
   repro:
-    name: Repro (Rosetta, ${{ matrix.arm }}, shard ${{ matrix.shard }})
+    name: Repro (darwin/${{ matrix.goarch }} GODEBUG=${{ matrix.godebug }}, shard ${{ matrix.shard }})
     runs-on: macos-latest
     timeout-minutes: 70
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
-        arm: [preempt, nopreempt]
-        include:
-        - arm: nopreempt
-          godebug: asyncpreemptoff=1
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        goarch: [arm64]
+        godebug: ['']
     env:
-      GOARCH: amd64
+      GOARCH: ${{ matrix.goarch }}
+      ARM: ${{ matrix.goarch }}${{ matrix.godebug && format('-{0}', matrix.godebug) || '' }}
       RUN: ${{ inputs.run || '.' }}
       SECS: ${{ inputs.secs || '5' }}
       BUDGET: ${{ inputs.budget || '45' }}
@@ -100,14 +99,14 @@ jobs:
           rc=$?
           if [ "$rc" -ne 0 ]; then
             hits=$((hits + 1))
-            cp "$log" "$hits_dir/${{ matrix.arm }}-shard${{ matrix.shard }}-run$runs.log"
+            cp "$log" "$hits_dir/$ARM-shard${{ matrix.shard }}-run$runs.log"
             echo "::error::run $runs exited $rc"
             grep -E -- '--- FAIL|mismatch|panic|fatal error|SIG' "$log" | head -20
           fi
         done
         echo "runs=$runs hits=$hits"
         {
-          echo "### ${{ matrix.arm }} shard ${{ matrix.shard }}: runs=$runs hits=$hits"
+          echo "### $ARM shard ${{ matrix.shard }}: runs=$runs hits=$hits"
           if [ "$hits" -gt 0 ]; then
             echo '```'
             cat "$hits_dir"/*.log | grep -E -- 'mismatch|panic|fatal error' | head -20
@@ -120,6 +119,6 @@ jobs:
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: stackstress-hits-${{ matrix.arm }}-shard${{ matrix.shard }}
+        name: stackstress-hits-${{ env.ARM }}-shard${{ matrix.shard }}
         path: ${{ runner.temp }}/hits/
         if-no-files-found: ignore
