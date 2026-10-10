@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Native build input set: the paths whose tracked content determines a
 # native module artifact. gen-natives.sh stamps their content hash into
-# every syso it builds and pgo-download-syso.sh verifies a downloaded
+# every syso it builds and pgo-download.sh verifies a downloaded
 # artifact against the installing tree with the same definition, so the
 # set must stay single-sourced here.
 #

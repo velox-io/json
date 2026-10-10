@@ -5,7 +5,7 @@
 #   .local/pgo-data/instr-<mode>-<os>-<arch>.profdata        (platform-suffixed)
 #
 # Usage:
-#   scripts/pgo-download-syso.sh [run-id]
+#   scripts/pgo-download.sh [run-id]
 #     run-id  PGO workflow run to download from. Default: latest successful
 #             run on the pgo-inst branch.
 #
@@ -38,7 +38,7 @@ REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$REPO_ROOT"
 
 command -v gh >/dev/null 2>&1 || {
-  echo "pgo-download-syso: gh CLI is required (https://cli.github.com/)" >&2
+  echo "pgo-download: gh CLI is required (https://cli.github.com/)" >&2
   exit 1
 }
 
@@ -68,8 +68,8 @@ if [ -z "$RUN_ID" ]; then
   RUN_ID=$(gh run list -R "$REPO" --workflow pgo.yml --branch pgo-inst \
     --status success --limit 1 --json databaseId --jq '.[0].databaseId')
 fi
-[ -n "$RUN_ID" ] || { echo "pgo-download-syso: no successful PGO run found" >&2; exit 1; }
-echo "==> pgo-download-syso: repo=$REPO run=$RUN_ID"
+[ -n "$RUN_ID" ] || { echo "pgo-download: no successful PGO run found" >&2; exit 1; }
+echo "==> pgo-download: repo=$REPO run=$RUN_ID"
 
 # ------------------------------------------------------------------
 # Download each pgo-<module>-<os>-<arch> artifact into the staging area.
@@ -80,13 +80,13 @@ _filters=''
 case "${MODULE:-}" in
   encvm|ndec) _filters="^pgo-${MODULE}-" ;;
   ''|all)     _filters='^pgo-' ;;
-  *) echo "pgo-download-syso: MODULE must be encvm|ndec (got '$MODULE')" >&2; exit 1 ;;
+  *) echo "pgo-download: MODULE must be encvm|ndec (got '$MODULE')" >&2; exit 1 ;;
 esac
 
 _artifacts=$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" --paginate \
   --jq '.artifacts[] | select(.expired == false) | .name' | grep -E "$_filters" || true)
 [ -n "$_artifacts" ] || {
-  echo "pgo-download-syso: no matching PGO artifacts in run $RUN_ID" >&2
+  echo "pgo-download: no matching PGO artifacts in run $RUN_ID" >&2
   exit 1
 }
 
@@ -105,12 +105,12 @@ if [ "${ALLOW_FOREIGN:-0}" != "1" ]; then
   source "$REPO_ROOT/scripts/native-build-inputs.sh"
   _local_hash=$(native_inputs_hash)
   if [ "$_local_hash" = "unknown" ]; then
-    echo "pgo-download-syso: refusing to install: this is not a git work tree," >&2
+    echo "pgo-download: refusing to install: this is not a git work tree," >&2
     echo "  so the local native inputs cannot be hashed for comparison." >&2
     exit 1
   fi
   if native_inputs_dirty; then
-    echo "pgo-download-syso: refusing to install over uncommitted native input changes:" >&2
+    echo "pgo-download: refusing to install over uncommitted native input changes:" >&2
     git status --porcelain --untracked-files=no -- "${NATIVE_INPUT_PATHS[@]}" ':(exclude)*.syso' |
       sed 's/^/    /' >&2
     echo "  Commit them first: an artifact must pair with the sources it was built from." >&2
@@ -130,12 +130,12 @@ if [ "${ALLOW_FOREIGN:-0}" != "1" ]; then
       continue
     fi
     if [ "$_st_dirty" != "0" ]; then
-      echo "pgo-download-syso: refusing $(basename "$_f"): built from a dirty tree" >&2
+      echo "pgo-download: refusing $(basename "$_f"): built from a dirty tree" >&2
       echo "  (stamp: commit=$_st_commit dirty=$_st_dirty)." >&2
       exit 1
     fi
     if [ "$_st_inputs" != "$_local_hash" ]; then
-      echo "pgo-download-syso: lineage mismatch, refusing to install." >&2
+      echo "pgo-download: lineage mismatch, refusing to install." >&2
       echo "  $(basename "$_f") was built from commit $_st_commit" >&2
       echo "    with native inputs $_st_inputs" >&2
       echo "  this tree is $(git rev-parse --short HEAD) with native inputs $_local_hash" >&2
@@ -169,7 +169,7 @@ if [ "${ALLOW_FOREIGN:-0}" != "1" ]; then
       done
     fi
     if ! git cat-file -e "${RUN_SHA}^{commit}" 2>/dev/null; then
-      echo "pgo-download-syso: refusing to install an unverifiable artifact." >&2
+      echo "pgo-download: refusing to install an unverifiable artifact." >&2
       echo "  run $RUN_ID has unstamped files and was built from $RUN_SHA" >&2
       echo "  (branch $RUN_BRANCH, $RUN_DATE), which is not present locally" >&2
       echo "  and could not be fetched. Fetch that commit and retry, or set" >&2
@@ -178,7 +178,7 @@ if [ "${ALLOW_FOREIGN:-0}" != "1" ]; then
     fi
     _changed=$(git diff --name-only "$RUN_SHA" HEAD -- "${NATIVE_INPUT_PATHS[@]}" ':(exclude)*.syso')
     if [ -n "$_changed" ]; then
-      echo "pgo-download-syso: lineage mismatch, refusing to install." >&2
+      echo "pgo-download: lineage mismatch, refusing to install." >&2
       echo "  run $RUN_ID built from $(git rev-parse --short "$RUN_SHA") (branch $RUN_BRANCH, $RUN_DATE)" >&2
       echo "  current tree is $(git rev-parse --short HEAD), native inputs differ:" >&2
       printf '%s\n' "$_changed" | sed 's/^/    /'
