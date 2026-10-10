@@ -647,6 +647,82 @@ func TestNumber_Float32MaxBoundary(t *testing.T) {
 	}
 }
 
+// Float32 double rounding: a parser that resolves the token to float64 first and then
+// narrows to float32 rounds twice, which can land one ULP away. vjson must parse
+// float32 targets at binary32 precision, matching encoding/json.
+func TestNumber_Float32DoubleRounding(t *testing.T) {
+	tests := []string{
+		// parse64-then-cast yields 7.3289003, binary32 parse 7.3289
+		"7.328900098800659",
+
+		// just past the midpoint between MaxFloat32 and the next smaller
+		// float32: binary32 parse rounds up to MaxFloat32, while the float64
+		// midpoint narrows ties-to-even down to the smaller neighbor
+		"3.4028233649732406e+38",
+	}
+
+	type S struct {
+		F float32 `json:"f"`
+	}
+
+	for _, sign := range []string{"", "-"} {
+		for _, data := range tests {
+			input := sign + data
+			t.Run(input, func(t *testing.T) {
+				var vj, std float32
+				vjErr := vjson.Unmarshal([]byte(input), &vj)
+				stdErr := json.Unmarshal([]byte(input), &std)
+				if (vjErr != nil) != (stdErr != nil) {
+					t.Fatalf("error mismatch for %s: vjson=%v stdlib=%v", input, vjErr, stdErr)
+				}
+				if vjErr != nil {
+					return
+				}
+				if vj != std {
+					t.Errorf("value mismatch for %s: vjson=%g(%08x) stdlib=%g(%08x)",
+						input, vj, math.Float32bits(vj), std, math.Float32bits(std))
+				}
+			})
+			t.Run("field:"+input, func(t *testing.T) {
+				doc := `{"f":` + input + `}`
+				var vj, std S
+				vjErr := vjson.Unmarshal([]byte(doc), &vj)
+				stdErr := json.Unmarshal([]byte(doc), &std)
+				if (vjErr != nil) != (stdErr != nil) {
+					t.Fatalf("error mismatch for %s: vjson=%v stdlib=%v", doc, vjErr, stdErr)
+				}
+				if vjErr != nil {
+					return
+				}
+				if vj != std {
+					t.Errorf("value mismatch for %s: vjson=%g(%08x) stdlib=%g(%08x)",
+						doc, vj.F, math.Float32bits(vj.F), std.F, math.Float32bits(std.F))
+				}
+			})
+			t.Run("value:"+input, func(t *testing.T) {
+				doc := `{"f":` + input + `}`
+				val, err := vjson.Parse([]byte(doc))
+				if err != nil {
+					t.Fatalf("parse %s: %v", doc, err)
+				}
+				var vj, std S
+				vjErr := vjson.UnmarshalValue(val, &vj)
+				stdErr := json.Unmarshal([]byte(doc), &std)
+				if (vjErr != nil) != (stdErr != nil) {
+					t.Fatalf("error mismatch for %s: vjson=%v stdlib=%v", doc, vjErr, stdErr)
+				}
+				if vjErr != nil {
+					return
+				}
+				if vj != std {
+					t.Errorf("value mismatch for %s: vjson=%g(%08x) stdlib=%g(%08x)",
+						doc, vj.F, math.Float32bits(vj.F), std.F, math.Float32bits(std.F))
+				}
+			})
+		}
+	}
+}
+
 // Float64 parsing precision: vjson must produce the same float64 as encoding/json.
 
 func TestNumber_Float64Precision(t *testing.T) {
