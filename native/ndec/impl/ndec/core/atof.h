@@ -527,14 +527,31 @@ typedef unsigned __int128 atof_u128;
 
 #define ATOF_MP_MAX_LIMBS 80
 
+/* Significant digits kept in D. Every midpoint between adjacent binary64
+ * (and binary32) values has at most 767 significant decimal digits, so
+ * truncating the input to K >= 767 digits and appending one sticky digit
+ * for a nonzero tail preserves the sign of every midpoint comparison.
+ * The cap also bounds all mp operands well below ATOF_MP_MAX_LIMBS:
+ * D < 10^769 and both comparison sides stay under 2^2600. */
+#define ATOF_MP_MAX_DIGITS 768
+
 typedef struct {
   uint64_t v[ATOF_MP_MAX_LIMBS];
   int len;
 } atof_mpint;
 
 typedef struct {
-  atof_mpint lhs;
-  atof_mpint rhs;
+  union {
+    struct {
+      atof_mpint lhs;
+      atof_mpint rhs;
+    };
+    /* Separator-free copy of the significant digits that sig_start points
+     * at for a quoted body with digit separators: the digit cap plus one
+     * sticky digit. Only the D build reads it, and the build precedes the
+     * first lhs/rhs write of every refine, so the two share storage. */
+    char dense_digits[ATOF_MP_MAX_DIGITS + 1];
+  };
   atof_mpint D;
   /* Scratch destination for atof_i_mp_mul_pow5. Kept on the ctx (heap-owned)
    * so the slow path does not need a stack-resident mpint (~648 bytes) in
@@ -940,14 +957,6 @@ static void atof_i_mp_add_word(atof_mpint *a, uint64_t word) {
   }
 }
 
-/* Significant digits kept in D. Every midpoint between adjacent binary64
- * (and binary32) values has at most 767 significant decimal digits, so
- * truncating the input to K >= 767 digits and appending one sticky digit
- * for a nonzero tail preserves the sign of every midpoint comparison.
- * The cap also bounds all mp operands well below ATOF_MP_MAX_LIMBS:
- * D < 10^769 and both comparison sides stay under 2^2600. */
-#define ATOF_MP_MAX_DIGITS 768
-
 /* Build the bigint D from the significant-digit string described by ctx.
  *
  * Field semantics:
@@ -1304,6 +1313,306 @@ INLINE double atof_i_apply_sign_f64(double v, int neg) {
   return v;
 }
 
+INLINE int atof_i_hexval(unsigned char c) {
+  if ((unsigned)(c - '0') <= 9u) return c - '0';
+  c = (unsigned char)(c | 0x20);
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  return -1;
+}
+
+/* No rounded magnitude has every bit set. */
+#define ATOF_HEX_FAIL UINT64_MAX
+
+/* Parses the strconv hex float body [p, lim), the span after the 0x
+ * prefix, and rounds it to the nearest binary float with prec significand
+ * bits (hidden bit included) and exponent bias, ties to even. The body is
+ * hex mantissa digits with one optional '.', then the mandatory p/P and a
+ * decimal exponent, consuming the whole span. Underscores sit between
+ * digits and the prefix counts as one, so 0x_1p0 parses while 0x1_p0 does
+ * not.
+ *
+ * The top 16 significant digits accumulate in m and every later digit
+ * drops, setting sticky when nonzero. scale counts hex digits of binary
+ * scale: each kept fraction digit takes 4 bits off, each dropped integer
+ * digit adds 4. Returns the magnitude bit pattern, the Inf pattern on
+ * overflow and 0 on underflow, or ATOF_HEX_FAIL. */
+NOINLINE static uint64_t atof_i_hex_bits(const char *p, const char *lim, int prec, int bias) {
+  uint64_t m = 0;
+  int sticky = 0, sawdig = 0, sawdot = 0, scale = 0;
+  const char *q = p;
+  for (;; q++) {
+    unsigned char c = q < lim ? (unsigned char)*q : 0;
+    int v           = atof_i_hexval(c);
+    if (v >= 0) {
+      sawdig = 1;
+      if ((m >> 60) == 0) {
+        m = m << 4 | (uint64_t)v;
+        scale -= sawdot;
+      } else {
+        sticky |= v != 0;
+        scale += !sawdot;
+      }
+      continue;
+    }
+    if (c == '_' && q + 1 < lim && (atof_i_hexval((unsigned char)q[-1]) >= 0 || (q[-1] | 0x20) == 'x') &&
+        atof_i_hexval((unsigned char)q[1]) >= 0)
+      continue;
+    if (c == '.' && !sawdot) {
+      sawdot = 1;
+      continue;
+    }
+    break;
+  }
+  if (!sawdig || q >= lim || (*q | 0x20) != 'p') return ATOF_HEX_FAIL;
+  q++;
+  int eneg = 0;
+  if (q < lim && (*q == '+' || *q == '-')) {
+    eneg = *q == '-';
+    q++;
+  }
+  if (q >= lim || (unsigned)(*q - '0') > 9u) return ATOF_HEX_FAIL;
+  int pe = 0;
+  for (; q < lim; q++) {
+    unsigned v = (unsigned)(*q - '0');
+    if (v <= 9u) {
+      if (pe < 10000) pe = pe * 10 + (int)v;
+      continue;
+    }
+    if (*q != '_' || q + 1 >= lim || (unsigned)(q[-1] - '0') > 9u || (unsigned)(q[1] - '0') > 9u)
+      return ATOF_HEX_FAIL;
+  }
+  if (m == 0) return 0;
+
+  /* Beyond 2^20 in magnitude every 64-bit mantissa rounds to 0 or Inf at
+   * both precisions, so the clamp keeps te an int at any body length. */
+  int64_t t = (int64_t)(eneg ? -pe : pe) + 4 * (int64_t)scale;
+  if (t < -(1 << 20)) t = -(1 << 20);
+  if (t > (1 << 20)) t = 1 << 20;
+  int te = (int)t;
+
+  int lz     = __builtin_clzll(m);
+  uint64_t M = m << lz; /* the value is M * 2^e */
+  int e      = te - lz;
+  int top    = e + 63; /* exponent of the leading bit */
+  int frac   = prec - 1;
+  int emin   = 1 - bias;
+  uint64_t sig;
+  int rb, st;
+  if (top >= emin) {
+    int drop = 64 - prec;
+    sig      = M >> drop;
+    rb       = (int)((M >> (drop - 1)) & 1);
+    st       = ((M & ((UINT64_C(1) << (drop - 1)) - 1)) != 0) | sticky;
+    if (rb && (st || (sig & 1))) sig++;
+    if (sig >> prec) {
+      sig >>= 1;
+      top++;
+    }
+    if (top > bias) return (UINT64_C(2) * (uint64_t)bias + 1) << frac;
+    return (uint64_t)(top + bias) << frac | (sig & ((UINT64_C(1) << frac) - 1));
+  }
+  /* Subnormal: sig counts units of the smallest subnormal 2^(emin - frac),
+   * and a carry into 2^frac lands on the min normal pattern. */
+  int sh = emin - frac - e;
+  if (sh < 64) {
+    sig = M >> sh;
+    rb  = (int)((M >> (sh - 1)) & 1);
+    st  = ((M & ((UINT64_C(1) << (sh - 1)) - 1)) != 0) | sticky;
+  } else {
+    sig = 0;
+    rb  = sh == 64; /* M's leading bit is set */
+    st  = (M << 1) != 0 || sticky;
+  }
+  if (rb && (st || (sig & 1))) sig++;
+  return sig;
+}
+
+/* Readies the trunc refine for a significand with digit separators.
+ * Refine and the d19 read index the significant digits densely, so the
+ * nd digits from sig_start are copied into ctx->dense_digits without
+ * separators or the dot. Past the digit cap a nonzero tail appends one
+ * sticky digit, a count one past the cap, so the D build folds the copy
+ * onto the D and exp10 the dense span would give. The value is the digit
+ * string times 10^(e10 - nd). Returns the leading 19 digits. */
+NOINLINE static uint64_t atof_i_dense_digits(atof_ctx *pc, const char *sig_start, int nd, int e10) {
+  int n      = 0;
+  int sticky = 0;
+  for (const char *r = sig_start; nd > 0; r++) {
+    unsigned v = (unsigned)(*r - '0');
+    if (v > 9u) continue;
+    nd--;
+    if (n < ATOF_MP_MAX_DIGITS) {
+      pc->dense_digits[n++] = *r;
+    } else {
+      sticky |= v != 0;
+    }
+  }
+  if (sticky) pc->dense_digits[n++] = '1';
+  uint64_t d19 = 0;
+  for (int i = 0; i < 19; i++)
+    d19 = d19 * 10 + (uint64_t)(pc->dense_digits[i] - '0');
+  pc->sig_start  = pc->dense_digits;
+  pc->ndigits    = n;
+  pc->dot_offset = n + 1;
+  pc->exp10      = e10 - n;
+  return d19;
+}
+
+/* Literal kinds of the strconv grammar the general entries share. */
+enum { ATOF_LIT_FAIL, ATOF_LIT_DEC, ATOF_LIT_HEX, ATOF_LIT_INF, ATOF_LIT_NAN };
+
+/* A scanned literal. DEC fills every field; HEX, INF, and NAN fill neg
+ * and end, which for HEX sits just past the 0x prefix. */
+typedef struct {
+  uint64_t d;            /* digits accumulated mod 2^64, exact while nd <= 19 */
+  int nd;                /* significant digits */
+  int dp;                /* decimal point position, in digits from sig_start */
+  int exp;               /* decimal exponent, saturated */
+  int neg;               /* leading '-' */
+  int sep;               /* separators sit between significant digits */
+  const char *sig_start; /* first significant digit */
+  const char *dot_ptr;   /* the '.', or NULL */
+  const char *end;
+} atof_lit;
+
+/* Scans the strconv literal grammar in [s, lim): an optional sign, then
+ * an Inf/NaN spelling, a 0x hex body, or a decimal mantissa with an
+ * optional exponent. A separator sits strictly between two decimal
+ * digits. The mantissa opens with a digit or '.', so every separator
+ * check reads p[-1] inside the span. */
+INLINE int atof_i_scan_lit(const char *s, const char *lim, atof_lit *g) {
+  const char *p = s;
+
+#define ATOF_I_L_PEEK() (p < lim ? (unsigned char)*p : 0)
+#define ATOF_I_L_SEP()                                                                                            \
+  (ATOF_I_L_PEEK() == '_' && p + 1 < lim && (unsigned)(p[-1] - '0') <= 9u && (unsigned)(p[1] - '0') <= 9u)
+
+  g->neg = 0;
+  if (ATOF_I_L_PEEK() == '-') {
+    g->neg = 1;
+    p++;
+  } else if (ATOF_I_L_PEEK() == '+') {
+    p++;
+  }
+
+  unsigned char c0 = ATOF_I_L_PEEK();
+  if (UNLIKELY((unsigned)(c0 - '0') > 9u && c0 != '.')) {
+    if (atof_i_lower(c0) == 'i' && atof_i_has_prefix_ci_n(p, lim, "inf")) {
+      p += 3;
+      if (atof_i_has_prefix_ci_n(p, lim, "inity")) p += 5;
+      g->end = p;
+      return ATOF_LIT_INF;
+    }
+    if (atof_i_lower(c0) == 'n' && atof_i_has_prefix_ci_n(p, lim, "nan")) {
+      g->end = p + 3;
+      return ATOF_LIT_NAN;
+    }
+    return ATOF_LIT_FAIL;
+  }
+  if (c0 == '0' && p + 1 < lim && (p[1] | 0x20) == 'x') {
+    g->end = p + 2;
+    return ATOF_LIT_HEX;
+  }
+
+  uint64_t d          = 0;
+  int nd              = 0;
+  int dp              = 0;
+  int sawdot          = 0;
+  int sawzero         = c0 == '0';
+  int sep             = 0;
+  const char *dot_ptr = NULL;
+
+  /* Leading zeros and the separators between them carry no significance. */
+  while (ATOF_I_L_PEEK() == '0' || ATOF_I_L_SEP())
+    p++;
+  const char *sig_start = p;
+
+  for (;; p++) {
+    unsigned char c = ATOF_I_L_PEEK();
+    if ((unsigned)(c - '0') <= 9u) {
+      d = d * 10 + (c - '0');
+      nd++;
+    } else if (ATOF_I_L_SEP()) {
+      sep = 1;
+    } else {
+      break;
+    }
+  }
+
+  if (ATOF_I_L_PEEK() == '.') {
+    sawdot  = 1;
+    dp      = nd;
+    dot_ptr = p++;
+    if (nd == 0) {
+      while (ATOF_I_L_PEEK() == '0' || ATOF_I_L_SEP()) {
+        if (*p == '0') {
+          dp--;
+          sawzero = 1;
+        }
+        p++;
+      }
+      sig_start = p;
+    }
+    while (lim - p >= 8 && atof_i_is_8digits(p)) {
+      d = d * 100000000 + atof_i_parse_8digits(p);
+      nd += 8;
+      p += 8;
+    }
+    for (;; p++) {
+      unsigned char c = ATOF_I_L_PEEK();
+      if ((unsigned)(c - '0') <= 9u) {
+        d = d * 10 + (c - '0');
+        nd++;
+      } else if (ATOF_I_L_SEP()) {
+        sep = 1;
+      } else {
+        break;
+      }
+    }
+  }
+
+  if (nd == 0 && !sawzero) return ATOF_LIT_FAIL;
+  if (!sawdot) dp = nd;
+
+  int exp = 0;
+  if (atof_i_lower(ATOF_I_L_PEEK()) == 'e') {
+    const char *before_exp = p++;
+    int eneg               = 0;
+    if (ATOF_I_L_PEEK() == '-') {
+      eneg = 1;
+      p++;
+    } else if (ATOF_I_L_PEEK() == '+') {
+      p++;
+    }
+    if ((unsigned)(ATOF_I_L_PEEK() - '0') <= 9u) {
+      for (;; p++) {
+        unsigned char c = ATOF_I_L_PEEK();
+        if ((unsigned)(c - '0') <= 9u) {
+          if (exp < 10000) exp = exp * 10 + (c - '0');
+        } else if (!ATOF_I_L_SEP()) {
+          break;
+        }
+      }
+      if (eneg) exp = -exp;
+    } else {
+      p = before_exp;
+    }
+  }
+
+#undef ATOF_I_L_SEP
+#undef ATOF_I_L_PEEK
+
+  g->d         = d;
+  g->nd        = nd;
+  g->dp        = dp;
+  g->exp       = exp;
+  g->sep       = sep;
+  g->sig_start = sig_start;
+  g->dot_ptr   = dot_ptr;
+  g->end       = p;
+  return ATOF_LIT_DEC;
+}
+
 /* The 22..37 extension range: first scale d exactly to a value < 2^53,
  * then multiply by 1e22 so that only one rounding is introduced. The base
  * range is expanded inline at each entry; this helper does not handle
@@ -1340,9 +1649,12 @@ INLINE int atof_i_f64_extended_fast_path(uint64_t d, int power, double *out) {
   } while (0)
 
 /* Finalization applies exact-range conversion, boundary handling, truncation
- * refinement, extended exact conversion, and the Eisel-Lemire path in order. */
-INLINE atof_result_f64 atof_i_finalize_f64(uint64_t d, int nd, int dp, int exp, int neg, const char *sig_start,
-                                           const char *dot_ptr, const char *p, atof_ctx *pc) {
+ * refinement, extended exact conversion, and the Eisel-Lemire path in order.
+ * sep marks separators between the significant digits, which the trunc path
+ * reads through a dense copy. */
+INLINE atof_result_f64 atof_i_finalize_f64(uint64_t d, int nd, int dp, int exp, int neg, int sep,
+                                           const char *sig_start, const char *dot_ptr, const char *p,
+                                           atof_ctx *pc) {
   int ndMant = nd <= 19 ? nd : 19;
   int power  = dp - ndMant + exp;
 
@@ -1352,18 +1664,22 @@ INLINE atof_result_f64 atof_i_finalize_f64(uint64_t d, int nd, int dp, int exp, 
   if (UNLIKELY(power < -343)) return (atof_result_f64){atof_i_apply_sign_f64(0.0, neg), p};
 
   if (UNLIKELY(nd > 19)) {
-    /* trunc path: re-scan the leading 19 digits exactly into d19. */
     uint64_t d19 = 0;
-    int taken    = 0;
-    for (const char *q = sig_start; q < p && taken < 19; q++) {
-      if (*q == '.') continue;
-      d19 = d19 * 10 + (unsigned char)(*q - '0');
-      taken++;
+    if (UNLIKELY(sep)) {
+      d19 = atof_i_dense_digits(pc, sig_start, nd, dp + exp);
+    } else {
+      /* trunc path: re-scan the leading 19 digits exactly into d19. */
+      int taken = 0;
+      for (const char *q = sig_start; q < p && taken < 19; q++) {
+        if (*q == '.') continue;
+        d19 = d19 * 10 + (unsigned char)(*q - '0');
+        taken++;
+      }
+      pc->sig_start  = sig_start;
+      pc->ndigits    = nd;
+      pc->exp10      = dp + exp - nd;
+      pc->dot_offset = (dot_ptr && dot_ptr >= sig_start) ? (int)(dot_ptr - sig_start) : nd + 1;
     }
-    pc->sig_start  = sig_start;
-    pc->ndigits    = nd;
-    pc->exp10      = dp + exp - nd;
-    pc->dot_offset = (dot_ptr && dot_ptr >= sig_start) ? (int)(dot_ptr - sig_start) : nd + 1;
     return (atof_result_f64){atof_i_apply_sign_f64(atof_i_parse_trunc_f64(d19, power, pc), neg), p};
   }
 
@@ -1373,112 +1689,30 @@ INLINE atof_result_f64 atof_i_finalize_f64(uint64_t d, int nd, int dp, int exp, 
   return (atof_result_f64){atof_i_apply_sign_f64(atof_i_parse_f64(d, power), neg), p};
 }
 
-/* General decimal entry. Accepts NaN/Inf, '+'/'-' sign, and arbitrary
- * leading zeros. Every read stays inside [s, s + readable_bytes), so the
+/* General decimal entry. Accepts NaN/Inf, '+'/'-' sign, arbitrary leading
+ * zeros, digit separators, and hex float spellings, the quoted-number
+ * strconv grammar. Every read stays inside [s, s + readable_bytes), so the
  * caller may pass an exact token span with no padding. */
 INLINE atof_result_f64 atof_parse_f64_ctx(const char *s, int readable_bytes, void *ctx) {
   atof_ctx *pc = (atof_ctx *)ctx;
   assert(pc != NULL);
-  const char *p   = s;
   const char *lim = s + readable_bytes;
-
-#define ATOF_I_GP_PEEK() (p < lim ? (unsigned char)*p : 0)
-
-  int neg = 0;
-  if (ATOF_I_GP_PEEK() == '-') {
-    neg = 1;
-    p++;
-  } else if (ATOF_I_GP_PEEK() == '+') {
-    p++;
+  atof_lit g;
+  switch (atof_i_scan_lit(s, lim, &g)) {
+  case ATOF_LIT_DEC:
+    return atof_i_finalize_f64(g.d, g.nd, g.dp, g.exp, g.neg, g.sep, g.sig_start, g.dot_ptr, g.end, pc);
+  case ATOF_LIT_HEX: {
+    uint64_t b = atof_i_hex_bits(g.end, lim, 53, 1023);
+    if (b == ATOF_HEX_FAIL) return (atof_result_f64){0.0, s};
+    return (atof_result_f64){atof_i_apply_sign_f64(atof_i_from_bits_f64(b), g.neg), lim};
   }
-
-  if (LIKELY((unsigned)(ATOF_I_GP_PEEK() - '0') <= 9 || ATOF_I_GP_PEEK() == '.')) {
-    /* common case: a digit or '.', handled by the scan below */
-  } else if (atof_i_lower(ATOF_I_GP_PEEK()) == 'i' && atof_i_has_prefix_ci_n(p, lim, "inf")) {
-    const char *q = p + 3;
-    if (atof_i_has_prefix_ci_n(q, lim, "inity")) q += 5;
-    return (atof_result_f64){atof_i_apply_sign_f64(atof_i_pos_inf_f64(), neg), q};
-  } else if (atof_i_lower(ATOF_I_GP_PEEK()) == 'n' && atof_i_has_prefix_ci_n(p, lim, "nan")) {
-    return (atof_result_f64){atof_i_nan_f64(), p + 3};
+  case ATOF_LIT_INF:
+    return (atof_result_f64){atof_i_apply_sign_f64(atof_i_pos_inf_f64(), g.neg), g.end};
+  case ATOF_LIT_NAN:
+    return (atof_result_f64){atof_i_nan_f64(), g.end};
+  default:
+    return (atof_result_f64){0.0, s};
   }
-
-  uint64_t d          = 0;
-  int nd              = 0;
-  int dp              = 0;
-  int sawdot          = 0;
-  int sawdigits       = 0;
-  const char *dot_ptr = NULL;
-
-  if (ATOF_I_GP_PEEK() == '0') {
-    sawdigits = 1;
-    p++;
-    while (ATOF_I_GP_PEEK() == '0')
-      p++;
-  }
-  const char *sig_start = p;
-
-  while ((unsigned)(ATOF_I_GP_PEEK() - '0') <= 9) {
-    d = d * 10 + (unsigned char)(*p - '0');
-    nd++;
-    p++;
-    sawdigits = 1;
-  }
-
-  if (ATOF_I_GP_PEEK() == '.') {
-    sawdot  = 1;
-    dp      = nd;
-    dot_ptr = p;
-    p++;
-    if (nd == 0) {
-      while (ATOF_I_GP_PEEK() == '0') {
-        dp--;
-        p++;
-        sawdigits = 1;
-      }
-      sig_start = p;
-    }
-    while (lim - p >= 8 && atof_i_is_8digits(p)) {
-      d = d * 100000000 + atof_i_parse_8digits(p);
-      nd += 8;
-      p += 8;
-      sawdigits = 1;
-    }
-    while ((unsigned)(ATOF_I_GP_PEEK() - '0') <= 9) {
-      d = d * 10 + (unsigned char)(*p - '0');
-      nd++;
-      p++;
-      sawdigits = 1;
-    }
-  }
-
-  if (!sawdigits) return (atof_result_f64){0.0, s};
-  if (!sawdot) dp = nd;
-
-  int exp = 0;
-  if ((ATOF_I_GP_PEEK() | 0x20) == 'e') {
-    const char *before_exp = p;
-    p++;
-    int eneg = 0;
-    if (ATOF_I_GP_PEEK() == '-') {
-      eneg = 1;
-      p++;
-    } else if (ATOF_I_GP_PEEK() == '+') {
-      p++;
-    }
-    if ((unsigned)(ATOF_I_GP_PEEK() - '0') <= 9) {
-      while ((unsigned)(ATOF_I_GP_PEEK() - '0') <= 9) {
-        if (exp < 10000) exp = exp * 10 + (*p - '0');
-        p++;
-      }
-      if (eneg) exp = -exp;
-    } else {
-      p = before_exp;
-    }
-  }
-
-#undef ATOF_I_GP_PEEK
-
-  return atof_i_finalize_f64(d, nd, dp, exp, neg, sig_start, dot_ptr, p, pc);
 }
 
 /* JSON entry. Strict JSON semantics: sign accepts '-' only, no NaN/Inf.
@@ -1674,7 +1908,7 @@ INLINE atof_result_f64 atof_parse_f64_json_ctx(const char *s, int readable_bytes
     ATOF_F64_RETURN_BASIC(d, nd, power0, neg, p);
   }
 
-  return atof_i_finalize_f64(d, nd, dp, exp, neg, sig_start, dot_ptr, p, pc);
+  return atof_i_finalize_f64(d, nd, dp, exp, neg, 0, sig_start, dot_ptr, p, pc);
 }
 
 INLINE float atof_i_pos_inf_f32(void) {
@@ -1721,107 +1955,30 @@ INLINE int atof_i_f32_fast_path(uint64_t d, int power, float *out) {
 INLINE atof_result_f32 atof_parse_f32_ctx(const char *s, int readable_bytes, void *ctx) {
   atof_ctx *pc = (atof_ctx *)ctx;
   assert(pc != NULL);
-  const char *p   = s;
   const char *lim = s + readable_bytes;
-
-#define ATOF_I_PT_PEEK() (p < lim ? (unsigned char)*p : 0)
-
-  int neg = 0;
-  if (ATOF_I_PT_PEEK() == '-') {
-    neg = 1;
-    p++;
-  } else if (ATOF_I_PT_PEEK() == '+') {
-    p++;
+  atof_lit g;
+  switch (atof_i_scan_lit(s, lim, &g)) {
+  case ATOF_LIT_DEC:
+    break;
+  case ATOF_LIT_HEX: {
+    uint64_t b = atof_i_hex_bits(g.end, lim, 24, 127);
+    if (b == ATOF_HEX_FAIL) return (atof_result_f32){0.0f, s};
+    return (atof_result_f32){atof_i_apply_sign_f32(atof_i_from_bits_f32((uint32_t)b), g.neg), lim};
+  }
+  case ATOF_LIT_INF:
+    return (atof_result_f32){atof_i_apply_sign_f32(atof_i_pos_inf_f32(), g.neg), g.end};
+  case ATOF_LIT_NAN:
+    return (atof_result_f32){atof_i_nan_f32(), g.end};
+  default:
+    return (atof_result_f32){0.0f, s};
   }
 
-  if (LIKELY((unsigned)(ATOF_I_PT_PEEK() - '0') <= 9 || ATOF_I_PT_PEEK() == '.')) {
-    /* common case: a digit or '.', handled by the scan below */
-  } else if (atof_i_lower(ATOF_I_PT_PEEK()) == 'i' && atof_i_has_prefix_ci_n(p, lim, "inf")) {
-    const char *q = p + 3;
-    if (atof_i_has_prefix_ci_n(q, lim, "inity")) q += 5;
-    return (atof_result_f32){atof_i_apply_sign_f32(atof_i_pos_inf_f32(), neg), q};
-  } else if (atof_i_lower(ATOF_I_PT_PEEK()) == 'n' && atof_i_has_prefix_ci_n(p, lim, "nan")) {
-    return (atof_result_f32){atof_i_nan_f32(), p + 3};
-  }
-
-  uint64_t d          = 0;
-  int nd              = 0;
-  int dp              = 0;
-  int sawdot          = 0;
-  int sawdigits       = 0;
-  const char *dot_ptr = NULL;
-
-  if (ATOF_I_PT_PEEK() == '0') {
-    sawdigits = 1;
-    p++;
-    while (ATOF_I_PT_PEEK() == '0')
-      p++;
-  }
-  const char *sig_start = p;
-
-  while (p < lim && (unsigned char)*p >= '0' && (unsigned char)*p <= '9') {
-    d = d * 10 + (unsigned char)(*p - '0');
-    nd++;
-    p++;
-    sawdigits = 1;
-  }
-
-  if (ATOF_I_PT_PEEK() == '.') {
-    sawdot  = 1;
-    dp      = nd;
-    dot_ptr = p;
-    p++;
-    if (nd == 0) {
-      while (ATOF_I_PT_PEEK() == '0') {
-        dp--;
-        p++;
-        sawdigits = 1;
-      }
-      sig_start = p;
-    }
-    while (lim - p >= 8 && atof_i_is_8digits(p)) {
-      d = d * 100000000 + atof_i_parse_8digits(p);
-      nd += 8;
-      p += 8;
-      sawdigits = 1;
-    }
-    while (p < lim && (unsigned char)*p >= '0' && (unsigned char)*p <= '9') {
-      d = d * 10 + (unsigned char)(*p - '0');
-      nd++;
-      p++;
-      sawdigits = 1;
-    }
-  }
-
-  if (!sawdigits) return (atof_result_f32){0.0f, s};
-  if (!sawdot) dp = nd;
-
-  int exp = 0;
-  if (ATOF_I_PT_PEEK() == 'e' || ATOF_I_PT_PEEK() == 'E') {
-    const char *before_exp = p;
-    p++;
-    int eneg = 0;
-    if (ATOF_I_PT_PEEK() == '-') {
-      eneg = 1;
-      p++;
-    } else if (ATOF_I_PT_PEEK() == '+') {
-      p++;
-    }
-    if ((unsigned)(ATOF_I_PT_PEEK() - '0') <= 9) {
-      while ((unsigned)(ATOF_I_PT_PEEK() - '0') <= 9) {
-        if (exp < 10000) exp = exp * 10 + (*p - '0');
-        p++;
-      }
-      if (eneg) exp = -exp;
-    } else {
-      p = before_exp;
-    }
-  }
-
-#undef ATOF_I_PT_PEEK
-
-  int ndMant = nd <= 19 ? nd : 19;
-  int power  = dp - ndMant + exp;
+  uint64_t d    = g.d;
+  int nd        = g.nd;
+  int neg       = g.neg;
+  const char *p = g.end;
+  int ndMant    = nd <= 19 ? nd : 19;
+  int power     = g.dp - ndMant + g.exp;
 
   if (d == 0 && nd <= 19) return (atof_result_f32){atof_i_apply_sign_f32(0.0f, neg), p};
   if (power > 38) return (atof_result_f32){atof_i_apply_sign_f32(atof_i_pos_inf_f32(), neg), p};
@@ -1829,16 +1986,20 @@ INLINE atof_result_f32 atof_parse_f32_ctx(const char *s, int readable_bytes, voi
 
   if (UNLIKELY(nd > 19)) {
     uint64_t d19 = 0;
-    int taken    = 0;
-    for (const char *q = sig_start; q < p && taken < 19; q++) {
-      if (*q == '.') continue;
-      d19 = d19 * 10 + (unsigned char)(*q - '0');
-      taken++;
+    if (UNLIKELY(g.sep)) {
+      d19 = atof_i_dense_digits(pc, g.sig_start, nd, g.dp + g.exp);
+    } else {
+      int taken = 0;
+      for (const char *q = g.sig_start; q < p && taken < 19; q++) {
+        if (*q == '.') continue;
+        d19 = d19 * 10 + (unsigned char)(*q - '0');
+        taken++;
+      }
+      pc->sig_start  = g.sig_start;
+      pc->ndigits    = nd;
+      pc->exp10      = g.dp + g.exp - nd;
+      pc->dot_offset = (g.dot_ptr && g.dot_ptr >= g.sig_start) ? (int)(g.dot_ptr - g.sig_start) : nd + 1;
     }
-    pc->sig_start  = sig_start;
-    pc->ndigits    = nd;
-    pc->exp10      = dp + exp - nd;
-    pc->dot_offset = (dot_ptr && dot_ptr >= sig_start) ? (int)(dot_ptr - sig_start) : nd + 1;
     return (atof_result_f32){atof_i_apply_sign_f32(atof_i_parse_trunc_f32(d19, power, pc), neg), p};
   }
 
@@ -1961,5 +2122,6 @@ INLINE atof_result_f32 atof_parse_f32_json_ctx(const char *s, int readable_bytes
 #undef ATOF_F64_RETURN_BASIC
 #undef ATOF_MP_MAX_LIMBS
 #undef ATOF_MP_MAX_DIGITS
+#undef ATOF_HEX_FAIL
 
 #endif /* ATOF_H */

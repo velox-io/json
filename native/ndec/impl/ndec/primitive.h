@@ -171,12 +171,13 @@ INLINE int bind_write_number(const uint8_t *src, uint8_t kind, uint8_t *dst, ato
  *
  * Numeric targets parse the strconv grammar, following encoding/json's
  * quoted numbers: int and float kinds accept a '+' sign, leading zeros,
- * ".5", "5.", and the Inf/NaN spellings, while a finite decimal that
- * overflows the destination precision and any trailing content are
- * errors. Unsigned kinds take digits only, matching strconv.ParseUint.
- * Hex-float spellings stay unsupported, the one strconv.ParseFloat form
- * the atof core does not take. The general atof entries stay inside len,
- * so the body parses in place at any length. */
+ * ".5", "5.", the Inf/NaN spellings, and float kinds additionally take
+ * hex floats and digit separators, the ParseFloat literal extensions.
+ * A finite decimal that overflows the destination precision and any
+ * trailing content are errors, while an underflow to zero stays a
+ * finite ±0. Unsigned kinds take digits only, matching
+ * strconv.ParseUint. The general atof entries stay inside len, so the
+ * body parses in place at any length. */
 
 INLINE int bind_parse_quoted_f64(const uint8_t *data, uint32_t len, double *out, atof_ctx *ctx) {
   atof_result_f64 r = atof_parse_f64_ctx((const char *)data, (int)len, ctx);

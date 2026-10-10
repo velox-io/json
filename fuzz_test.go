@@ -9,7 +9,6 @@ import (
 	"math/big"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -395,20 +394,20 @@ func FuzzUnmarshalNumber(f *testing.F) {
 		`1.7976931348623157e+308`, `1.8e308`, `5e-324`, `2.4703282292062328e-324`,
 		`9100000000000000.999`, `100.0000000000800`,
 		`1,2.5,-3e2`, `01`, `1.`, `.5`, `1e`, `+1`, `-`, `NaN`, `-Inf`, `infinity`,
-		`0\u00780\u00700`, // \u escaped hex float spelling
+		// Hex float and digit separator spellings, plain and \u escaped.
+		`0x1p-2`, `0X1P2`, `0x.8p1`, `0x1`, `0x1p`, `0x1p9999`, `0x1p-99999`,
+		`0x1_0p0`, `0x_1p0`, `0x1p0_`, `1_000.5`, `1__0`, `1_`, `_1`, `1e2_0`,
+		`0\u00780\u00700`, `0\u005f000.5`,
 	}
 	seeds = append(seeds, longNumberSeeds()...)
+	// An 801-digit mantissa that std reads 100 times too small at binary32,
+	// and at binary64 through go1.26, with the value finite at both: the
+	// two-field forms arbitrate per field, the separator spelling included.
+	for _, head := range []string{"16484751900672", "1_6484751900672"} {
+		seeds = append(seeds, head+strings.Repeat("0", 787)+"1e-788")
+	}
 	for _, s := range seeds {
 		f.Add([]byte(s))
-	}
-
-	type fields struct {
-		F32 float32 `json:"f32"`
-		F64 float64 `json:"f64"`
-	}
-	type quoted struct {
-		Q32 float32 `json:"q32,string"`
-		Q64 float64 `json:"q64,string"`
 	}
 
 	f.Fuzz(func(t *testing.T, data []byte) {
@@ -423,21 +422,24 @@ func FuzzUnmarshalNumber(f *testing.F) {
 		checkNumberParity[[]float64](t, "[]float64", w, data, stdBad)
 		doc := wrapBytes(`{"f32":`, data, "")
 		doc = append(append(doc, `,"f64":`...), data...)
-		checkNumberParity[fields](t, "struct", append(doc, '}'), data, stdBad)
-		// Hex floats and digit separators are the documented ",string"
-		// divergence: strconv takes them, the native atof does not.
-		// The spelling can hide behind \u escapes, so decide on the
-		// unescaped body. A body Unquote rejects cannot parse as a
-		// float either, leaving the raw bytes a sound fallback.
-		body := string(data)
-		if unq, err := strconv.Unquote("\"" + body + "\""); err == nil {
-			body = unq
-		}
-		if !strings.ContainsAny(body, "xX_") {
-			q := wrapBytes(`{"q32":"`, data, `","q64":"`)
-			checkNumberParity[quoted](t, "quoted", append(append(q, data...), `"}`...), data, stdBad)
-		}
+		checkNumberParity[numberFields](t, "struct", append(doc, '}'), data, stdBad)
+		// The quoted leg is unconditional: both engines parse the full
+		// strconv grammar, hex floats and digit separators included.
+		q := wrapBytes(`{"q32":"`, data, `","q64":"`)
+		checkNumberParity[quotedFields](t, "quoted", append(append(q, data...), `"}`...), data, stdBad)
 	})
+}
+
+// numberFields and quotedFields carry one number text at both precisions,
+// as JSON numbers and as `,string` bodies.
+type numberFields struct {
+	F32 float32 `json:"f32"`
+	F64 float64 `json:"f64"`
+}
+
+type quotedFields struct {
+	Q32 float32 `json:"q32,string"`
+	Q64 float64 `json:"q64,string"`
 }
 
 func wrapBytes(pre string, data []byte, post string) []byte {
@@ -447,10 +449,9 @@ func wrapBytes(pre string, data []byte, post string) []byte {
 
 // checkNumberParity fails when vjson rejects what encoding/json accepts or
 // when both accept with different values. Leniency stays unchecked, as in
-// FuzzUnmarshalAny. num is the bare number text inside data; its correctly
-// rounded truth arbitrates the two failure branches, and stdBad, from
-// stdAtofWrong on the same text, disarms the mixed-precision forms whose
-// mismatch cannot be attributed per field.
+// FuzzUnmarshalAny. num is the number text inside data; its correctly
+// rounded truth for kind arbitrates the two failure branches, and stdBad,
+// from stdAtofWrong on the same text, disarms an out-of-range truth.
 func checkNumberParity[T any](t *testing.T, kind string, data, num []byte, stdBad bool) {
 	t.Helper()
 	var vj, std T
@@ -459,7 +460,7 @@ func checkNumberParity[T any](t *testing.T, kind string, data, num []byte, stdBa
 	if vjErr != nil && stdErr == nil {
 		// A truth past the form's range turns the acceptance itself into
 		// the stdlib atof defect; vjson's rejection is correct.
-		if tr, ok := ratNumber(num); ok && !tr.inRange(kind) {
+		if tr, ok := truthFor(kind, num); ok && !tr.inRange(kind) {
 			return
 		}
 		t.Errorf("%s: vjson rejected but encoding/json accepted\ninput: %q\nvjson error: %v\nstdlib: %v",
@@ -468,18 +469,30 @@ func checkNumberParity[T any](t *testing.T, kind string, data, num []byte, stdBa
 	}
 	// Shortest round-trip formatting is injective on floats and equates NaN.
 	if vjErr == nil && stdErr == nil && fmt.Sprint(vj) != fmt.Sprint(std) {
-		if tr, ok := ratNumber(num); ok && heldBy(tr, vj, kind, stdBad) {
+		if tr, ok := truthFor(kind, num); ok && heldBy(tr, vj, kind, stdBad) {
 			return
 		}
 		t.Errorf("%s: value mismatch\ninput:  %q\nvjson:  %v\nstdlib: %v", kind, data, vj, std)
 	}
 }
 
-// numTruth is the correctly rounded value of a JSON number token at both
-// float precisions, from big.Rat.
+// numTruth is the correctly rounded value of a number text at both float
+// precisions, from big.Rat.
 type numTruth struct {
 	f64 float64
 	f32 float32
+}
+
+// ratTruth evaluates s exactly. ok is false when big.Rat rejects it.
+func ratTruth(s string) (numTruth, bool) {
+	r, ok := new(big.Rat).SetString(s)
+	if !ok {
+		return numTruth{}, false
+	}
+	var tr numTruth
+	tr.f64, _ = r.Float64()
+	tr.f32, _ = r.Float32()
+	return tr, true
 }
 
 // ratNumber parses num as a JSON number token and returns its truth. ok is
@@ -491,22 +504,38 @@ func ratNumber(num []byte) (numTruth, bool) {
 	if end, valid := gdec.ValidNumber(num, 0); !valid || end != len(num) {
 		return numTruth{}, false
 	}
-	r, ok := new(big.Rat).SetString(string(num))
-	if !ok {
-		return numTruth{}, false
-	}
-	var tr numTruth
-	tr.f64, _ = r.Float64()
-	tr.f32, _ = r.Float32()
-	return tr, true
+	return ratTruth(string(num))
 }
 
-// inRange reports whether the truth fits the precision of kind. The mixed
-// kinds accept when either precision overflows: encoding/json must reject
-// that field, so its acceptance is a defect.
+// quotedNumber returns the truth of num as a `,string` body: its JSON
+// string decode read as a strconv literal, digit separators and hex
+// mantissas included. big.Rat takes a superset of that grammar, and the
+// truth arbitrates only bodies encoding/json accepted. ok is false for
+// bodies big.Rat cannot evaluate, the NaN and Inf spellings among them.
+func quotedNumber(num []byte) (numTruth, bool) {
+	var body string
+	if json.Unmarshal(wrapBytes(`"`, num, `"`), &body) != nil {
+		return numTruth{}, false
+	}
+	return ratTruth(body)
+}
+
+// truthFor evaluates num as kind reads it: a `,string` body for the quoted
+// form, a bare JSON number token for every other form.
+func truthFor(kind string, num []byte) (numTruth, bool) {
+	if kind == "quoted" {
+		return quotedNumber(num)
+	}
+	return ratNumber(num)
+}
+
+// inRange reports whether the truth fits the precision of kind. The
+// two-field forms need both precisions, so their range is binary32's;
+// encoding/json must reject an overflowing field, and its acceptance is a
+// defect.
 func (tr numTruth) inRange(kind string) bool {
 	switch kind {
-	case "float32", "[]float32":
+	case "float32", "[]float32", "struct", "quoted":
 		return !math.IsInf(float64(tr.f32), 0)
 	default:
 		return !math.IsInf(tr.f64, 0)
@@ -514,9 +543,9 @@ func (tr numTruth) inRange(kind string) bool {
 }
 
 // heldBy reports whether v holds the correctly rounded value for kind, so a
-// stdlib divergence on the same text is the oracle's defect. The mixed
-// kinds cannot attribute a mismatch per field; they stand down only when
-// stdBad already proved the toolchain's atof wrong.
+// stdlib divergence on the same text is the oracle's defect. The two-field
+// forms must hold it at both precisions. An out-of-range truth stands down
+// only when stdBad already proved the toolchain's atof wrong.
 func heldBy[T any](tr numTruth, v T, kind string, stdBad bool) bool {
 	if !tr.inRange(kind) {
 		return stdBad
@@ -534,6 +563,12 @@ func heldBy[T any](tr numTruth, v T, kind string, stdBad bool) bool {
 	case "[]float32":
 		x, _ := any(v).([]float32)
 		return len(x) == 1 && x[0] == tr.f32
+	case "struct":
+		x, _ := any(v).(numberFields)
+		return x.F32 == tr.f32 && x.F64 == tr.f64
+	case "quoted":
+		x, _ := any(v).(quotedFields)
+		return x.Q32 == tr.f32 && x.Q64 == tr.f64
 	default:
 		return stdBad
 	}

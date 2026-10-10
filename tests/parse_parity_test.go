@@ -300,15 +300,11 @@ func TestUnmarshal_Float32Precision(t *testing.T) {
 }
 
 // A quoted number under ,string follows strconv.ParseFloat's grammar:
-// leading zeros, a bare trailing dot, and range overflow match
-// encoding/json on every supported toolchain. A leading plus sign and a
-// bare leading dot are accepted by encoding/json only since go1.27, so
-// vjson's acceptance is pinned directly and parity is asserted only when
-// the running std also accepts them.
-//
-// Known remaining divergence inside strconv.ParseFloat's grammar: hex floats
-// ("0x1p-2") and digit separators ("1_0") are not parsed by the native
-// backend.
+// leading zeros, a bare trailing dot, hex floats, digit separators, and
+// range overflow match encoding/json on every supported toolchain. A
+// leading plus sign and a bare leading dot are accepted by encoding/json
+// only since go1.27, so vjson's acceptance is pinned directly and parity
+// is asserted only when the running std also accepts them.
 func TestUnmarshal_StringTagFloatGrammar(t *testing.T) {
 	type doc struct {
 		Q float64 `json:",string"`
@@ -319,10 +315,46 @@ func TestUnmarshal_StringTagFloatGrammar(t *testing.T) {
 	assertSameDecode(t, "string float range overflow", []byte(`{"Q":"1e1000"}`), func() any { return new(doc) })
 	assertSameDecode(t, "string float inner space", []byte(`{"Q":" 10"}`), func() any { return new(doc) })
 
+	// Hex floats, the mandatory p exponent, and separator placement follow
+	// ParseFloat exactly; the escaped spellings decode before the parse.
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"hex plain", `0x1p-2`},
+		{"hex upper", `0X1P2`},
+		{"hex frac lead", `-0x.8p1`},
+		{"hex dot tail", `0x1.p0`},
+		{"hex e is digit", `0x1e2p3`},
+		{"hex missing p", `0x1`},
+		{"hex p no digits", `0x1p`},
+		{"hex p trailing sep", `0x1p0_`},
+		{"hex overflow", `0x1p9999`},
+		{"hex underflow", `0x1p-99999`},
+		{"hex negative zero", `-0x0p0`},
+		{"hex escaped prefix", `\u0030x1p-2`},
+		{"sep int frac", `1_000.5`},
+		{"sep double", `1__000`},
+		{"sep trailing", `1_`},
+		{"sep leading", `_1`},
+		{"sep in exponent", `1e2_0`},
+		{"sep leading zeros", `0_1`},
+		{"sep escaped", `1_00\u005f0.5`},
+		{"sep adjacent e", `1e_0`},
+		{"sep adjacent dot", `1_.5`},
+	} {
+		in := []byte(`{"Q":"` + tc.body + `"}`)
+		assertSameDecode(t, "string float "+tc.name, in, func() any { return new(doc) })
+	}
+
 	// Bodies of any length parse in place, at both precisions; the escaped
-	// body is decoded into scratch before the number parse.
+	// body is decoded into scratch before the number parse. The long
+	// separator bodies ride the compaction and the >768 digit fold.
 	type doc32 struct {
 		Q float32 `json:",string"`
+	}
+	zeros := func(n int) string {
+		return strings.Repeat("0_", n) + "0"
 	}
 	long := []string{
 		"1." + strings.Repeat("0", 126) + "1",
@@ -330,11 +362,30 @@ func TestUnmarshal_StringTagFloatGrammar(t *testing.T) {
 		"1." + strings.Repeat("0", 15) + strings.Repeat("5", 1538) + strings.Repeat("0", 31) + "5",
 		`\u0031.` + strings.Repeat("0", 300) + "1",
 		"1." + strings.Repeat("0", 300) + "1x",
+		"1" + zeros(400) + "e-800",
+		"1" + zeros(400) + "1e-800",
+		"1." + zeros(400) + "e-1",
+		`\u0031` + zeros(400) + "e-800",
 	}
 	for _, body := range long {
 		in := []byte(`{"Q":"` + body + `"}`)
 		assertSameDecode(t, "string float long body", in, func() any { return new(doc) })
 		assertSameDecode(t, "string float32 long body", in, func() any { return new(doc32) })
+	}
+
+	// float32-specific hex boundaries: the subnormal midpoint rounds to
+	// even, one ulp above rounds up, and the largest finite hex overflows.
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"f32 subnormal midpoint", `0x1p-150`},
+		{"f32 min subnormal", `0x1p-149`},
+		{"f32 max finite", `0x1.fffffep127`},
+		{"f32 overflow", `0x1.ffffffp127`},
+	} {
+		in := []byte(`{"Q":"` + tc.body + `"}`)
+		assertSameDecode(t, "string float "+tc.name, in, func() any { return new(doc32) })
 	}
 
 	var plus, frac doc
@@ -343,6 +394,9 @@ func TestUnmarshal_StringTagFloatGrammar(t *testing.T) {
 	}
 	if err := vjson.Unmarshal([]byte(`{"Q":".5"}`), &frac); err != nil || frac.Q != 0.5 {
 		t.Errorf("string float leading fraction: vjson got=%v err=%v", frac.Q, err)
+	}
+	if err := vjson.Unmarshal([]byte(`{"Q":"0x0p0"}`), &frac); err != nil || frac.Q != 0 {
+		t.Errorf("string float hex zero: vjson got=%v err=%v", frac.Q, err)
 	}
 	if stdLaxStringFloat() {
 		assertSameDecode(t, "string float plus sign", []byte(`{"Q":"+10"}`), func() any { return new(doc) })

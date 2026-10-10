@@ -5,7 +5,6 @@ import (
 	"errors"
 	"math/bits"
 	"strconv"
-	"strings"
 	"unsafe"
 
 	"github.com/velox-io/json/internal/gdec"
@@ -454,8 +453,8 @@ func (c *binder) numberTextAt(s text, p int) (string, int, error) {
 
 // writeQuotedScalar binds a `,string` body, following encoding/json's
 // quoted grammar: strconv for numbers, an embedded JSON string literal for
-// strings. Hex floats stay rejected, as the native parser has no path for
-// them.
+// strings. Strconv's literal extensions (hex floats, digit separators)
+// come along for free, mirroring the native atof core.
 func (c *binder) writeQuotedScalar(dst unsafe.Pointer, k vbind.Kind, s string) bool {
 	switch k {
 	case vbind.KindBool:
@@ -490,9 +489,6 @@ func (c *binder) writeQuotedScalar(dst unsafe.Pointer, k vbind.Kind, s string) b
 	case vbind.KindUint, vbind.KindUint8, vbind.KindUint16, vbind.KindUint32, vbind.KindUint64:
 		return storeUnsigned(dst, k, s)
 	case vbind.KindFloat32, vbind.KindFloat64:
-		if len(s) == 0 || strings.ContainsAny(s, "xX_") {
-			return false
-		}
 		return storeFloat(dst, k, s)
 	}
 	return false

@@ -27,7 +27,10 @@ ZLIB_CFLAGS = -I$(ZLIB_INC)
 endif
 
 TEST_DEPS  = impl/ndec/core/*.h impl/ndec/*.h test/*.h
-TEST_CFLAGS = -g -O0 -march=native $(INCLUDES) -I$(CRITERION_INC)
+# Every fixed array is bounds checked, a struct's trailing one included, so
+# an index one past a scratch array traps instead of landing in padding.
+BOUNDS_CFLAGS = -fstrict-flex-arrays=3 -fsanitize=array-bounds -fno-sanitize-recover=array-bounds
+TEST_CFLAGS = -g -O0 -march=native $(INCLUDES) -I$(CRITERION_INC) $(BOUNDS_CFLAGS)
 TEST_BINS  = $(BUILD)/atof_tests $(BUILD)/sax_tests $(BUILD)/chunkfeed_tests $(BUILD)/dom_tests $(BUILD)/window_tests \
              $(BUILD)/bind_tests
 
@@ -62,7 +65,7 @@ $(BUILD)/sax_tests: test/sax_tests.c test/gzload.h $(TEST_DEPS) | $(BUILD)
 # include paths match sources.sh: bind.h pulls the ABI header from abi/, the
 # lookup header from vlib, and util/log.h from the repo root. log.c backs the
 # -DVJ_DEBUG tracing and trap guards; lookup.c builds fixture lookup blobs.
-BIND_TEST_CFLAGS = -g -O0 -march=native -DVJ_DEBUG $(INCLUDES) -I abi -I ../vlib/impl -I .. -I$(CRITERION_INC)
+BIND_TEST_CFLAGS = -g -O0 -march=native -DVJ_DEBUG $(INCLUDES) -I abi -I ../vlib/impl -I .. -I$(CRITERION_INC) $(BOUNDS_CFLAGS)
 ifeq ($(BIND_ASAN),1)
 # Address-only: the production scanner has benign ctz(0) sites that UBSan flags.
 BIND_TEST_CFLAGS += -fsanitize=address -fno-omit-frame-pointer

@@ -131,6 +131,62 @@ Test(bind_m1, quoted_null, .init = fx_setup) {
   hx_destroy(&d);
 }
 
+/* A `,string` float takes the ParseFloat literal extensions: hex floats
+ * and digit separators, plain or escaped, since the body decodes before
+ * the numeric parse. An overflow to Inf rejects like a decimal one and
+ * keeps the destination untouched, while an underflow to zero binds. */
+Test(bind_m1, quoted_hex_float, .init = fx_setup) {
+  FxTree *fx = &g_fx;
+
+  typedef struct {
+    double f; /* off 0, `,string` */
+    float g;  /* off 8, `,string` */
+  } Dst;
+  uint16_t ts = fx_struct(fx, sizeof(Dst));
+  fx_fld(fx, ts, "f", fx->t_f64, offsetof(Dst, f), BIND_FF_QUOTED);
+  fx_fld(fx, ts, "g", fx->t_f32, offsetof(Dst, g), BIND_FF_QUOTED);
+  fx_struct_done(fx, ts);
+  fx_build(fx);
+
+  HxDriver d;
+  hx_init(&d, fx, (HxOpts){0});
+  Dst dst;
+
+  memset(&dst, 0, sizeof(dst));
+  const char *ok = "{\"f\":\"0x1p-2\",\"g\":\"1_000.5\"}";
+  cr_assert(hx_run_json(&d, ok, strlen(ok), ts, &dst, 0) == 0);
+  cr_assert(dst.f == 0.25);
+  cr_assert(dst.g == 1000.5f);
+
+  memset(&dst, 0, sizeof(dst));
+  const char *esc = "{\"f\":\"\\u0030x1p-2\",\"g\":\"1_00\\u005f0.5\"}";
+  cr_assert(hx_run_json(&d, esc, strlen(esc), ts, &dst, 0) == 0);
+  cr_assert(dst.f == 0.25);
+  cr_assert(dst.g == 1000.5f);
+
+  memset(&dst, 0, sizeof(dst));
+  const char *round = "{\"f\":\"0x1.fffffffffffff8p0\",\"g\":\"0x1p-149\"}";
+  cr_assert(hx_run_json(&d, round, strlen(round), ts, &dst, 0) == 0);
+  cr_assert(dst.f == 2.0);
+  cr_assert(dst.g == 1.401298464324817e-45f);
+
+  memset(&dst, 0, sizeof(dst));
+  const char *under = "{\"f\":\"0x1p-99999\",\"g\":\"-0x0p0\"}";
+  cr_assert(hx_run_json(&d, under, strlen(under), ts, &dst, 0) == 0);
+  cr_assert(dst.f == 0.0);
+  static const float neg_zero = -0.0f;
+  cr_assert(memcmp(&dst.g, &neg_zero, sizeof neg_zero) == 0);
+
+  dst.f = 1.5;
+  dst.g = 2.5f;
+  const char *ovf = "{\"f\":\"0x1p9999\",\"g\":\"0x1p-150\"}";
+  cr_assert(hx_run_json(&d, ovf, strlen(ovf), ts, &dst, 0) == 1);
+  cr_assert(d.err == BIND_ERR_TYPE_MISMATCH);
+  cr_assert(dst.f == 1.5);
+
+  hx_destroy(&d);
+}
+
 Test(bind_m1, nested_slice_array_ptr, .init = fx_setup) {
   FxTree *fx = &g_fx;
   typedef struct {

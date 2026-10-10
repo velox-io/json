@@ -43,6 +43,8 @@
 #define HX_REC_MAX      256
 #define HX_ALIAS_MAX    16
 
+_Static_assert(sizeof(atof_ctx) <= HX_ATOF_SIZE, "atof_ctx exceeds HX_ATOF_SIZE; bump it with NDEC_ATOF_SIZE");
+
 typedef struct HxStr {
   const uint8_t *p;
   uintptr_t len;
