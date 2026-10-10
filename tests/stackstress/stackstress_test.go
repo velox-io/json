@@ -101,23 +101,110 @@ func floatDocBits(d *floatDoc) [2]uint64 {
 	}
 }
 
-// floatDocNE is the float comparison Verify judges by. Out of line, it
-// loads both operands from memory on its own.
+// Field bits of a comparison mask.
+const (
+	fieldF uint8 = 1 << iota
+	fieldG
+)
+
+func maskString(m uint8) string {
+	switch m {
+	case 0:
+		return "-"
+	case fieldF:
+		return "F"
+	case fieldG:
+		return "G"
+	}
+	return "FG"
+}
+
+// floatDocNEMask is the compiled float comparison Verify judges by,
+// reporting the unequal fields. Out of line, it loads both operands from
+// memory on its own.
 //
 //go:noinline
-func floatDocNE(a, b *floatDoc) bool { return *a != *b }
+func floatDocNEMask(a, b *floatDoc) uint8 {
+	var m uint8
+	if a.F != b.F {
+		m |= fieldF
+	}
+	if a.G != b.G {
+		m |= fieldG
+	}
+	return m
+}
 
-// floatMismatch reports one disagreement between the bit snapshots gs, ws
-// and the float comparison ne, all taken before the report. It re-reads
-// both operands and classifies the failure:
+// RFLAGS bits UCOMISD sets.
+const (
+	flagPF = 1 << 2
+	flagZF = 1 << 6
+)
+
+// flagsNE decodes one UCOMISD RFLAGS image: ZF clear or PF (unordered)
+// set means the operands differ.
+func flagsNE(fl uint64) bool { return fl&flagZF == 0 || fl&flagPF != 0 }
+
+// floatObs is one comparison of a decoded document against its
+// reference: integer bit snapshots, the compiled comparison mask and,
+// where the probe exists, the UCOMISD flags of each field.
+type floatObs struct {
+	gs, ws [2]uint64
+	mask   uint8
+	flags  [2]uint64
+}
+
+func observeFloatDoc(gp, wp *floatDoc) floatObs {
+	o := floatObs{gs: floatDocBits(gp), ws: floatDocBits(wp), mask: floatDocNEMask(gp, wp)}
+	if haveFPProbe {
+		o.flags[0], o.flags[1] = ucomisdFlags((*[2]float64)(unsafe.Pointer(gp)), (*[2]float64)(unsafe.Pointer(wp)))
+	}
+	return o
+}
+
+// flagMask is the unequal-field mask the UCOMISD flags imply.
+func (o floatObs) flagMask() uint8 {
+	if !haveFPProbe {
+		return 0
+	}
+	var m uint8
+	if flagsNE(o.flags[0]) {
+		m |= fieldF
+	}
+	if flagsNE(o.flags[1]) {
+		m |= fieldG
+	}
+	return m
+}
+
+func (o floatObs) bad() bool { return o.mask != 0 || o.flagMask() != 0 || o.gs != o.ws }
+
+// floatRepeats is how many comparisons floatMismatch reruns to tell a
+// one-shot fault from a persistent one.
+const floatRepeats = 64
+
+// floatMismatch reports the bad observation o. It reads MXCSR, reruns
+// the comparison floatRepeats times, re-reads both operands and
+// classifies the failure:
 //   - pointer: an operand address differs from the one recorded at
 //     allocation, so a stack slot holding it was overwritten;
-//   - float compare: the snapshots agree bit for bit while ne holds, so
-//     the comparison itself misbehaved;
+//   - float compare: the snapshots agree bit for bit while a comparison
+//     reports unequal fields, so the comparison itself misbehaved;
 //   - transient: the snapshots differ and the re-read agrees, so memory
 //     changed underneath Verify;
 //   - contents: the operands still differ; ref names the wrong side.
-func floatMismatch(i int, base, wantAddr uintptr, gp, wp *floatDoc, ne bool, gs, ws [2]uint64) error {
+func floatMismatch(i int, base, wantAddr uintptr, gp, wp *floatDoc, o floatObs) error {
+	mxcsr := stmxcsr()
+	maskHits, flagHits := 0, 0
+	for range floatRepeats {
+		r := observeFloatDoc(gp, wp)
+		if r.mask != 0 {
+			maskHits++
+		}
+		if r.flagMask() != 0 {
+			flagHits++
+		}
+	}
 	gotAddr := uintptr(unsafe.Pointer(gp))
 	wantBase := base + uintptr(i)*unsafe.Sizeof(floatDoc{})
 	gr, wr := floatDocBits(gp), floatDocBits(wp)
@@ -125,15 +212,20 @@ func floatMismatch(i int, base, wantAddr uintptr, gp, wp *floatDoc, ne bool, gs,
 	switch {
 	case gotAddr != wantBase || uintptr(unsafe.Pointer(wp)) != wantAddr:
 		kind = "pointer"
-	case gs == ws:
+	case o.gs == o.ws:
 		kind = "float compare"
 	case gr == wr:
 		kind = "transient"
 	default:
 		kind = "contents"
 	}
-	return fmt.Errorf("doc %d: %s mismatch: ne=%v snap got=%016x want=%016x reread got=%016x want=%016x ref=%016x got@%#x expect@%#x want@%#x expect@%#x (reread got %+v want %+v)",
-		i, kind, ne, gs, ws, gr, wr, floatRefBits[i],
+	probe := ""
+	if haveFPProbe {
+		probe = fmt.Sprintf(" ucomisd=%s flags=[%#x %#x] repeat ucomisd=%d/%d mxcsr=%#x",
+			maskString(o.flagMask()), o.flags[0], o.flags[1], flagHits, floatRepeats, mxcsr)
+	}
+	return fmt.Errorf("doc %d: %s mismatch: compiled=%s repeat compiled=%d/%d%s snap got=%016x want=%016x reread got=%016x want=%016x ref=%016x got@%#x expect@%#x want@%#x expect@%#x (reread got %+v want %+v)",
+		i, kind, maskString(o.mask), maskHits, floatRepeats, probe, o.gs, o.ws, gr, wr, floatRefBits[i],
 		gotAddr, wantBase, uintptr(unsafe.Pointer(wp)), wantAddr, *gp, *wp)
 }
 
@@ -158,9 +250,8 @@ func floatPrecisionCase() Case {
 					return fmt.Errorf("std decode doc %d: %w", i, err)
 				}
 				gp := &r.docs[i]
-				gs, ws := floatDocBits(gp), floatDocBits(&want)
-				if ne := floatDocNE(gp, &want); ne || gs != ws {
-					return floatMismatch(i, r.base, wantAddr, gp, &want, ne, gs, ws)
+				if o := observeFloatDoc(gp, &want); o.bad() {
+					return floatMismatch(i, r.base, wantAddr, gp, &want, o)
 				}
 			}
 			return nil
