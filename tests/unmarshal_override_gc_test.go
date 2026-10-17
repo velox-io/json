@@ -1,5 +1,3 @@
-//go:build vj_test_overideptr
-
 package tests
 
 import (
@@ -18,9 +16,10 @@ type oldValue struct{ N [8]int }
 
 // overwriteTarget is what Unmarshal decodes into.
 type overwriteTarget struct {
-	S string               `json:"s"`
-	P *oldValue            `json:"p"`
-	M map[string]*oldValue `json:"m"`
+	S  string               `json:"s"`
+	P  *oldValue            `json:"p"`
+	PP **oldValue           `json:"pp"`
+	M  map[string]*oldValue `json:"m"`
 }
 
 // chainNode links a target behind a long chain, so mark reaches it last.
@@ -48,7 +47,7 @@ type overwriteCase struct {
 	name      string
 	doc       string                                // overwrites the field holding the old value
 	newTarget func() *overwriteTarget               // target whose field holds a fresh old value
-	oldOf     func(*overwriteTarget) unsafe.Pointer // reads the old value out of the field
+	pin       func(*overwriteTarget) unsafe.Pointer // copies the field's old value out, pins it, returns the word the caller keeps
 }
 
 // TestUnmarshalOverrideNonNilGC: a caller copies a field's old value to its
@@ -62,19 +61,40 @@ func TestUnmarshalOverrideNonNilGC(t *testing.T) {
 			name:      "string",
 			doc:       `{"s":"new"}`,
 			newTarget: func() *overwriteTarget { return &overwriteTarget{S: strings.Repeat("o", 256)} },
-			oldOf:     func(v *overwriteTarget) unsafe.Pointer { return unsafe.Pointer(unsafe.StringData(v.S)) },
+			pin: func(v *overwriteTarget) unsafe.Pointer {
+				return unsafe.Pointer(unsafe.StringData(vjson.Pin(v.S)))
+			},
 		},
 		{
 			name:      "pointer",
 			doc:       `{"p":null}`,
 			newTarget: func() *overwriteTarget { return &overwriteTarget{P: &oldValue{}} },
-			oldOf:     func(v *overwriteTarget) unsafe.Pointer { return unsafe.Pointer(v.P) },
+			pin:       func(v *overwriteTarget) unsafe.Pointer { return unsafe.Pointer(vjson.Pin(v.P)) },
 		},
 		{
 			name:      "map value",
 			doc:       `{"m":{"k":{"N":[1]}}}`,
 			newTarget: func() *overwriteTarget { return &overwriteTarget{M: map[string]*oldValue{"k": {}}} },
-			oldOf:     func(v *overwriteTarget) unsafe.Pointer { return unsafe.Pointer(v.M["k"]) },
+			pin:       func(v *overwriteTarget) unsafe.Pointer { return unsafe.Pointer(vjson.Pin(v.M["k"])) },
+		},
+		{
+			// Null clears the outermost slot, dropping the box and, through
+			// it, the leaf, both without a barrier.
+			name: "double pointer",
+			doc:  `{"pp":null}`,
+			newTarget: func() *overwriteTarget {
+				leaf := &oldValue{}
+				return &overwriteTarget{PP: &leaf}
+			},
+			pin: func(v *overwriteTarget) unsafe.Pointer { return unsafe.Pointer(vjson.Pin(v.PP)) },
+		},
+		{
+			// A value with a nil leaf replaces the leaf pointer slot inside
+			// the box, the multi-level fill path.
+			name:      "double pointer fill",
+			doc:       `{"pp":{"N":[1]}}`,
+			newTarget: func() *overwriteTarget { var leaf *oldValue; return &overwriteTarget{PP: &leaf} },
+			pin:       func(v *overwriteTarget) unsafe.Pointer { return unsafe.Pointer(vjson.Pin(v.PP)) },
 		},
 	}
 	decoders := []struct {
@@ -104,7 +124,15 @@ func TestUnmarshalOverrideNonNilGC(t *testing.T) {
 					// the scanned stack. The target's field stays the only
 					// path to it that mark will follow.
 					target := chainTail(chain)
-					old := c.oldOf(target)
+
+					// solution1: pinner
+					// var old = c.pin(target)
+					// var p runtime.Pinner
+					// p.Pin(old)
+					// defer p.Unpin()
+
+					// solution2: explicit gc barrier
+					var old = c.pin(target)
 
 					// The overwrite cuts that path. A barriered store shades
 					// the old value; a raw store leaves it white, and the
@@ -117,7 +145,7 @@ func TestUnmarshalOverrideNonNilGC(t *testing.T) {
 					// The next cycle reaches the freed old value through old
 					// and throws "found pointer to free object".
 					runtime.GC()
-					runtime.KeepAlive(old)
+					runtime.KeepAlive(old) //use old
 				}
 			})
 		}
