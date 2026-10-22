@@ -68,6 +68,11 @@ jobs:
   test-linux-arm64:
     name: Test (Linux ARM64, Go stable)
     runs-on: ubuntu-24.04-arm
+    # A test timeout prints a goroutine running on another thread as "stack
+    # unavailable". crash signals every thread to dump the goroutine it runs,
+    # so a goroutine stuck in [running] shows its PC and frames.
+    env:
+      GOTRACEBACK: crash
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
