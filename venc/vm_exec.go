@@ -489,14 +489,8 @@ func (es *encodeState) handleFallbackYield(ctx *VjExecCtx, bp *Blueprint) error 
 		es.writeKeySpace(ctx)
 	}
 
-	if fb.TagFlags&EncTagFlagQuoted != 0 {
-		if err := es.encodeValueQuoted(fb.TI, fieldPtr); err != nil {
-			return err
-		}
-	} else {
-		if err := fb.TI.Encode(es, fieldPtr); err != nil {
-			return err
-		}
+	if err := es.encodeFieldValue(fb.TI, fb.ValueFn, fieldPtr); err != nil {
+		return err
 	}
 
 	ctx.PC += 8
@@ -695,13 +689,7 @@ func (es *encodeState) unfoldInGo(ctx *VjExecCtx, ifacePtr unsafe.Pointer, iface
 		if es.indentString != "" {
 			es.buf = append(es.buf, ' ')
 		}
-		var err error
-		if fi.TagFlags&EncTagFlagQuoted != 0 {
-			err = es.encodeValueQuoted(fi.Type, fptr)
-		} else {
-			err = fi.Type.Encode(es, fptr)
-		}
-		if err != nil {
+		if err := es.encodeFieldValue(fi.Type, fi.ValueFn, fptr); err != nil {
 			return err
 		}
 	}

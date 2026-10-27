@@ -225,6 +225,9 @@ type fbInfo struct {
 	// Offset is then relative to the base the hops reach rather than to the
 	// struct, so the hops must be walked before it is applied.
 	PtrPath []typ.PtrHop
+
+	// ValueFn is the field's tag-specific encoder; see EncFieldInfo.ValueFn.
+	ValueFn EncodeFn
 }
 
 // resolveFieldBase walks a promoted field's embedded-pointer hops and reports

@@ -117,6 +117,12 @@ type EncFieldInfo struct {
 
 	// OmitZeroAddr records that the IsZero method has a pointer receiver.
 	OmitZeroAddr bool
+
+	// ValueFn encodes the value in place of Type.Encode when the field's tag
+	// options change its representation: it runs the `,string` quoting. It is
+	// nil when the type's own encoding applies. Every Go-side emission of the
+	// field goes through encodeFieldValue, which honors it.
+	ValueFn EncodeFn
 }
 
 type EncStructInfo struct {

@@ -50,6 +50,7 @@ func fieldFBInfo(fi *EncFieldInfo, fc fieldContext, reason int32) *fbInfo {
 		IsZeroFn:   fi.IsZeroFn,
 		OmitZeroFn: fi.OmitZeroFn,
 		PtrPath:    fi.PtrPath,
+		ValueFn:    fi.ValueFn,
 	}
 }
 
